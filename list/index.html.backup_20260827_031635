@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crossy Road Clone - Three.js</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; } /* Sky blue background */
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://unpkg.com/three@0.156.0/build/three.min.js"></script>
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer;
+        let player;
+        let roadSegments = []; // Array to hold all road segment meshes
+        let backgroundObjects = []; // Array to hold all background meshes
+        const clock = new THREE.Clock();
+
+        // --- Initialization Function ---
+        function init() {
+            // 1. Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky color
+
+            // 2. Camera Setup (Perspective Camera is best for a 3D game)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10); // Slightly elevated view
+            camera.lookAt(0, 0, 0);
+
+            // 3. Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; // Enable shadows for 'ultra details'
+            document.body.appendChild(renderer.domElement);
+
+            // 4. Lighting (Crucial for visible geometry and shadows)
+            const ambientLight = new THREE.AmbientLight(0x666666); // Soft ambient light
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            // Improve shadow quality
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            scene.add(directionalLight);
+
+            // 5. Create Ground Plane (The underlying surface)
+            const groundGeometry = new THREE.PlaneGeometry(100, 50);
+            const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x6B8E23 }); // Olive green grass/dirt
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // Lay flat
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // 6. Implement Geometry Components
+            createBackgroundScenery(); // NEW: Building/Scenery placement
+            createRoadLanes();
+
+            // 7. Player Character (Simple representation for now)
+            const playerGeometry = new THREE.SphereGeometry(1, 16, 16);
+            const playerMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            player = new THREE.Mesh(playerGeometry, playerMaterial);
+            player.position.set(0, 1, -10); // Start at the back, slightly above ground
+            player.castShadow = true;
+            scene.add(player);
+
+            // 8. Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('keydown', onKeyDown, false);
+        }
+
+        // Function to generate background buildings and scenery
+        function createBackgroundScenery() {
+            const geometry = new THREE.BoxGeometry(1, 5, 1); // Template geometry for buildings
+            const colors = [0xA0522D, 0x8B4513, 0x556B2F, 0x696969]; // Different brown/gray colors
+            const count = 40; // Number of structures to create
+
+            for (let i = 0; i < count; i++) {
+                const randomColor = Math.random() * 0xFFFFFF;
+                const material = new THREE.MeshPhongMaterial({ color: randomColor });
+                
+                // Randomize size and offset
+                const sizeX = Math.random() * 6 + 3;
+                const sizeY = Math.random() * 8 + 2;
+                const sizeZ = Math.random() * 10 + 5;
+
+                const mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(sizeX, sizeY, sizeZ), 
+                    material
+                );
+
+                // Random placement along the left and right sides (X-axis)
+                const side = Math.floor(Math.random() * 2); // 0 for Left, 1 for Right
+                const sideOffset = side === 0 ? -20 : 20;
+
+                // Random placement along the depth (Z-axis)
+                // Place them far enough back but not too far (between -50 and -150)
+                const zPos = Math.random() * 100 - 150;
+                
+                // Random slight elevation
+                mesh.position.set(sideOffset + (Math.random() - 0.5) * 5, sizeY / 2, zPos);
+                
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+                backgroundObjects.push(mesh);
+            }
+        }
+
+        // Function to generate road lanes
+        function createRoadLanes() {
+            const laneWidth = 45; // Should cover the width of the plane
+            const laneLength = 20;
+            const segmentMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 }); // Grey asphalt color
+
+            // The crossy road structure will be composed of several repeating segments.
+            // We start placing them at Z = -5 (near player) and go towards Z = -60 (far).
+            
+            // Define lanes (1 = crosswalk, 0 = solid road)
+            const lanePattern = [
+                { type: 1, zPos: -10, height: 1 }, // Crosswalk 1
+                { type: 0, zPos: -30, height: 1 }, // Road 2
+                { type: 1, zPos: -50, height: 1 }  // Crosswalk 3
+            ];
+
+            lanePattern.forEach(pattern => {
+                const geometry = new THREE.BoxGeometry(laneWidth, 0.1, laneLength);
+                const mesh = new THREE.Mesh(geometry, segmentMaterial);
+                
+                // Position the segment
+                mesh.position.set(0, 0.05, pattern.zPos);
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+                roadSegments.push(mesh);
+            });
+        }
+
+        // --- Event Handlers ---
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Simple key handling for basic movement simulation
+        const moveSpeed = 0.15;
+        const direction = { x: 0, z: 0 };
+        function onKeyDown(event) {
+            switch (event.key) {
+                case 'ArrowUp':
+                case 'w':
+                    direction.z = -1;
+                    break;
+                case 'ArrowDown':
+                case 's':
+                    direction.z = 1;
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                    direction.x = -1;
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                    direction.x = 1;
+                    break;
+                default:
+                    direction.x = 0;
+                    direction.z = 0;
+                    return;
+            }
+            // Prevent continuous movement until key is released (for simple state machine)
+        }
+
+        // Need to handle key release to stop movement
+        document.addEventListener('keyup', function(event) {
+            switch (event.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'ArrowDown':
+                case 's':
+                case 'ArrowLeft':
+                case 'a':
+                case 'ArrowRight':
+                case 'd':
+                    // Only reset if the released key was the primary direction
+                    if (event.key.toLowerCase() === 'w' || event.key === 'ArrowUp') {
+                        if (direction.z > 0) direction.z = 0;
+                    } else if (event.key.toLowerCase() === 's' || event.key === 'ArrowDown') {
+                        if (direction.z < 0) direction.z = 0;
+                    } else if (event.key.toLowerCase() === 'a' || event.key === 'ArrowLeft') {
+                        if (direction.x < 0) direction.x = 0;
+                    } else if (event.key.toLowerCase() === 'd' || event.key === 'ArrowRight') {
+                        if (direction.x > 0) direction.x = 0;
+                    }
+            }
+        });
+
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // Player Movement Logic
+            if (direction.x !== 0 || direction.z !== 0) {
+                player.position.x += direction.x * moveSpeed * delta * 60;
+                player.position.z += direction.z * moveSpeed * delta * 60;
+                
+                // Simple boundary check for demonstration purposes
+                player.position.x = THREE.MathUtils.clamp(player.position.x, -45, 45);
+                player.position.z = THREE.MathUtils.clamp(player.position.z, -45, 45);
+            }
+
+            // Keep camera slightly following the player's Z position (Simulating the crossy movement)
+            camera.position.z = player.position.z + 10;
+            camera.lookAt(player.position.x, player.position.y, player.position.z);
+
+
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+
+        // Start the game
+        init();
+        animate();
+    </script>
+</body>
+</html>
