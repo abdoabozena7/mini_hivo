@@ -1,1 +1,0 @@
-﻿import importlib.util, sys; print('requests', importlib.util.find_spec('requests') is not None); print('rich', importlib.util.find_spec('rich') is not None); print('prompt_toolkit', importlib.util.find_spec('prompt_toolkit') is not None); print('playwright', importlib.util.find_spec('playwright') is not None)

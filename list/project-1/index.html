@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#dff7ef">
+    <title>Hopline — City Crossing</title>
+    <link rel="icon" href="data:,">
+    <style>
+        :root {
+            --ink: #142a35;
+            --paper: #eaf9f3;
+            --accent: #ff6b45;
+            --line: rgba(20, 42, 53, .22);
+            --shadow: 0 18px 50px rgba(20, 42, 53, .16);
+        }
+        * { box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%; margin: 0; overflow: hidden;
+            background: #a9e1d4; color: var(--ink);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        body::after {
+            content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 2;
+            background: linear-gradient(180deg, rgba(255,255,255,.13), transparent 44%, rgba(18,42,53,.04));
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        .brand {
+            position: fixed; top: max(24px, env(safe-area-inset-top)); left: max(28px, env(safe-area-inset-left));
+            z-index: 5; display: flex; align-items: baseline; gap: 11px;
+            font-size: clamp(1rem, 1.6vw, 1.35rem); font-weight: 950; letter-spacing: -.045em;
+        }
+        .brand span { font-size: .64rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; opacity: .56; }
+        .hud {
+            position: fixed; top: max(23px, env(safe-area-inset-top)); right: max(28px, env(safe-area-inset-right));
+            z-index: 5; display: flex; gap: 24px; align-items: flex-start; text-align: right;
+        }
+        .metric { min-width: 62px; }
+        .metric-label {
+            display: block; margin-bottom: 2px; font-size: .58rem; font-weight: 900;
+            letter-spacing: .15em; text-transform: uppercase; opacity: .52;
+        }
+        .metric-value {
+            display: block; font-size: clamp(1.25rem, 2.4vw, 2rem); line-height: 1;
+            font-weight: 950; letter-spacing: -.065em; font-variant-numeric: tabular-nums;
+        }
+        .stage {
+            position: fixed; left: max(6vw, 32px); top: 50%; z-index: 6; width: min(480px, 86vw);
+            transform: translateY(-48%); transition: opacity .32s ease, transform .42s cubic-bezier(.2,.8,.2,1);
+        }
+        .stage.is-hidden { opacity: 0; pointer-events: none; transform: translateY(-43%); }
+        .eyebrow {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
+            font-size: .67rem; line-height: 1; font-weight: 900; letter-spacing: .18em; text-transform: uppercase;
+        }
+        .eyebrow::before { content: ""; width: 32px; height: 3px; background: var(--accent); border-radius: 99px; }
+        h1 {
+            max-width: 440px; margin: 0; font-size: clamp(3.8rem, 8.6vw, 7.7rem); line-height: .78;
+            letter-spacing: -.09em; text-transform: uppercase; font-weight: 1000;
+        }
+        .stage p {
+            max-width: 370px; margin: 24px 0 28px; font-size: clamp(.94rem, 1.4vw, 1.08rem);
+            line-height: 1.55; font-weight: 650; opacity: .72;
+        }
+        .action {
+            appearance: none; border: 0; border-radius: 999px; padding: 15px 22px 15px 24px;
+            background: var(--ink); color: white; box-shadow: var(--shadow); cursor: pointer;
+            font: inherit; font-size: .74rem; font-weight: 900; letter-spacing: .12em; text-transform: uppercase;
+            transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+        }
+        .action:hover { transform: translateY(-2px); background: #203f4b; box-shadow: 0 22px 56px rgba(20,42,53,.22); }
+        .action:active { transform: translateY(0) scale(.97); }
+        .action:focus-visible { outline: 4px solid rgba(255,107,69,.32); outline-offset: 4px; }
+        .control-hint {
+            position: fixed; left: max(28px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom));
+            z-index: 5; display: flex; align-items: center; gap: 13px; font-size: .64rem;
+            font-weight: 850; letter-spacing: .11em; text-transform: uppercase; opacity: .64;
+        }
+        .keys { display: flex; gap: 5px; }
+        kbd {
+            min-width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--line);
+            border-bottom-width: 3px; border-radius: 7px; background: rgba(234,249,243,.66);
+            backdrop-filter: blur(8px); font: inherit;
+        }
+        .status {
+            position: fixed; left: 50%; bottom: max(25px, env(safe-area-inset-bottom)); z-index: 5;
+            transform: translateX(-50%); padding: 8px 12px; border-radius: 999px;
+            background: rgba(234,249,243,.7); backdrop-filter: blur(12px); font-size: .62rem;
+            font-weight: 900; letter-spacing: .12em; text-transform: uppercase; opacity: 0;
+            transition: opacity .2s ease, transform .2s ease;
+        }
+        .status.is-visible { opacity: .8; transform: translateX(-50%) translateY(-3px); }
+        .mobile-pad {
+            position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom));
+            z-index: 7; display: none; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(2, 46px); gap: 7px;
+        }
+        .pad-button {
+            border: 1px solid rgba(20,42,53,.14); border-radius: 14px; background: rgba(234,249,243,.8);
+            color: var(--ink); backdrop-filter: blur(12px); box-shadow: 0 8px 20px rgba(20,42,53,.1);
+            font-size: 1.15rem; font-weight: 900; touch-action: manipulation;
+        }
+        .pad-up { grid-column: 2; }
+        .pad-left { grid-column: 1; grid-row: 2; }
+        .pad-down { grid-column: 2; grid-row: 2; }
+        .pad-right { grid-column: 3; grid-row: 2; }
+        .fatal {
+            position: fixed; inset: 0; z-index: 20; display: none; place-items: center;
+            padding: 32px; background: var(--paper); text-align: center; font-weight: 800;
+        }
+        body.impact canvas { animation: impact .34s ease both; }
+        @keyframes impact {
+            0%, 100% { transform: translate(0); filter: saturate(1); }
+            20% { transform: translate(-8px, 3px); filter: saturate(1.6); }
+            45% { transform: translate(7px, -2px); }
+            70% { transform: translate(-4px, 1px); }
+        }
+        @media (pointer: coarse), (max-width: 760px) {
+            .brand { top: 18px; left: 18px; }
+            .brand span { display: none; }
+            .hud { top: 18px; right: 18px; gap: 14px; }
+            .stage { left: 22px; top: 44%; width: calc(100vw - 44px); }
+            h1 { font-size: clamp(3.25rem, 17vw, 5.6rem); max-width: 350px; }
+            .stage p { max-width: 310px; margin-top: 20px; }
+            .control-hint { display: none; }
+            .mobile-pad { display: grid; }
+            .status { bottom: 128px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="brand">HOPLINE <span>city crossing</span></div>
+    <div class="hud" aria-label="Game score">
+        <div class="metric"><span class="metric-label">Score</span><span class="metric-value" id="score">00</span></div>
+        <div class="metric"><span class="metric-label">Best</span><span class="metric-value" id="best">00</span></div>
+    </div>
+    <main class="stage" id="intro" aria-labelledby="intro-title">
+        <div class="eyebrow">Rush hour. Your move.</div>
+        <h1 id="intro-title">Own the crossing.</h1>
+        <p>Guide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.</p>
+        <button class="action" id="start-button">Start crossing&nbsp; →</button>
+    </main>
+    <section class="stage is-hidden" id="result" aria-live="assertive" aria-labelledby="result-title">
+        <div class="eyebrow" id="result-kicker">Traffic wins this round</div>
+        <h1 id="result-title">Close call.</h1>
+        <p id="result-copy">You made it across <strong id="final-score">0</strong> blocks. The next opening is already coming.</p>
+        <button class="action" id="restart-button">Cross again&nbsp; ↻</button>
+    </section>
+    <div class="control-hint" aria-hidden="true">
+        <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div>
+        <span>or arrow keys · one key, one hop</span>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite">Go!</div>
+    <div class="mobile-pad" aria-label="Touch controls">
+        <button class="pad-button pad-up" data-move="up" aria-label="Move forward">↑</button>
+        <button class="pad-button pad-left" data-move="left" aria-label="Move left">←</button>
+        <button class="pad-button pad-down" data-move="down" aria-label="Move backward">↓</button>
+        <button class="pad-button pad-right" data-move="right" aria-label="Move right">→</button>
+    </div>
+    <div class="fatal" id="fatal">The 3D engine could not load. Check your connection and refresh.</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+    (() => {
+        'use strict';
+        if (!window.THREE) {
+            document.getElementById('fatal').style.display = 'grid';
+            return;
+        }
+
+        const LANE_DEPTH = 3.2;
+        const STEP_X = 2.35;
+        const ROAD_WIDTH = 31;
+        const MAX_COL = 5;
+        const GOAL_ROW = 24;
+        const PLAYER_Y = .78;
+        const PLAYER_SCALE = 1.18;
+        const HOP_MS = 190;
+        const COLORS = {
+            sky: 0xa9e1d4, fog: 0xb8e6dc, grass: 0x4fbd89, grassAlt: 0x42ad7c,
+            road: 0x283f4b, stripe: 0xf5d86e, ink: 0x17313b, cream: 0xffefd0,
+            coral: 0xff6b45, glass: 0x9ed8df
+        };
+
+        const scoreEl = document.getElementById('score');
+        const bestEl = document.getElementById('best');
+        const introEl = document.getElementById('intro');
+        const resultEl = document.getElementById('result');
+        const resultTitleEl = document.getElementById('result-title');
+        const resultKickerEl = document.getElementById('result-kicker');
+        const resultCopyEl = document.getElementById('result-copy');
+        const statusEl = document.getElementById('status');
+
+        let scene, camera, renderer, clock, player, directionalLight;
+        const lanes = [];
+        const vehicles = [];
+        const animatedClouds = [];
+        const cameraTarget = new THREE.Vector3();
+        const desiredCamera = new THREE.Vector3();
+        const lookTarget = new THREE.Vector3();
+        const state = {
+            status: 'ready', score: 0, best: readBest(), row: 0, col: 0, maxRow: 0,
+            hopping: false, hopStart: 0, hopFrom: new THREE.Vector3(), hopTo: new THREE.Vector3(),
+            queuedMove: null, statusTimer: null
+        };
+
+        function readBest() {
+            try { return Number(localStorage.getItem('hopline-best') || 0); } catch (_) { return 0; }
+        }
+        function saveBest() {
+            try { localStorage.setItem('hopline-best', String(state.best)); } catch (_) {}
+        }
+        function seededRandom(seed) {
+            let value = seed >>> 0;
+            return () => {
+                value += 0x6D2B79F5;
+                let t = value;
+                t = Math.imul(t ^ (t >>> 15), t | 1);
+                t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function mat(color, roughness = .82) {
+            return new THREE.MeshStandardMaterial({ color, roughness, metalness: .04 });
+        }
+        function box(w, h, d, material, cast = true, receive = true) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+            mesh.castShadow = cast; mesh.receiveShadow = receive; return mesh;
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(COLORS.sky);
+            scene.fog = new THREE.Fog(COLORS.fog, 30, 74);
+            clock = new THREE.Clock();
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = .86;
+            document.body.prepend(renderer.domElement);
+            camera = new THREE.OrthographicCamera(-12, 12, 9, -9, .1, 160);
+            scene.add(new THREE.HemisphereLight(0xf6fff9, 0x355e55, .84));
+            directionalLight = new THREE.DirectionalLight(0xfff1cf, 1.32);
+            directionalLight.position.set(-18, 31, 15);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.set(2048, 2048);
+            directionalLight.shadow.camera.left = -26;
+            directionalLight.shadow.camera.right = 26;
+            directionalLight.shadow.camera.top = 30;
+            directionalLight.shadow.camera.bottom = -22;
+            directionalLight.shadow.camera.near = 1;
+            directionalLight.shadow.camera.far = 90;
+            directionalLight.shadow.bias = -.00025;
+            scene.add(directionalLight);
+            createWorld();
+            player = createChicken();
+            player.position.set(0, PLAYER_Y, 0);
+            player.scale.setScalar(PLAYER_SCALE);
+            scene.add(player);
+            onResize(); updateHud(); bindControls();
+            window.addEventListener('resize', onResize);
+            document.addEventListener('visibilitychange', () => clock.getDelta());
+            window.__HOPLINE_READY__ = true;
+            animate();
+        }
+
+        function createWorld() {
+            const base = box(44, 1.2, (GOAL_ROW + 8) * LANE_DEPTH, mat(0x4c8f75), false, true);
+            base.position.set(0, -.72, -(GOAL_ROW * LANE_DEPTH) / 2 + LANE_DEPTH);
+            scene.add(base);
+            const pattern = [
+                'grass', 'grass', 'road', 'road', 'grass', 'road', 'grass', 'road', 'road', 'grass',
+                'road', 'road', 'grass', 'grass', 'road', 'grass', 'road', 'road', 'grass', 'road',
+                'grass', 'road', 'road', 'grass', 'goal'
+            ];
+            for (let row = -2; row <= GOAL_ROW; row++) createLane(row, row < 2 ? 'grass' : (pattern[row] || 'grass'));
+            createSkyline(); createClouds();
+        }
+
+        function createLane(row, type) {
+            const z = -row * LANE_DEPTH;
+            const safe = type === 'grass' || type === 'goal';
+            const color = type === 'goal' ? 0xf3cf68 : (row % 2 ? COLORS.grassAlt : COLORS.grass);
+            const surface = box(ROAD_WIDTH, .36, LANE_DEPTH + .04, mat(safe ? color : COLORS.road), false, true);
+            surface.position.set(0, -.16, z); scene.add(surface);
+            const lane = { row, z, type, vehicles: [] }; lanes.push(lane);
+            if (type === 'road') {
+                const direction = row % 2 === 0 ? 1 : -1;
+                const speed = 4.1 + (row % 4) * .72;
+                const stripeMat = mat(COLORS.stripe);
+                for (let x = -12; x <= 12; x += 4) {
+                    const stripe = box(2.05, .035, .1, stripeMat, false, false);
+                    stripe.position.set(x, .035, z); scene.add(stripe);
+                }
+                const count = row % 3 === 0 ? 3 : 2;
+                for (let i = 0; i < count; i++) {
+                    const vehicle = createVehicle(row, i, direction, speed);
+                    lane.vehicles.push(vehicle); vehicles.push(vehicle); scene.add(vehicle.group);
+                }
+            } else decorateSafeLane(row, z, type);
+        }
+
+        function decorateSafeLane(row, z, type) {
+            const random = seededRandom(8400 + row * 91);
+            if (type === 'goal') {
+                const archMat = mat(COLORS.coral);
+                const left = box(.5, 4.2, .5, archMat); left.position.set(-6.3, 2, z);
+                const right = left.clone(); right.position.x = 6.3;
+                const top = box(13.1, .55, .55, archMat); top.position.set(0, 4, z);
+                scene.add(left, right, top);
+                const banner = box(6.4, 1.25, .18, mat(COLORS.cream)); banner.position.set(0, 3.28, z + .18); scene.add(banner);
+                return;
+            }
+            [-13.2, -10.7, 10.7, 13.2].forEach((x, index) => {
+                if (random() > .28 || row < 1) {
+                    const tree = createTree(random, index % 2 === 0);
+                    tree.position.set(x + (random() - .5) * .55, 0, z + (random() - .5) * .55);
+                    scene.add(tree);
+                }
+            });
+        }
+
+        function createTree(random, tall) {
+            const group = new THREE.Group();
+            const trunk = box(.44, tall ? 1.65 : 1.25, .44, mat(0x866147));
+            trunk.position.y = trunk.geometry.parameters.height / 2; group.add(trunk);
+            const crown = box(tall ? 1.55 : 1.8, tall ? 2.15 : 1.55, tall ? 1.55 : 1.8, mat(random() > .5 ? 0x27715b : 0x39886b));
+            crown.position.y = tall ? 2.32 : 1.72; crown.rotation.y = random() * .45; group.add(crown); return group;
+        }
+
+        function createVehicle(row, index, direction, speed) {
+            const random = seededRandom(row * 1301 + index * 47);
+            const isBus = row % 5 === 0 && index === 0;
+            const length = isBus ? 4.7 : 3.15 + random() * .45;
+            const palette = [0xff6b45, 0x5f70d7, 0xf2c84b, 0x37a98a, 0xe95d82];
+            const color = palette[(row + index) % palette.length];
+            const group = new THREE.Group();
+            const body = box(length, .82, 1.55, mat(color)); body.position.y = .72; group.add(body);
+            const cabin = box(isBus ? length - .55 : length * .55, .72, 1.34, mat(isBus ? color : COLORS.cream));
+            cabin.position.set(isBus ? 0 : -.18 * direction, 1.42, 0); group.add(cabin);
+            const windshield = box(isBus ? .12 : .7, .42, 1.37, mat(COLORS.glass), false, false);
+            windshield.position.set(direction * (isBus ? length / 2 + .015 : length * .18), 1.46, 0); group.add(windshield);
+            const wheelMat = mat(0x17252c);
+            [-1, 1].forEach(side => [-1, 1].forEach(end => {
+                const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .24, 12), wheelMat);
+                wheel.rotation.x = Math.PI / 2; wheel.position.set(end * length * .31, .36, side * .79); wheel.castShadow = true; group.add(wheel);
+            }));
+            const x = direction > 0 ? -18 + index * 12 : 18 - index * 12;
+            group.position.set(x, 0, -row * LANE_DEPTH);
+            return { group, direction, speed, halfX: length / 2, row };
+        }
+
+        function createChicken() {
+            const group = new THREE.Group();
+            const white = mat(COLORS.cream), coral = mat(COLORS.coral), dark = mat(COLORS.ink);
+            const body = box(1.22, 1.28, 1.2, white); body.position.y = .78; group.add(body);
+            const head = box(.94, .9, .94, white); head.position.set(0, 1.74, -.1); group.add(head);
+            const comb = box(.26, .38, .32, coral); comb.position.set(0, 2.37, -.1); group.add(comb);
+            const beak = box(.48, .3, .42, mat(0xf4c84f)); beak.position.set(0, 1.72, -.66); group.add(beak);
+            [-.25, .25].forEach(x => {
+                const eye = box(.14, .17, .08, dark, false, false); eye.position.set(x, 1.92, -.575); group.add(eye);
+                const foot = box(.25, .16, .48, coral); foot.position.set(x * 1.15, .08, -.12); group.add(foot);
+            });
+            const leftWing = box(.23, .72, .76, white); leftWing.position.set(-.72, .88, 0); leftWing.rotation.z = -.18;
+            const rightWing = leftWing.clone(); rightWing.position.x = .72; rightWing.rotation.z = .18;
+            group.add(leftWing, rightWing); group.userData.leftWing = leftWing; group.userData.rightWing = rightWing; return group;
+        }
+
+        function createSkyline() {
+            const random = seededRandom(9917);
+            const palette = [0x315c69, 0x3d7180, 0x5d7483, 0x285665, 0x547f78];
+            [-1, 1].forEach(side => {
+                for (let i = 0; i < 13; i++) {
+                    const w = 3 + random() * 3.2, h = 5 + random() * 10, d = 3.2 + random() * 4;
+                    const building = box(w, h, d, mat(palette[i % palette.length]), true, true);
+                    building.position.set(side * (20 + random() * 5), h / 2 - .2, -i * 6 + 6); scene.add(building);
+                    const roof = box(w * .32, .5, d * .32, mat(COLORS.coral));
+                    roof.position.set(building.position.x, h + .05, building.position.z); scene.add(roof);
+                }
+            });
+        }
+
+        function createClouds() {
+            const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: .78 });
+            for (let i = 0; i < 5; i++) {
+                const group = new THREE.Group();
+                const count = 3 + (i % 2);
+                for (let j = 0; j < count; j++) {
+                    const puff = box(2.4 + j * .3, .7 + (j % 2) * .35, 1.4, cloudMat, false, false);
+                    puff.position.set(j * 1.5, (j % 2) * .25, 0); group.add(puff);
+                }
+                group.position.set(-28 + i * 14, 14 + (i % 2) * 3, -12 - i * 15); scene.add(group);
+                animatedClouds.push({ group, speed: .22 + i * .025 });
+            }
+        }
+
+        function bindControls() {
+            document.getElementById('start-button').addEventListener('click', startGame);
+            document.getElementById('restart-button').addEventListener('click', restartGame);
+            window.addEventListener('keydown', event => {
+                const key = event.key.toLowerCase();
+                const moves = { arrowup: [0, 1], w: [0, 1], arrowdown: [0, -1], s: [0, -1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] };
+                if (!moves[key]) return;
+                event.preventDefault();
+                if (!event.repeat) requestMove(...moves[key]);
+            }, { passive: false });
+            document.querySelectorAll('[data-move]').forEach(button => {
+                button.addEventListener('pointerdown', event => {
+                    event.preventDefault();
+                    const map = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
+                    requestMove(...map[button.dataset.move]);
+                });
+            });
+        }
+
+        function startGame() {
+            if (state.status === 'gameover' || state.status === 'won') return restartGame();
+            if (state.status === 'playing') return;
+            state.status = 'playing'; introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); showStatus('Find the gap');
+        }
+        function restartGame() {
+            state.status = 'playing'; state.score = 0; state.row = 0; state.col = 0; state.maxRow = 0;
+            state.hopping = false; state.queuedMove = null;
+            player.position.set(0, PLAYER_Y, 0); player.rotation.set(0, 0, 0); player.scale.setScalar(PLAYER_SCALE);
+            introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); updateHud(); showStatus('Fresh run');
+        }
+        function requestMove(dx, dRow) {
+            if (state.status === 'ready') startGame();
+            if (state.status !== 'playing') return false;
+            if (state.hopping) { state.queuedMove = [dx, dRow]; return false; }
+            const nextCol = THREE.MathUtils.clamp(state.col + dx, -MAX_COL, MAX_COL);
+            const nextRow = THREE.MathUtils.clamp(state.row + dRow, 0, GOAL_ROW);
+            if (nextCol === state.col && nextRow === state.row) return false;
+            state.col = nextCol; state.row = nextRow; state.hopping = true; state.hopStart = performance.now();
+            state.hopFrom.copy(player.position); state.hopTo.set(nextCol * STEP_X, PLAYER_Y, -nextRow * LANE_DEPTH);
+            player.rotation.y = dx < 0 ? Math.PI / 2 : dx > 0 ? -Math.PI / 2 : dRow < 0 ? Math.PI : 0;
+            if (nextRow > state.maxRow) {
+                state.maxRow = nextRow; state.score = nextRow;
+                if (state.score > state.best) { state.best = state.score; saveBest(); }
+                updateHud();
+            }
+            return true;
+        }
+
+        function updateHop(now) {
+            if (!state.hopping) return;
+            const t = Math.min(1, (now - state.hopStart) / HOP_MS);
+            const eased = t * t * (3 - 2 * t);
+            player.position.lerpVectors(state.hopFrom, state.hopTo, eased);
+            player.position.y = PLAYER_Y + Math.sin(Math.PI * t) * 1.28;
+            const squash = Math.sin(Math.PI * t);
+            player.scale.set(PLAYER_SCALE * (1 + squash * .07), PLAYER_SCALE * (1 - squash * .11), PLAYER_SCALE * (1 + squash * .07));
+            player.userData.leftWing.rotation.z = -.18 - squash * .55;
+            player.userData.rightWing.rotation.z = .18 + squash * .55;
+            if (t >= 1) {
+                player.position.copy(state.hopTo); player.scale.setScalar(PLAYER_SCALE);
+                player.userData.leftWing.rotation.z = -.18; player.userData.rightWing.rotation.z = .18;
+                state.hopping = false;
+                if (state.row >= GOAL_ROW) return endGame('won');
+                const queued = state.queuedMove; state.queuedMove = null; if (queued) requestMove(...queued);
+            }
+        }
+
+        function updateTraffic(delta) {
+            vehicles.forEach(vehicle => {
+                vehicle.group.position.x += vehicle.direction * vehicle.speed * delta;
+                const limit = 20 + vehicle.halfX;
+                if (vehicle.direction > 0 && vehicle.group.position.x > limit) vehicle.group.position.x = -limit;
+                if (vehicle.direction < 0 && vehicle.group.position.x < -limit) vehicle.group.position.x = limit;
+            });
+        }
+        function checkCollisions() {
+            if (state.status !== 'playing') return;
+            for (const vehicle of vehicles) {
+                const dz = Math.abs(player.position.z - vehicle.group.position.z);
+                const dx = Math.abs(player.position.x - vehicle.group.position.x);
+                if (dz < .9 && dx < vehicle.halfX + .48) { endGame('collision'); return; }
+            }
+        }
+        function endGame(reason) {
+            if (state.status === 'gameover' || state.status === 'won') return;
+            state.status = reason === 'won' ? 'won' : 'gameover'; state.hopping = false; state.queuedMove = null;
+            if (reason === 'won') {
+                resultKickerEl.textContent = 'Rooftop garden reached'; resultTitleEl.textContent = 'City cleared.';
+                resultCopyEl.innerHTML = `Perfect timing across <strong>${state.score}</strong> blocks. Pip owns this route.`;
+                showStatus('Route complete');
+            } else {
+                resultKickerEl.textContent = 'Traffic wins this round'; resultTitleEl.textContent = 'Close call.';
+                resultCopyEl.innerHTML = `You made it across <strong>${state.score}</strong> blocks. The next opening is already coming.`;
+                document.body.classList.remove('impact'); void document.body.offsetWidth; document.body.classList.add('impact');
+                player.rotation.z = -.88; showStatus('Bonk!');
+            }
+            window.setTimeout(() => resultEl.classList.remove('is-hidden'), 320);
+        }
+
+        function updateCamera(delta) {
+            const aspect = window.innerWidth / window.innerHeight;
+            desiredCamera.set(17, aspect < .8 ? 23 : 18, player.position.z + 18);
+            camera.position.lerp(desiredCamera, 1 - Math.pow(.001, delta));
+            cameraTarget.set(player.position.x * .12, 0, player.position.z - 5.2);
+            lookTarget.lerp(cameraTarget, 1 - Math.pow(.0005, delta));
+            camera.lookAt(lookTarget); directionalLight.target.position.copy(lookTarget);
+        }
+        function updateHud() {
+            scoreEl.textContent = String(state.score).padStart(2, '0'); bestEl.textContent = String(state.best).padStart(2, '0');
+        }
+        function showStatus(text) {
+            window.clearTimeout(state.statusTimer); statusEl.textContent = text; statusEl.classList.add('is-visible');
+            state.statusTimer = window.setTimeout(() => statusEl.classList.remove('is-visible'), 1100);
+        }
+        function onResize() {
+            if (!camera || !renderer) return;
+            const aspect = window.innerWidth / window.innerHeight;
+            const viewHeight = aspect < .82 ? 24 : 17.5;
+            camera.left = -viewHeight * aspect / 2; camera.right = viewHeight * aspect / 2;
+            camera.top = viewHeight / 2; camera.bottom = -viewHeight / 2; camera.updateProjectionMatrix();
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        function animate(now = performance.now()) {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), .05);
+            updateTraffic(delta); updateHop(now); checkCollisions(); updateCamera(delta);
+            animatedClouds.forEach(cloud => { cloud.group.position.x += cloud.speed * delta; if (cloud.group.position.x > 36) cloud.group.position.x = -36; });
+            renderer.render(scene, camera);
+        }
+
+        window.__HOPLINE__ = {
+            getState: () => ({
+                status: state.status, score: state.score, best: state.best,
+                player: { row: state.row, col: state.col, x: Number(player ? player.position.x.toFixed(3) : 0), z: Number(player ? player.position.z.toFixed(3) : 0) },
+                laneCount: lanes.length, vehicleCount: vehicles.length
+            }),
+            start: startGame,
+            restart: restartGame,
+            step: direction => {
+                const map = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
+                return map[direction] ? requestMove(...map[direction]) : false;
+            },
+            forceCollision: () => endGame('collision'),
+            forceWin: () => {
+                if (state.status !== 'playing') restartGame();
+                state.row = GOAL_ROW; state.maxRow = GOAL_ROW; state.score = GOAL_ROW;
+                if (state.score > state.best) { state.best = state.score; saveBest(); }
+                player.position.set(0, PLAYER_Y, -GOAL_ROW * LANE_DEPTH);
+                updateHud(); endGame('won');
+            }
+        };
+        init();
+    })();
+    </script>
+</body>
+</html>

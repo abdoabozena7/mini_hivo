@@ -1,42 +1,66 @@
 import argparse
 import base64
+import hashlib
 import importlib
 import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
+
+from hivo.evidence import result_failed as evidence_result_failed
+from hivo.evidence import evidence_for_review
+from hivo.evidence import unresolved_tool_failures
+from hivo.context import compact_messages
+from hivo.memory import MemoryStore
+from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
+from hivo.playbooks import build_execution_stages, classify_project, compact_stage_plan, playbook_context
+from hivo.projects import ProjectStore
+from hivo.verification import evaluate_web_snapshot, infer_web_profile
 
 # ---------------------------------------------------------------------------
 # CONFIG - keep model/provider configuration simple for the experiment
 # ---------------------------------------------------------------------------
 
-MODEL = ""
+MODEL_POLICY = SingleModelPolicy()
+MODEL = GEMMA_MODEL
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_URL = OLLAMA_BASE_URL + "/api/chat"
 
 WORKSPACE = None
+DEFAULT_PROJECTS_ROOT = Path(__file__).resolve().parent / "list"
 MEMORY_FILE = ".agent_memory.json"
 EXPERIMENT_FILE = ".agent_experiment.jsonl"
 EVIDENCE_DIR = ".agent_evidence"
+RUNS_DIR = ".agent_runs"
 
 MAX_TOOL_STEPS = 20
-MAX_DEPTH = 3
+MAX_DEPTH = 2
 MAX_CHILDREN = 4
-MAX_TOTAL_TASKS = 12
+MAX_TOTAL_TASKS = 8
 MAX_CLARIFICATION_QUESTIONS = 5
 MAX_REPAIRS_PER_LEAF = 2
-MAX_STRUCTURED_RETRIES = 5
-CONTEXT_LIMIT_TOKENS = 32768
+MAX_STRUCTURED_RETRIES = 2
+MAX_PROVIDER_RETRIES = 1
+OLLAMA_TIMEOUT_SECONDS = 120
+CONTEXT_LIMIT_TOKENS = MODEL_POLICY.context_window("builder")
 MODEL_TASK_CAPACITY = 2  # auto-derived from the selected local model; 1=very weak ... 4=stronger
-ENABLE_VISION = False
+ENABLE_VISION = True
+MODEL_CAPABILITIES = set()
+ROUTER_MODEL = ""
+FALLBACK_MODEL = ""
+VISION_MODEL = ""
+MODEL_CAPABILITY_MAP = {}
+VISION_ERROR = None
 
 DANGEROUS = ["rm -rf", "sudo", "mkfs", "shutdown", "reboot", "format ", "del /f", ":(){"]
 KNOWN_DEPENDENCIES = {
@@ -61,6 +85,28 @@ DASHBOARD = {"mode": "baseline", "context": 0, "active_role": "-", "active_task"
 LIVE_VIEW = None
 RUN_STARTED = 0.0
 VISION_ENABLED_FOR_RUN = False
+RUN_ID = ""
+ACTIVE_TRANSACTION = None
+MEMORY_STORE = None
+
+
+class ProviderError(RuntimeError):
+    """The model provider could not complete a request."""
+
+
+class StructuredOutputError(RuntimeError):
+    """The provider replied, but the structured contract was not satisfied."""
+
+
+def configure_console_streams(streams=None):
+    """Prevent generated Unicode from crashing legacy Windows code pages."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -219,46 +265,59 @@ def _model_choice_label(model_info):
     return name + suffix
 
 
+def fetch_model_capabilities(model_name):
+    try:
+        response = requests.post(OLLAMA_BASE_URL + "/api/show", timeout=10, json={"model": model_name})
+        if response.status_code == 200:
+            return {str(item).lower() for item in response.json().get("capabilities", [])}
+    except Exception:
+        pass
+    return set()
+
+
+def configure_role_models(models, primary_name):
+    global ROUTER_MODEL, FALLBACK_MODEL, VISION_MODEL, MODEL_CAPABILITY_MAP
+    MODEL_POLICY.validate(primary_name)
+    installed_names = {item.get("name") or item.get("model") for item in models}
+    if primary_name not in installed_names:
+        raise RuntimeError(f"required local model is not installed: {primary_name}")
+    capabilities = fetch_model_capabilities(primary_name)
+    MODEL_CAPABILITY_MAP = {primary_name: capabilities}
+    ROUTER_MODEL = primary_name
+    FALLBACK_MODEL = ""
+    VISION_MODEL = primary_name
+
+
 def select_local_ollama_model(explicit=None):
-    global MODEL, MODEL_TASK_CAPACITY
+    global MODEL, MODEL_TASK_CAPACITY, MODEL_CAPABILITIES
+    try:
+        required_name = MODEL_POLICY.validate(explicit)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
     models = fetch_local_ollama_models()
     if not models:
         raise RuntimeError(
-            "no LOCAL Ollama models were found. Pull at least one local model first, "
-            "for example: `ollama pull qwen2.5-coder:7b`. Cloud-tagged models are intentionally hidden."
+            f"no LOCAL Ollama models were found. Install the required model with `ollama pull {required_name}`."
         )
 
     by_name = {(item.get("name") or item.get("model")): item for item in models}
-    if explicit:
-        if explicit not in by_name:
-            available = ", ".join(by_name)
-            raise RuntimeError(f"requested local model '{explicit}' was not found. Available local models: {available}")
-        chosen = by_name[explicit]
-    elif PROMPT_TOOLKIT_AVAILABLE and sys.stdin.isatty():
-        values = [(name, _model_choice_label(info)) for name, info in by_name.items()]
-        selected = radiolist_dialog(
-            title="Local Ollama Model",
-            text="Use Up/Down arrows to choose a LOCAL model, then press Enter.",
-            values=values,
-        ).run()
-        if not selected:
-            raise SystemExit()
-        chosen = by_name[selected]
-    elif len(models) == 1:
-        chosen = models[0]
-        print(f"[MODEL AUTO-SELECT] {_model_choice_label(chosen)}")
-    else:
+    if required_name not in by_name:
         raise RuntimeError(
-            "multiple local models are installed but no interactive terminal is available. "
-            "Use --model <name> for non-interactive runs."
+            f"required local model '{required_name}' was not found. "
+            f"Install it with `ollama pull {required_name}`."
         )
+    chosen = by_name[required_name]
 
-    MODEL = chosen.get("name") or chosen.get("model")
+    MODEL = required_name
     MODEL_TASK_CAPACITY = infer_model_capacity(chosen)
+    configure_role_models(models, MODEL)
+    MODEL_CAPABILITIES = MODEL_CAPABILITY_MAP.get(MODEL, set())
     print(f"[MODEL] {MODEL}")
     print("[PROVIDER] local Ollama only")
     print("[CLOUD MODELS] hidden/disabled by this agent selection")
     print(f"[CAPACITY] {MODEL_TASK_CAPACITY}/4 (AUTO-ESTIMATED FROM MODEL SIZE; EXPERIMENTAL)")
+    print(f"[CAPABILITIES] {', '.join(sorted(MODEL_CAPABILITIES)) or 'unknown'}")
+    print(f"[ROLE MODELS] every model-backed role={MODEL} | fallback=disabled")
     return chosen
 
 
@@ -301,9 +360,24 @@ def ensure_browser(install_if_missing=False):
 TOOLS = [
     {"type": "function", "function": {
         "name": "write_file",
-        "description": "Create a file, or overwrite an existing one (a backup is made automatically first).",
+        "description": (
+            "Create a NEW file. Always provide path before content. Existing files are protected; "
+            "use edit_file for focused changes. Keep one call compact enough to finish completely."
+        ),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+            "path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": (
+            "Safely replace one SMALL exact text fragment in an existing file. Always provide path, old, then new. "
+            "Use multiple compact edits instead of one large rewrite so the tool call cannot be truncated."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"},
+            "expected_replacements": {"type": "integer", "minimum": 1, "maximum": 20}},
+            "required": ["path", "old", "new"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
         "name": "read_file",
@@ -334,7 +408,32 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "command": {"type": "string"}}, "required": ["command"]},
     }},
+    {"type": "function", "function": {
+        "name": "verify_web_app",
+        "description": "Serve an HTML file from the workspace, open it in Chromium, capture runtime errors/state and a screenshot.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}}, "required": ["path"], "additionalProperties": False},
+    }},
 ]
+
+TOOL_DEFINITIONS = {item["function"]["name"]: item["function"] for item in TOOLS}
+
+
+def tool_argument_error(name, args):
+    definition = TOOL_DEFINITIONS.get(name)
+    if definition is None:
+        return None
+    if not isinstance(args, dict):
+        return f"error: {name} arguments must be one JSON object"
+    required = definition.get("parameters", {}).get("required", [])
+    missing = [key for key in required if key not in args or args.get(key) is None]
+    if not missing:
+        return None
+    return (
+        f"error: incomplete or truncated {name} tool call; missing required arguments: {', '.join(missing)}. "
+        "Retry with every required field, put path first when present, and use smaller content/edit fragments. "
+        "No file was changed."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,44 +474,104 @@ def precheck_file_reference(user_text):
 
 
 # ---------------------------------------------------------------------------
-# MEMORY - preserved small JSON workspace memory
+# MEMORY - durable SQLite ledger with bounded verified retrieval
 # ---------------------------------------------------------------------------
 
+def get_memory_store():
+    global MEMORY_STORE
+    if WORKSPACE is None:
+        return None
+    expected = (WORKSPACE / ".hivo" / "memory.sqlite3").resolve()
+    if MEMORY_STORE is None or MEMORY_STORE.db_path.resolve() != expected:
+        MEMORY_STORE = MemoryStore(WORKSPACE)
+    return MEMORY_STORE
+
+
 def load_memory():
-    path = WORKSPACE / MEMORY_FILE
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"workspace": str(WORKSPACE), "recent_files": [], "operations": [],
-            "last_error": None, "last_fix_attempt": None}
+    store = get_memory_store()
+    recent_files = store.recent_files() if store else []
+    resumable = store.latest_resumable_run() if store else None
+    if resumable:
+        print(
+            f"[MEMORY] durable unfinished run available: {resumable['run_id']} "
+            f"({len(resumable.get('tasks', []))} ledger task(s))"
+        )
+    return {
+        "workspace": str(WORKSPACE),
+        "memory_db": str(store.db_path) if store else "",
+        "recent_files": recent_files,
+        # Kept as a bounded compatibility field; full history lives in SQLite.
+        "operations": [],
+        "last_error": None,
+        "last_fix_attempt": None,
+        "resume_snapshot": resumable,
+    }
 
 
-def update_memory(memory, tool_name, tool_args, result):
+def relevant_memory_context(query, role="Builder", memory=None):
+    store = get_memory_store()
+    if not store:
+        return ""
+    max_chars = 2200 if role in {"Builder", "Repairer"} else 1000
+    try:
+        verified_budget = int(max_chars * 0.7)
+        verified = store.context_for(query, max_items=6, max_chars=verified_budget)
+        resumable = store.resumable_context(
+            query,
+            max_chars=max_chars - verified_budget,
+            snapshot=(memory or {}).get("resume_snapshot"),
+        )
+        return "\n\n".join(item for item in (verified, resumable) if item)[:max_chars]
+    except Exception as exc:
+        print(f"[WARN] could not retrieve durable memory: {exc}")
+        return ""
+
+
+def tool_result_failed(result):
+    return evidence_result_failed(result)
+
+
+def update_memory(memory, tool_name, tool_args, result, role=None, task_id=None):
     path_arg = tool_args.get("path")
     if path_arg:
         if path_arg in memory["recent_files"]:
             memory["recent_files"].remove(path_arg)
         memory["recent_files"] = [path_arg] + memory["recent_files"][:9]
 
-    memory["operations"] = memory["operations"][-19:] + [{
+    memory["operations"] = memory.get("operations", [])[-7:] + [{
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "tool": tool_name, "args": tool_args, "result": str(result)[:200],
+        "tool": tool_name, "args": _sanitize_event_value(tool_args), "result": str(result)[:500],
     }]
 
-    if tool_name in ("run_file", "run_command"):
-        lower = str(result).lower()
-        is_error = "error" in lower or "traceback" in lower or "exception" in lower
-        memory["last_error"] = str(result)[:500] if is_error else None
+    if tool_name in ("run_file", "run_command", "verify_web_app"):
+        memory["last_error"] = str(result)[:500] if tool_result_failed(result) else None
 
-    if tool_name == "write_file" and memory.get("last_error"):
+    if (tool_name in ("write_file", "edit_file") and path_arg and memory.get("last_error")
+            and not tool_result_failed(result)):
         memory["last_fix_attempt"] = f"Edited {path_arg} after an error"
 
+    record_run_event("tool_result", tool=tool_name, args=tool_args, result=str(result))
+
     try:
-        (WORKSPACE / MEMORY_FILE).write_text(json.dumps(memory, indent=2), encoding="utf-8")
-    except OSError as exc:
-        print(f"[WARN] could not save memory file: {exc}")
+        store = get_memory_store()
+        if store:
+            store.record_event(
+                run_id=RUN_ID or None,
+                task_id=task_id,
+                role=role,
+                tool=tool_name,
+                target=str(path_arg or tool_args.get("command") or ""),
+                status="failed" if tool_result_failed(result) else "succeeded",
+                content=str(result),
+                details={
+                    "args": _sanitize_event_value(tool_args),
+                    "model": MODEL,
+                    "mutation_author": "model_tool_call" if tool_name in {"write_file", "edit_file"} else None,
+                },
+            )
+            memory["recent_files"] = store.recent_files()
+    except (OSError, ValueError) as exc:
+        print(f"[WARN] could not save durable memory event: {exc}")
     return memory
 
 
@@ -420,29 +579,117 @@ def update_memory(memory, tool_name, tool_args, result):
 # TOOL IMPLEMENTATIONS - intentionally kept simple
 # ---------------------------------------------------------------------------
 
+def begin_transaction(task_id):
+    global ACTIVE_TRANSACTION
+    if ACTIVE_TRANSACTION is not None:
+        raise RuntimeError(f"transaction already active for {ACTIVE_TRANSACTION['task_id']}")
+    ACTIVE_TRANSACTION = {"task_id": task_id, "files": {}}
+
+
+def _transaction_capture(target):
+    if ACTIVE_TRANSACTION is None:
+        return
+    key = str(target)
+    if key in ACTIVE_TRANSACTION["files"]:
+        return
+    ACTIVE_TRANSACTION["files"][key] = {
+        "existed": target.exists(),
+        "content": target.read_bytes() if target.exists() and target.is_file() else None,
+    }
+
+
+def commit_transaction():
+    global ACTIVE_TRANSACTION
+    task_id = (ACTIVE_TRANSACTION or {}).get("task_id")
+    changed = sorted((ACTIVE_TRANSACTION or {}).get("files", {}))
+    ACTIVE_TRANSACTION = None
+    record_run_event("transaction_commit", task_id=task_id, changed=changed)
+    return changed
+
+
+def rollback_transaction():
+    global ACTIVE_TRANSACTION
+    transaction = ACTIVE_TRANSACTION
+    ACTIVE_TRANSACTION = None
+    if not transaction:
+        return []
+    restored = []
+    for raw_path, snapshot in transaction["files"].items():
+        target = Path(raw_path)
+        try:
+            if snapshot["existed"]:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(snapshot["content"])
+            elif target.exists() and target.is_file():
+                target.unlink()
+            restored.append(raw_path)
+        except OSError as exc:
+            print(f"[ROLLBACK_ERROR] {target}: {exc}")
+    record_run_event("transaction_rollback", task_id=transaction.get("task_id"), restored=restored)
+    return restored
+
+
 def backup(target):
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = target.with_name(target.name + f".backup_{stamp}")
+    run_name = RUN_ID or stamp
+    relative = target.relative_to(WORKSPACE)
+    backup_path = WORKSPACE / ".agent_backups" / run_name / relative
     try:
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        if backup_path.exists():
+            backup_path = backup_path.with_name(backup_path.name + f".{stamp}")
         shutil.copy2(target, backup_path)
-        return f" (backup created: {backup_path.name})"
+        return f" (managed backup: {backup_path.relative_to(WORKSPACE)})"
     except OSError as exc:
         return f"error: backup failed, file NOT changed: {exc}"
 
 
-def write_file(path, content):
+def write_file(path, content, role="System"):
     target = safe_path(path)
     if target is None:
         return f"error: '{path}' is outside the workspace."
-    note = ""
-    if target.exists():
-        note = backup(target)
-        if note.startswith("error"):
-            return note
+    transaction_snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
+    created_in_transaction = bool(transaction_snapshot and not transaction_snapshot.get("existed"))
+    if role == "Repairer":
+        return "error: Repairer cannot replace files with write_file; use a focused edit_file change"
+    if target.exists() and role == "Builder" and not created_in_transaction:
+        return (
+            "error: write_file cannot replace an existing file; "
+            "read it and use edit_file for a focused verified change"
+        )
+    note = backup(target) if target.exists() and not created_in_transaction else ""
+    if note.startswith("error"):
+        return note
     try:
+        _transaction_capture(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"wrote file: {target}{note}"
+    except OSError as exc:
+        return f"error writing file: {exc}"
+
+
+def edit_file(path, old, new, expected_replacements=1):
+    target = safe_path(path)
+    if target is None:
+        return f"error: '{path}' is outside the workspace."
+    if not target.exists() or not target.is_file():
+        return f"error: file does not exist: {target}"
+    try:
+        original = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"error reading file: {exc}"
+    actual = original.count(old)
+    expected = expected_replacements or 1
+    if actual != expected:
+        return f"error: expected {expected} exact replacement(s), found {actual}; file was not changed"
+    note = backup(target)
+    if note.startswith("error"):
+        return note
+    try:
+        _transaction_capture(target)
+        target.write_text(original.replace(old, new, expected), encoding="utf-8")
+        return f"edited file: {target} ({expected} replacement(s)){note}"
     except OSError as exc:
         return f"error writing file: {exc}"
 
@@ -470,8 +717,12 @@ def backup_file(path):
 
 def list_files():
     try:
+        hidden_agent_names = {
+            MEMORY_FILE, EXPERIMENT_FILE, EVIDENCE_DIR, RUNS_DIR, ".hivo",
+            ".agent_backups", ".git", ".venv", "__pycache__",
+        }
         names = [p.name for p in sorted(WORKSPACE.iterdir())
-                 if MEMORY_FILE not in p.name and ".backup_" not in p.name]
+                 if p.name not in hidden_agent_names and ".backup_" not in p.name]
         return "\n".join(names) if names else "(workspace is empty)"
     except OSError as exc:
         return f"error listing files: {exc}"
@@ -497,6 +748,8 @@ def run_file(path):
             if build.returncode != 0:
                 return f"compile error:\n{build.stderr}"
             cmd = [str(exe)]
+        elif ext in (".html", ".htm"):
+            return json.dumps(browser_workspace_snapshot(path, "run_file"), ensure_ascii=False)
         else:
             return f"error: unsupported file type for running: {ext}"
 
@@ -511,22 +764,76 @@ def run_file(path):
         return f"error running file: {exc}"
 
 
-def run_command(command):
-    if any(bad in command.lower() for bad in DANGEROUS):
-        return f"error: this command was refused for safety reasons: {command}"
+def _validated_command_parts(command):
+    lower = command.lower()
+    if any(bad in lower for bad in DANGEROUS) or any(token in command for token in ("\n", "\r", "&&", "||", ";", "|", ">", "<")):
+        return None, "dangerous commands and shell composition are not allowed"
     try:
-        result = subprocess.run(command, shell=True, cwd=WORKSPACE,
+        parts = shlex.split(command, posix=(os.name != "nt"))
+        parts = [part.strip('"') for part in parts]
+    except ValueError as exc:
+        return None, f"could not parse command: {exc}"
+    if not parts:
+        return None, "empty command"
+
+    executable = Path(parts[0]).stem.lower()
+    allowed = {"python", "python3", "py", "node", "npm", "npx", "pytest", "git", "g++", "clang++", "tsc"}
+    if executable not in allowed:
+        return None, f"executable '{executable}' is not in the verification allowlist"
+    if executable in {"python", "python3", "py"} and "-c" in parts:
+        return None, "inline Python is not allowed; run a workspace script or approved module"
+    if executable == "node" and any(flag in parts for flag in ("-e", "--eval")):
+        return None, "inline Node.js is not allowed; run a workspace script"
+    if executable == "git":
+        subcommand = next((part for part in parts[1:] if not part.startswith("-")), "")
+        if subcommand not in {"status", "diff", "log", "show", "ls-files", "rev-parse"}:
+            return None, f"git subcommand '{subcommand}' is not read-only and is not allowed"
+    if executable == "npm" and any(word in parts[1:] for word in ("install", "uninstall", "publish", "link")):
+        return None, "package mutation is not allowed from run_command"
+    if executable == "npx":
+        requested = next((Path(part).stem.lower() for part in parts[1:] if not part.startswith("-")), "")
+        if requested not in {"eslint", "tsc", "vitest", "jest", "playwright", "vite"}:
+            return None, f"npx tool '{requested}' is not in the verification allowlist"
+
+    for part in parts[1:]:
+        if part.startswith("-") or "://" in part:
+            continue
+        candidate = Path(part)
+        looks_like_path = candidate.is_absolute() or ".." in candidate.parts or "/" in part or "\\" in part
+        if looks_like_path:
+            resolved = candidate.resolve() if candidate.is_absolute() else (WORKSPACE / candidate).resolve()
+            if not resolved.is_relative_to(WORKSPACE):
+                return None, f"path argument escapes the workspace: {part}"
+    return parts, None
+
+
+def run_command(command):
+    parts, validation_error = _validated_command_parts(command)
+    if validation_error:
+        return f"error: command refused: {validation_error}"
+    try:
+        result = subprocess.run(parts, shell=False, cwd=WORKSPACE,
                                 capture_output=True, text=True, timeout=60)
-        return result.stdout + result.stderr
+        output = (result.stdout + result.stderr).strip()
+        return f"[exit_code={result.returncode}]\n{output or '(no output)'}"
     except subprocess.TimeoutExpired:
         return "error: command timed out (60s limit)"
     except Exception as exc:
         return f"tool error: {exc}"
 
 
-def run_tool(name, args):
+def run_tool(name, args, role="System"):
+    if role == "Falsifier" and name in {"write_file", "edit_file", "backup_file"}:
+        return "error: Falsifier is read-only and may not modify files"
+    if role == "Repairer" and name in {"write_file", "backup_file"}:
+        return "error: Repairer may only make focused edit_file changes to existing files"
+    argument_error = tool_argument_error(name, args)
+    if argument_error:
+        return argument_error
     if name == "write_file":
-        return write_file(args["path"], args["content"])
+        return write_file(args["path"], args["content"], role=role)
+    if name == "edit_file":
+        return edit_file(args["path"], args["old"], args["new"], args.get("expected_replacements", 1))
     if name == "read_file":
         return read_file(args["path"])
     if name == "backup_file":
@@ -537,6 +844,8 @@ def run_tool(name, args):
         return run_file(args["path"])
     if name == "run_command":
         return run_command(args["command"])
+    if name == "verify_web_app":
+        return json.dumps(browser_workspace_snapshot(args["path"], "tool"), ensure_ascii=False)
     return f"unknown tool: {name}"
 
 
@@ -548,50 +857,204 @@ SYSTEM_PROMPT = (
     "You are a terminal coding agent working ONLY inside one workspace folder. "
     "Never access, describe, or reference any path outside it.\n"
     "Use read_file before explaining or editing a file - never answer from "
-    "general knowledge. Use write_file to create or update a file (it backs "
-    "up automatically). Use list_files if unsure what exists. Use run_file "
-    "to execute a file and check its real output.\n"
+    "general knowledge. Use write_file only to create a new file. Existing files are protected: "
+    "use edit_file for the smallest exact change after reading the current content. Use list_files if unsure what exists. "
+    "Use run_file to execute code. For HTML/web work use verify_web_app or run_file on the HTML file, "
+    "then inspect the returned browser evidence and screenshot.\n"
+    "For every browser game, expose a non-visual test bridge at window.__AGENT_GAME__. It must provide "
+    "getState(), start(), restart(), and move(direction). Add forceCollision(), forceCollect(), and forceWin() "
+    "when those mechanics are requested. State must include status, score, and best when relevant. "
+    "This bridge is required for independent browser verification and must call the real game logic.\n"
     "If a request is unclear or a tool returns an error, say so plainly "
     "instead of guessing.\n"
-    "To fix broken code: read_file, run_file, find the cause of the error, "
-    "write_file with the corrected version, run_file again to confirm it "
+    "To fix broken code: read_file, run_file, find the demonstrated cause of the error, "
+    "edit only that defect, then run fresh verification to confirm it "
     "works, then report what was wrong and what you changed. If it still "
     "fails, repeat rather than giving up after one try.\n"
     "Never attempt destructive or system-altering commands. "
     "When done, give a short final answer with the result."
 )
 
+ROLE_SYSTEM_PROMPTS = {
+    "Builder": SYSTEM_PROMPT,
+    "Repairer": SYSTEM_PROMPT + (
+        "\nYou are the Repairer. Change only what deterministic failure evidence demonstrates. "
+        "You cannot replace existing files or use write_file. If evidence is missing or an environment/model/visual "
+        "check failed, report that condition without editing application code."
+    ),
+    "Falsifier": (
+        "You are a read-only verification agent inside one workspace. Use read_file, list_files, run_file, "
+        "run_command, and verify_web_app to seek concrete failures. Never request write_file, edit_file, "
+        "or backup_file. Report evidence concisely and do not claim success without verification."
+    ),
+}
+
+
+def tools_for_role(role):
+    if role == "Falsifier":
+        allowed = {"read_file", "list_files", "run_file", "run_command", "verify_web_app"}
+        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    if role == "Repairer":
+        allowed = {"edit_file", "read_file", "list_files", "run_file", "run_command", "verify_web_app"}
+        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    return TOOLS
+
 
 # ---------------------------------------------------------------------------
 # METRICS / TERMINAL VISIBILITY
 # ---------------------------------------------------------------------------
 
+def _source_hash():
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:
+        return "unavailable"
+
+
+def _sanitize_event_value(value, key=""):
+    if key == "images" and isinstance(value, list):
+        return [{"redacted_base64_chars": len(str(item))} for item in value]
+    if key == "content" and isinstance(value, str) and len(value) > 10000:
+        return {"chars": len(value), "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+                "preview": value[:2000]}
+    if isinstance(value, dict):
+        return {str(k): _sanitize_event_value(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_event_value(item, key) for item in value]
+    return value
+
+
+def record_run_event(kind, **payload):
+    if WORKSPACE is None or not RUN_ID:
+        return
+    try:
+        run_dir = WORKSPACE / RUNS_DIR
+        run_dir.mkdir(parents=True, exist_ok=True)
+        item = _sanitize_event_value({
+            "time": datetime.now().isoformat(timespec="milliseconds"),
+            "run_id": RUN_ID,
+            "kind": kind,
+            **payload,
+        })
+        with (run_dir / f"{RUN_ID}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(item, ensure_ascii=False, default=str) + "\n")
+    except OSError as exc:
+        print(f"[WARN] could not write run event: {exc}")
+
+
+def persist_run_summary():
+    if WORKSPACE is None or not RUN_ID:
+        return
+    try:
+        run_dir = WORKSPACE / RUNS_DIR
+        run_dir.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "run": RUN,
+            "tasks": TASKS,
+            "roles": ROLE_STATUS,
+            "source": {"path": str(Path(__file__).resolve()), "sha256": _source_hash()},
+        }
+        (run_dir / f"{RUN_ID}.summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"[WARN] could not persist run summary: {exc}")
+
+
 def new_metrics(mode):
     return {
-        "mode": mode, "model": MODEL, "clarification_questions": 0,
+        "run_id": RUN_ID, "source_sha256": _source_hash(),
+        "mode": mode, "model": MODEL, "model_capabilities": sorted(MODEL_CAPABILITIES),
+        "role_models": {"router": MODEL, "builder": MODEL,
+                        "visual": MODEL, "fallback": None},
+        "clarification_questions": 0,
         "tasks_created": 0, "leaf_tasks": 0, "splits": 0, "re_splits": 0,
         "max_depth": 0, "builder_calls": 0, "predictor_calls": 0,
         "challenger_calls": 0, "falsifier_calls": 0, "repairer_calls": 0,
         "quality_reviews": 0, "browser_checks": 0, "verification_failures": 0,
         "task_too_broad_count": 0, "model_calls": 0, "tool_calls": 0,
+        "invalid_tool_calls": 0,
         "peak_estimated_context_tokens": 0, "elapsed_seconds": 0.0,
         "status": "unknown",
     }
 
 
 def reset_run(mode):
-    global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, VISION_ENABLED_FOR_RUN
+    global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, VISION_ENABLED_FOR_RUN, VISION_ERROR
+    global RUN_ID, ACTIVE_TRANSACTION
+    RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    ACTIVE_TRANSACTION = None
     RUN = new_metrics(mode)
     TASKS = {}
     ROLE_STATUS = {
         "Coordinator": "active", "Predictor": "unused", "Builder": "waiting",
         "Challenger": "unused", "Falsifier": "waiting", "Quality Review": "waiting",
-        "Repairer": "unused", "Browser": "waiting",
+        "Repairer": "unused", "Browser": "waiting", "Visual QA": "waiting",
     }
     DASHBOARD = {"mode": mode, "context": 0, "active_role": "Coordinator", "active_task": "ROOT",
                  "action": "starting", "tool": "-", "event": f"[MODE] {mode}"}
     RUN_STARTED = time.time()
-    VISION_ENABLED_FOR_RUN = ENABLE_VISION
+    VISION_ENABLED_FOR_RUN = ENABLE_VISION and bool(VISION_MODEL)
+    VISION_ERROR = None
+    record_run_event("run_started", mode=mode, model=MODEL, source_sha256=RUN["source_sha256"])
+    try:
+        store = get_memory_store()
+        if store:
+            store.begin_run(RUN_ID, "(goal understanding pending)", {"status": "pending"})
+    except Exception as exc:
+        print(f"[WARN] could not initialize durable run ledger: {exc}")
+
+
+def begin_durable_run(contract):
+    store = get_memory_store()
+    if not store or not RUN_ID:
+        return
+    try:
+        store.begin_run(
+            RUN_ID,
+            str(contract.get("goal") or contract.get("original_goal") or "coding task"),
+            contract,
+        )
+    except Exception as exc:
+        print(f"[WARN] could not start durable run ledger: {exc}")
+
+
+def update_task_ledger(task_id, goal, status, summary="", parent_id=None, stage_index=None):
+    store = get_memory_store()
+    if not store or not RUN_ID:
+        return
+    try:
+        store.upsert_task(
+            RUN_ID, str(task_id), str(goal), str(status), summary=str(summary),
+            parent_id=parent_id, stage_index=stage_index,
+        )
+    except Exception as exc:
+        print(f"[WARN] could not update durable task ledger: {exc}")
+
+
+def remember_verified_outcome(task, contract, summary, changed_files):
+    """Persist only outcomes that already passed deterministic evidence gates."""
+    store = get_memory_store()
+    if not store:
+        return
+    profile = classify_project(contract)
+    content = (
+        f"Verified task completed. Goal: {compact_text(task.get('goal', ''), 500)}. "
+        f"Result: {compact_text(summary, 500)}. "
+        f"Changed files: {', '.join(changed_files[:20]) or '(none captured)'}"
+    )
+    try:
+        store.add_note(
+            content,
+            kind="verified_outcome",
+            scope=profile,
+            verified=True,
+            importance=0.8,
+            run_id=RUN_ID or None,
+            task_id=task.get("id"),
+        )
+    except Exception as exc:
+        print(f"[WARN] could not save verified outcome: {exc}")
 
 
 def estimate_context_tokens(messages):
@@ -668,17 +1131,18 @@ def event(text, role=None, task=None, action=None, tool=None, plain=True):
     DASHBOARD["event"] = text
     if plain and LIVE_VIEW is None:
         print(text)
+    record_run_event("status", text=text, role=role, task=task, action=action, tool=tool)
     refresh_dashboard()
 
 
-def print_context(messages):
+def print_context(messages, context_limit=CONTEXT_LIMIT_TOKENS):
     estimate = estimate_context_tokens(messages)
     RUN["peak_estimated_context_tokens"] = max(RUN["peak_estimated_context_tokens"], estimate)
     DASHBOARD["context"] = estimate
-    remaining = max(0.0, 100.0 * (1 - estimate / CONTEXT_LIMIT_TOKENS))
+    remaining = max(0.0, 100.0 * (1 - estimate / context_limit))
     print(f"[MODEL] {MODEL}")
     print(f"[CALL] {RUN['model_calls']}")
-    print(f"[CONTEXT] ESTIMATED {estimate:,} / {CONTEXT_LIMIT_TOKENS:,} tokens | ~{remaining:.0f}% remaining")
+    print(f"[CONTEXT] ESTIMATED {estimate:,} / {context_limit:,} tokens | ~{remaining:.0f}% remaining")
     refresh_dashboard()
 
 
@@ -699,46 +1163,111 @@ def finish_metrics(status):
     print("\n[RUN METRICS]")
     for key, value in RUN.items():
         print(f"{key}: {value}")
+    record_run_event("run_finished", status=status, metrics=RUN, tasks=TASKS)
+    persist_run_summary()
     append_metrics()
+    try:
+        store = get_memory_store()
+        if store and RUN_ID:
+            store.finish_run(RUN_ID, status)
+    except Exception as exc:
+        print(f"[WARN] could not close durable run ledger: {exc}")
 
 
 # ---------------------------------------------------------------------------
 # OLLAMA CALLS + TINY STRUCTURED JSON HELPER
 # ---------------------------------------------------------------------------
 
-def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None):
+def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, think=None,
+               provider_retries=None, model_override=None, fallback_model=None, role="Builder"):
     if requests is None:
-        raise RuntimeError("requests dependency is unavailable")
-    RUN["model_calls"] += 1
-    print_context(messages)
+        raise ProviderError("requests dependency is unavailable")
     headers = {}
     api_key = os.environ.get("OLLAMA_API_KEY")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    payload = {"model": MODEL, "messages": messages, "stream": False}
+    requested_model = model_override or MODEL
+    try:
+        MODEL_POLICY.validate(requested_model)
+    except ValueError as exc:
+        raise ProviderError(str(exc)) from exc
+    if fallback_model and fallback_model != requested_model:
+        raise ProviderError("cross-model fallback is disabled by the single-model policy")
+
+    context_window = MODEL_POLICY.context_window(role)
+    # Reserve substantial context for Gemma's generated tool arguments. Large
+    # HTML writes and edit_file(old,new) calls otherwise end mid-JSON.
+    provider_messages = compact_messages(messages, max_chars=int(context_window * 1.5), keep_recent=4)
+    print_context(provider_messages, context_window)
+    payload = {
+        "model": requested_model,
+        "messages": provider_messages,
+        "stream": False,
+        "keep_alive": "10m",
+        "options": {
+            "num_ctx": context_window,
+            "num_predict": {
+                "Builder": 4096,
+                "Repairer": 3072,
+                "Falsifier": 1536,
+                "Visual": 1024,
+                "Quality": 1536,
+                "Coordinator": 1536,
+            }.get(role, 2048),
+        },
+    }
     if tools is not None:
         payload["tools"] = tools
     if response_format is not None:
         payload["format"] = response_format
     if temperature is not None:
-        payload["options"] = {"temperature": temperature}
-    try:
-        response = requests.post(OLLAMA_URL, headers=headers, timeout=300, json=payload)
-    except requests.exceptions.RequestException as exc:
-        raise RuntimeError(f"could not reach Ollama at {OLLAMA_URL}: {exc}")
+        payload["options"].update({"temperature": temperature, "seed": 0})
+    if think is not None:
+        payload["think"] = think
 
-    if response.status_code in (401, 403):
-        raise RuntimeError("authentication failed - sign in (`ollama signin`) or check OLLAMA_API_KEY.")
-    if response.status_code != 200:
-        raise RuntimeError(f"Ollama returned an error (status {response.status_code}): {response.text}")
-    try:
-        message = response.json()["message"]
-    except (ValueError, KeyError):
-        raise RuntimeError("invalid response from the model.")
-    if not message.get("content") and not message.get("tool_calls"):
-        raise RuntimeError("empty response from the model.")
-    return message
+    retry_limit = MAX_PROVIDER_RETRIES if provider_retries is None else max(0, int(provider_retries))
+    last_error = "unknown provider error"
+    for attempt in range(retry_limit + 1):
+        RUN["model_calls"] += 1
+        started = time.time()
+        record_run_event("model_request", model=requested_model, role=role, attempt=attempt + 1,
+                         context_window=context_window, messages=provider_messages,
+                         tools=[tool["function"]["name"] for tool in (tools or [])],
+                         structured=bool(response_format), think=think)
+        try:
+            response = requests.post(
+                OLLAMA_URL, headers=headers, timeout=OLLAMA_TIMEOUT_SECONDS, json=payload
+            )
+        except requests.exceptions.RequestException as exc:
+            last_error = f"could not reach Ollama at {OLLAMA_URL}: {exc}"
+            response = None
+
+        if response is not None and response.status_code in (401, 403):
+            raise ProviderError("authentication failed - sign in (`ollama signin`) or check OLLAMA_API_KEY.")
+        if response is not None and response.status_code == 200:
+            try:
+                body = response.json()
+                message = body["message"]
+            except (ValueError, KeyError) as exc:
+                last_error = f"invalid response from the model: {exc}"
+            else:
+                if message.get("content") or message.get("tool_calls"):
+                    record_run_event("model_response", model=requested_model, role=role,
+                                     elapsed_seconds=round(time.time() - started, 3), message=message,
+                                     done_reason=body.get("done_reason"),
+                                     prompt_eval_count=body.get("prompt_eval_count"),
+                                     eval_count=body.get("eval_count"))
+                    return message
+                last_error = "empty response from the model"
+        elif response is not None:
+            last_error = f"Ollama returned an error (status {response.status_code}): {response.text[:2000]}"
+
+        record_run_event("provider_retry", model=requested_model, role=role,
+                         attempt=attempt + 1, error=last_error)
+        if attempt < retry_limit:
+            time.sleep(0.5 * (2 ** attempt))
+    raise ProviderError(last_error)
 
 
 def _parse_json_content(content):
@@ -802,13 +1331,16 @@ def structured_model_call(prompt_text, validator, label, schema):
     last_content = ""
     for attempt in range(MAX_STRUCTURED_RETRIES):
         try:
-            message = ask_ollama(messages, tools=None, response_format=schema, temperature=0)
+            structured_role = "Quality" if label == "quality-review" else "Coordinator"
+            message = ask_ollama(messages, tools=None, response_format=schema, temperature=0, think=False,
+                                 provider_retries=0, model_override=MODEL, role=structured_role)
             last_content = message.get("content", "")
             data = _normalize_structured_data(_parse_json_content(last_content), label)
             if validator(data):
+                record_run_event("structured_valid", label=label, attempt=attempt + 1, data=data)
                 return data
-            last_error = f"JSON parsed but failed {label} validation"
-        except RuntimeError:
+            last_error = f"JSON parsed but failed {label} semantic validation: {json.dumps(data, ensure_ascii=False)}"
+        except ProviderError:
             # Provider/network/auth failures are not structured-output mistakes.
             raise
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -816,6 +1348,8 @@ def structured_model_call(prompt_text, validator, label, schema):
 
         attempt_no = attempt + 1
         print(f"[STRUCTURED RETRY] {label} {attempt_no}/{MAX_STRUCTURED_RETRIES} | {last_error}")
+        record_run_event("structured_invalid", label=label, attempt=attempt_no,
+                         error=last_error, raw_content=last_content)
         if attempt_no < MAX_STRUCTURED_RETRIES:
             messages = [
                 {"role": "system", "content": (
@@ -823,13 +1357,14 @@ def structured_model_call(prompt_text, validator, label, schema):
                     "No markdown, no explanation, no additional keys."
                 )},
                 {"role": "user", "content": (
+                    f"Original task context:\n{prompt_text}\n\n"
                     f"The previous {label} output was invalid. Error: {last_error}\n"
                     f"Previous output: {last_content[:1500]}\n"
                     f"Required schema: {schema_text}\n"
                     "Generate a fresh valid object now."
                 )},
             ]
-    raise RuntimeError(
+    raise StructuredOutputError(
         f"invalid {label} structured response after {MAX_STRUCTURED_RETRIES} strict attempts: {last_error}"
     )
 
@@ -840,7 +1375,12 @@ def structured_model_call(prompt_text, validator, label, schema):
 
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context=""):
     if messages is None:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)}]
+    durable_context = relevant_memory_context(
+        f"{role} {task_text} {extra_context[:1200]}", role=role, memory=memory,
+    )
+    if durable_context:
+        extra_context = f"{durable_context}\n\n{extra_context}" if extra_context else durable_context
     if extra_context:
         task_text = f"{extra_context}\n\nCURRENT TASK:\n{task_text}"
     messages.append({"role": "user", "content": task_text})
@@ -854,8 +1394,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
 
     for _step in range(MAX_TOOL_STEPS):
         try:
-            assistant_message = ask_ollama(messages)
-        except RuntimeError as exc:
+            assistant_message = ask_ollama(messages, tools=tools_for_role(role), role=role)
+        except ProviderError as exc:
             provider_error = str(exc)
             status = "provider_failure"
             summary = provider_error
@@ -866,37 +1406,54 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
             summary = assistant_message.get("content", "") or "done"
-            status = "done"
+            if role in {"Builder", "Repairer"} and not tool_evidence:
+                status = "failed"
+                summary = "No tool evidence was produced; implementation cannot be marked done. " + summary
+            else:
+                status = "done"
             break
 
         for call in tool_calls:
-            name = call["function"]["name"]
-            args = call["function"]["arguments"]
+            try:
+                name = call["function"]["name"]
+                args = call["function"].get("arguments", {})
+            except (KeyError, TypeError) as exc:
+                result = f"error: malformed tool call: {exc}"
+                tool_evidence.append({"tool": "malformed", "target": "-", "result": result})
+                messages.append({"role": "tool", "tool_name": "malformed", "content": result})
+                continue
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
                 except ValueError:
                     args = {}
+            if not isinstance(args, dict):
+                args = {}
             target = args.get("path") or args.get("command") or "-"
             RUN["tool_calls"] += 1
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id,
                   action=f"using {name}", tool=name)
-            if role == "Falsifier" and name in {"write_file", "backup_file"}:
-                result = "error: Falsifier is read-only and may not modify files"
+            argument_issue = tool_argument_error(name, args)
+            if argument_issue:
+                RUN["invalid_tool_calls"] += 1
+                result = argument_issue
             else:
-                result = run_tool(name, args)
+                try:
+                    result = run_tool(name, args, role=role)
+                except (KeyError, TypeError, ValueError) as exc:
+                    result = f"error: invalid arguments for {name}: {exc}"
             print(f"[RESULT] {str(result)[:300]}")
             tool_evidence.append({"tool": name, "target": target, "result": str(result)[:1000]})
-            memory = update_memory(memory, name, args, str(result))
-            messages.append({"role": "tool", "content": str(result)})
+            memory = update_memory(memory, name, args, str(result), role=role, task_id=task_id)
+            messages.append({"role": "tool", "tool_name": name, "content": str(result)})
 
-            if memory.get("last_error") and name in ("run_file", "run_command"):
+            if memory.get("last_error") and name in ("run_file", "run_command", "verify_web_app"):
                 print(f"[ERROR DETECTED] {memory['last_error'][:200]}")
                 messages.append({
                     "role": "user",
                     "content": (
-                        "Execution failed. Automatically read the file, diagnose the error, "
-                        "create a backup, fix the code, run it again, and verify the result."
+                        "Verification failed. Decide first whether this is a code defect, a tool capability issue, "
+                        "or an environment failure. Only edit code for a demonstrated code defect, then rerun fresh verification."
                     ),
                 })
             if name == "write_file" and memory.get("last_fix_attempt"):
@@ -906,6 +1463,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         summary = "TASK_TOO_BROAD: existing maximum tool-step limit reached"
 
     ROLE_STATUS[role] = "done" if status == "done" else "failed"
+    record_run_event("agent_finished", role=role, task_id=task_id, status=status,
+                     summary=summary, tool_evidence=tool_evidence)
     return {
         "status": status, "summary": compact_text(summary, 700), "messages": messages,
         "memory": memory, "tool_evidence": tool_evidence, "provider_error": provider_error,
@@ -953,7 +1512,19 @@ PRIOR CLARIFICATIONS:
         "required": ["status", "question", "goal", "requirements", "constraints", "success_criteria"],
         "additionalProperties": False,
     }
-    return structured_model_call(prompt_text, _goal_validator, "goal-understanding", schema)
+    try:
+        return structured_model_call(prompt_text, _goal_validator, "goal-understanding", schema)
+    except (StructuredOutputError, ProviderError) as exc:
+        fallback = {
+            "status": "ready", "question": "", "goal": compact_text(raw_goal, 1200),
+            # Preserve the complete request even when the weak model cannot satisfy
+            # the JSON envelope; provider-side context projection remains bounded.
+            "requirements": [raw_goal],
+            "constraints": [prior_answers] if prior_answers else [],
+            "success_criteria": ["The requested outcome is implemented and verified with executable evidence"],
+        }
+        record_run_event("structured_fallback", label="goal-understanding", error=str(exc), fallback=fallback)
+        return fallback
 
 
 def compact_contract(contract):
@@ -973,9 +1544,54 @@ def _fit_validator(data):
     if not isinstance(data, dict) or data.get("decision") not in {"execute", "split"}:
         return False
     if data["decision"] == "execute":
-        return True
+        return data.get("subtasks") == [] and isinstance(data.get("reason", ""), str)
     subtasks = data.get("subtasks")
-    return isinstance(subtasks, list) and 2 <= len(subtasks) <= MAX_CHILDREN and all(isinstance(x, str) and x.strip() for x in subtasks)
+    return (isinstance(data.get("reason", ""), str) and isinstance(subtasks, list)
+            and 2 <= len(subtasks) <= MAX_CHILDREN
+            and all(isinstance(x, str) and x.strip() for x in subtasks))
+
+
+def task_fit_schema():
+    common = {
+        "reason": {"type": "string"},
+    }
+    return {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "decision": {"const": "execute"},
+                    **common,
+                    "subtasks": {"type": "array", "maxItems": 0},
+                },
+                "required": ["decision", "reason", "subtasks"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "decision": {"const": "split"},
+                    **common,
+                    "subtasks": {"type": "array", "items": {"type": "string"},
+                                 "minItems": 2, "maxItems": MAX_CHILDREN},
+                },
+                "required": ["decision", "reason", "subtasks"],
+                "additionalProperties": False,
+            },
+        ]
+    }
+
+
+def deterministic_task_fit(task, depth, contract):
+    if depth >= MAX_DEPTH or RUN["tasks_created"] >= MAX_TOTAL_TASKS:
+        return {"decision": "execute", "reason": "deterministic recursion limit fallback", "subtasks": []}
+    requirements = [str(item).strip() for item in contract.get("requirements", []) if str(item).strip()]
+    if depth == 0 and len(requirements) >= 2:
+        subtasks = requirements[:min(MAX_CHILDREN, MAX_TOTAL_TASKS - RUN["tasks_created"])]
+        if len(subtasks) >= 2:
+            return {"decision": "split", "reason": "structured router failed; split by locked requirements",
+                    "subtasks": subtasks}
+    return {"decision": "execute", "reason": "structured router failed; safe focused execution fallback", "subtasks": []}
 
 
 def decide_task_fit(task, depth, contract, dependency_summaries=None):
@@ -986,25 +1602,22 @@ def decide_task_fit(task, depth, contract, dependency_summaries=None):
 Return exactly one JSON object containing ALL schema fields.
 EXECUTE: {{"decision":"execute","reason":"short reason","subtasks":[]}}
 SPLIT: {{"decision":"split","reason":"short reason","subtasks":["...","..."]}}
-Split only when there are multiple independently solvable/verifiable pieces, too much context at once, or the task is too broad for one focused execution.
-Do not split trivial work. Children must collectively preserve the parent goal. Prefer 2-4 meaningful children. Do not invent unrelated work.
-MODEL_TASK_CAPACITY={MODEL_TASK_CAPACITY}/4 (EXPERIMENTAL MANUAL CAPACITY). Low capacity means split more conservatively into narrower tasks.
+Split only when there are multiple independently solvable/verifiable pieces with a clear integration boundary, too much context at once, or the task is too broad for one focused execution.
+Do not split trivial work or fragment many children that all rewrite the same monolithic file. Children must collectively preserve the parent goal. Prefer 2-3 vertical slices that each leave the workspace coherent and verifiable.
+MODEL_TASK_CAPACITY={MODEL_TASK_CAPACITY}/4 (SIZE-DERIVED ADVISORY HINT ONLY). Low capacity alone is not a reason to split; recursion can amplify correlated model errors.
 Depth={depth}; max_depth={MAX_DEPTH}; remaining_task_budget={MAX_TOTAL_TASKS - RUN['tasks_created']}.
 ROOT CONTRACT: {compact_contract(contract)}
 TASK: {task['goal']}
 COMPLETED DEPENDENCY SUMMARIES: {json.dumps(deps[-3:], ensure_ascii=False)}
 {('ORIGINAL ROOT REQUEST (root planning only): ' + contract.get('original_goal', '')) if depth == 0 else ''}"""
-    schema = {
-        "type": "object",
-        "properties": {
-            "decision": {"type": "string", "enum": ["execute", "split"]},
-            "reason": {"type": "string"},
-            "subtasks": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_CHILDREN},
-        },
-        "required": ["decision", "reason", "subtasks"],
-        "additionalProperties": False,
-    }
-    return structured_model_call(prompt_text, _fit_validator, "task-fit", schema)
+    try:
+        return structured_model_call(prompt_text, _fit_validator, "task-fit", task_fit_schema())
+    except (StructuredOutputError, ProviderError) as exc:
+        fallback = deterministic_task_fit(task, depth, contract)
+        record_run_event("structured_fallback", label="task-fit", error=str(exc), fallback=fallback)
+        event(f"[TASK-FIT FALLBACK] {task['id']} -> {fallback['decision']}", role="Coordinator",
+              task=task["id"], action="deterministic task-fit fallback")
+        return fallback
 
 
 def decompose_task(task, decision):
@@ -1032,7 +1645,11 @@ def decompose_task(task, decision):
 
 def task_risk(task_text):
     lower = task_text.lower()
-    high_words = ("auth", "security", "migration", "database", "architecture", "refactor", "payment", "permission", "concurrent")
+    high_words = (
+        "auth", "security", "migration", "database", "architecture", "refactor", "payment", "permission",
+        "concurrent", "game", "physics", "collision", "3d", "webgl", "three.js", "ui", "ux", "animation",
+        "responsive", "accessibility", "design",
+    )
     if any(word in lower for word in high_words) or len(task_text) > 900:
         return "high"
     low_words = ("css", "rename", "comment", "typo", "readme", "documentation", "format")
@@ -1052,7 +1669,7 @@ def short_role_call(role, task, contract, instruction):
         {"role": "user", "content": f"ROOT CONTRACT: {compact_contract(contract)}\nTASK: {task['goal']}\n{instruction}"},
     ]
     try:
-        message = ask_ollama(messages, tools=None)
+        message = ask_ollama(messages, tools=None, role=role)
         text = compact_text(message.get("content", ""), 600)
         ROLE_STATUS[role] = "done"
         return text
@@ -1087,7 +1704,7 @@ def run_adaptive_checks(task, contract, memory, builder_result, allow_falsifier=
 # PLAYWRIGHT OPTIONAL BROWSER EVIDENCE
 # ---------------------------------------------------------------------------
 
-def browser_snapshot(url, task_id="ROOT"):
+def browser_snapshot(url, task_id="ROOT", profile=None):
     RUN["browser_checks"] += 1
     ROLE_STATUS["Browser"] = "working"
     event(f"[BROWSER] opening {url}", role="Browser", task=task_id, action="browser verification")
@@ -1102,26 +1719,159 @@ def browser_snapshot(url, task_id="ROOT"):
     screenshot = evidence_dir / f"task_{safe_id}.png"
     console_errors = []
     page_errors = []
+    network_errors = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(**browser_launch_kwargs())
-            page = browser.new_page()
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
             page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
             page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+            page.on("response", lambda response: network_errors.append(
+                f"{response.status} {response.url}"
+            ) if response.status >= 400 and not response.url.endswith("/favicon.ico") else None)
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_timeout(800)
             title = page.title()
             final_url = page.url
             text = page.locator("body").inner_text(timeout=5000)[:4000]
+            runtime_state = page.evaluate("""() => {
+                const bridge = window.__AGENT_GAME__ || window.__HOPLINE__ || null;
+                const state = bridge && typeof bridge.getState === 'function' ? bridge.getState() : null;
+                return {
+                    canvasCount: document.querySelectorAll('canvas').length,
+                    viewport: [innerWidth, innerHeight],
+                    gameBridge: bridge ? {name: window.__AGENT_GAME__ ? '__AGENT_GAME__' : '__HOPLINE__', state} : null,
+                    debugState: state
+                };
+            }""")
+            interaction_checks = []
+            has_game_probe = bool(runtime_state.get("gameBridge"))
+            if has_game_probe:
+                bridge_expr = "window.__AGENT_GAME__ || window.__HOPLINE__"
+                page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
+                page.wait_for_timeout(100)
+                before_move = page.evaluate(f"() => ({bridge_expr}).getState()")
+                moved_with_bridge = page.evaluate(
+                    f"() => {{ const game={bridge_expr}; if (typeof game.move === 'function') "
+                    "{ game.move('up'); return true; } return false; }"
+                )
+                if not moved_with_bridge:
+                    page.keyboard.press("ArrowUp")
+                page.wait_for_timeout(650)
+                moved_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                moved = moved_state != before_move and (
+                    moved_state.get("score", 0) > (before_move or {}).get("score", -1)
+                    or moved_state.get("player") != (before_move or {}).get("player")
+                    or moved_state.get("position") != (before_move or {}).get("position")
+                )
+                interaction_checks.append({"name": "keyboard_movement", "passed": bool(moved),
+                                           "before": before_move, "after": moved_state})
+
+                has_collect_probe = page.evaluate(
+                    f"() => typeof ({bridge_expr}).forceCollect === 'function'"
+                )
+                if has_collect_probe:
+                    before_collect = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    page.evaluate(f"() => ({bridge_expr}).forceCollect()")
+                    page.wait_for_timeout(100)
+                    collected_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    collected = (
+                        collected_state.get("score", 0) > (before_collect or {}).get("score", -1)
+                        or collected_state.get("collected") != (before_collect or {}).get("collected")
+                        or collected_state.get("energy") != (before_collect or {}).get("energy")
+                    )
+                    interaction_checks.append({"name": "collection_updates_state", "passed": bool(collected),
+                                               "before": before_collect, "after": collected_state})
+
+                has_collision_probe = page.evaluate(
+                    f"() => typeof ({bridge_expr}).forceCollision === 'function'"
+                )
+                if has_collision_probe:
+                    page.evaluate(f"() => ({bridge_expr}).forceCollision()")
+                    page.wait_for_timeout(150)
+                    collision_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    interaction_checks.append({"name": "collision_game_over",
+                                               "passed": str(collision_state.get("status", "")).lower()
+                                                         in {"gameover", "game-over", "lost", "dead"},
+                                               "after": collision_state})
+                has_restart_probe = page.evaluate(f"() => typeof ({bridge_expr}).restart === 'function'")
+                if has_restart_probe:
+                    page.evaluate(f"() => ({bridge_expr}).restart()")
+                    page.wait_for_timeout(150)
+                    restart_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    interaction_checks.append({"name": "restart_resets_state",
+                                               "passed": str(restart_state.get("status", "")).lower()
+                                                         not in {"gameover", "game-over", "lost", "dead"}
+                                                         and restart_state.get("score") == 0,
+                                               "after": restart_state})
+                has_win_probe = page.evaluate(f"() => typeof ({bridge_expr}).forceWin === 'function'")
+                if has_win_probe:
+                    page.evaluate(f"() => ({bridge_expr}).forceWin()")
+                    page.wait_for_timeout(150)
+                    win_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    interaction_checks.append({"name": "goal_win_state",
+                                               "passed": str(win_state.get("status", "")).lower()
+                                                         in {"won", "win", "complete", "completed"},
+                                               "after": win_state})
+                    best_before_reload = win_state.get("best")
+                    if best_before_reload is not None:
+                        page.reload(wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(350)
+                        persistence_state = page.evaluate("""() => {
+                            const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                            return game && typeof game.getState === 'function' ? game.getState() : null;
+                        }""")
+                        best_after_reload = (persistence_state or {}).get("best")
+                        interaction_checks.append({
+                            "name": "score_persistence",
+                            "passed": best_after_reload is not None and best_after_reload >= best_before_reload,
+                            "before": best_before_reload, "after": best_after_reload,
+                        })
+
+                touch_required = bool(profile and "touch_control" in profile.required_interactions)
+                if touch_required:
+                    page.set_viewport_size({"width": 390, "height": 844})
+                    page.wait_for_timeout(200)
+                touch_selector = (
+                    "[data-direction], [data-move], [data-action='up'], "
+                    "button[aria-label*='forward' i], button[aria-label*='up' i], .touch-controls button"
+                )
+                touch_button = page.locator(touch_selector).first
+                touch_available = touch_button.count() > 0 and touch_button.is_visible()
+                if touch_required and touch_available:
+                    page.evaluate("""() => {
+                        const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        if (game && typeof game.restart === 'function') game.restart();
+                        if (game && typeof game.start === 'function') game.start();
+                    }""")
+                    touch_before = page.evaluate("""() => {
+                        const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        return game && game.getState ? game.getState() : null;
+                    }""")
+                    touch_button.click()
+                    page.wait_for_timeout(650)
+                    touch_after = page.evaluate("""() => {
+                        const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        return game && game.getState ? game.getState() : null;
+                    }""")
+                    interaction_checks.append({"name": "touch_control", "passed": touch_after != touch_before,
+                                               "before": touch_before, "after": touch_after})
             page.screenshot(path=str(screenshot), full_page=True)
             browser.close()
         print(f"[BROWSER] title={json.dumps(title)}")
         print(f"[BROWSER] console_errors={len(console_errors)}")
         print(f"[SCREENSHOT] {screenshot.relative_to(WORKSPACE)}")
         ROLE_STATUS["Browser"] = "done"
-        return {"passed": not console_errors and not page_errors, "environment_error": False,
-                "title": title, "url": final_url, "text": text,
-                "console_errors": console_errors, "page_errors": page_errors,
-                "screenshot": str(screenshot.relative_to(WORKSPACE))}
+        snapshot = {"passed": False, "environment_error": False,
+                    "title": title, "url": final_url, "text": text,
+                    "console_errors": console_errors, "page_errors": page_errors,
+                    "network_errors": network_errors, "runtime_state": runtime_state,
+                    "interaction_checks": interaction_checks,
+                    "screenshot": str(screenshot.relative_to(WORKSPACE))}
+        effective_profile = profile or infer_web_profile(
+            "game" if runtime_state.get("gameBridge") or runtime_state.get("canvasCount") else "web", {}
+        )
+        return evaluate_web_snapshot(snapshot, effective_profile)
     except Exception as exc:
         ROLE_STATUS["Browser"] = "failed"
         return {"passed": False, "environment_error": True, "evidence": str(exc)}
@@ -1158,33 +1908,123 @@ def _extract_local_url(text):
     return match.group(0).rstrip(".,);]") if match else None
 
 
-def optional_browser_check(task):
-    lower = task["goal"].lower()
-    webish = any(word in lower for word in ("web", "frontend", "browser", "html", "css", "react", "page", "ui"))
-    url = _extract_local_url(task["goal"])
-    if webish and url:
-        return browser_snapshot(url, task["id"])
+def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None):
+    target = safe_path(path)
+    if target is None:
+        return {"passed": False, "environment_error": False, "evidence": f"path escapes workspace: {path}"}
+    if not target.exists() or target.suffix.lower() not in {".html", ".htm"}:
+        return {"passed": False, "environment_error": False, "evidence": f"HTML entry not found: {path}"}
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    relative = target.relative_to(WORKSPACE).as_posix()
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+        cwd=WORKSPACE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+    )
+    try:
+        time.sleep(0.35)
+        result = browser_snapshot(f"http://127.0.0.1:{port}/{relative}", task_id, profile=profile)
+        result["entry_path"] = relative
+        return result
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=3)
+
+
+def discover_web_entrypoint(task, contract=None):
+    combined = task.get("goal", "") + " " + compact_contract(contract or {})
+    lower = combined.lower()
+    webish = any(word in lower for word in (
+        "web", "frontend", "browser", "html", "css", "react", "page", "ui", "game", "3d", "webgl", "three.js"
+    ))
+    url = _extract_local_url(combined)
+    if url:
+        return {"url": url}
+    if not webish or WORKSPACE is None:
+        return None
+    preferred = WORKSPACE / "index.html"
+    if preferred.exists():
+        return {"path": "index.html"}
+    candidates = sorted(WORKSPACE.glob("*.htm*"))
+    return {"path": str(candidates[0].relative_to(WORKSPACE))} if candidates else None
+
+
+def optional_browser_check(task, contract=None):
+    target = discover_web_entrypoint(task, contract)
+    profile = infer_web_profile(task.get("goal", ""), contract or {})
+    if target and target.get("url"):
+        return browser_snapshot(target["url"], task["id"], profile=profile)
+    if target and target.get("path"):
+        return browser_workspace_snapshot(target["path"], task["id"], profile=profile)
     ROLE_STATUS["Browser"] = "unused"
     return None
 
 
 def maybe_vision_review(browser_result, task, contract):
-    global VISION_ENABLED_FOR_RUN
+    global VISION_ENABLED_FOR_RUN, VISION_ERROR
+    if VISION_ERROR is not None:
+        return VISION_ERROR
     if not VISION_ENABLED_FOR_RUN or not browser_result or not browser_result.get("screenshot"):
         return None
     screenshot = safe_path(browser_result["screenshot"])
     if screenshot is None or not screenshot.exists():
         return None
     try:
+        ROLE_STATUS["Visual QA"] = "working"
         image_b64 = base64.b64encode(screenshot.read_bytes()).decode("ascii")
-        messages = [{"role": "user", "content": f"Verify screenshot against task: {task['goal']}\nContract: {compact_contract(contract)}",
+        messages = [{"role": "user", "content": (
+            f"Act as Visual QA. Verify this rendered screenshot against the task and contract. "
+            "Check hierarchy, composition, legibility, recognizable product/game state, visual defects, empty space, "
+            "responsive framing, and visible goal fidelity. Start with exactly PASS:, FAIL:, or UNKNOWN:, followed by "
+            "concise concrete evidence. FAIL only for a concrete defect visible in the pixels (blank, clipped, illegible, "
+            "broken, placeholder-looking, or visibly off-contract). Use UNKNOWN when behavior such as timers, persistence, "
+            "or interactions cannot be proven by one screenshot. Do not praise the design or infer hidden behavior.\n"
+            f"Task: {task['goal']}\nContract: {compact_contract(contract)}"
+        ),
                      "images": [image_b64]}]
-        message = ask_ollama(messages, tools=None)
-        return compact_text(message.get("content", ""), 500)
+        message = ask_ollama(messages, tools=None, temperature=0, think=False,
+                             model_override=MODEL, fallback_model="", role="Visual")
+        text = compact_text(message.get("content", ""), 900)
+        upper = text.lstrip().upper()
+        if not upper.startswith(("PASS:", "FAIL:", "UNKNOWN:")):
+            VISION_ERROR = {
+                "passed": False,
+                "environment_error": True,
+                "status": "ERROR",
+                "evidence": f"visual model returned an invalid verdict: {text or '(empty)'}",
+            }
+            ROLE_STATUS["Visual QA"] = "failed"
+            VISION_ENABLED_FOR_RUN = False
+            return VISION_ERROR
+        result = {
+            "passed": upper.startswith("PASS:"),
+            "environment_error": False,
+            "status": "PASS" if upper.startswith("PASS:") else ("FAIL" if upper.startswith("FAIL:") else "UNKNOWN"),
+            "evidence": text or "visual model returned no verdict",
+        }
+        ROLE_STATUS["Visual QA"] = "done"
+        record_run_event("vision_review", task_id=task["id"], result=result,
+                         screenshot=browser_result.get("screenshot"))
+        return result
     except Exception as exc:
-        print(f"[WARN] vision verification disabled for this run: {exc}")
+        print(f"[WARN] visual verification environment failure: {exc}")
+        ROLE_STATUS["Visual QA"] = "failed"
         VISION_ENABLED_FOR_RUN = False
-        return None
+        VISION_ERROR = {
+            "passed": False,
+            "environment_error": True,
+            "status": "ERROR",
+            "evidence": f"visual review unavailable: {exc}",
+        }
+        return VISION_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -1194,7 +2034,7 @@ def maybe_vision_review(browser_result, task, contract):
 def _quality_validator(data):
     if not isinstance(data, dict) or not isinstance(data.get("checks"), list):
         return False
-    allowed = {"PASS", "FAIL", "NOT_APPLICABLE"}
+    allowed = {"PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"}
     for check in data["checks"]:
         if not isinstance(check, dict) or check.get("status") not in allowed:
             return False
@@ -1203,7 +2043,43 @@ def _quality_validator(data):
     return True
 
 
-def review_quality(task, contract, builder_result, adaptive, browser_result=None, fresh=False):
+def deterministic_quality_checks(builder_result, browser_result=None, vision_review=None):
+    evidence = builder_result.get("tool_evidence", [])
+    checks = []
+    if builder_result.get("status") != "done":
+        checks.append({"name": "builder_completion", "status": "FAIL",
+                       "evidence": f"builder status is {builder_result.get('status')}",
+                       "source": "deterministic"})
+    if not evidence:
+        checks.append({"name": "tool_evidence", "status": "FAIL",
+                       "evidence": "no tool evidence was produced", "source": "deterministic"})
+    failing_tools = unresolved_tool_failures(evidence)
+    if browser_result and browser_result.get("passed"):
+        entry = str(browser_result.get("entry_path") or "index.html")
+        failing_tools = [item for item in failing_tools if not (
+            item.get("tool") in {"verify_web_app", "run_file"}
+            and str(item.get("target")) == entry
+        )]
+    if failing_tools:
+        checks.append({"name": "tool_execution", "status": "FAIL",
+                       "evidence": compact_text(json.dumps(failing_tools, ensure_ascii=False), 700),
+                       "source": "deterministic"})
+    verification_tools = {"run_file", "run_command", "verify_web_app"}
+    verification_ran = any(item.get("tool") in verification_tools for item in evidence) or browser_result is not None
+    if not verification_ran:
+        checks.append({"name": "executable_verification", "status": "FAIL",
+                       "evidence": "no executable command, file run, or browser check was performed",
+                       "source": "deterministic"})
+    if browser_result is not None and not browser_result.get("passed"):
+        checks.append({"name": "browser_contract", "status": "FAIL",
+                       "evidence": compact_text(json.dumps(browser_result, ensure_ascii=False), 700),
+                       "source": "deterministic"})
+    # A screenshot model is useful critique, but its opinion is not independent
+    # deterministic evidence and cannot itself authorize application-code repair.
+    return checks
+
+
+def review_quality(task, contract, builder_result, adaptive, browser_result=None, vision_review=None, fresh=False):
     RUN["quality_reviews"] += 1
     ROLE_STATUS["Quality Review"] = "working"
     event(f"[VERIFY] {'fresh verification' if fresh else task['id']}", role="Quality Review",
@@ -1211,15 +2087,20 @@ def review_quality(task, contract, builder_result, adaptive, browser_result=None
     evidence = {
         "builder_status": builder_result.get("status"),
         "builder_summary": builder_result.get("summary"),
-        "builder_tool_evidence": builder_result.get("tool_evidence", [])[-8:],
+        "builder_tool_evidence": evidence_for_review(builder_result.get("tool_evidence", [])),
         "falsifier_summary": adaptive.get("falsifier", ""),
-        "falsifier_tool_evidence": (adaptive.get("falsifier_result") or {}).get("tool_evidence", [])[-8:],
+        "falsifier_tool_evidence": evidence_for_review(
+            (adaptive.get("falsifier_result") or {}).get("tool_evidence", [])
+        ),
         "browser": browser_result,
+        "vision_review": vision_review,
     }
     prompt_text = f"""Review this coding task against relevant fixed quality concerns:
 correctness, testing, security, clean code/maintainability, architecture consistency, regression, goal fidelity.
-Select only concerns relevant to this task. For each return PASS, FAIL, or NOT_APPLICABLE with short concrete evidence.
-Do not say 'looks correct'. Prefer actual command/test/file/browser evidence. A missing executable check should not become PASS.
+Select only concerns relevant to this task. For each return PASS, FAIL, UNKNOWN, or NOT_APPLICABLE with short concrete evidence.
+FAIL requires direct evidence that behavior is wrong. Missing or unexecuted evidence is UNKNOWN, never FAIL and never PASS.
+Treat narrative Builder/Falsifier claims without matching current tool or browser evidence as advisory, not proof.
+Do not say 'looks correct'. Prefer actual command/test/file/browser evidence.
 Return JSON: {{"checks":[{{"name":"correctness","status":"PASS","evidence":"..."}}]}}
 ROOT CONTRACT: {compact_contract(contract)}
 TASK: {task['goal']}
@@ -1234,7 +2115,7 @@ EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:14000]}"""
                         "type": "object",
                         "properties": {
                             "name": {"type": "string"},
-                            "status": {"type": "string", "enum": ["PASS", "FAIL", "NOT_APPLICABLE"]},
+                            "status": {"type": "string", "enum": ["PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"]},
                             "evidence": {"type": "string"},
                         },
                         "required": ["name", "status", "evidence"],
@@ -1247,31 +2128,49 @@ EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:14000]}"""
         }
         result = structured_model_call(prompt_text, _quality_validator, "quality-review", schema)
     except RuntimeError as exc:
-        result = {"checks": [{"name": "verification", "status": "FAIL", "evidence": f"quality review unavailable: {exc}"}]}
+        result = {"checks": [{"name": "verification", "status": "FAIL",
+                              "evidence": f"quality review unavailable: {exc}", "source": "model"}]}
+    for check in result["checks"]:
+        check.setdefault("source", "model")
+    result["checks"].extend(deterministic_quality_checks(builder_result, browser_result, vision_review))
     ROLE_STATUS["Quality Review"] = "done"
+    record_run_event("quality_review", task_id=task["id"], fresh=fresh, result=result)
     return result
 
 
 def evidence_gate(builder_result, quality):
     checks = quality.get("checks", [])
-    failures = [check for check in checks if check.get("status") == "FAIL"]
+    failures = [check for check in checks if (
+        check.get("status") == "FAIL" and check.get("source") != "model"
+    )]
+    advisory_failures = [check for check in checks if (
+        check.get("status") == "FAIL" and check.get("source") == "model"
+    )]
     deterministic_failure = any(
-        any(term in item.get("result", "").lower() for term in ("traceback", "compile error", "syntaxerror"))
-        for item in builder_result.get("tool_evidence", [])
+        check.get("status") == "FAIL" and check.get("source") == "deterministic"
+        for check in checks
     )
     passed = builder_result.get("status") == "done" and bool(checks) and not failures and not deterministic_failure
     if not passed:
         RUN["verification_failures"] += 1
-    return {"passed": passed, "checks": checks, "deterministic_failure": deterministic_failure}
+    return {"passed": passed, "checks": checks, "deterministic_failure": deterministic_failure,
+            "advisory_failures": advisory_failures}
 
 
-def classify_failure(builder_result, quality, browser_result=None):
+def classify_failure(builder_result, quality, browser_result=None, vision_review=None):
     if builder_result.get("status") == "too_broad":
         return "TASK_TOO_BROAD"
     if builder_result.get("status") == "provider_failure":
         return "ENVIRONMENT_ERROR"
-    evidence_text = json.dumps({"quality": quality, "browser": browser_result}, ensure_ascii=False).lower()
-    if any(term in evidence_text for term in ("connection refused", "not found", "unavailable", "missing dependency", "browser executable")):
+    if browser_result and browser_result.get("environment_error"):
+        return "ENVIRONMENT_ERROR"
+    if vision_review and vision_review.get("environment_error"):
+        return "ENVIRONMENT_ERROR"
+    blocking_quality = {
+        "checks": [check for check in quality.get("checks", []) if check.get("source") != "model"]
+    }
+    evidence_text = json.dumps({"quality": blocking_quality, "browser": browser_result}, ensure_ascii=False).lower()
+    if any(term in evidence_text for term in ("missing dependency", "browser executable", "cuda error", "provider error")):
         return "ENVIRONMENT_ERROR"
     if "blocked" in evidence_text:
         return "BLOCKED"
@@ -1292,13 +2191,48 @@ def repair_task(task, contract, failure_evidence, memory):
     return result
 
 
+def repair_evidence(quality, gate, browser_result):
+    return {
+        "deterministic_checks": [
+            check for check in quality.get("checks", [])
+            if check.get("source") == "deterministic" and check.get("status") == "FAIL"
+        ],
+        "browser": browser_result,
+        "deterministic_failure": gate.get("deterministic_failure", False),
+    }
+
+
 # ---------------------------------------------------------------------------
 # FOCUSED LEAF EXECUTION
 # ---------------------------------------------------------------------------
 
+def contract_for_task(task, root_contract):
+    if task.get("id") == "ROOT":
+        return root_contract
+    return {
+        "status": "ready",
+        "goal": task.get("goal", ""),
+        "requirements": [task.get("goal", "")],
+        "constraints": list(root_contract.get("constraints", [])),
+        "success_criteria": ["this leaf's observable behavior is implemented and verified"],
+        "original_goal": root_contract.get("original_goal", root_contract.get("goal", "")),
+    }
+
+
+def should_run_visual_review(task):
+    if task.get("id") == "ROOT":
+        return True
+    lower = str(task.get("goal", "")).casefold()
+    return any(word in lower for word in (
+        "ui", "ux", "visual", "design", "layout", "responsive", "css", "animation",
+        "واجهة", "تصميم", "متجاوب",
+    ))
+
+
 def leaf_context(contract, task, parent_summary, dependency_summaries, predictor="", challenger=""):
     return (
         f"ROOT GOAL CONTRACT (compact; authoritative):\n{compact_contract(contract)}\n\n"
+        f"{playbook_context(contract)}\n\n"
         f"PARENT CONTEXT: {compact_text(parent_summary or '(none)', 900)}\n"
         f"COMPLETED DEPENDENCIES: {json.dumps(dependency_summaries[-4:], ensure_ascii=False)[:3000]}\n"
         f"PREDICTOR CHECKLIST: {predictor or '(not used)'}\n"
@@ -1308,103 +2242,251 @@ def leaf_context(contract, task, parent_summary, dependency_summaries, predictor
     )
 
 
-def execute_builder(task, contract, memory, parent_summary="", dependency_summaries=None):
+def execute_builder_stages(task, contract, memory, base_context=""):
+    """Give Gemma bounded passes while keeping all generated code model-authored."""
+    local_contract = contract if task.get("id") == "ROOT" else {
+        "goal": task.get("goal", ""),
+        "requirements": [task.get("goal", "")],
+        "constraints": contract.get("constraints", []),
+        "success_criteria": contract.get("success_criteria", []),
+    }
+    stages = build_execution_stages(local_contract)
+    plan = compact_stage_plan(stages)
+    previous_summaries = []
+    combined_evidence = []
+    stage_records = []
+    last_result = None
+
+    for stage in stages:
+        stage_id = f"{task['id']}.S{stage['index']}"
+        RUN["builder_calls"] += 1
+        update_task_ledger(
+            stage_id, stage["goal"], "running", parent_id=task.get("id"),
+            stage_index=stage["index"],
+        )
+        event(
+            f"[STAGE {stage['index']}/{len(stages)}] {stage['name']}",
+            role="Builder", task=stage_id, action="bounded implementation stage",
+        )
+        stage_context = (
+            f"{base_context}\n\n"
+            f"FULL BOUNDED STAGE PLAN: {plan}\n"
+            f"THIS PASS: stage {stage['index']} of {len(stages)} - {stage['name']}\n"
+            f"STAGE ACCEPTANCE FOCUS: {stage.get('acceptance', 'verify observable behavior')}\n"
+            f"PRIOR STAGE SUMMARIES: {json.dumps(previous_summaries[-3:], ensure_ascii=False)[:2400]}\n"
+            "You are the sole author of all implementation code. Inspect the real workspace first. "
+            "Implement only this stage, preserve completed behavior, and run focused executable verification. "
+            "Do not claim requirements from later stages are complete."
+        )
+        result = execute_agent_task(
+            stage["goal"], memory, role="Builder", task_id=stage_id,
+            extra_context=stage_context,
+        )
+        last_result = result
+        memory = result["memory"]
+        combined_evidence.extend(result.get("tool_evidence", []))
+        record = {
+            "task_id": stage_id,
+            "goal": stage["goal"],
+            "status": result["status"],
+            "summary": result.get("summary", ""),
+            "stage_index": stage["index"],
+        }
+        stage_records.append(record)
+        if result["status"] != "done":
+            update_task_ledger(
+                stage_id, stage["goal"], result["status"], result.get("summary", ""),
+                parent_id=task.get("id"), stage_index=stage["index"],
+            )
+            return {
+                **result,
+                "memory": memory,
+                "tool_evidence": combined_evidence,
+                "stage_records": stage_records,
+                "stage_plan": stages,
+            }
+        update_task_ledger(
+            stage_id, stage["goal"], "implemented_unverified", result.get("summary", ""),
+            parent_id=task.get("id"), stage_index=stage["index"],
+        )
+        previous_summaries.append({"stage": stage["index"], "summary": result.get("summary", "")})
+
+    summaries = [record["summary"] for record in stage_records if record.get("summary")]
+    return {
+        "status": "done",
+        "summary": compact_text(" | ".join(summaries) or "all bounded stages implemented", 700),
+        "messages": (last_result or {}).get("messages", []),
+        "memory": memory,
+        "tool_evidence": combined_evidence,
+        "provider_error": (last_result or {}).get("provider_error"),
+        "stage_records": stage_records,
+        "stage_plan": stages,
+    }
+
+
+def finalize_stage_ledger(builder_result, status):
+    for stage in builder_result.get("stage_records", []):
+        update_task_ledger(
+            stage["task_id"], stage["goal"], status, stage.get("summary", ""),
+            parent_id=stage["task_id"].rsplit(".S", 1)[0],
+            stage_index=stage.get("stage_index"),
+        )
+
+
+def _execute_builder_impl(task, contract, memory, parent_summary="", dependency_summaries=None):
     dependency_summaries = dependency_summaries or []
+    verification_contract = contract_for_task(task, contract)
     RUN["leaf_tasks"] += 1
-    RUN["builder_calls"] += 1
+    begin_transaction(task["id"])
     risk = task_risk(task["goal"])
     predictor = challenger = ""
     if risk == "high":
-        predictor = short_role_call("Predictor", task, contract,
+        predictor = short_role_call("Predictor", task, verification_contract,
                                     "Predict likely failure points/interfaces/regressions. Short checklist only.")
         if any(word in task["goal"].lower() for word in ("design", "architecture", "approach")):
-            challenger = short_role_call("Challenger", task, contract,
+            challenger = short_role_call("Challenger", task, verification_contract,
                                          "Challenge the approach for simplicity/safety before implementation. Do not modify files.")
 
     context = leaf_context(contract, task, parent_summary, dependency_summaries, predictor, challenger)
-    result = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=context)
+    result = execute_builder_stages(task, contract, memory, base_context=context)
     memory = result["memory"]
     if result["status"] == "too_broad":
         RUN["task_too_broad_count"] += 1
+        rollback_transaction()
+        finalize_stage_ledger(result, "rolled_back")
         return {"status": "too_broad", "summary": result["summary"], "memory": memory, "builder": result}
     if result["status"] == "provider_failure":
+        rollback_transaction()
+        finalize_stage_ledger(result, "rolled_back")
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": result["summary"], "memory": memory, "builder": result}
 
-    adaptive = run_adaptive_checks(task, contract, memory, result, allow_falsifier=True)
+    adaptive = run_adaptive_checks(task, verification_contract, memory, result, allow_falsifier=True)
     memory = adaptive["memory"]
-    browser_result = optional_browser_check(task)
-    maybe_vision_review(browser_result, task, contract)
-    quality = review_quality(task, contract, result, adaptive, browser_result, fresh=False)
+    browser_result = optional_browser_check(task, verification_contract)
+    vision_review = maybe_vision_review(browser_result, task, verification_contract) if should_run_visual_review(task) else None
+    quality = review_quality(task, verification_contract, result, adaptive, browser_result, vision_review, fresh=False)
     gate = evidence_gate(result, quality)
     if gate["passed"]:
+        changed_files = commit_transaction()
+        finalize_stage_ledger(result, "done")
+        remember_verified_outcome(task, contract, result["summary"], changed_files)
         return {"status": "done", "summary": result["summary"], "memory": memory,
-                "builder": result, "quality": quality, "gate": gate, "browser": browser_result}
+                "builder": result, "quality": quality, "gate": gate, "browser": browser_result,
+                "vision": vision_review, "changed_files": changed_files}
 
-    failure_type = classify_failure(result, quality, browser_result)
+    failure_type = classify_failure(result, quality, browser_result, vision_review)
     if failure_type != "IMPLEMENTATION_ERROR":
         if failure_type == "TASK_TOO_BROAD":
             RUN["task_too_broad_count"] += 1
+        rollback_transaction()
+        finalize_stage_ledger(result, "rolled_back")
         return {"status": "too_broad" if failure_type == "TASK_TOO_BROAD" else "failed",
                 "failure_type": failure_type, "summary": f"verification failed: {failure_type}",
                 "memory": memory, "builder": result, "quality": quality, "gate": gate, "browser": browser_result}
 
     current = result
     for _repair in range(MAX_REPAIRS_PER_LEAF):
-        repaired = repair_task(task, contract, {"quality": quality, "gate": gate, "browser": browser_result}, memory)
+        repaired = repair_task(task, verification_contract, repair_evidence(quality, gate, browser_result), memory)
         memory = repaired["memory"]
         if repaired["status"] == "provider_failure":
+            rollback_transaction()
+            finalize_stage_ledger(result, "rolled_back")
             return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": repaired["summary"], "memory": memory}
         if repaired["status"] == "too_broad":
             RUN["task_too_broad_count"] += 1
+            rollback_transaction()
+            finalize_stage_ledger(result, "rolled_back")
             return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": repaired["summary"], "memory": memory}
         current = repaired
         fresh_adaptive = {"falsifier": "not rerun; one Falsifier call max per leaf", "falsifier_result": None}
-        fresh_browser = optional_browser_check(task)
-        quality = review_quality(task, contract, current, fresh_adaptive, fresh_browser, fresh=True)
+        fresh_browser = optional_browser_check(task, verification_contract)
+        fresh_vision = maybe_vision_review(fresh_browser, task, verification_contract) if should_run_visual_review(task) else None
+        quality = review_quality(task, verification_contract, current, fresh_adaptive, fresh_browser, fresh_vision, fresh=True)
         gate = evidence_gate(current, quality)
         if gate["passed"]:
+            changed_files = commit_transaction()
+            finalize_stage_ledger(result, "done")
+            remember_verified_outcome(task, contract, current["summary"], changed_files)
             return {"status": "done", "summary": current["summary"], "memory": memory,
-                    "builder": current, "quality": quality, "gate": gate, "browser": fresh_browser}
-        failure_type = classify_failure(current, quality, fresh_browser)
+                    "builder": current, "quality": quality, "gate": gate, "browser": fresh_browser,
+                    "vision": fresh_vision, "changed_files": changed_files}
+        failure_type = classify_failure(current, quality, fresh_browser, fresh_vision)
         if failure_type != "IMPLEMENTATION_ERROR":
+            rollback_transaction()
+            finalize_stage_ledger(result, "rolled_back")
             return {"status": "too_broad" if failure_type == "TASK_TOO_BROAD" else "failed",
                     "failure_type": failure_type, "summary": f"fresh verification failed: {failure_type}", "memory": memory}
 
+    rollback_transaction()
+    finalize_stage_ledger(result, "rolled_back")
     return {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "failed evidence gate after repair limit", "memory": memory}
+
+
+def execute_builder(task, contract, memory, parent_summary="", dependency_summaries=None):
+    try:
+        return _execute_builder_impl(task, contract, memory, parent_summary, dependency_summaries)
+    except Exception:
+        restored = rollback_transaction()
+        record_run_event("transaction_rollback", task_id=task.get("id"), restored=restored,
+                         reason="unexpected exception")
+        raise
 
 
 # ---------------------------------------------------------------------------
 # AGGREGATION / INTEGRATION
 # ---------------------------------------------------------------------------
 
-def aggregate_task(task, contract, child_results, memory, root=False):
+def _aggregate_task_impl(task, contract, child_results, memory, root=False):
     label = "ROOT" if root else task["id"]
     event(f"[AGGREGATE {label}]", role="Builder", task=label, action="integration verification")
     child_info = [{"task": child["task"], "status": child["result"]["status"],
                    "summary": child["result"].get("summary", "")} for child in child_results]
-    if any(item["status"] != "done" for item in child_info):
-        return {"status": "failed", "summary": "one or more child tasks failed", "memory": memory,
-                "children": child_info}
-
     RUN["builder_calls"] += 1
+    begin_transaction(f"aggregate-{label}")
+    failed_children = [item for item in child_info if item["status"] != "done"]
     instruction = (
         f"ROOT CONTRACT: {compact_contract(contract)}\n"
+        f"{playbook_context(contract)}\n"
         f"PARENT GOAL: {task['goal']}\n"
         f"CHILD RESULTS: {json.dumps(child_info, ensure_ascii=False)[:8000]}\n"
         f"{('ORIGINAL ROOT REQUEST: ' + contract.get('original_goal', '')) if root else ''}\n"
-        "Inspect the combined REAL workspace. Integrate only necessary gaps, resolve conflicts, and verify the parent goal. "
-        "At root explicitly check original outcome, root constraints, and missing requirements. Return a short result summary."
+        "Inspect the combined REAL workspace. Integrate successful child work, recover any failed child requirements, "
+        "resolve conflicts, and run executable verification for the complete parent goal. "
+        "For a visual/web project, use the real browser screenshot for one focused visual and responsive polish pass. "
+        "At root explicitly check every original requirement and constraint. Return a short evidence-based result summary."
     )
     result = execute_agent_task(instruction, memory, role="Builder", task_id=label)
     memory = result["memory"]
     if result["status"] != "done":
-        return {"status": "failed", "summary": result["summary"], "memory": memory}
+        rollback_transaction()
+        return {"status": "failed", "summary": result["summary"], "memory": memory,
+                "children": child_info, "failed_children": failed_children}
     adaptive = {"falsifier": "parent integration verification", "falsifier_result": None}
-    quality = review_quality(task, contract, result, adaptive, optional_browser_check(task), fresh=True)
+    browser_result = optional_browser_check(task, contract)
+    vision_review = maybe_vision_review(browser_result, task, contract)
+    quality = review_quality(task, contract, result, adaptive, browser_result, vision_review, fresh=True)
     gate = evidence_gate(result, quality)
-    return {"status": "done" if gate["passed"] else "failed", "summary": result["summary"],
-            "memory": memory, "quality": quality, "gate": gate}
+    if gate["passed"]:
+        changed_files = commit_transaction()
+        remember_verified_outcome(task, contract, result["summary"], changed_files)
+        return {"status": "done", "summary": result["summary"], "memory": memory,
+                "quality": quality, "gate": gate, "browser": browser_result,
+                "vision": vision_review, "children": child_info, "changed_files": changed_files}
+    rollback_transaction()
+    return {"status": "failed", "summary": "parent integration failed evidence gate", "memory": memory,
+            "quality": quality, "gate": gate, "browser": browser_result,
+            "vision": vision_review, "children": child_info, "failed_children": failed_children}
+
+
+def aggregate_task(task, contract, child_results, memory, root=False):
+    try:
+        return _aggregate_task_impl(task, contract, child_results, memory, root=root)
+    except Exception:
+        restored = rollback_transaction()
+        record_run_event("transaction_rollback", task_id=task.get("id"), restored=restored,
+                         reason="unexpected aggregation exception")
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -1414,6 +2496,10 @@ def aggregate_task(task, contract, child_results, memory, root=False):
 def solve_task(task, depth, contract, memory, parent_summary="", dependency_summaries=None, fit_decider=None, leaf_executor=None):
     dependency_summaries = dependency_summaries or []
     task["status"] = "running"
+    update_task_ledger(
+        task["id"], task["goal"], "running", task.get("summary", ""),
+        parent_id=task.get("parent"),
+    )
     RUN["max_depth"] = max(RUN["max_depth"], depth)
     event(f"[TASK {task['id']}] depth={depth} evaluating", role="Coordinator", task=task["id"], action="task fit")
 
@@ -1444,6 +2530,10 @@ def solve_task(task, depth, contract, memory, parent_summary="", dependency_summ
                 aggregate = aggregate_task(task, contract, completed, memory, root=(task["id"] == "ROOT"))
             task["status"] = aggregate["status"]
             task["summary"] = aggregate.get("summary", "")
+            update_task_ledger(
+                task["id"], task["goal"], task["status"], task["summary"],
+                parent_id=task.get("parent"),
+            )
             event(f"[{'DONE' if task['status'] == 'done' else 'FAILED'} {task['id']}]", task=task["id"], action="aggregated")
             return aggregate
 
@@ -1476,10 +2566,18 @@ def solve_task(task, depth, contract, memory, parent_summary="", dependency_summ
                     aggregate = aggregate_task(task, contract, completed, memory, root=(task["id"] == "ROOT"))
                 task["status"] = aggregate["status"]
                 task["summary"] = aggregate.get("summary", "")
+                update_task_ledger(
+                    task["id"], task["goal"], task["status"], task["summary"],
+                    parent_id=task.get("parent"),
+                )
                 return aggregate
 
     task["status"] = leaf.get("status", "failed")
     task["summary"] = leaf.get("summary", "")
+    update_task_ledger(
+        task["id"], task["goal"], task["status"], task["summary"],
+        parent_id=task.get("parent"),
+    )
     event(f"[{'DONE' if task['status'] == 'done' else 'FAILED'} {task['id']}]", task=task["id"], action="leaf complete")
     return leaf
 
@@ -1488,25 +2586,36 @@ def solve_task(task, depth, contract, memory, parent_summary="", dependency_summ
 # INPUT / WORKSPACE SETUP
 # ---------------------------------------------------------------------------
 
-def get_workspace(explicit=None):
+def get_workspace(explicit=None, projects_root=None):
     if explicit:
         path = Path(explicit).expanduser().resolve()
         if not path.exists() or not path.is_dir():
             raise RuntimeError(f"workspace is not a folder: {path}")
         print(f"workspace set to: {path}\n")
         return path
+    store = ProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
+    migration = store.migrate_legacy_contents()
+    if migration.moved:
+        print(f"[PROJECT MIGRATION] moved {len(migration.moved)} legacy item(s) into {migration.project}")
+
     while True:
+        default_path = store.root / store.peek_next_name()
         if PROMPT_TOOLKIT_AVAILABLE and sys.stdin.isatty():
-            print("Choose workspace folder. Type a path; Tab autocompletes folders.")
+            print(f"Workspace: press Enter to create {default_path}, or type an existing path.")
             raw = prompt("Workspace> ", completer=PathCompleter(only_directories=True, expanduser=True)).strip()
         else:
-            raw = input("Enter the workspace folder path: ").strip()
+            raw = input(f"Workspace [Enter = {default_path}]: ").strip()
         if raw.lower() in ("exit", "quit"):
             raise SystemExit()
         if not raw:
-            print("error: workspace is required. Choose/type a folder path; blank Enter is not accepted.")
-            continue
+            path = store.create_project()
+            print(f"workspace created: {path}\n")
+            return path
         path = Path(raw).expanduser().resolve()
+        if path == store.root:
+            path = store.create_project()
+            print(f"workspace created: {path}\n")
+            return path
         if not path.exists():
             print(f"error: that folder does not exist: {path}")
         elif not path.is_dir():
@@ -1568,6 +2677,39 @@ def _mode_validator(data):
     )
 
 
+def normalize_execution_choice(choice, contract):
+    """Prevent feature-splitting when all children would fight over one artifact."""
+    normalized = dict(choice)
+    profile = classify_project(contract)
+    text = " ".join(
+        [str(contract.get("goal", "")), str(contract.get("original_goal", ""))]
+        + [str(item) for item in contract.get("constraints", [])]
+    ).casefold()
+    cohesive_markers = (
+        "self-contained", "single file", "one file", "one local", "no build step",
+        "standalone", "ملف واحد", "بدون build",
+    )
+    distributed_markers = (
+        "frontend and backend", "client and server", "microservice", "multiple services",
+        "database migration", "mobile app and", "سطح المكتب والموبايل",
+    )
+    cohesive_web = (
+        profile in {"web_game", "web_app"}
+        and len(contract.get("requirements", [])) <= 8
+        and (any(marker in text for marker in cohesive_markers) or not any(
+            marker in text for marker in distributed_markers
+        ))
+    )
+    if normalized.get("mode") == "recursive" and cohesive_web:
+        normalized["mode"] = "baseline"
+        normalized["reason"] = (
+            "deterministic cohesive-artifact guard: use bounded vertical stages "
+            "instead of conflicting recursive children"
+        )
+        record_run_event("mode_guardrail", profile=profile, original=choice, normalized=normalized)
+    return normalized
+
+
 def decide_execution_mode(raw_goal, contract):
     prompt_chars = len(raw_goal)
     prompt_lines = raw_goal.count("\n") + 1
@@ -1581,8 +2723,8 @@ BASELINE means: one existing coding-agent/tool loop handles the whole request.
 RECURSIVE means: recursively split broad work into focused children, execute them sequentially, verify, repair, and aggregate.
 
 Choose BASELINE for a small/cohesive request that this model can reasonably execute and verify in one focused pass.
-Choose RECURSIVE when the goal contains multiple independently implementable/verifiable parts, many components/files/features, a large project specification, substantial integration work, or is too broad for this model in one focused context.
-When capacity is low, prefer recursive mode earlier. Do not choose recursive just because a task is non-trivial.
+Choose RECURSIVE when the goal contains multiple independently implementable/verifiable parts, many components/files/features, a large project specification, or substantial integration work.
+Treat model capacity as an advisory hint only. Do not choose recursive merely because capacity is low or a task is non-trivial; recursive overhead can amplify errors when every child rewrites the same monolithic artifact.
 
 SELECTED MODEL: {MODEL}
 MODEL CAPACITY: {MODEL_TASK_CAPACITY}/4 (auto-estimated from model parameter size; experimental, not a benchmark)
@@ -1597,7 +2739,19 @@ GOAL CONTRACT: {compact_contract(contract)}"""
         "required": ["mode", "reason"],
         "additionalProperties": False,
     }
-    return structured_model_call(prompt_text, _mode_validator, "execution-mode", schema)
+    try:
+        choice = structured_model_call(prompt_text, _mode_validator, "execution-mode", schema)
+        return normalize_execution_choice(choice, contract)
+    except (StructuredOutputError, ProviderError) as exc:
+        requirement_count = len(contract.get("requirements", []))
+        complex_request = (requirement_count >= 3 or prompt_chars > 900
+                           or (MODEL_TASK_CAPACITY <= 1 and requirement_count >= 2))
+        fallback = {
+            "mode": "recursive" if complex_request else "baseline",
+            "reason": "deterministic fallback after invalid structured router output",
+        }
+        record_run_event("structured_fallback", label="execution-mode", error=str(exc), fallback=fallback)
+        return normalize_execution_choice(fallback, contract)
 
 
 def baseline_prompt_with_clarifications(raw_goal, contract):
@@ -1611,29 +2765,36 @@ def baseline_prompt_with_clarifications(raw_goal, contract):
 # RUN MODES
 # ---------------------------------------------------------------------------
 
-def run_baseline_request(user_text, memory, history=None, reset=True, finish=True):
+def run_baseline_request(user_text, memory, history=None, contract_override=None, reset=True, finish=True):
     if reset:
         reset_run("baseline")
     else:
         RUN["mode"] = "baseline"
         DASHBOARD["mode"] = "baseline"
     RUN["tasks_created"] = 1
-    RUN["leaf_tasks"] = 1
-    RUN["builder_calls"] = 1
     RUN["max_depth"] = 0
-    TASKS["ROOT"] = {"id": "ROOT", "goal": user_text, "depth": 0, "parent": None,
-                     "status": "running", "children": [], "summary": ""}
+    contract = contract_override or {
+        "status": "ready", "goal": user_text, "requirements": [user_text], "constraints": [],
+        "success_criteria": ["the requested change is implemented and verified"], "original_goal": user_text,
+    }
+    begin_durable_run(contract)
+    TASKS["ROOT"] = {"id": "ROOT", "goal": contract.get("goal", user_text), "depth": 0, "parent": None,
+                      "status": "running", "children": [], "summary": ""}
+    update_task_ledger("ROOT", TASKS["ROOT"]["goal"], "running")
     print("[MODE] baseline")
     print(f"[MODEL] {MODEL}")
     print(f"[ROOT] {compact_text(user_text, 160)}")
-    messages = history if history is not None else [{"role": "system", "content": SYSTEM_PROMPT}]
-    result = execute_agent_task(user_text, memory, messages=messages, role="Builder", task_id="ROOT")
+    result = execute_builder(TASKS["ROOT"], contract, memory)
     TASKS["ROOT"]["status"] = "done" if result["status"] == "done" else "failed"
     TASKS["ROOT"]["summary"] = result["summary"]
+    update_task_ledger("ROOT", TASKS["ROOT"]["goal"], TASKS["ROOT"]["status"], result["summary"])
     final_status = "done" if result["status"] == "done" else result["status"]
     if finish:
         finish_metrics(final_status)
-    return result, result["memory"], result["messages"]
+    result_messages = (result.get("builder") or {}).get("messages") or history or [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
+    return result, result["memory"], result_messages
 
 
 def run_recursive_request(user_text, memory, interactive=True, contract_override=None, fit_decider=None, leaf_executor=None,
@@ -1659,6 +2820,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         if finish:
             finish_metrics("needs_clarification")
         return {"status": "needs_clarification", "summary": contract.get("question", "")}, memory
+
+    begin_durable_run(contract)
 
     root = {"id": "ROOT", "goal": contract["goal"], "depth": 0, "parent": None,
             "status": "pending", "children": [], "summary": ""}
@@ -1706,6 +2869,7 @@ def run_auto_request(user_text, memory, history=None, interactive=True):
         return {"status": "needs_clarification", "summary": contract.get("question", "")}, memory, history
 
     print("[GOAL LOCKED] execution will continue autonomously")
+    begin_durable_run(contract)
     try:
         choice = decide_execution_mode(user_text, contract)
     except RuntimeError as exc:
@@ -1723,7 +2887,7 @@ def run_auto_request(user_text, memory, history=None, interactive=True):
     if selected == "baseline":
         effective_prompt = baseline_prompt_with_clarifications(user_text, contract)
         result, memory, history = run_baseline_request(
-            effective_prompt, memory, history=history, reset=False, finish=False
+            effective_prompt, memory, history=history, contract_override=contract, reset=False, finish=False
         )
     else:
         result, memory = run_recursive_request(
@@ -1751,19 +2915,21 @@ def _mock_leaf(task, contract, memory, parent_summary, dependencies):
 
 
 def _self_test_architecture(tmp):
-    global WORKSPACE, ask_ollama, execute_agent_task, run_adaptive_checks, review_quality, repair_task, optional_browser_check
+    global WORKSPACE, ask_ollama, execute_agent_task, execute_builder, run_adaptive_checks, review_quality, repair_task, optional_browser_check
     WORKSPACE = Path(tmp)
     memory = load_memory()
 
     # 1. Baseline really enters the shared existing-style loop once and never splits.
-    real_ask = ask_ollama
-    def mock_ask(messages, tools=TOOLS):
-        RUN["model_calls"] += 1
-        return {"role": "assistant", "content": "mock baseline done"}
-    ask_ollama = mock_ask
+    real_builder = execute_builder
+    def mock_baseline_builder(task, contract, mem, parent_summary="", dependency_summaries=None):
+        RUN["leaf_tasks"] += 1
+        RUN["builder_calls"] += 1
+        return {"status": "done", "summary": "mock baseline done", "memory": mem,
+                "builder": {"messages": [{"role": "assistant", "content": "done"}]}}
+    execute_builder = mock_baseline_builder
     baseline_result, memory, _history = run_baseline_request("single baseline task", memory)
     baseline_ok = baseline_result["status"] == "done" and RUN["tasks_created"] == 1 and RUN["leaf_tasks"] == 1 and RUN["splits"] == 0
-    ask_ollama = real_ask
+    execute_builder = real_builder
 
     # 2. Literal recursion: ROOT -> 1, 2 -> 2.1, 2.2.
     reset_run("recursive")
@@ -1818,10 +2984,10 @@ def _self_test_architecture(tmp):
     state = {"repairs": 0, "reviews": 0}
     def fake_execute(*args, **kwargs):
         return {"status": "done", "summary": "built", "memory": memory,
-                "tool_evidence": [{"tool": "run_command", "result": "tests ran"}]}
+                "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]\ntests ran"}]}
     def fake_adaptive(task, contract, mem, builder, allow_falsifier=True):
         return {"risk": "normal", "falsifier": "checked", "falsifier_result": None, "memory": mem}
-    def fake_review(task, contract, builder, adaptive, browser_result=None, fresh=False):
+    def fake_review(task, contract, builder, adaptive, browser_result=None, vision_review=None, fresh=False):
         state["reviews"] += 1
         if state["reviews"] == 1:
             return {"checks": [{"name": "tests", "status": "FAIL", "evidence": "1 failed"}]}
@@ -1829,9 +2995,9 @@ def _self_test_architecture(tmp):
     def fake_repair(task, contract, evidence, mem):
         state["repairs"] += 1
         return {"status": "done", "summary": "repaired", "memory": mem,
-                "tool_evidence": [{"tool": "run_command", "result": "1 passed fresh"}]}
+                "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]\n1 passed fresh"}]}
     execute_agent_task, run_adaptive_checks = fake_execute, fake_adaptive
-    review_quality, repair_task, optional_browser_check = fake_review, fake_repair, lambda task: None
+    review_quality, repair_task, optional_browser_check = fake_review, fake_repair, lambda task, contract=None: None
     repaired = execute_builder({"id": "T", "goal": "fix bug", "depth": 0}, _mock_contract(), memory)
     repair_ok = repaired["status"] == "done" and state["repairs"] == 1
     fresh_ok = state["reviews"] == 2
@@ -1855,11 +3021,41 @@ def _self_test_architecture(tmp):
     event("[TEST EVENT]", plain=False)
     dashboard_ok = before == json.dumps(TASKS, sort_keys=True)
 
+    # 12. Task-fit validator and schema agree on execute/split invariants.
+    fit_contract_ok = (
+        _fit_validator({"decision": "execute", "reason": "small", "subtasks": []})
+        and not _fit_validator({"decision": "execute", "reason": "contradictory", "subtasks": ["x"]})
+        and _fit_validator({"decision": "split", "reason": "broad", "subtasks": ["a", "b"]})
+        and not _fit_validator({"decision": "split", "reason": "invalid", "subtasks": []})
+        and len(task_fit_schema().get("oneOf", [])) == 2
+    )
+
+    # 13. Failed leaves can restore only the files they touched.
+    transaction_file = WORKSPACE / "transaction_probe.txt"
+    transaction_file.write_text("before", encoding="utf-8")
+    begin_transaction("transaction-self-test")
+    write_file("transaction_probe.txt", "after")
+    write_file("created_probe.txt", "temporary")
+    rollback_transaction()
+    transaction_ok = (transaction_file.read_text(encoding="utf-8") == "before"
+                      and not (WORKSPACE / "created_probe.txt").exists())
+
+    # 14-15. Web entrypoints are discovered without a prompt URL and unsafe shell commands are rejected.
+    (WORKSPACE / "index.html").write_text("<!doctype html><title>probe</title>", encoding="utf-8")
+    browser_discovery_ok = discover_web_entrypoint(
+        {"id": "T", "goal": "Build a browser game"}, _mock_contract()
+    ) == {"path": "index.html"}
+    safe_parts, safe_error = _validated_command_parts("git status")
+    _unsafe_parts, unsafe_error = _validated_command_parts("python -c \"print(1)\"")
+    command_safety_ok = bool(safe_parts) and safe_error is None and bool(unsafe_error)
+
     return {"architecture": baseline_ok, "true recursion": recursion_ok, "max depth": depth_ok,
             "max total tasks": total_ok, "focused context": focused_ok, "re-split": resplit_ok,
             "repair routing": repair_ok, "fresh verification": fresh_ok,
             "evidence gate": failed_not_done_ok, "large paste": large_ok,
-            "dashboard isolation": dashboard_ok}
+            "dashboard isolation": dashboard_ok, "task-fit contract": fit_contract_ok,
+            "transaction rollback": transaction_ok, "browser discovery": browser_discovery_ok,
+            "command safety": command_safety_ok}
 
 def _self_test_browser(tmp, install_browser=False):
     global WORKSPACE
@@ -1886,7 +3082,9 @@ def _self_test_browser(tmp, install_browser=False):
     finally:
         server.terminate()
         try: server.wait(timeout=3)
-        except subprocess.TimeoutExpired: server.kill()
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=3)
 
     if result.get("environment_error"):
         result = browser_inline_snapshot(html, "browser_self_test")
@@ -1910,7 +3108,7 @@ def ollama_reachable():
 def run_self_test(install_browser=False):
     global WORKSPACE
     print("[SELF TEST]")
-    with tempfile.TemporaryDirectory(prefix="agent21_selftest_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="agent21_selftest_", ignore_cleanup_errors=True) as tmp:
         results = _self_test_architecture(tmp)
         browser_ok, browser_result, screenshot = _self_test_browser(tmp, install_browser=install_browser)
         results["browser wrapper"] = browser_ok
@@ -1918,7 +3116,8 @@ def run_self_test(install_browser=False):
 
         labels = ["architecture", "true recursion", "max depth", "max total tasks", "focused context",
                   "re-split", "repair routing", "fresh verification", "evidence gate", "large paste",
-                  "dashboard isolation", "browser wrapper"]
+                  "dashboard isolation", "task-fit contract", "transaction rollback", "browser discovery",
+                  "command safety", "browser wrapper"]
         for label in labels:
             print(f"{label + ' ':<24}.{('PASS' if results[label] else 'FAIL'):>8}")
         print(f"{'live ollama ':<24}.{('REACHABLE (smoke not auto-run)' if live else 'SKIP'):>8}")
@@ -1939,7 +3138,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Small baseline vs recursive coding-agent experiment")
     parser.add_argument("--mode", choices=("auto", "baseline", "recursive"), default="auto",
                         help="auto is the normal UX; baseline/recursive remain available for A/B research")
-    parser.add_argument("--model", help="Use one installed LOCAL Ollama model without showing the arrow-key selector")
+    parser.add_argument("--model", help=f"Compatibility option; only {GEMMA_MODEL} is accepted")
     parser.add_argument("--prompt-file", help="Read one large benchmark prompt from a file")
     parser.add_argument("--workspace", help="Workspace path (otherwise prompted interactively)")
     parser.add_argument("--self-test", action="store_true", help="Run deterministic architecture tests")
@@ -1950,6 +3149,7 @@ def parse_args():
 
 def main():
     global WORKSPACE, LIVE_VIEW
+    configure_console_streams()
     args = parse_args()
     if not ensure_dependencies(auto_install=not args.no_bootstrap):
         raise SystemExit(2)
@@ -1959,7 +3159,7 @@ def main():
         raise SystemExit(0 if ok else 1)
 
     try:
-        print("[STARTUP 1/3] Choose LOCAL Ollama model")
+        print(f"[STARTUP 1/3] Verify required LOCAL model: {GEMMA_MODEL}")
         select_local_ollama_model(args.model)
         print("[STARTUP 2/3] Choose workspace")
         WORKSPACE = get_workspace(args.workspace)

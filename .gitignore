@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.backup_*
+
+# Runtime provenance and browser/visual verification artifacts.
+.agent_runs/
+.agent_evidence/
+.agent_backups/
+.hivo/
+output/
