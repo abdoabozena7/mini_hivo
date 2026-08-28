@@ -1,14 +1,26 @@
 """Deterministic interpretation of tool evidence."""
 
+import json
 import re
 
 
 VERIFICATION_TOOLS = frozenset({"run_file", "run_command", "verify_web_app"})
 
 
+def result_not_applicable(result: object) -> bool:
+    return str(result).strip().lower().startswith("[not_applicable]")
+
+
 def result_failed(result: object) -> bool:
     text = str(result).strip()
     lower = text.lower()
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict) and payload.get("passed") is False:
+            return True
     if lower.startswith(("error:", "tool error:", "compile error:", "traceback")):
         return True
     exit_code = re.search(r"\[exit_code=(\d+)\]", lower)
@@ -24,7 +36,7 @@ def latest_verification_evidence(evidence: list[dict]) -> list[dict]:
     latest: dict[tuple[str, str], tuple[int, dict]] = {}
     for index, item in enumerate(evidence):
         tool = str(item.get("tool", ""))
-        if tool not in VERIFICATION_TOOLS:
+        if tool not in VERIFICATION_TOOLS or result_not_applicable(item.get("result", "")):
             continue
         key = (tool, str(item.get("target", "-")))
         latest[key] = (index, item)

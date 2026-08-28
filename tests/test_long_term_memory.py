@@ -77,6 +77,65 @@ class LongTermMemoryTests(unittest.TestCase):
         self.assertIn("not proof of completion", context)
         self.assertIn("ROOT.S1", context)
 
+    def test_current_run_is_not_injected_as_its_own_resume_history(self):
+        store = MemoryStore(self.workspace)
+        store.begin_run("older-run", "Build a timer", {"requirements": ["controls"]})
+        store.begin_run("current-run", "Build a timer", {"requirements": ["controls"]})
+
+        snapshot = store.latest_resumable_run(exclude_run_id="current-run")
+
+        self.assertEqual(snapshot["run_id"], "older-run")
+
+    def test_model_artifact_ownership_survives_restart_and_detects_user_changes(self):
+        target = self.workspace / "script.js"
+        target.write_text("const author = 'model';\n", encoding="utf-8")
+        first = MemoryStore(self.workspace)
+        self.assertTrue(first.mark_model_artifact("script.js", "run-1"))
+
+        reopened = MemoryStore(self.workspace)
+        self.assertTrue(reopened.is_unverified_model_artifact("script.js"))
+        self.assertEqual(reopened.unverified_model_artifacts(), ["script.js"])
+        target.write_text("const author = 'user';\n", encoding="utf-8")
+        self.assertFalse(reopened.is_unverified_model_artifact("script.js"))
+        self.assertEqual(reopened.unverified_model_artifacts(), [])
+
+    def test_verified_model_artifact_cannot_be_full_rewritten(self):
+        target = self.workspace / "index.html"
+        target.write_text("<!doctype html><title>Model</title>", encoding="utf-8")
+        store = MemoryStore(self.workspace)
+        store.mark_model_artifact("index.html", "run-1")
+        self.assertEqual(store.mark_artifacts_verified([target], "run-1"), 1)
+        self.assertFalse(store.is_unverified_model_artifact("index.html"))
+
+    def test_focused_model_edit_refreshes_only_existing_model_ownership(self):
+        model_file = self.workspace / "model.js"
+        user_file = self.workspace / "user.js"
+        model_file.write_text("const version = 1;\n", encoding="utf-8")
+        user_file.write_text("const owner = 'user';\n", encoding="utf-8")
+        store = MemoryStore(self.workspace)
+        store.mark_model_artifact("model.js", "run-1")
+
+        model_file.write_text("const version = 2;\n", encoding="utf-8")
+        user_file.write_text("const owner = 'still-user';\n", encoding="utf-8")
+
+        self.assertTrue(store.refresh_unverified_model_artifact("model.js", "run-1"))
+        self.assertFalse(store.refresh_unverified_model_artifact("user.js", "run-1"))
+        self.assertTrue(store.is_unverified_model_artifact("model.js"))
+        self.assertFalse(store.is_unverified_model_artifact("user.js"))
+
+    def test_interrupted_write_events_are_backfilled_as_model_artifacts(self):
+        target = self.workspace / "app.js"
+        target.write_text("const resumed = true;\n", encoding="utf-8")
+        store = MemoryStore(self.workspace)
+        store.begin_run("interrupted", "Build an app", {"requirements": ["works"]})
+        store.record_event(
+            run_id="interrupted", task_id="ROOT.S1", role="Builder", tool="write_file",
+            target="app.js", status="succeeded", content="wrote file", details={},
+        )
+
+        reopened = MemoryStore(self.workspace)
+        self.assertTrue(reopened.is_unverified_model_artifact("app.js"))
+
     def test_legacy_json_is_imported_once(self):
         legacy = {
             "recent_files": ["index.html"],

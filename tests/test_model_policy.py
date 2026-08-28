@@ -14,6 +14,20 @@ class SingleModelPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SingleModelPolicy().validate("qwen2.5-coder:7b")
 
+    def test_staged_builder_uses_twelve_k_context_not_the_model_maximum(self):
+        from hivo.model_policy import SingleModelPolicy
+
+        self.assertEqual(SingleModelPolicy().context_window("Builder"), 12_288)
+
+    def test_weak_model_sampling_is_low_variance_and_role_specific(self):
+        from hivo.model_policy import SingleModelPolicy
+
+        policy = SingleModelPolicy()
+
+        self.assertEqual(policy.temperature("Builder"), 0.1)
+        self.assertEqual(policy.temperature("Repairer"), 0.1)
+        self.assertEqual(policy.temperature("Coordinator"), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

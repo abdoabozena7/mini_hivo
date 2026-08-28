@@ -5,9 +5,16 @@ import hashlib
 import json
 
 
+def _content_digest(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
 def _compact_marker(content: str) -> str:
-    digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:12]
-    return f"[compacted prior content: {len(content)} chars, sha256={digest}]"
+    digest = _content_digest(content)
+    return (
+        f"[HIVO HISTORY OMITTED: non-source metadata only; chars={len(content)}; sha256={digest}; "
+        "re-read the current file; never copy this marker into code]"
+    )
 
 
 def projected_size(messages: list[dict]) -> int:
@@ -21,7 +28,10 @@ def projected_size(messages: list[dict]) -> int:
 
 def _compact_argument_payload(value, threshold: int = 700):
     if isinstance(value, str):
-        return _compact_marker(value) if len(value) > threshold else value
+        # Keep the historical tool schema valid without placing a copyable
+        # pseudo-source marker where a weak model expects real file content.
+        # Current bytes live in the workspace and must be recovered by read_file.
+        return "" if len(value) > threshold else value
     if isinstance(value, dict):
         return {key: _compact_argument_payload(item, threshold) for key, item in value.items()}
     if isinstance(value, list):
@@ -45,7 +55,7 @@ def _compact_tool_arguments(message: dict) -> None:
                 arguments = json.loads(arguments)
             except (ValueError, TypeError):
                 if len(arguments) > 700:
-                    function["arguments"] = _compact_marker(arguments)
+                    function["arguments"] = {}
                 continue
         function["arguments"] = _compact_argument_payload(arguments)
 
@@ -53,20 +63,21 @@ def _compact_tool_arguments(message: dict) -> None:
 def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8) -> list[dict]:
     """Return a provider-safe copy without mutating the agent's source history."""
     projected = deepcopy(messages)
-    for item in projected:
-        content = item.get("content")
-        if isinstance(content, str) and len(content) > 16_000:
-            item["content"] = content[:8_000] + "\n...\n" + content[-4_000:]
-
-    # Historical write/edit payloads can be larger than file-read output and are
-    # useless after their tool result is known. Preserve names, paths, and hashes.
-    for item in projected[:-1]:
-        _compact_tool_arguments(item)
 
     def size() -> int:
         return projected_size(projected)
 
+    # Do not rewrite a healthy prompt merely because it contains a recent file
+    # mutation. Gemma needs its own immediately preceding payload to avoid
+    # inventing or copying compaction placeholders. Only compact on real overflow,
+    # starting outside the protected recent window.
     cutoff = max(1, len(projected) - keep_recent)
+    if size() > max_chars:
+        for index in range(1, cutoff):
+            _compact_tool_arguments(projected[index])
+            if size() <= max_chars:
+                break
+
     for index in range(1, cutoff):
         if size() <= max_chars:
             break
@@ -81,6 +92,15 @@ def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8)
             content = projected[index].get("content")
             if isinstance(content, str) and len(content) > 120:
                 projected[index]["content"] = _compact_marker(content)
+
+    # If old history was not enough, remove large argument bodies from oldest
+    # to newest. Empty string fields are valid historical arguments and cannot
+    # masquerade as source code. Paths and tool outcomes remain available.
+    if size() > max_chars:
+        for item in projected[1:]:
+            _compact_tool_arguments(item)
+            if size() <= max_chars:
+                break
 
     # A very large latest tool result is still bounded so output tokens remain
     # available to the model. Keep both ends because code declarations and
@@ -99,7 +119,6 @@ def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8)
     # projection whose measured payload is above the explicit message budget.
     if size() > max_chars:
         for item in projected[1:]:
-            _compact_tool_arguments(item)
             content = item.get("content")
             if size() <= max_chars:
                 break

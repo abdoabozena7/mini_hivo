@@ -20,12 +20,14 @@ from pathlib import Path
 from hivo.evidence import result_failed as evidence_result_failed
 from hivo.evidence import evidence_for_review
 from hivo.evidence import unresolved_tool_failures
+from hivo.browser_checks import run_profile_interactions
 from hivo.context import compact_messages
+from hivo.http_client import HttpTransportError, get_json as http_get_json, post_json as http_post_json
 from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.playbooks import build_execution_stages, classify_project, compact_stage_plan, playbook_context
 from hivo.projects import ProjectStore
-from hivo.verification import evaluate_web_snapshot, infer_web_profile
+from hivo.verification import evaluate_web_snapshot, infer_web_profile, interaction_expectations
 
 # ---------------------------------------------------------------------------
 # CONFIG - keep model/provider configuration simple for the experiment
@@ -43,14 +45,15 @@ EXPERIMENT_FILE = ".agent_experiment.jsonl"
 EVIDENCE_DIR = ".agent_evidence"
 RUNS_DIR = ".agent_runs"
 
-MAX_TOOL_STEPS = 20
+MAX_TOOL_STEPS = 28
+MAX_STAGE_CONTINUATIONS = 1
 MAX_DEPTH = 2
 MAX_CHILDREN = 4
 MAX_TOTAL_TASKS = 8
 MAX_CLARIFICATION_QUESTIONS = 5
 MAX_REPAIRS_PER_LEAF = 2
 MAX_STRUCTURED_RETRIES = 2
-MAX_PROVIDER_RETRIES = 1
+MAX_PROVIDER_RETRIES = 2
 OLLAMA_TIMEOUT_SECONDS = 120
 CONTEXT_LIMIT_TOKENS = MODEL_POLICY.context_window("builder")
 MODEL_TASK_CAPACITY = 2  # auto-derived from the selected local model; 1=very weak ... 4=stronger
@@ -64,13 +67,11 @@ VISION_ERROR = None
 
 DANGEROUS = ["rm -rf", "sudo", "mkfs", "shutdown", "reboot", "format ", "del /f", ":(){"]
 KNOWN_DEPENDENCIES = {
-    "requests": "requests>=2.31,<3",
     "rich": "rich>=13.7,<15",
     "prompt_toolkit": "prompt_toolkit>=3.0.43,<4",
     "playwright": "playwright>=1.45,<2",
 }
 
-requests = None
 RICH_AVAILABLE = False
 PROMPT_TOOLKIT_AVAILABLE = False
 PLAYWRIGHT_AVAILABLE = False
@@ -87,7 +88,10 @@ RUN_STARTED = 0.0
 VISION_ENABLED_FOR_RUN = False
 RUN_ID = ""
 ACTIVE_TRANSACTION = None
+ACTIVE_CONTRACT = None
+ACTIVE_TOOL_CONTRACT = None
 MEMORY_STORE = None
+FORCE_CPU_FOR_RUN = False
 
 
 class ProviderError(RuntimeError):
@@ -114,13 +118,8 @@ def configure_console_streams(streams=None):
 # ---------------------------------------------------------------------------
 
 def _load_optional_imports():
-    global requests, RICH_AVAILABLE, PROMPT_TOOLKIT_AVAILABLE, PLAYWRIGHT_AVAILABLE
+    global RICH_AVAILABLE, PROMPT_TOOLKIT_AVAILABLE, PLAYWRIGHT_AVAILABLE
     global Console, Live, Panel, Table, Tree, Group, Text, prompt, KeyBindings, PathCompleter, radiolist_dialog, sync_playwright
-
-    try:
-        requests = importlib.import_module("requests")
-    except ImportError:
-        requests = None
 
     try:
         rich_console = importlib.import_module("rich.console")
@@ -197,15 +196,13 @@ def is_cloud_model_name(name):
 
 
 def fetch_local_ollama_models():
-    if requests is None:
-        raise RuntimeError("requests dependency is unavailable")
     if not is_local_ollama_url(OLLAMA_BASE_URL):
         raise RuntimeError(
             f"OLLAMA_BASE_URL must point to local Ollama only; got: {OLLAMA_BASE_URL}"
         )
     try:
-        response = requests.get(OLLAMA_BASE_URL + "/api/tags", timeout=5)
-    except requests.exceptions.RequestException as exc:
+        response = http_get_json(OLLAMA_BASE_URL + "/api/tags", timeout=5)
+    except HttpTransportError as exc:
         raise RuntimeError(
             f"could not reach local Ollama at {OLLAMA_BASE_URL}. "
             f"Start Ollama first (for example: `ollama serve`). Details: {exc}"
@@ -267,7 +264,9 @@ def _model_choice_label(model_info):
 
 def fetch_model_capabilities(model_name):
     try:
-        response = requests.post(OLLAMA_BASE_URL + "/api/show", timeout=10, json={"model": model_name})
+        response = http_post_json(
+            OLLAMA_BASE_URL + "/api/show", timeout=10, payload={"model": model_name}
+        )
         if response.status_code == 200:
             return {str(item).lower() for item in response.json().get("capabilities", [])}
     except Exception:
@@ -380,6 +379,31 @@ TOOLS = [
             "required": ["path", "old", "new"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
+        "name": "read_file_range",
+        "description": (
+            "Read a bounded 1-based line range with line numbers. Use this before edit_file_range "
+            "or when a full file is too large."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer", "minimum": 1},
+            "end_line": {"type": "integer", "minimum": 1}},
+            "required": ["path"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "edit_file_range",
+        "description": (
+            "Replace a bounded 1-based line range after reading it. This is more reliable than a large exact old/new "
+            "replacement. Always provide path, start_line, end_line, then compact new content."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer", "minimum": 1},
+            "end_line": {"type": "integer", "minimum": 1},
+            "new": {"type": "string"}},
+            "required": ["path", "start_line", "end_line", "new"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
         "name": "read_file",
         "description": "Read a file's content.",
         "parameters": {"type": "object", "properties": {
@@ -490,7 +514,7 @@ def get_memory_store():
 def load_memory():
     store = get_memory_store()
     recent_files = store.recent_files() if store else []
-    resumable = store.latest_resumable_run() if store else None
+    resumable = store.latest_resumable_run(exclude_run_id=RUN_ID or None) if store else None
     if resumable:
         print(
             f"[MEMORY] durable unfinished run available: {resumable['run_id']} "
@@ -531,6 +555,127 @@ def tool_result_failed(result):
     return evidence_result_failed(result)
 
 
+_INTERACTION_DIAGNOSES = {
+    "timer_start_changes_visible_time": (
+        "The Start button was activated and the deterministic browser clock advanced 1200 ms, but the visible "
+        "countdown did not decrease. Inspect the real click handler, interval/tick creation, and any duplicate or "
+        "immediate reset logic; this is executable code evidence, not a screenshot opinion."
+    ),
+    "timer_pause_freezes_visible_time": (
+        "Pause is evaluated after Start. If Start did not change the clock, fix Start first; otherwise ensure Pause "
+        "clears the one active interval without resetting the displayed value."
+    ),
+    "timer_reset_restores_visible_time": (
+        "Reset did not restore the configured phase duration after real Start/Pause interaction."
+    ),
+    "timer_duration_configuration": (
+        "The verifier requires two visible numeric duration inputs. A valid Focus value must update the visible "
+        "clock after input/change and optional Save Settings, and each duration needs a positive min bound that "
+        "makes a below-minimum value invalid."
+    ),
+    "timer_phase_switches_and_counts_session": (
+        "A full deterministic phase duration elapsed. Both the visible phase label and completed-session count must "
+        "change through the real timer logic."
+    ),
+    "settings_persistence": (
+        "A visible numeric setting was changed, change/blur was dispatched, Save/Apply was clicked when present, "
+        "and the page was reloaded; the requested value did not survive."
+    ),
+    "keyboard_activation": "Focusing the primary Start button and pressing Enter did not activate it.",
+    "responsive_no_overflow": "The 390px viewport produced horizontal overflow or no usable visible controls.",
+    "reduced_motion": "With prefers-reduced-motion enabled, non-trivial CSS motion remained active.",
+}
+
+
+def verification_failure_signature(result):
+    """Return a port- and prose-independent signature for repeated web failures."""
+    try:
+        payload = json.loads(str(result))
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(payload, dict) or payload.get("passed"):
+        return ()
+    signals = []
+    for item in payload.get("interaction_checks") or []:
+        if not isinstance(item, dict) or item.get("passed") or not item.get("name"):
+            continue
+        name = str(item["name"])
+        if name == "timer_phase_switches_and_counts_session":
+            problems = []
+            before_phase = item.get("before_phase")
+            after_phase = item.get("after_phase")
+            if not before_phase or not after_phase or before_phase == after_phase:
+                problems.append("phase_not_changed")
+            before_count = item.get("before_count")
+            after_count = item.get("after_count")
+            if before_count is None or after_count is None:
+                problems.append("completed_count_missing")
+            elif after_count <= before_count:
+                problems.append("completed_count_not_incremented")
+            signals.extend(f"interaction:{name}:{problem}" for problem in (problems or ["failed"]))
+        else:
+            signals.append(f"interaction:{name}")
+    signals.extend(
+        f"failure:{item.get('code')}"
+        for item in payload.get("failures") or []
+        if isinstance(item, dict) and item.get("code") not in {"failed_interaction"}
+    )
+    signals.extend(f"page:{str(item)[:120]}" for item in payload.get("page_errors") or [])
+    signals.extend(f"console:{str(item)[:120]}" for item in payload.get("console_errors") or [])
+    if payload.get("environment_error"):
+        signals.append("environment_error")
+    return tuple(sorted(set(signals or ["web_verification_failed"])))
+
+
+def verification_failure_digest(result, limit=1800):
+    """Project verbose browser JSON into the exact actionable evidence Gemma needs."""
+    try:
+        payload = json.loads(str(result))
+    except (TypeError, ValueError):
+        return compact_text(str(result), limit)
+    if not isinstance(payload, dict):
+        return compact_text(str(result), limit)
+    failed = []
+    for item in payload.get("interaction_checks") or []:
+        if not isinstance(item, dict) or item.get("passed"):
+            continue
+        name = str(item.get("name") or "unknown_interaction")
+        projection = {key: item[key] for key in (
+            "name", "before", "after", "before_phase", "after_phase",
+            "before_count", "after_count", "missing", "evidence",
+        ) if key in item}
+        missing = set(projection.get("missing") or [])
+        if "clock" in missing:
+            projection["diagnosis"] = (
+                "No visible countdown could be recognized. Render the live value as combined MM:SS or HH:MM:SS "
+                "text in one visible clock container; nested spans are allowed. Inspect the markup/display update "
+                "before changing button or interval logic."
+            )
+        elif name == "timer_phase_switches_and_counts_session" and (
+            projection.get("before_count") is None or projection.get("after_count") is None
+        ):
+            projection["diagnosis"] = (
+                "The phase may already switch, but no dedicated completed-session counter was recognized. Add a "
+                "visible label such as 'Completed Sessions: 0' and increment it to 1 only when a focus phase "
+                "finishes. 'Session 1' inside phase/status prose is a current-session ordinal and does not satisfy "
+                "the completed-session count. Preserve the working phase transition."
+            )
+        else:
+            projection["diagnosis"] = _INTERACTION_DIAGNOSES.get(
+                name, "The required real-browser interaction did not produce its observable outcome."
+            )
+        failed.append(projection)
+    digest = {
+        "passed": bool(payload.get("passed")),
+        "environment_error": bool(payload.get("environment_error")),
+        "page_errors": payload.get("page_errors") or [],
+        "console_errors": payload.get("console_errors") or [],
+        "failed_interactions": failed,
+        "failures": payload.get("failures") or [],
+    }
+    return json.dumps(digest, ensure_ascii=False, default=str)[:max(100, int(limit))]
+
+
 def update_memory(memory, tool_name, tool_args, result, role=None, task_id=None):
     path_arg = tool_args.get("path")
     if path_arg:
@@ -544,9 +689,14 @@ def update_memory(memory, tool_name, tool_args, result, role=None, task_id=None)
     }]
 
     if tool_name in ("run_file", "run_command", "verify_web_app"):
-        memory["last_error"] = str(result)[:500] if tool_result_failed(result) else None
+        if not tool_result_failed(result):
+            memory["last_error"] = None
+        elif tool_name == "verify_web_app":
+            memory["last_error"] = verification_failure_digest(result)
+        else:
+            memory["last_error"] = str(result)[:800]
 
-    if (tool_name in ("write_file", "edit_file") and path_arg and memory.get("last_error")
+    if (tool_name in ("write_file", "edit_file", "edit_file_range") and path_arg and memory.get("last_error")
             and not tool_result_failed(result)):
         memory["last_fix_attempt"] = f"Edited {path_arg} after an error"
 
@@ -566,9 +716,21 @@ def update_memory(memory, tool_name, tool_args, result, role=None, task_id=None)
                 details={
                     "args": _sanitize_event_value(tool_args),
                     "model": MODEL,
-                    "mutation_author": "model_tool_call" if tool_name in {"write_file", "edit_file"} else None,
+                    "mutation_author": "model_tool_call" if tool_name in {
+                        "write_file", "edit_file", "edit_file_range",
+                    } else None,
                 },
             )
+            if (
+                role == "Builder" and tool_name == "write_file" and path_arg
+                and not tool_result_failed(result)
+            ):
+                store.mark_model_artifact(path_arg, RUN_ID or None)
+            elif (
+                role == "Builder" and tool_name in {"edit_file", "edit_file_range"} and path_arg
+                and not tool_result_failed(result)
+            ):
+                store.refresh_unverified_model_artifact(path_arg, RUN_ID or None)
             memory["recent_files"] = store.recent_files()
     except (OSError, ValueError) as exc:
         print(f"[WARN] could not save durable memory event: {exc}")
@@ -623,6 +785,9 @@ def rollback_transaction():
             elif target.exists() and target.is_file():
                 target.unlink()
             restored.append(raw_path)
+            store = get_memory_store()
+            if store:
+                store.reconcile_rolled_back_artifact(raw_path, existed=bool(snapshot["existed"]))
         except OSError as exc:
             print(f"[ROLLBACK_ERROR] {target}: {exc}")
     record_run_event("transaction_rollback", task_id=transaction.get("task_id"), restored=restored)
@@ -644,27 +809,83 @@ def backup(target):
         return f"error: backup failed, file NOT changed: {exc}"
 
 
+def source_validation_error(target, content):
+    """Return a deterministic syntax error without mutating the workspace."""
+    suffix = target.suffix.casefold()
+    text = str(content)
+    if suffix == ".py":
+        try:
+            compile(text, str(target), "exec")
+        except SyntaxError as exc:
+            return f"Python syntax validation failed at line {exc.lineno}: {exc.msg}"
+        return None
+    if suffix == ".json":
+        try:
+            json.loads(text)
+        except (ValueError, TypeError) as exc:
+            return f"JSON syntax validation failed: {exc}"
+        return None
+    javascript = text if suffix in {".js", ".mjs", ".cjs"} else ""
+    if suffix in {".html", ".htm"}:
+        blocks = re.findall(
+            r"<script(?![^>]*\bsrc=)(?![^>]*type=[\"'](?:application|application/ld)\/json[\"'])[^>]*>([\s\S]*?)</script>",
+            text,
+            flags=re.IGNORECASE,
+        )
+        javascript = "\n;\n".join(blocks)
+    if not javascript.strip():
+        return None
+    try:
+        checked = subprocess.run(
+            ["node", "--check", "-"], input=javascript, text=True,
+            encoding="utf-8", errors="replace", capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if checked.returncode != 0:
+        detail = compact_text(checked.stderr or checked.stdout, 500)
+        return f"JavaScript syntax validation failed: {detail}"
+    return None
+
+
 def write_file(path, content, role="System"):
     target = safe_path(path)
     if target is None:
         return f"error: '{path}' is outside the workspace."
     transaction_snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
     created_in_transaction = bool(transaction_snapshot and not transaction_snapshot.get("existed"))
+    resumable_model_artifact = False
     if role == "Repairer":
         return "error: Repairer cannot replace files with write_file; use a focused edit_file change"
     if target.exists() and role == "Builder" and not created_in_transaction:
-        return (
-            "error: write_file cannot replace an existing file; "
-            "read it and use edit_file for a focused verified change"
+        store = get_memory_store()
+        resumable_model_artifact = bool(
+            ACTIVE_TRANSACTION is not None and store
+            and store.is_unverified_model_artifact(target)
         )
+        if not resumable_model_artifact:
+            return (
+                "error: write_file cannot replace an existing user-owned or verified file; "
+                "read it and use edit_file for a focused verified change"
+            )
     note = backup(target) if target.exists() and not created_in_transaction else ""
     if note.startswith("error"):
         return note
+    validation_error = source_validation_error(target, content)
+    if validation_error:
+        return f"error: {validation_error}; file was not changed"
     try:
         _transaction_capture(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        return f"wrote file: {target}{note}"
+        ownership = ""
+        if role == "Builder":
+            ownership = (
+                " (resumed unverified model artifact; Builder may revise it in this transaction)"
+                if resumable_model_artifact
+                else " (transaction-owned; Builder may revise it with write_file)"
+            )
+        return f"wrote file: {target}{ownership}{note}"
     except OSError as exc:
         return f"error writing file: {exc}"
 
@@ -683,13 +904,76 @@ def edit_file(path, old, new, expected_replacements=1):
     expected = expected_replacements or 1
     if actual != expected:
         return f"error: expected {expected} exact replacement(s), found {actual}; file was not changed"
-    note = backup(target)
+    candidate = original.replace(old, new, expected)
+    validation_error = source_validation_error(target, candidate)
+    if validation_error:
+        return f"error: {validation_error}; edit was automatically rejected and file was not changed"
+    snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
+    transaction_owned = bool(snapshot and not snapshot.get("existed"))
+    note = "" if transaction_owned else backup(target)
     if note.startswith("error"):
         return note
     try:
         _transaction_capture(target)
-        target.write_text(original.replace(old, new, expected), encoding="utf-8")
+        target.write_text(candidate, encoding="utf-8")
         return f"edited file: {target} ({expected} replacement(s)){note}"
+    except OSError as exc:
+        return f"error writing file: {exc}"
+
+
+def read_file_range(path, start_line=1, end_line=None):
+    target = safe_path(path)
+    if target is None:
+        return f"error: '{path}' is outside the workspace."
+    if not target.exists() or not target.is_file():
+        return f"error: file does not exist: {target}"
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return f"error reading file: {exc}"
+    start = max(1, int(start_line or 1))
+    end = min(len(lines), int(end_line or min(len(lines), start + 199)))
+    if start > len(lines) or end < start:
+        return f"error: invalid line range {start}-{end}; file has {len(lines)} lines"
+    selected = lines[start - 1:end]
+    return f"[lines {start}-{end} of {len(lines)}]\n" + "\n".join(
+        f"{number}: {line}" for number, line in enumerate(selected, start=start)
+    )
+
+
+def edit_file_range(path, start_line, end_line, new, role="System"):
+    target = safe_path(path)
+    if target is None:
+        return f"error: '{path}' is outside the workspace."
+    if not target.exists() or not target.is_file():
+        return f"error: file does not exist: {target}"
+    try:
+        original = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"error reading file: {exc}"
+    lines = original.splitlines(keepends=True)
+    start, end = int(start_line), int(end_line)
+    if start < 1 or end < start or end > len(lines):
+        return f"error: invalid line range {start}-{end}; file has {len(lines)} lines"
+    snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
+    transaction_owned = bool(snapshot and not snapshot.get("existed"))
+    span = end - start + 1
+    if not transaction_owned and role in {"Builder", "Repairer"} and span > max(120, int(len(lines) * 0.6)):
+        return "error: requested range is too broad for a pre-existing file; use smaller verified edits"
+    note = "" if transaction_owned else backup(target)
+    if note.startswith("error"):
+        return note
+    replacement = str(new)
+    if end < len(lines) and replacement and not replacement.endswith(("\n", "\r")):
+        replacement += "\n"
+    candidate = "".join(lines[:start - 1]) + replacement + "".join(lines[end:])
+    validation_error = source_validation_error(target, candidate)
+    if validation_error:
+        return f"error: {validation_error}; edit was automatically rejected and file was not changed"
+    try:
+        _transaction_capture(target)
+        target.write_text(candidate, encoding="utf-8")
+        return f"edited lines {start}-{end} in file: {target}{note}"
     except OSError as exc:
         return f"error writing file: {exc}"
 
@@ -740,6 +1024,17 @@ def run_file(path):
         if ext == ".py":
             cmd = [sys.executable, str(target)]
         elif ext == ".js":
+            source = target.read_text(encoding="utf-8", errors="replace")
+            if re.search(
+                r"\b(?:document|localStorage|sessionStorage|navigator|requestAnimationFrame)\b|\bwindow\s*[.[]",
+                source,
+            ):
+                return (
+                    "[not_applicable] browser-target JavaScript is not executed under Node because DOM/browser "
+                    "globals are intentionally unavailable there. Mutation-time JavaScript syntax validation "
+                    "already ran; use verify_web_app on the local HTML entry point for runtime behavior. Do not "
+                    "remove valid browser APIs merely to make this Node command run."
+                )
             cmd = ["node", str(target)]
         elif ext in (".cpp", ".cc"):
             exe = target.with_suffix(".out")
@@ -823,7 +1118,7 @@ def run_command(command):
 
 
 def run_tool(name, args, role="System"):
-    if role == "Falsifier" and name in {"write_file", "edit_file", "backup_file"}:
+    if role == "Falsifier" and name in {"write_file", "edit_file", "edit_file_range", "backup_file"}:
         return "error: Falsifier is read-only and may not modify files"
     if role == "Repairer" and name in {"write_file", "backup_file"}:
         return "error: Repairer may only make focused edit_file changes to existing files"
@@ -834,6 +1129,10 @@ def run_tool(name, args, role="System"):
         return write_file(args["path"], args["content"], role=role)
     if name == "edit_file":
         return edit_file(args["path"], args["old"], args["new"], args.get("expected_replacements", 1))
+    if name == "read_file_range":
+        return read_file_range(args["path"], args.get("start_line", 1), args.get("end_line"))
+    if name == "edit_file_range":
+        return edit_file_range(args["path"], args["start_line"], args["end_line"], args["new"], role=role)
     if name == "read_file":
         return read_file(args["path"])
     if name == "backup_file":
@@ -845,7 +1144,11 @@ def run_tool(name, args, role="System"):
     if name == "run_command":
         return run_command(args["command"])
     if name == "verify_web_app":
-        return json.dumps(browser_workspace_snapshot(args["path"], "tool"), ensure_ascii=False)
+        active = ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {}
+        profile = infer_web_profile(str(active.get("goal") or "web"), active)
+        return json.dumps(
+            browser_workspace_snapshot(args["path"], "tool", profile=profile), ensure_ascii=False
+        )
     return f"unknown tool: {name}"
 
 
@@ -857,8 +1160,11 @@ SYSTEM_PROMPT = (
     "You are a terminal coding agent working ONLY inside one workspace folder. "
     "Never access, describe, or reference any path outside it.\n"
     "Use read_file before explaining or editing a file - never answer from "
-    "general knowledge. Use write_file only to create a new file. Existing files are protected: "
-    "use edit_file for the smallest exact change after reading the current content. Use list_files if unsure what exists. "
+    "general knowledge. Use write_file to create a new file, or to continue an unverified model-owned artifact "
+    "when the tool explicitly permits it. Other existing files are protected: "
+    "use edit_file for the smallest exact change after reading the current content. A file created by Builder in the "
+    "active transaction is transaction-owned and may be revised with write_file. After one repeated exact-match failure, "
+    "use read_file_range and edit_file_range instead of guessing the old text. Use list_files if unsure what exists. "
     "Use run_file to execute code. For HTML/web work use verify_web_app or run_file on the HTML file, "
     "then inspect the returned browser evidence and screenshot.\n"
     "For every browser game, expose a non-visual test bridge at window.__AGENT_GAME__. It must provide "
@@ -890,12 +1196,27 @@ ROLE_SYSTEM_PROMPTS = {
 }
 
 
-def tools_for_role(role):
+def tools_for_role(role, tool_policy=None):
+    if role == "Builder" and tool_policy == "coherent_rewrite":
+        allowed = {
+            "write_file", "read_file", "read_file_range", "list_files",
+            "run_file", "run_command", "verify_web_app",
+        }
+        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    if role == "Builder" and tool_policy == "coherent_rewrite_followup":
+        allowed = {
+            "edit_file", "edit_file_range", "read_file", "read_file_range", "list_files",
+            "run_file", "run_command", "verify_web_app",
+        }
+        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     if role == "Falsifier":
-        allowed = {"read_file", "list_files", "run_file", "run_command", "verify_web_app"}
+        allowed = {"read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
         return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     if role == "Repairer":
-        allowed = {"edit_file", "read_file", "list_files", "run_file", "run_command", "verify_web_app"}
+        allowed = {
+            "edit_file", "edit_file_range", "read_file", "read_file_range",
+            "list_files", "run_file", "run_command", "verify_web_app",
+        }
         return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     return TOOLS
 
@@ -974,6 +1295,10 @@ def new_metrics(mode):
         "quality_reviews": 0, "browser_checks": 0, "verification_failures": 0,
         "task_too_broad_count": 0, "model_calls": 0, "tool_calls": 0,
         "invalid_tool_calls": 0,
+        "stage_continuations": 0,
+        "coherent_rewrite_recoveries": 0,
+        "provider_cpu_fallbacks": 0,
+        "provider_execution": "gpu_or_auto",
         "peak_estimated_context_tokens": 0, "elapsed_seconds": 0.0,
         "status": "unknown",
     }
@@ -981,9 +1306,12 @@ def new_metrics(mode):
 
 def reset_run(mode):
     global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, VISION_ENABLED_FOR_RUN, VISION_ERROR
-    global RUN_ID, ACTIVE_TRANSACTION
+    global RUN_ID, ACTIVE_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, FORCE_CPU_FOR_RUN
     RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     ACTIVE_TRANSACTION = None
+    ACTIVE_CONTRACT = None
+    ACTIVE_TOOL_CONTRACT = None
+    FORCE_CPU_FOR_RUN = False
     RUN = new_metrics(mode)
     TASKS = {}
     ROLE_STATUS = {
@@ -1006,6 +1334,9 @@ def reset_run(mode):
 
 
 def begin_durable_run(contract):
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT
+    ACTIVE_CONTRACT = dict(contract)
+    ACTIVE_TOOL_CONTRACT = dict(contract)
     store = get_memory_store()
     if not store or not RUN_ID:
         return
@@ -1017,6 +1348,12 @@ def begin_durable_run(contract):
         )
     except Exception as exc:
         print(f"[WARN] could not start durable run ledger: {exc}")
+
+
+def set_active_tool_contract(contract):
+    """Scope model-invoked verification to the requirements of the active stage."""
+    global ACTIVE_TOOL_CONTRACT
+    ACTIVE_TOOL_CONTRACT = dict(contract or {})
 
 
 def update_task_ledger(task_id, goal, status, summary="", parent_id=None, stage_index=None):
@@ -1053,6 +1390,7 @@ def remember_verified_outcome(task, contract, summary, changed_files):
             run_id=RUN_ID or None,
             task_id=task.get("id"),
         )
+        store.mark_artifacts_verified(changed_files, RUN_ID or None)
     except Exception as exc:
         print(f"[WARN] could not save verified outcome: {exc}")
 
@@ -1180,8 +1518,7 @@ def finish_metrics(status):
 
 def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, think=None,
                provider_retries=None, model_override=None, fallback_model=None, role="Builder"):
-    if requests is None:
-        raise ProviderError("requests dependency is unavailable")
+    global FORCE_CPU_FOR_RUN
     headers = {}
     api_key = os.environ.get("OLLAMA_API_KEY")
     if api_key:
@@ -1195,10 +1532,14 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     if fallback_model and fallback_model != requested_model:
         raise ProviderError("cross-model fallback is disabled by the single-model policy")
 
-    context_window = MODEL_POLICY.context_window(role)
-    # Reserve substantial context for Gemma's generated tool arguments. Large
-    # HTML writes and edit_file(old,new) calls otherwise end mid-JSON.
-    provider_messages = compact_messages(messages, max_chars=int(context_window * 1.5), keep_recent=4)
+    policy_context_window = MODEL_POLICY.context_window(role)
+    context_window = min(policy_context_window, 8192) if FORCE_CPU_FOR_RUN else policy_context_window
+    # Reserve substantial context for Gemma's generated tool arguments. CPU
+    # fallback uses a tighter projection to keep the combined 8K window safe.
+    message_ratio = 1.25 if FORCE_CPU_FOR_RUN else 1.5
+    provider_messages = compact_messages(
+        messages, max_chars=int(context_window * message_ratio), keep_recent=4
+    )
     print_context(provider_messages, context_window)
     payload = {
         "model": requested_model,
@@ -1217,12 +1558,15 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
             }.get(role, 2048),
         },
     }
+    if FORCE_CPU_FOR_RUN:
+        payload["options"]["num_gpu"] = 0
+        payload["options"]["num_predict"] = min(payload["options"]["num_predict"], 3072)
     if tools is not None:
         payload["tools"] = tools
     if response_format is not None:
         payload["format"] = response_format
-    if temperature is not None:
-        payload["options"].update({"temperature": temperature, "seed": 0})
+    effective_temperature = MODEL_POLICY.temperature(role) if temperature is None else temperature
+    payload["options"].update({"temperature": effective_temperature, "seed": 0})
     if think is not None:
         payload["think"] = think
 
@@ -1236,10 +1580,10 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                          tools=[tool["function"]["name"] for tool in (tools or [])],
                          structured=bool(response_format), think=think)
         try:
-            response = requests.post(
-                OLLAMA_URL, headers=headers, timeout=OLLAMA_TIMEOUT_SECONDS, json=payload
+            response = http_post_json(
+                OLLAMA_URL, headers=headers, timeout=OLLAMA_TIMEOUT_SECONDS, payload=payload
             )
-        except requests.exceptions.RequestException as exc:
+        except HttpTransportError as exc:
             last_error = f"could not reach Ollama at {OLLAMA_URL}: {exc}"
             response = None
 
@@ -1266,7 +1610,33 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
         record_run_event("provider_retry", model=requested_model, role=role,
                          attempt=attempt + 1, error=last_error)
         if attempt < retry_limit:
-            time.sleep(0.5 * (2 ** attempt))
+            transient_worker_crash = any(marker in last_error.casefold() for marker in (
+                "llama-server process has terminated", "cuda error", "shared object initialization",
+                "connection reset", "eof",
+            ))
+            if transient_worker_crash and not FORCE_CPU_FOR_RUN:
+                FORCE_CPU_FOR_RUN = True
+                RUN["provider_cpu_fallbacks"] += 1
+                RUN["provider_execution"] = "cpu_only_after_cuda_crash"
+                cpu_context = min(policy_context_window, 8192)
+                provider_messages = compact_messages(
+                    messages, max_chars=int(cpu_context * 1.25), keep_recent=4
+                )
+                payload["messages"] = provider_messages
+                payload["options"]["num_ctx"] = cpu_context
+                payload["options"]["num_gpu"] = 0
+                payload["options"]["num_predict"] = min(payload["options"]["num_predict"], 3072)
+                print(f"[PROVIDER DEGRADE] {requested_model} CPU-only after CUDA worker crash")
+                record_run_event(
+                    "provider_cpu_fallback", model=requested_model, role=role,
+                    context_window=cpu_context,
+                )
+            delay = (3.0 * (attempt + 1)) if transient_worker_crash else (0.5 * (2 ** attempt))
+            record_run_event(
+                "provider_backoff", model=requested_model, role=role,
+                seconds=delay, transient_worker_crash=transient_worker_crash,
+            )
+            time.sleep(delay)
     raise ProviderError(last_error)
 
 
@@ -1373,7 +1743,62 @@ def structured_model_call(prompt_text, validator, label, schema):
 # REUSABLE EXISTING TOOL LOOP (baseline and recursive leaves share this)
 # ---------------------------------------------------------------------------
 
-def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context=""):
+def tool_recovery_hint(tool_name, result, repeated_failures):
+    lower = str(result).casefold()
+    if tool_name == "edit_file" and repeated_failures >= 2 and (
+        "exact replacement" in lower or "found 0" in lower
+    ):
+        return (
+            "Stop repeating the same exact-string edit. Use read_file_range to inspect numbered lines, then "
+            "edit_file_range with a small bounded range. If the Builder created this file in the current "
+            "transaction, it may instead issue one complete write_file revision. Re-verify afterward."
+        )
+    if "incomplete or truncated" in lower and repeated_failures >= 2:
+        return (
+            "The tool JSON is being truncated. Put path first and make the next write/edit substantially smaller; "
+            "prefer read_file_range plus edit_file_range."
+        )
+    if tool_name == "edit_file_range" and repeated_failures >= 2 and "invalid line range" in lower:
+        return (
+            "The line numbers are stale or invalid. Read a small current range with read_file_range, then ensure "
+            "1 <= start_line <= end_line <= the reported total before one focused edit_file_range. Do not guess "
+            "line numbers or replace a protected existing file."
+        )
+    if repeated_failures >= 2 and "syntax validation failed" in lower:
+        return (
+            "The proposed edit is repeatedly syntactically incomplete. Re-read the enclosing function or block, "
+            "then submit one smaller balanced replacement that includes every required closing delimiter. Run "
+            "fresh verification after the accepted edit."
+        )
+    return ""
+
+
+def coherent_rewrite_preflight(args):
+    """Reject an obvious function fragment before it replaces a full model draft."""
+    target = safe_path(args.get("path"))
+    content = args.get("content")
+    if target is None or not target.is_file() or not isinstance(content, str):
+        return ""
+    try:
+        existing = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    old_size = len(existing.strip())
+    new_size = len(content.strip())
+    if old_size >= 1200 and new_size < max(300, int(old_size * 0.30)):
+        ratio = round((100 * new_size / old_size), 1) if old_size else 0
+        return (
+            f"error: coherent rewrite rejected before mutation: proposed {new_size}-character content is only "
+            f"{ratio}% of the existing {old_size}-character model draft and appears to be a fragment. Re-read "
+            "the file and submit one complete replacement that preserves all previously verified behavior, "
+            "interfaces, event handlers, and current-stage requirements. No file was changed."
+        )
+    return ""
+
+
+def execute_agent_task(
+    task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="", tool_policy=None,
+):
     if messages is None:
         messages = [{"role": "system", "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)}]
     durable_context = relevant_memory_context(
@@ -1388,13 +1813,34 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     status = "unknown"
     summary = ""
     provider_error = None
+    repeated_failures = {}
+    mutation_failures = {}
+    last_mutation_target = None
+    last_verification_signature = ()
+    stagnant_verifications = 0
+    recovery_strategy = None
+    recovery_targets = []
+    stop_early = False
+    coherent_rewrite_written = False
+    coherent_followup_unlocked = False
 
     ROLE_STATUS[role] = "working"
     event(f"[{role.upper()}] {task_id} executing", role=role, task=task_id, action="model/tool loop")
 
     for _step in range(MAX_TOOL_STEPS):
+        active_tool_policy = (
+            "coherent_rewrite_followup"
+            if tool_policy == "coherent_rewrite" and coherent_followup_unlocked
+            else tool_policy
+        )
+        offered_tools = tools_for_role(role, tool_policy=active_tool_policy)
+        offered_tool_names = {
+            tool["function"]["name"] for tool in offered_tools
+        }
         try:
-            assistant_message = ask_ollama(messages, tools=tools_for_role(role), role=role)
+            assistant_message = ask_ollama(
+                messages, tools=offered_tools, role=role,
+            )
         except ProviderError as exc:
             provider_error = str(exc)
             status = "provider_failure"
@@ -1433,19 +1879,87 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             RUN["tool_calls"] += 1
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id,
                   action=f"using {name}", tool=name)
-            argument_issue = tool_argument_error(name, args)
-            if argument_issue:
+            if name not in offered_tool_names:
                 RUN["invalid_tool_calls"] += 1
-                result = argument_issue
+                if active_tool_policy == "coherent_rewrite":
+                    result = (
+                        f"error: tool {name!r} is unavailable under the active coherent rewrite policy; "
+                        "use read tools, then write_file for an eligible unverified model-owned artifact, "
+                        "and run fresh verification"
+                    )
+                elif active_tool_policy == "coherent_rewrite_followup":
+                    result = (
+                        f"error: tool {name!r} is unavailable during focused post-rewrite repair; "
+                        "use one small edit_file or edit_file_range change justified by the fresh evidence, "
+                        "then verify"
+                    )
+                else:
+                    result = f"error: tool {name!r} is unavailable for role {role}"
             else:
-                try:
-                    result = run_tool(name, args, role=role)
-                except (KeyError, TypeError, ValueError) as exc:
-                    result = f"error: invalid arguments for {name}: {exc}"
+                argument_issue = tool_argument_error(name, args)
+                if argument_issue:
+                    RUN["invalid_tool_calls"] += 1
+                    result = argument_issue
+                else:
+                    rewrite_issue = (
+                        coherent_rewrite_preflight(args)
+                        if active_tool_policy == "coherent_rewrite" and name == "write_file"
+                        else ""
+                    )
+                    if rewrite_issue:
+                        result = rewrite_issue
+                    else:
+                        try:
+                            result = run_tool(name, args, role=role)
+                        except (KeyError, TypeError, ValueError) as exc:
+                            result = f"error: invalid arguments for {name}: {exc}"
             print(f"[RESULT] {str(result)[:300]}")
-            tool_evidence.append({"tool": name, "target": target, "result": str(result)[:1000]})
+            projected_result = (
+                verification_failure_digest(result, 1400)
+                if name == "verify_web_app" and tool_result_failed(result)
+                else str(result)[:1000]
+            )
+            tool_evidence.append({"tool": name, "target": target, "result": projected_result})
             memory = update_memory(memory, name, args, str(result), role=role, task_id=task_id)
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
+
+            if tool_policy == "coherent_rewrite" and name == "write_file" \
+                    and not tool_result_failed(result):
+                coherent_rewrite_written = True
+
+            if tool_policy == "coherent_rewrite" and coherent_rewrite_written \
+                    and name == "verify_web_app" and tool_result_failed(result):
+                coherent_followup_unlocked = True
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "The mandatory coherent rewrite is complete and fresh browser evidence now isolates the "
+                        "remaining defect. Focused edit_file/edit_file_range tools are unlocked for a small "
+                        "evidence-backed correction. Do not rewrite again; verify immediately after the fix."
+                    ),
+                })
+
+            # A contract-aware browser verifier is executable proof for the
+            # active stage. Weak models commonly keep "polishing" after this
+            # point and regress already-correct behavior, so the orchestrator
+            # owns the stopping decision instead of asking for another sample.
+            if role in {"Builder", "Repairer"} and name == "verify_web_app" \
+                    and not tool_result_failed(result):
+                status = "done"
+                summary = "Deterministic browser verification passed; stop-on-proof completed this stage."
+                print("[STAGE VERIFIED] stopping before unnecessary model edits")
+                stop_early = True
+                break
+
+            failure_key = (name, str(target))
+            if tool_result_failed(result):
+                repeated_failures[failure_key] = repeated_failures.get(failure_key, 0) + 1
+            else:
+                repeated_failures[failure_key] = 0
+            recovery_hint = tool_recovery_hint(name, result, repeated_failures[failure_key])
+            if recovery_hint:
+                print(f"[TOOL RECOVERY] {recovery_hint}")
+                messages.append({"role": "user", "content": recovery_hint})
 
             if memory.get("last_error") and name in ("run_file", "run_command", "verify_web_app"):
                 print(f"[ERROR DETECTED] {memory['last_error'][:200]}")
@@ -1458,9 +1972,58 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 })
             if name == "write_file" and memory.get("last_fix_attempt"):
                 print(f"[FIX ATTEMPT] {memory['last_fix_attempt']}")
+            if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"}:
+                if str(target) != "-":
+                    last_mutation_target = str(target)
+                effective_target = str(target) if str(target) != "-" else last_mutation_target
+                if effective_target and tool_result_failed(result):
+                    mutation_failures[effective_target] = mutation_failures.get(effective_target, 0) + 1
+                    candidate = safe_path(effective_target)
+                    store = get_memory_store()
+                    rewrite_safe = bool(candidate and (
+                        not candidate.exists()
+                        or (store and store.is_unverified_model_artifact(candidate))
+                    ))
+                    if mutation_failures[effective_target] >= 4 and rewrite_safe:
+                        status = "too_broad"
+                        recovery_strategy = "rewrite_unverified"
+                        recovery_targets = [effective_target]
+                        summary = (
+                            "STAGNANT_MUTATION: repeated invalid or contradictory edits targeted the same "
+                            "model-owned artifact; stop patching and use a fresh coherent model-authored rewrite pass"
+                        )
+                        print("[STAGNATION] repeated mutation failures; routing to coherent rewrite continuation")
+                        stop_early = True
+                        break
+            if role == "Builder" and name == "verify_web_app" and tool_result_failed(result):
+                signature = verification_failure_signature(result)
+                if signature and signature == last_verification_signature:
+                    stagnant_verifications += 1
+                else:
+                    last_verification_signature = signature
+                    stagnant_verifications = 1 if signature else 0
+                if stagnant_verifications >= 3:
+                    status = "too_broad"
+                    recovery_strategy = "fresh_focused"
+                    recovery_targets = list(dict.fromkeys(memory.get("recent_files", [])[:5]))
+                    summary = (
+                        "STAGNANT_VERIFICATION: the same executable browser failures survived three verification "
+                        "cycles; continue in a fresh focused evidence context without replacing the working artifact"
+                    )
+                    print("[STAGNATION] repeated browser failure; routing to fresh focused continuation")
+                    stop_early = True
+                    break
+        if stop_early:
+            break
     else:
         status = "too_broad"
         summary = "TASK_TOO_BROAD: existing maximum tool-step limit reached"
+        if role == "Builder" and any(
+            key[0] == "verify_web_app" and count >= 3
+            for key, count in repeated_failures.items()
+        ):
+            recovery_strategy = "fresh_focused"
+            recovery_targets = [last_mutation_target] if last_mutation_target else []
 
     ROLE_STATUS[role] = "done" if status == "done" else "failed"
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
@@ -1468,6 +2031,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     return {
         "status": status, "summary": compact_text(summary, 700), "messages": messages,
         "memory": memory, "tool_evidence": tool_evidence, "provider_error": provider_error,
+        "recovery_strategy": recovery_strategy, "recovery_targets": recovery_targets,
     }
 
 
@@ -1724,6 +2288,8 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
         with sync_playwright() as p:
             browser = p.chromium.launch(**browser_launch_kwargs())
             page = browser.new_page(viewport={"width": 1440, "height": 900})
+            if profile and profile.kind == "timer":
+                page.clock.install()
             page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
             page.on("pageerror", lambda exc: page_errors.append(str(exc)))
             page.on("response", lambda response: network_errors.append(
@@ -1856,6 +2422,9 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
                     }""")
                     interaction_checks.append({"name": "touch_control", "passed": touch_after != touch_before,
                                                "before": touch_before, "after": touch_after})
+            if profile:
+                interaction_checks.extend(run_profile_interactions(page, profile))
+            page.set_viewport_size({"width": 1440, "height": 900})
             page.screenshot(path=str(screenshot), full_page=True)
             browser.close()
         print(f"[BROWSER] title={json.dumps(title)}")
@@ -2268,11 +2837,26 @@ def execute_builder_stages(task, contract, memory, base_context=""):
             f"[STAGE {stage['index']}/{len(stages)}] {stage['name']}",
             role="Builder", task=stage_id, action="bounded implementation stage",
         )
+        stage_contract = {
+            "status": "ready",
+            "goal": stage["goal"],
+            "requirements": list(stage.get("requirements", [])),
+            "constraints": list(local_contract.get("constraints", [])),
+            "success_criteria": [stage.get("acceptance", "verify this stage's observable behavior")],
+            # Preserve project identity for profile selection without importing
+            # requirements that belong to later stages.
+            "original_goal": local_contract.get("goal", task.get("goal", "")),
+        }
+        set_active_tool_contract(stage_contract)
+        stage_profile = infer_web_profile(stage["goal"], stage_contract)
+        observable_checks = interaction_expectations(stage_profile)
+        observable_context = "\n".join(f"- {item}" for item in observable_checks)
         stage_context = (
             f"{base_context}\n\n"
             f"FULL BOUNDED STAGE PLAN: {plan}\n"
             f"THIS PASS: stage {stage['index']} of {len(stages)} - {stage['name']}\n"
             f"STAGE ACCEPTANCE FOCUS: {stage.get('acceptance', 'verify observable behavior')}\n"
+            f"DETERMINISTIC STAGE OBSERVABLES:\n{observable_context or '- Run the relevant executable checks.'}\n"
             f"PRIOR STAGE SUMMARIES: {json.dumps(previous_summaries[-3:], ensure_ascii=False)[:2400]}\n"
             "You are the sole author of all implementation code. Inspect the real workspace first. "
             "Implement only this stage, preserve completed behavior, and run focused executable verification. "
@@ -2282,15 +2866,73 @@ def execute_builder_stages(task, contract, memory, base_context=""):
             stage["goal"], memory, role="Builder", task_id=stage_id,
             extra_context=stage_context,
         )
+        stage_evidence = list(result.get("tool_evidence", []))
+        continuation_count = 0
+
+        while result["status"] == "too_broad" and continuation_count < MAX_STAGE_CONTINUATIONS:
+            continuation_count += 1
+            RUN["stage_continuations"] += 1
+            RUN["builder_calls"] += 1
+            memory = result["memory"]
+            latest_error = compact_text(memory.get("last_error") or "(no unresolved verification error recorded)", 1800)
+            recent_evidence = evidence_for_review(stage_evidence, limit=6)
+            rewrite_recovery = result.get("recovery_strategy") == "rewrite_unverified"
+            recovery_targets = list(result.get("recovery_targets") or [])
+            store = get_memory_store()
+            rewrite_candidates = store.unverified_model_artifacts() if store else []
+            if rewrite_recovery:
+                RUN["coherent_rewrite_recoveries"] += 1
+            update_task_ledger(
+                stage_id, stage["goal"], "continuing",
+                "bounded pass exhausted; continuing from the same transactional workspace",
+                parent_id=task.get("id"), stage_index=stage["index"],
+            )
+            event(
+                f"[STAGE CONTINUATION {continuation_count}/{MAX_STAGE_CONTINUATIONS}] {stage['name']}",
+                role="Builder", task=stage_id, action="fresh-context continuation",
+            )
+            if rewrite_recovery:
+                recovery_instruction = (
+                    "COHERENT REWRITE RECOVERY: repeated patching preserved the same executable failure. Stop the "
+                    "micro-patch loop. Inspect the relevant files once, then use write_file to replace the defective "
+                    "unverified model-owned artifact(s) with a simple, complete, internally coherent implementation "
+                    "authored entirely by you. Do not call edit_file or edit_file_range before that first coherent "
+                    "rewrite. Preserve selectors/interfaces used by the other files, avoid duplicated functions/state, "
+                    "then run syntax and fresh browser verification. The tool will refuse any user-owned or verified "
+                    f"file. FAILURE TARGET HINTS: {json.dumps(recovery_targets, ensure_ascii=False)}. "
+                    f"ALLOWED FULL-REWRITE CANDIDATES: {json.dumps(rewrite_candidates, ensure_ascii=False)}"
+                )
+            else:
+                recovery_instruction = (
+                    "The CURRENT WORKSPACE is authoritative and contains your own valid progress. Inspect only the "
+                    "exact area implicated by the latest evidence, make the smallest syntax-valid correction, and run "
+                    "fresh executable verification. Do not rebuild or duplicate the implementation."
+                )
+            continuation_context = (
+                f"{stage_context}\n\n"
+                f"CONTINUATION PASS {continuation_count}/{MAX_STAGE_CONTINUATIONS}: This is the same stage and the "
+                "same active transaction, not a new project.\n"
+                f"{recovery_instruction}\n"
+                f"ACTIONABLE VERIFICATION DIGEST: {latest_error}\n"
+                f"RECENT NON-STALE EVIDENCE: {json.dumps(recent_evidence, ensure_ascii=False)[:3200]}"
+            )
+            continuation_kwargs = {"tool_policy": "coherent_rewrite"} if rewrite_recovery else {}
+            result = execute_agent_task(
+                stage["goal"], memory, role="Builder", task_id=stage_id,
+                extra_context=continuation_context, **continuation_kwargs,
+            )
+            stage_evidence.extend(result.get("tool_evidence", []))
+
         last_result = result
         memory = result["memory"]
-        combined_evidence.extend(result.get("tool_evidence", []))
+        combined_evidence.extend(stage_evidence)
         record = {
             "task_id": stage_id,
             "goal": stage["goal"],
             "status": result["status"],
             "summary": result.get("summary", ""),
             "stage_index": stage["index"],
+            "continuations": continuation_count,
         }
         stage_records.append(record)
         if result["status"] != "done":
@@ -2341,14 +2983,13 @@ def _execute_builder_impl(task, contract, memory, parent_summary="", dependency_
     risk = task_risk(task["goal"])
     predictor = challenger = ""
     if risk == "high":
-        predictor = short_role_call("Predictor", task, verification_contract,
-                                    "Predict likely failure points/interfaces/regressions. Short checklist only.")
-        if any(word in task["goal"].lower() for word in ("design", "architecture", "approach")):
-            challenger = short_role_call("Challenger", task, verification_contract,
-                                         "Challenge the approach for simplicity/safety before implementation. Do not modify files.")
+        predictor = "Use the deterministic project playbook and verify after each bounded stage."
+        ROLE_STATUS["Predictor"] = "deterministic"
+        ROLE_STATUS["Challenger"] = "unused"
 
     context = leaf_context(contract, task, parent_summary, dependency_summaries, predictor, challenger)
     result = execute_builder_stages(task, contract, memory, base_context=context)
+    set_active_tool_contract(verification_contract)
     memory = result["memory"]
     if result["status"] == "too_broad":
         RUN["task_too_broad_count"] += 1
@@ -2642,11 +3283,59 @@ def read_user_prompt():
     return input("You> ").strip()
 
 
+def extract_explicit_requirements(raw_goal):
+    requirements = []
+    for raw_line in str(raw_goal).splitlines():
+        line = raw_line.strip()
+        match = re.match(r"^(?:[-*•]|\d+[.)])\s+(.+)$", line)
+        if match:
+            item = match.group(1).strip()
+            if len(item) >= 3:
+                requirements.append(item)
+    return requirements
+
+
+def normalize_goal_contract(raw_goal, contract):
+    normalized = dict(contract)
+    explicit = extract_explicit_requirements(raw_goal)
+    if len(explicit) >= 2:
+        normalized["requirements"] = explicit
+        record_run_event(
+            "contract_requirement_normalization",
+            source="explicit_prompt_bullets", count=len(explicit),
+        )
+    return normalized
+
+
 def get_goal_contract(raw_goal, interactive=True):
+    explicit = extract_explicit_requirements(raw_goal)
+    if len(explicit) >= 2:
+        first_line = next(
+            (
+                line.strip() for line in str(raw_goal).splitlines()
+                if line.strip() and not re.match(
+                    r"^(?:requirements?|المتطلبات)\s*:?$", line.strip(), re.IGNORECASE
+                )
+            ),
+            compact_text(raw_goal, 1200),
+        )
+        result = {
+            "status": "ready",
+            "question": "",
+            "goal": compact_text(first_line, 1200),
+            "requirements": explicit,
+            "constraints": [],
+            "success_criteria": ["every explicit requirement is implemented and verified"],
+            "original_goal": raw_goal,
+            "clarifications": [],
+        }
+        record_run_event("deterministic_goal_contract", requirement_count=len(explicit))
+        return result
     answers = []
     for attempt in range(MAX_CLARIFICATION_QUESTIONS + 1):
         result = understand_goal(raw_goal, "\n".join(answers))
         if result["status"] == "ready":
+            result = normalize_goal_contract(raw_goal, result)
             result["original_goal"] = raw_goal
             result["clarifications"] = list(answers)
             return result
@@ -2711,6 +3400,12 @@ def normalize_execution_choice(choice, contract):
 
 
 def decide_execution_mode(raw_goal, contract):
+    deterministic_guard = normalize_execution_choice(
+        {"mode": "recursive", "reason": "cohesion probe"}, contract
+    )
+    if deterministic_guard["mode"] == "baseline":
+        return deterministic_guard
+
     prompt_chars = len(raw_goal)
     prompt_lines = raw_goal.count("\n") + 1
     prompt_text = f"""Choose the smallest orchestration mode that is likely to complete this coding goal reliably with the SELECTED model.
@@ -2777,6 +3472,7 @@ def run_baseline_request(user_text, memory, history=None, contract_override=None
         "status": "ready", "goal": user_text, "requirements": [user_text], "constraints": [],
         "success_criteria": ["the requested change is implemented and verified"], "original_goal": user_text,
     }
+    contract = normalize_goal_contract(contract.get("original_goal", user_text), contract)
     begin_durable_run(contract)
     TASKS["ROOT"] = {"id": "ROOT", "goal": contract.get("goal", user_text), "depth": 0, "parent": None,
                       "status": "running", "children": [], "summary": ""}
@@ -3096,10 +3792,10 @@ def _self_test_browser(tmp, install_browser=False):
     return passed, result, screenshot
 
 def ollama_reachable():
-    if not OLLAMA_URL or requests is None:
+    if not OLLAMA_URL:
         return False
     try:
-        response = requests.get(OLLAMA_URL.rsplit("/api/chat", 1)[0] + "/api/tags", timeout=2)
+        response = http_get_json(OLLAMA_URL.rsplit("/api/chat", 1)[0] + "/api/tags", timeout=2)
         return response.status_code == 200
     except Exception:
         return False

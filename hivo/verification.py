@@ -14,9 +14,41 @@ class WebVerificationProfile:
     required_interactions: tuple[str, ...]
 
 
+_INTERACTION_EXPECTATIONS = {
+    "timer_start_changes_visible_time": "Start must make the visible MM:SS countdown decrease under an advanced browser clock.",
+    "timer_pause_freezes_visible_time": "Pause must freeze the already-started visible countdown without resetting it.",
+    "timer_reset_restores_visible_time": "Reset must restore the configured phase duration and remain usable after Start/Pause.",
+    "timer_phase_switches_and_counts_session": (
+        "After one complete displayed focus duration, the visible phase label must change to Break and a dedicated "
+        "visible label such as 'Completed Sessions: 0' must increment to 1. A current-session ordinal inside status "
+        "text is not a completed-session counter."
+    ),
+    "timer_duration_configuration": (
+        "Provide at least two visible numeric duration inputs. Applying a valid Focus value must update the visible "
+        "clock, and a value below a positive min bound must fail native validity."
+    ),
+    "settings_persistence": "A changed visible numeric setting must survive change/blur, optional Save/Apply, and reload.",
+    "keyboard_activation": "Focusing the primary Start button and pressing Enter must activate it.",
+    "responsive_no_overflow": "At 390px width, controls must remain visible with no horizontal overflow.",
+    "reduced_motion": "prefers-reduced-motion must disable non-trivial animation and transition motion.",
+}
+
+
+def interaction_expectations(profile: WebVerificationProfile) -> tuple[str, ...]:
+    """Human-readable contract observables for a weak builder before it edits."""
+    return tuple(
+        _INTERACTION_EXPECTATIONS[name]
+        for name in profile.required_interactions
+        if name in _INTERACTION_EXPECTATIONS
+    )
+
+
 def infer_web_profile(task_text: str, contract: dict | None = None) -> WebVerificationProfile:
     combined = f"{task_text} {json.dumps(contract or {}, ensure_ascii=False)}".lower()
     game = any(word in combined for word in ("game", "3d", "webgl", "three.js", "hovercraft"))
+    timer = not game and any(word in combined for word in (
+        "timer", "countdown", "pomodoro", "focus timer", "مؤقت", "عد تنازلي",
+    ))
     required: list[str] = []
     if game:
         required.append("keyboard_movement")
@@ -32,8 +64,33 @@ def infer_web_profile(task_text: str, contract: dict | None = None) -> WebVerifi
             required.append("score_persistence")
         if any(word in combined for word in ("touch", "mobile", "responsive controls")):
             required.append("touch_control")
+    elif timer:
+        required.extend((
+            "timer_start_changes_visible_time",
+            "timer_pause_freezes_visible_time",
+            "timer_reset_restores_visible_time",
+        ))
+        if any(word in combined for word in (
+            "configurable", "focus and break durations", "duration setting", "duration settings",
+            "sensible validation", "مدة التركيز", "مدة الاستراحة",
+        )):
+            required.append("timer_duration_configuration")
+        if any(word in combined for word in (
+            "phase switch", "phase switching", "automatic focus", "automatic break",
+            "completed-session", "completed session", "session count", "cycle count",
+            "تبديل المرحلة", "الجلسات المكتملة",
+        )):
+            required.append("timer_phase_switches_and_counts_session")
+        if any(word in combined for word in ("persist", "localstorage", "save settings", "حفظ")):
+            required.append("settings_persistence")
+        if any(word in combined for word in ("keyboard", "accessible", "accessibility", "لوحة المفاتيح")):
+            required.append("keyboard_activation")
+        if any(word in combined for word in ("responsive", "mobile", "متجاوب")):
+            required.append("responsive_no_overflow")
+        if any(word in combined for word in ("reduced-motion", "reduced motion", "تقليل الحركة")):
+            required.append("reduced_motion")
     return WebVerificationProfile(
-        kind="game" if game else "web",
+        kind="game" if game else "timer" if timer else "web",
         require_title=True,
         require_canvas=game,
         require_game_bridge=game,

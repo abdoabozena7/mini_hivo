@@ -41,6 +41,34 @@ class PlaybookTests(unittest.TestCase):
         self.assertLess(len(context), 3000)
         self.assertIn("PROJECT PROFILE", context)
 
+    def test_new_no_build_web_app_gets_clean_file_boundary_guidance(self):
+        contract = {
+            "goal": "Build a browser focus timer with a local HTML entry point",
+            "requirements": ["working controls"],
+            "constraints": ["no build step"],
+        }
+
+        context = playbook_context(contract)
+
+        self.assertIn("markup, styles, and behavior in separate small local files", context)
+
+    def test_six_requirements_use_one_weak_model_pass_each(self):
+        contract = {
+            "goal": "Build a focus timer",
+            "requirements": [f"requirement {index}" for index in range(1, 7)],
+            "constraints": [],
+            "success_criteria": ["verified"],
+        }
+
+        stages = build_execution_stages(contract)
+
+        self.assertEqual(len(stages), 6)
+        self.assertEqual([len(stage["requirements"]) for stage in stages], [1, 1, 1, 1, 1, 1])
+        self.assertEqual(
+            [item for stage in stages for item in stage["requirements"]],
+            contract["requirements"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

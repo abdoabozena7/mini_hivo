@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from typing import Any
 
 
@@ -16,6 +15,7 @@ PLAYBOOKS: dict[str, tuple[str, ...]] = {
     ),
     "web_app": (
         "Establish the real data/state flow before styling secondary surfaces.",
+        "For a new no-build browser app, keep markup, styles, and behavior in separate small local files unless the request explicitly requires one file.",
         "Implement loading, empty, error, and success behavior where relevant.",
         "Verify primary keyboard/pointer flows and responsive layout in a real browser.",
     ),
@@ -91,9 +91,9 @@ def _is_complex(contract: dict[str, Any], profile: str) -> bool:
     )
 
 
-def build_execution_stages(contract: dict[str, Any], max_stages: int = 4) -> list[dict[str, Any]]:
+def build_execution_stages(contract: dict[str, Any], max_stages: int = 6) -> list[dict[str, Any]]:
     """Create bounded, requirement-preserving stages without another model call."""
-    maximum = max(1, min(4, int(max_stages)))
+    maximum = max(1, min(6, int(max_stages)))
     profile = classify_project(contract)
     requirements = [str(item).strip() for item in contract.get("requirements", []) if str(item).strip()]
     if not requirements:
@@ -107,7 +107,10 @@ def build_execution_stages(contract: dict[str, Any], max_stages: int = 4) -> lis
             "requirements": requirements,
         }]
 
-    stage_count = min(maximum, max(2, math.ceil(len(requirements) / 2)))
+    # The pinned model has low measured task capacity, so keep each explicit
+    # requirement in its own pass while the contract fits the bounded maximum.
+    # Larger contracts are still distributed without dropping or reordering.
+    stage_count = min(maximum, max(2, len(requirements)))
     if len(requirements) == 1 and stage_count > 1:
         requirement = requirements[0]
         return [
@@ -126,9 +129,16 @@ def build_execution_stages(contract: dict[str, Any], max_stages: int = 4) -> lis
                 "acceptance": PLAYBOOKS[profile][min(1, len(PLAYBOOKS[profile]) - 1)],
             },
         ][:maximum]
-    buckets: list[list[str]] = [[] for _ in range(stage_count)]
-    for index, requirement in enumerate(requirements):
-        buckets[min(stage_count - 1, index * stage_count // len(requirements))].append(requirement)
+    base_size, extras = divmod(len(requirements), stage_count)
+    sizes = [base_size for _ in range(stage_count)]
+    distribution = [0, *range(stage_count - 1, 0, -1)]
+    for index in range(extras):
+        sizes[distribution[index]] += 1
+    buckets: list[list[str]] = []
+    cursor = 0
+    for size in sizes:
+        buckets.append(requirements[cursor:cursor + size])
+        cursor += size
 
     guidance = PLAYBOOKS[profile]
     stages: list[dict[str, Any]] = []

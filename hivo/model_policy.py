@@ -42,4 +42,17 @@ class SingleModelPolicy:
             return 4096
         if role_key in {"falsifier", "repairer"}:
             return 8192
-        return 16384
+        if role_key == "builder":
+            # Bounded stages keep real prompts well below this value. Reserving
+            # 16K caused repeated CUDA worker initialization failures locally.
+            return 12288
+        return 8192
+
+    def temperature(self, role: str) -> float:
+        """Use reproducible low-variance sampling for weak-model coding loops."""
+        role_key = role.strip().lower()
+        if role_key in {"builder", "repairer"}:
+            return 0.1
+        if role_key == "visual":
+            return 0.2
+        return 0.0

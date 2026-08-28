@@ -2,6 +2,22 @@ import unittest
 
 
 class EvidencePolicyTests(unittest.TestCase):
+    def test_not_applicable_runtime_probe_is_neither_success_nor_failure_evidence(self):
+        from hivo.evidence import latest_verification_evidence, unresolved_tool_failures
+
+        evidence = [{
+            "tool": "run_file", "target": "script.js",
+            "result": "[not_applicable] browser-target JavaScript must run in a browser",
+        }]
+
+        self.assertEqual(latest_verification_evidence(evidence), [])
+        self.assertEqual(unresolved_tool_failures(evidence), [])
+
+    def test_compact_json_false_result_is_a_failure(self):
+        from hivo.evidence import result_failed
+
+        self.assertTrue(result_failed('{"passed":false,"failures":[]}'))
+
     def test_a_later_success_resolves_an_earlier_verification_failure(self):
         from hivo.evidence import unresolved_tool_failures
 

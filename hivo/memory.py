@@ -20,7 +20,7 @@ from typing import Any, Iterable
 MEMORY_DIRECTORY = ".hivo"
 MEMORY_DATABASE = "memory.sqlite3"
 LEGACY_MEMORY_FILE = ".agent_memory.json"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def _now() -> str:
@@ -49,6 +49,7 @@ class MemoryStore:
         self.db_path = self.workspace / MEMORY_DIRECTORY / MEMORY_DATABASE
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
+        self._recover_interrupted_artifacts()
         self._migrate_legacy_once()
 
     def _connect(self) -> sqlite3.Connection:
@@ -128,6 +129,18 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_run_task
                     ON events(run_id, task_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS artifacts (
+                    path TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    first_run_id TEXT,
+                    last_run_id TEXT,
+                    verified INTEGER NOT NULL DEFAULT 0,
+                    content_sha256 TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS artifacts_owner_verified
+                    ON artifacts(owner, verified, updated_at DESC);
                 """
             )
             connection.execute(
@@ -135,6 +148,169 @@ class MemoryStore:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (SCHEMA_VERSION,),
             )
+
+    def _artifact_path(self, path: str | Path) -> str | None:
+        try:
+            raw = Path(str(path))
+            target = raw if raw.is_absolute() else self.workspace / raw
+            return target.resolve().relative_to(self.workspace).as_posix()
+        except (OSError, ValueError):
+            return None
+
+    def _artifact_hash(self, relative_path: str) -> str | None:
+        target = self.workspace / relative_path
+        try:
+            if not target.is_file():
+                return None
+            return hashlib.sha256(target.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def _recover_interrupted_artifacts(self) -> None:
+        """Backfill files written by a process that stopped before finalization."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT e.target, e.run_id, MIN(e.created_at) AS first_at,
+                          MAX(e.created_at) AS last_at
+                   FROM events e
+                   JOIN runs r ON r.run_id = e.run_id
+                   WHERE e.tool = 'write_file' AND e.status = 'succeeded'
+                     AND e.target IS NOT NULL AND e.target != ''
+                     AND r.status = 'running'
+                   GROUP BY e.target, e.run_id"""
+            ).fetchall()
+            for row in rows:
+                relative = self._artifact_path(str(row["target"]))
+                digest = self._artifact_hash(relative) if relative else None
+                if not relative or not digest:
+                    continue
+                connection.execute(
+                    """INSERT OR IGNORE INTO artifacts(
+                           path, owner, first_run_id, last_run_id, verified,
+                           content_sha256, created_at, updated_at
+                       ) VALUES(?, 'model', ?, ?, 0, ?, ?, ?)""",
+                    (
+                        relative, row["run_id"], row["run_id"], digest,
+                        row["first_at"] or _now(), row["last_at"] or _now(),
+                    ),
+                )
+
+    def mark_model_artifact(self, path: str | Path, run_id: str | None = None) -> bool:
+        """Record a successful model-authored full write and its exact bytes."""
+        relative = self._artifact_path(path)
+        digest = self._artifact_hash(relative) if relative else None
+        if not relative or not digest:
+            return False
+        now = _now()
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT INTO artifacts(
+                       path, owner, first_run_id, last_run_id, verified,
+                       content_sha256, created_at, updated_at
+                   ) VALUES(?, 'model', ?, ?, 0, ?, ?, ?)
+                   ON CONFLICT(path) DO UPDATE SET
+                     owner='model',
+                     last_run_id=excluded.last_run_id,
+                     verified=0,
+                     content_sha256=excluded.content_sha256,
+                     updated_at=excluded.updated_at""",
+                (relative, run_id, run_id, digest, now, now),
+            )
+        return True
+
+    def is_unverified_model_artifact(self, path: str | Path) -> bool:
+        """Allow resumption only while the on-disk bytes still match the model write."""
+        relative = self._artifact_path(path)
+        if not relative:
+            return False
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT content_sha256 FROM artifacts
+                   WHERE path = ? AND owner = 'model' AND verified = 0""",
+                (relative,),
+            ).fetchone()
+        if not row:
+            return False
+        digest = self._artifact_hash(relative)
+        return bool(digest and digest == str(row["content_sha256"]))
+
+    def unverified_model_artifacts(self, limit: int = 20) -> list[str]:
+        """Return only model drafts whose current bytes still match the ledger."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT path, content_sha256 FROM artifacts
+                   WHERE owner = 'model' AND verified = 0
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (max(1, int(limit)),),
+            ).fetchall()
+        result: list[str] = []
+        for row in rows:
+            relative = str(row["path"])
+            digest = self._artifact_hash(relative)
+            if digest and digest == str(row["content_sha256"]):
+                result.append(relative)
+        return result
+
+    def refresh_unverified_model_artifact(
+        self, path: str | Path, run_id: str | None = None,
+    ) -> bool:
+        """Refresh bytes after a focused Builder edit without claiming user files."""
+        relative = self._artifact_path(path)
+        digest = self._artifact_hash(relative) if relative else None
+        if not relative or not digest:
+            return False
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """UPDATE artifacts SET content_sha256 = ?,
+                       last_run_id = COALESCE(?, last_run_id), updated_at = ?
+                   WHERE path = ? AND owner = 'model' AND verified = 0""",
+                (digest, run_id, _now(), relative),
+            )
+        return cursor.rowcount > 0
+
+    def mark_artifacts_verified(
+        self, paths: Iterable[str | Path], run_id: str | None = None,
+    ) -> int:
+        normalized = [self._artifact_path(path) for path in paths]
+        normalized = [path for path in normalized if path]
+        if not normalized:
+            return 0
+        with self._connection() as connection:
+            changed = 0
+            for path in dict.fromkeys(normalized):
+                cursor = connection.execute(
+                    """UPDATE artifacts SET verified = 1,
+                           last_run_id = COALESCE(?, last_run_id), updated_at = ?
+                       WHERE path = ? AND owner = 'model'""",
+                    (run_id, _now(), path),
+                )
+                changed += max(0, cursor.rowcount)
+        return changed
+
+    def reconcile_rolled_back_artifact(self, path: str | Path, *, existed: bool) -> None:
+        """Keep ownership aligned with bytes restored by a normal rollback."""
+        relative = self._artifact_path(path)
+        if not relative:
+            return
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT verified FROM artifacts WHERE path = ? AND owner = 'model'",
+                (relative,),
+            ).fetchone()
+            if not row or bool(row["verified"]):
+                return
+            if not existed:
+                connection.execute(
+                    "DELETE FROM artifacts WHERE path = ? AND verified = 0",
+                    (relative,),
+                )
+                return
+            digest = self._artifact_hash(relative)
+            if digest:
+                connection.execute(
+                    "UPDATE artifacts SET content_sha256 = ?, updated_at = ? WHERE path = ?",
+                    (digest, _now(), relative),
+                )
 
     def _metadata(self, key: str) -> str | None:
         with self._connection() as connection:
@@ -222,11 +398,19 @@ class MemoryStore:
                 (run_id, task_id, parent_id, str(goal), str(status), str(summary), stage_index, _now()),
             )
 
-    def latest_resumable_run(self) -> dict | None:
+    def latest_resumable_run(self, *, exclude_run_id: str | None = None) -> dict | None:
         with self._connection() as connection:
-            run = connection.execute(
-                "SELECT * FROM runs WHERE status = 'running' ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
+            if exclude_run_id:
+                run = connection.execute(
+                    """SELECT * FROM runs
+                       WHERE status = 'running' AND run_id <> ?
+                       ORDER BY started_at DESC LIMIT 1""",
+                    (exclude_run_id,),
+                ).fetchone()
+            else:
+                run = connection.execute(
+                    "SELECT * FROM runs WHERE status = 'running' ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()
             if not run:
                 return None
             tasks = connection.execute(
@@ -348,7 +532,10 @@ class MemoryStore:
                 """SELECT target, MAX(id) AS newest
                    FROM events
                    WHERE target IS NOT NULL AND target != ''
-                     AND tool IN ('read_file', 'write_file', 'edit_file', 'run_file', 'verify_web_app')
+                     AND tool IN (
+                       'read_file', 'read_file_range', 'write_file', 'edit_file', 'edit_file_range',
+                       'run_file', 'verify_web_app'
+                     )
                    GROUP BY target ORDER BY newest DESC LIMIT ?""",
                 (max(1, int(limit)),),
             ).fetchall()
