@@ -528,7 +528,8 @@ class AdaptiveArchitectureTests(unittest.TestCase):
                 }
             return {"status": "done", "summary": "child verified", "memory": memory}
 
-        with patch.object(mini, "decompose_task", side_effect=decompose):
+        with patch.object(mini, "decompose_task", side_effect=decompose), \
+                patch.object(mini, "_maybe_search_alternate_strategy", return_value=None):
             result = mini.solve_task(
                 root, 0, contract, {}, {}, fit_decider=fit, leaf_executor=leaf,
                 aggregator=Mock(return_value={"status": "done", "summary": "unused", "memory": {}}),
@@ -554,7 +555,8 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "summary": "failed deterministic evidence gate after repair limit", "memory": {},
             "failure_evidence": [{"tool": "run_command", "target": "pytest", "result": "1 failed"}],
         }
-        with patch.object(mini, "decompose_task") as decompose:
+        with patch.object(mini, "decompose_task") as decompose, \
+                patch.object(mini, "_maybe_search_alternate_strategy", return_value=None):
             result = mini.solve_task(
                 task, mini.MAX_DEPTH, contract, {}, {}, leaf_executor=Mock(return_value=leaf),
             )
@@ -569,6 +571,135 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(diagnosis["category"], "model_capability_floor")
         self.assertEqual(diagnosis["next_action"], "declare_limit")
         self.assertEqual(mini.build_node_diagnosis()[0]["why_failed"], "model_capability_floor")
+
+    def test_terminal_too_broad_backtracks_to_a_materially_different_decomposition(self):
+        contract = self.contract(["state", "transition", "verification"])
+        parent = mini.make_task(
+            "3.1.3.1.1", "Implement the combat behavior", 5, "3.1.3.1",
+            ["combat behavior is verified"], ["src/game.js"],
+        )
+        terminal = mini.make_task(
+            "3.1.3.1.1.1", "Finish combat behavior", 6, parent["id"],
+            ["combat behavior is verified"], ["src/game.js"],
+        )
+        mini.TASKS[parent["id"]] = parent
+        mini.TASKS[terminal["id"]] = terminal
+        parent["children"].append(terminal["id"])
+        mini._record_decomposition_branch(
+            parent,
+            [{"goal": terminal["goal"], "done_when": terminal["done_when"], "scope_hint": terminal["scope_hint"]}],
+            [terminal],
+            kind="initial",
+        )
+        alternative_specs = [
+            {"goal": "Track one enemy position", "done_when": ["position changes deterministically"], "scope_hint": ["src/game.js"]},
+            {"goal": "Spawn one enemy outside the viewport", "done_when": ["exactly one enemy is observable"], "scope_hint": ["src/game.js"]},
+        ]
+
+        def leaf(task, _contract, memory, _repo, _parent, _deps):
+            if task["id"] == terminal["id"]:
+                return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+                        "summary": "terminal branch still exceeds capacity", "memory": memory}
+            return {"status": "done", "summary": f"verified {task['id']}", "memory": memory}
+
+        def aggregate(_task, _contract, children, memory, _repo, root=False):
+            self.assertTrue(all(item["result"]["status"] == "done" for item in children))
+            return {"status": "done", "summary": "alternative subtree integrated", "memory": memory}
+
+        with patch.object(mini, "decompose_alternative_task", return_value=alternative_specs) as alternative:
+            result = mini._execute_children(
+                parent, [terminal], parent["depth"], contract, {}, {}, "", [],
+                fit_decider=lambda *_args: {"decision": "execute"},
+                leaf_executor=leaf, aggregator=aggregate,
+            )
+
+        mini.recompute_search_metrics()
+        self.assertEqual(result["status"], "done")
+        alternative.assert_called_once()
+        self.assertEqual(mini.RUN["decomposition_backtracks"], 1)
+        self.assertEqual(mini.RUN["alternative_decompositions"], 1)
+        self.assertEqual(mini.RUN["alternative_decomposition_rescues"], 1)
+        self.assertEqual(parent["decomposition_alternatives"][0]["status"], "verified")
+        self.assertEqual(terminal["failure_diagnosis"]["next_action"], "backtrack_decomposition")
+        self.assertTrue(parent["failed_decompositions"])
+        packet = mini.build_node_context(parent, contract, None, {}, failure_evidence=[])
+        self.assertIn("FAILED DECOMPOSITIONS", packet)
+        self.assertIn("Finish combat behavior", packet)
+
+    def test_terminal_backtracking_is_bounded_and_records_capability_floor_candidate(self):
+        contract = self.contract(["state", "transition"])
+        parent = mini.make_task(
+            "3.1.3.1.1", "Implement the combat behavior", 5, "3.1.3.1",
+            ["combat behavior is verified"], ["src/game.js"],
+        )
+        terminal = mini.make_task(
+            "3.1.3.1.1.1", "Finish combat behavior", 6, parent["id"],
+            ["combat behavior is verified"], ["src/game.js"],
+        )
+        mini.TASKS[parent["id"]] = parent
+        mini.TASKS[terminal["id"]] = terminal
+        parent["children"].append(terminal["id"])
+        mini._record_decomposition_branch(
+            parent,
+            [{"goal": terminal["goal"], "done_when": terminal["done_when"], "scope_hint": terminal["scope_hint"]}],
+            [terminal],
+            kind="initial",
+        )
+        alternatives = [
+            [{"goal": "Observe enemy position", "done_when": ["position is observable"], "scope_hint": []},
+             {"goal": "Observe spawn count", "done_when": ["spawn count is observable"], "scope_hint": []}],
+            [{"goal": "Apply one collision state transition", "done_when": ["collision transition is observable"], "scope_hint": []},
+             {"goal": "Verify one reset outcome", "done_when": ["reset outcome is executable"], "scope_hint": []}],
+        ]
+
+        def leaf(_task, _contract, memory, _repo, _parent, _deps):
+            return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+                    "summary": "terminal branch still exceeds capacity", "memory": memory}
+
+        aggregator = Mock()
+        with patch.object(mini, "decompose_alternative_task", side_effect=alternatives):
+            result = mini._execute_children(
+                parent, [terminal], parent["depth"], contract, {}, {}, "", [],
+                fit_decider=lambda *_args: {"decision": "execute"},
+                leaf_executor=leaf, aggregator=aggregator,
+            )
+
+        mini.recompute_search_metrics()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(mini.RUN["decomposition_backtracks"], 2)
+        self.assertEqual(mini.RUN["alternative_decompositions"], 2)
+        self.assertEqual(mini.RUN["alternative_decomposition_rescues"], 0)
+        self.assertEqual(mini.RUN["decomposition_backtrack_rescue_rate"], 0.0)
+        self.assertTrue(parent["decomposition_search_exhausted"])
+        self.assertEqual(parent["failure_diagnosis"]["category"], "model_capability_floor")
+        self.assertEqual(mini.RUN["capability_floor_nodes"], 1)
+        aggregator.assert_not_called()
+
+    def test_strategy_search_is_bounded_to_two_candidates_and_one_execution_choice(self):
+        task = mini.make_task(
+            "1.2.2.4.1.1", "Implement collision reset in updateCollision()", 6, "1.2.2.4.1",
+            ["collision reset is verified"], ["src/game.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "deterministic check failed", "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        strategies = [
+            {"label": "state transition", "approach": "set explicit collision state then reset", "verification_plan": "check before and after state"},
+            {"label": "boundary wrapper", "approach": "wrap the existing collision boundary and delegate reset", "verification_plan": "check the existing function result"},
+        ]
+        with patch.object(mini, "structured_model_call", side_effect=[
+            {"strategies": strategies}, {"selected_index": 1, "rationale": "different boundary"},
+        ]):
+            planned = mini.search_alternate_strategies(task, self.contract(), failure, {}, {})
+            selected = mini.select_alternate_strategy(task, planned, failure)
+
+        self.assertEqual(len(planned), mini.MAX_ALTERNATE_STRATEGIES)
+        self.assertEqual(selected, 1)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["challenger_calls"], 1)
+        mini.recompute_search_metrics()
+        self.assertEqual(mini.RUN["strategy_rescue_rate"], 0.0)
 
     def test_implementation_failure_does_not_force_split_when_fit_rejects_granularity_rescue(self):
         contract = self.contract(["one focused behavior"])

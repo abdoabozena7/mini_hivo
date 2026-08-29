@@ -53,6 +53,8 @@ MAX_TOOL_STEPS = 28
 MAX_DEPTH = 6
 MAX_CHILDREN = 4
 MAX_TOTAL_TASKS = 64
+MAX_DECOMPOSITION_ALTERNATIVES = 2
+MAX_ALTERNATE_STRATEGIES = 2
 MAX_CLARIFICATION_QUESTIONS = 5
 MAX_REPAIRS_PER_LEAF = 2
 MAX_STRUCTURED_RETRIES = 5
@@ -943,6 +945,16 @@ def new_metrics(mode):
         "resplit_nodes_with_any_verified_child": 0,
         "resplit_nodes_fully_recovered": 0,
         "granularity_rescue_rate": 0.0,
+        "terminal_too_broad_nodes": 0,
+        "decomposition_backtracks": 0,
+        "alternative_decompositions": 0,
+        "alternative_decomposition_rescues": 0,
+        "decomposition_backtrack_rescue_rate": None,
+        "strategy_searches": 0,
+        "alternate_strategies_attempted": 0,
+        "strategy_rescues": 0,
+        "strategy_rescue_rate": None,
+        "capability_floor_nodes": 0,
         "root_verified": False,
         "verified_nodes": 0, "failed_nodes": 0, "integration_failures": 0,
         "max_depth_failures": 0,
@@ -1029,6 +1041,18 @@ def compact_task_tree():
             entry["failure_diagnosis"] = task.get("failure_diagnosis")
         if task.get("resplit") is not None:
             entry["resplit"] = task.get("resplit")
+        if task.get("decomposition_history"):
+            entry["decomposition_history"] = task.get("decomposition_history", [])[-3:]
+        if task.get("failed_decompositions"):
+            entry["failed_decompositions"] = task.get("failed_decompositions", [])[-3:]
+        if task.get("decomposition_alternatives"):
+            entry["decomposition_alternatives"] = task.get("decomposition_alternatives", [])[-3:]
+        if task.get("terminal_too_broad") is not None:
+            entry["terminal_too_broad"] = task.get("terminal_too_broad")
+        if task.get("decomposition_search_exhausted"):
+            entry["decomposition_search_exhausted"] = True
+        if task.get("strategy_search") is not None:
+            entry["strategy_search"] = task.get("strategy_search")
         if task.get("integration_manifest") is not None:
             entry["integration_manifest"] = task.get("integration_manifest")
         if task.get("integration_preflight") is not None:
@@ -1080,6 +1104,7 @@ def finish_metrics(status):
     RUN["elapsed_seconds"] = round(time.time() - RUN_STARTED, 2)
     RUN["status"] = status
     recompute_resplit_metrics()
+    recompute_search_metrics()
     recompute_integration_metrics()
     RUN["task_tree"] = compact_task_tree()
     RUN["node_diagnosis"] = build_node_diagnosis()
@@ -1097,6 +1122,7 @@ def finish_metrics(status):
             pass
     print_task_tree()
     print_resplit_metrics()
+    print_search_metrics()
     print_integration_metrics()
     print_node_diagnosis()
     print("\n[RUN METRICS]")
@@ -1722,6 +1748,15 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "attempts": [], "failure_diagnosis": None,
         "last_failure_type": None,
         "resplit": None,
+        "decomposition_history": [],
+        "failed_decompositions": [],
+        "active_decomposition_id": None,
+        "decomposition_alternatives": [],
+        "decomposition_backtracks": 0,
+        "alternative_decomposition_rescued": False,
+        "terminal_too_broad": None,
+        "decomposition_search_exhausted": False,
+        "strategy_search": None,
         "integration_manifest": None,
         "integration_preflight": None,
     }
@@ -1896,7 +1931,438 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
         RUN["max_depth"] = max(RUN["max_depth"], child["depth"])
         update_task_ledger(child)
         children.append(child)
+    _record_decomposition_branch(
+        task, specs, children, kind="resplit" if force_smaller else "initial",
+    )
     return children
+
+
+def _compact_decomposition_spec(spec):
+    spec = spec if isinstance(spec, dict) else {}
+    return {
+        "goal": compact_text(spec.get("goal", ""), 420),
+        "done_when": bounded_list(spec.get("done_when", []), 6, 220),
+        "scope_hint": bounded_list(spec.get("scope_hint", []), 6, 140),
+    }
+
+
+def _record_decomposition_branch(task, specs, children, kind="initial", branch_id=None):
+    """Record one decomposition boundary before its children execute."""
+    if not isinstance(task, dict):
+        return None
+    history = task.setdefault("decomposition_history", [])
+    branch_id = branch_id or f"{kind}-{len(history) + 1}"
+    branch = {
+        "branch_id": str(branch_id),
+        "kind": str(kind),
+        "child_ids": [str(child.get("id", "")) for child in children if isinstance(child, dict)],
+        "children": [_compact_decomposition_spec(spec) for spec in (specs or [])],
+        "status": "running",
+        "children_result": [],
+        "failure_evidence": [],
+        "terminal_child_ids": [],
+    }
+    history.append(branch)
+    task["active_decomposition_id"] = branch["branch_id"]
+    return branch
+
+
+def _decomposition_tokens(value):
+    stop_words = {
+        "a", "an", "and", "are", "as", "at", "be", "by", "complete", "create", "do",
+        "for", "from", "implement", "make", "of", "one", "the", "then", "to", "with",
+        "verify", "verified", "use", "using", "existing", "minimal", "remaining", "behavior",
+    }
+    return {
+        token for token in re.findall(r"[a-z0-9_$]+", str(value).casefold())
+        if len(token) > 2 and token not in stop_words
+    }
+
+
+def _decomposition_spec_tokens(spec):
+    spec = spec if isinstance(spec, dict) else {}
+    values = [spec.get("goal", ""), *list(spec.get("done_when", []) or []), *list(spec.get("scope_hint", []) or [])]
+    tokens = set()
+    for value in values:
+        tokens.update(_decomposition_tokens(value))
+    return tokens
+
+
+def _materially_different_decomposition(specs, failed_decompositions):
+    """Reject alternatives that are only lexical paraphrases of failed branches."""
+    specs = list(specs or [])
+    failed_specs = []
+    for branch in failed_decompositions or []:
+        if not isinstance(branch, dict):
+            continue
+        failed_specs.extend(branch.get("children", []) or [])
+    if not specs or not failed_specs:
+        return bool(specs)
+    old_tokens = [_decomposition_spec_tokens(spec) for spec in failed_specs]
+    new_tokens = [_decomposition_spec_tokens(spec) for spec in specs]
+    similarities = []
+    for current in new_tokens:
+        if not current:
+            similarities.append(1.0)
+            continue
+        similarities.append(max(
+            len(current & previous) / max(1, len(current | previous))
+            for previous in old_tokens
+        ))
+    # A branch is invalid when every new child is effectively the same boundary
+    # as something that already failed.  One genuinely new observable boundary
+    # is enough to keep a useful mixed decomposition.
+    return not all(score >= 0.78 for score in similarities)
+
+
+def _alternative_fallback_child_contracts(task):
+    """Produce generic observable boundaries if structured planning is unavailable."""
+    goal = compact_text(task.get("goal", "task"), 520)
+    requirements = list(task.get("done_when", []) or [])
+    if requirements:
+        return [
+            {
+                "goal": f"Define the smallest observable state or input boundary for: {goal}",
+                "done_when": [f"one explicit state/input boundary for {requirements[0]} is observable"],
+                "scope_hint": list(task.get("scope_hint", [])),
+            },
+            {
+                "goal": f"Implement one deterministic transition at that boundary for: {goal}",
+                "done_when": [f"the transition for {requirements[min(1, len(requirements) - 1)]} is observable"],
+                "scope_hint": list(task.get("scope_hint", [])),
+            },
+            {
+                "goal": f"Verify one end-to-end observable outcome for: {goal}",
+                "done_when": ["one deterministic outcome is verified without relying on narrative claims"],
+                "scope_hint": list(task.get("scope_hint", [])),
+            },
+        ]
+    return [
+        {
+            "goal": f"Expose one observable state boundary for: {goal}",
+            "done_when": ["one state boundary is observable and deterministic"],
+            "scope_hint": list(task.get("scope_hint", [])),
+        },
+        {
+            "goal": f"Implement one deterministic transition for: {goal}",
+            "done_when": ["one transition is observable and deterministic"],
+            "scope_hint": list(task.get("scope_hint", [])),
+        },
+        {
+            "goal": f"Verify one observable outcome for: {goal}",
+            "done_when": ["one executable outcome is verified"],
+            "scope_hint": list(task.get("scope_hint", [])),
+        },
+    ]
+
+
+def compact_failed_decompositions(task):
+    """Project prior failed boundaries into a bounded parent/Node Packet."""
+    if not isinstance(task, dict):
+        return []
+    result = []
+    for branch in task.get("decomposition_history", []) or []:
+        if not isinstance(branch, dict) or branch.get("status") not in {"failed", "exhausted", "blocked"}:
+            continue
+        result.append({
+            "branch_id": str(branch.get("branch_id", "")),
+            "kind": str(branch.get("kind", "")),
+            "children": list(branch.get("children", []) or [])[:MAX_CHILDREN],
+            "children_result": list(branch.get("children_result", []) or [])[:MAX_CHILDREN],
+            "terminal_child_ids": list(branch.get("terminal_child_ids", []) or [])[:MAX_CHILDREN],
+            "why_failed": compact_text(branch.get("why_failed", ""), 420),
+            "failure_evidence": list(branch.get("failure_evidence", []) or [])[:4],
+        })
+    return result[-MAX_DECOMPOSITION_ALTERNATIVES - 1:]
+
+
+def decompose_alternative_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None,
+                               terminal_failure=None):
+    """Ask for a materially different decomposition after a terminal broad failure."""
+    failed_decompositions = compact_failed_decompositions(task)
+    goal = compact_text(task.get("goal", "task"), 1000)
+    terminal_failure = terminal_failure if isinstance(terminal_failure, dict) else {}
+    prompt_text = f"""Create 2-4 ALTERNATIVE structured child contracts for the current parent node.
+This is decomposition BACKTRACKING after a terminal child still returned TASK_TOO_BROAD.
+Do NOT continue the same decomposition direction and do NOT paraphrase a failed child.
+The new children must be materially smaller in simultaneous reasoning load and use
+different observable boundaries. Prefer one state transition, one input/output,
+one interface, or one deterministic behavior per child. Each child must have a
+concrete executable done_when condition. Children together must preserve the parent goal.
+
+FAILED DECOMPOSITIONS (a new child is invalid if it merely restates one of these):
+{json.dumps(failed_decompositions, ensure_ascii=False)[:5200] or '(none)'}
+
+TERMINAL FAILURE:
+{json.dumps(terminal_failure, ensure_ascii=False)[:2200] or '(none)'}
+ROOT CONTRACT: {compact_contract(contract)}
+PARENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
+PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}
+DEPENDENCIES: {json.dumps((dependency_summaries or [])[-4:], ensure_ascii=False)[:2000]}
+REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
+
+    def validator(data):
+        return _children_validator(data) and _materially_different_decomposition(
+            data.get("children", []), failed_decompositions,
+        )
+
+    try:
+        data = structured_model_call(prompt_text, validator, "alternative-decompose-task", children_schema())
+        specs = data["children"]
+    except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
+        specs = _alternative_fallback_child_contracts(task)
+        record_run_event("structured_fallback", label="alternative-decompose-task", error=str(exc))
+    if not _materially_different_decomposition(specs, failed_decompositions):
+        record_run_event(
+            "alternative_decomposition_rejected", task_id=task.get("id"),
+            reason="candidate boundaries paraphrased a failed decomposition",
+        )
+        return []
+    return list(specs)[:MAX_CHILDREN]
+
+
+def alternate_strategy_schema():
+    strategy = {
+        "type": "object", "properties": {
+            "label": {"type": "string"},
+            "approach": {"type": "string"},
+            "verification_plan": {"type": "string"},
+        },
+        "required": ["label", "approach", "verification_plan"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object", "properties": {
+            "strategies": {"type": "array", "items": strategy,
+                           "minItems": MAX_ALTERNATE_STRATEGIES, "maxItems": MAX_ALTERNATE_STRATEGIES},
+        },
+        "required": ["strategies"], "additionalProperties": False,
+    }
+
+
+def _alternate_strategy_validator(data):
+    if not isinstance(data, dict) or not isinstance(data.get("strategies"), list):
+        return False
+    strategies = data["strategies"]
+    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
+        return False
+    for strategy in strategies:
+        if not isinstance(strategy, dict) or not all(
+            isinstance(strategy.get(key), str) and strategy[key].strip()
+            for key in ("label", "approach", "verification_plan")
+        ):
+            return False
+    first = _decomposition_tokens(strategies[0]["approach"])
+    second = _decomposition_tokens(strategies[1]["approach"])
+    overlap = len(first & second) / max(1, len(first | second))
+    return overlap < 0.78 and strategies[0]["label"].casefold() != strategies[1]["label"].casefold()
+
+
+def _alternate_strategy_fallback(task):
+    goal = compact_text(task.get("goal", "the focused node"), 620)
+    return [
+        {
+            "label": "extend_existing_boundary",
+            "approach": (
+                f"Inspect the existing function or state boundary that already owns this behavior, then make one "
+                f"minimal local extension for: {goal}. Preserve existing control flow and interfaces."
+            ),
+            "verification_plan": "Run the narrowest deterministic check for the existing boundary and the requested outcome.",
+        },
+        {
+            "label": "explicit_state_transition",
+            "approach": (
+                f"Model the requested behavior as one explicit input/state transition for: {goal}; implement the "
+                "smallest observable transition and connect it through the existing entry point."
+            ),
+            "verification_plan": "Exercise the input/state transition directly and verify the observable before/after state.",
+        },
+    ]
+
+
+def search_alternate_strategies(task, contract, failure_result, memory, repo_snapshot,
+                                parent_summary="", dependency_summaries=None):
+    """Plan two non-mutating strategies for a small implementation failure."""
+    RUN["strategy_searches"] = RUN.get("strategy_searches", 0) + 1
+    evidence = _failure_evidence_from_result(failure_result)
+    node_packet = build_node_context(
+        task, contract, get_memory_store(), repo_snapshot, parent_summary, dependency_summaries, evidence,
+    )
+    prompt_text = f"""Generate exactly TWO materially different implementation strategies for this SMALL failed node.
+Do not edit files. Do not propose another decomposition. Strategy A and Strategy B must use different
+implementation boundaries or mechanisms, and each must include a cheap executable verification plan.
+The current deterministic failure is evidence, not a request to repeat the same approach.
+
+CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
+FAILURE EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:3600]}
+NODE PACKET: {node_packet[:5200]}
+Return only the two candidate strategies in the schema."""
+    try:
+        data = structured_model_call(
+            prompt_text, _alternate_strategy_validator, "alternate-strategy-search", alternate_strategy_schema(),
+        )
+        strategies = data["strategies"]
+    except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
+        strategies = _alternate_strategy_fallback(task)
+        record_run_event("structured_fallback", label="alternate-strategy-search", error=str(exc))
+    strategies = strategies[:MAX_ALTERNATE_STRATEGIES]
+    task["strategy_search"] = {
+        "status": "planned",
+        "strategies": [
+            {"label": compact_text(item.get("label", ""), 80),
+             "approach": compact_text(item.get("approach", ""), 700),
+             "verification_plan": compact_text(item.get("verification_plan", ""), 400)}
+            for item in strategies
+        ],
+        "failure_evidence": evidence[-4:],
+    }
+    record_run_event(
+        "strategy_search", task_id=task.get("id"),
+        strategies=[compact_text(item.get("label", ""), 80) for item in strategies],
+    )
+    return strategies
+
+
+def select_alternate_strategy(task, strategies, failure_result):
+    """Use one cheap challenger decision; only the selected strategy may mutate."""
+    strategies = list(strategies or [])
+    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
+        return 0
+    RUN["challenger_calls"] = RUN.get("challenger_calls", 0) + 1
+    schema = {
+        "type": "object", "properties": {
+            "selected_index": {"type": "integer", "enum": list(range(MAX_ALTERNATE_STRATEGIES))},
+            "rationale": {"type": "string"},
+        },
+        "required": ["selected_index", "rationale"], "additionalProperties": False,
+    }
+
+    def validator(data):
+        return (
+            isinstance(data, dict)
+            and data.get("selected_index") in range(MAX_ALTERNATE_STRATEGIES)
+            and isinstance(data.get("rationale"), str)
+            and bool(data["rationale"].strip())
+        )
+
+    prompt_text = f"""Act as a cheap read-only Challenger for one small failed coding node.
+Compare the TWO proposed strategies against the deterministic failure. Choose exactly one index for execution.
+Prefer the approach that changes the implementation boundary materially, preserves existing interfaces, and has
+an executable verification path. Do not edit files and do not invent a third strategy.
+NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
+FAILURE: {json.dumps(_failure_evidence_from_result(failure_result), ensure_ascii=False)[:2600]}
+STRATEGIES: {json.dumps(strategies, ensure_ascii=False)[:4200]}"""
+    try:
+        choice = structured_model_call(prompt_text, validator, "strategy-challenger", schema)
+    except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
+        choice = {"selected_index": 0, "rationale": "deterministic first-candidate fallback"}
+        record_run_event("structured_fallback", label="strategy-challenger", error=str(exc))
+    index = int(choice.get("selected_index", 0))
+    task.setdefault("strategy_search", {})["selected_index"] = index
+    task["strategy_search"]["challenger_rationale"] = compact_text(choice.get("rationale", ""), 420)
+    record_run_event(
+        "strategy_selected", task_id=task.get("id"), selected_index=index,
+        rationale=task["strategy_search"]["challenger_rationale"],
+    )
+    return index
+
+
+def execute_selected_strategy(task, contract, strategy, failure_result, memory, repo_snapshot,
+                              parent_summary="", dependency_summaries=None):
+    """Execute and verify only the challenger-selected strategy."""
+    strategy = strategy if isinstance(strategy, dict) else {}
+    RUN["alternate_strategies_attempted"] = RUN.get("alternate_strategies_attempted", 0) + 1
+    label = compact_text(strategy.get("label", "alternative"), 80).replace(" ", "-") or "alternative"
+    task_id = f"{task.get('id', 'NODE')}:strategy:{label}"
+    node_context = build_node_context(
+        task, contract, get_memory_store(), repo_snapshot, parent_summary, dependency_summaries,
+        _failure_evidence_from_result(failure_result),
+    )
+    context = (
+        f"{node_context}\n\nSELECTED ALTERNATE STRATEGY (the only candidate to execute):\n"
+        f"{json.dumps(strategy, ensure_ascii=False)[:2400]}\n"
+        "Implement only this strategy for the current small node. Do not broaden scope or try another strategy. "
+        "Run the stated executable verification before stopping."
+    )
+    global ACTIVE_TOOL_CONTRACT
+    ACTIVE_TOOL_CONTRACT = {
+        "goal": task["goal"], "requirements": task.get("done_when", []),
+        "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
+    }
+    begin_transaction(task_id)
+    builder = execute_agent_task(
+        task["goal"], memory, role="Builder", task_id=task_id, extra_context=context,
+    )
+    memory = builder.get("memory", memory)
+    if builder.get("status") in {"provider_failure", "too_broad"}:
+        rollback_transaction()
+        result = {
+            "status": "failed" if builder.get("status") == "provider_failure" else "too_broad",
+            "failure_type": "ENVIRONMENT_ERROR" if builder.get("status") == "provider_failure" else "TASK_TOO_BROAD",
+            "summary": builder.get("summary", "alternate strategy execution failed"),
+            "memory": memory, "builder": builder,
+        }
+        task.setdefault("strategy_search", {})["outcome"] = "failed"
+        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
+        return result
+    falsifier = falsify_task(task, ACTIVE_TOOL_CONTRACT, memory, builder, repo_snapshot, node_context)
+    memory = falsifier.get("memory", memory)
+    if falsifier.get("status") == "provider_failure":
+        rollback_transaction()
+        result = {
+            "status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": falsifier.get("summary", ""),
+            "memory": memory, "builder": builder, "falsifier": falsifier,
+        }
+        task.setdefault("strategy_search", {})["outcome"] = "failed"
+        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
+        return result
+    browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT)
+    gate = evidence_gate(builder, falsifier, browser)
+    event(
+        f"[STRATEGY VERIFY {task.get('id')}] {'PASS' if gate.get('passed') else 'FAIL'}",
+        role="Quality Review", task=task.get("id"), action="alternate strategy verification",
+    )
+    if not gate.get("passed"):
+        rollback_transaction()
+        result = {
+            "status": "failed", "failure_type": classify_failure(builder, gate, browser, falsifier),
+            "summary": "alternate strategy failed deterministic evidence gate", "memory": memory,
+            "builder": builder, "falsifier": falsifier, "browser": browser, "gate": gate,
+            "failure_evidence": gate.get("deterministic_failures", []),
+        }
+        task.setdefault("strategy_search", {})["outcome"] = "failed"
+        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
+        return result
+    changed = commit_transaction()
+    remember_verified_outcome(task, contract, builder.get("summary", "alternate strategy verified"), changed)
+    result = {
+        "status": "done", "summary": builder.get("summary", "alternate strategy verified"),
+        "memory": memory, "builder": builder, "falsifier": falsifier, "browser": browser,
+        "gate": gate, "changed_files": changed, "strategy": strategy,
+    }
+    task.setdefault("strategy_search", {})["outcome"] = "rescued"
+    task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
+    RUN["strategy_rescues"] = RUN.get("strategy_rescues", 0) + 1
+    record_run_event("strategy_rescue", task_id=task.get("id"), strategy=label, changed_files=changed)
+    return result
+
+
+def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_snapshot,
+                                     parent_summary="", dependency_summaries=None):
+    if not isinstance(task, dict) or not isinstance(leaf_result, dict):
+        return None
+    if leaf_result.get("failure_type") != "IMPLEMENTATION_ERROR" or not _looks_like_tiny_scope(task):
+        return None
+    strategies = search_alternate_strategies(
+        task, contract, leaf_result, memory, repo_snapshot, parent_summary, dependency_summaries,
+    )
+    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
+        return None
+    selected = select_alternate_strategy(task, strategies, leaf_result)
+    return execute_selected_strategy(
+        task, contract, strategies[selected], leaf_result, memory, repo_snapshot,
+        parent_summary, dependency_summaries,
+    )
 
 
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
@@ -1943,6 +2409,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         "target": str(item.get("target", ""))[:180],
         "result": compact_text(item.get("result", ""), 500),
     } for item in failure_evidence[-4:]]
+    failed_decompositions = compact_failed_decompositions(task)
     packet = (
         f"ROOT CONTRACT:\n{compact_contract(root_contract, max_chars=MAX_ROOT_PACKET_CHARS)}\n\n"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
@@ -1952,6 +2419,8 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"{json.dumps(bounded_list(project_invariants, 12, MAX_INTEGRATION_FACT_CHARS), ensure_ascii=False)[:1500] or '(none)'}\n\n"
         f"RELEVANT PROJECT MEMORY:\n{memory_excerpt[:1200] or '(none)'}\n\n"
         f"FAILURE EVIDENCE:\n{json.dumps(failure_projection, ensure_ascii=False)[:1500] if failure_projection else '(none)'}\n\n"
+        f"FAILED DECOMPOSITIONS (do not paraphrase these boundaries):\n"
+        f"{json.dumps(failed_decompositions, ensure_ascii=False)[:2600] if failed_decompositions else '(none)'}\n\n"
         f"REPOSITORY HINTS:\n{repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1900)}\n\n"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
     )
@@ -2684,10 +3153,23 @@ def diagnose_failure(task, result, evidence=None):
         category = "local_integration_state_corruption"
         confidence = "high" if has_integration_preflight else "medium"
         rationale = "Verified child work reached a parent integration boundary with concrete shared-state or interface conflicts."
+    elif result.get("decomposition_search_exhausted"):
+        category = "model_capability_floor"
+        confidence = "low"
+        rationale = (
+            "The original decomposition and the bounded alternative decomposition attempts all remained too broad; "
+            "this is evidence for a capability floor or a non-decomposition mechanism, not proof of either."
+        )
     elif status == "too_broad" or failure_type == "TASK_TOO_BROAD":
         category = "scope_too_broad"
         confidence = "high"
-        rationale = "The Builder explicitly reported a capacity/scope overflow."
+        if at_max_depth and (task.get("terminal_too_broad") or result.get("terminal_too_broad")):
+            rationale = (
+                "The Builder reported a capacity/scope overflow at the depth limit; backtrack to the parent and try "
+                "a materially different decomposition before considering a capability floor."
+            )
+        else:
+            rationale = "The Builder explicitly reported a capacity/scope overflow."
     elif failure_type == "ENVIRONMENT_ERROR":
         category = "environment_failure"
         confidence = "high"
@@ -2730,7 +3212,11 @@ def diagnose_failure(task, result, evidence=None):
             rationale = "The node had executable implementation evidence but did not satisfy verification; try a different implementation strategy."
 
     actions = {
-        "scope_too_broad": "split" if not at_max_depth else "manual_decomposition_or_budget_review",
+        "scope_too_broad": (
+            "backtrack_decomposition"
+            if at_max_depth and (task.get("terminal_too_broad") or result.get("terminal_too_broad"))
+            else ("split" if not at_max_depth else "manual_decomposition_or_budget_review")
+        ),
         "implementation_strategy_wrong": "search_or_mutate",
         "local_integration_state_corruption": "parent_repair",
         "model_capability_floor": "declare_limit",
@@ -2748,6 +3234,7 @@ def diagnose_failure(task, result, evidence=None):
         "depth": depth,
         "at_max_depth": at_max_depth,
         "automatic_resplit_blocked": at_max_depth,
+        "decomposition_search_exhausted": bool(result.get("decomposition_search_exhausted") or task.get("decomposition_search_exhausted")),
         "evidence": evidence,
     }
     return diagnosis
@@ -2845,6 +3332,44 @@ def recompute_resplit_metrics():
     }
 
 
+def recompute_search_metrics():
+    """Compute bounded decomposition/strategy search outcomes from task state."""
+    tasks = [task for task in TASKS.values() if isinstance(task, dict)]
+    terminal = sum(1 for task in tasks if isinstance(task.get("terminal_too_broad"), dict))
+    backtracks = sum(int(task.get("decomposition_backtracks", 0) or 0) for task in tasks)
+    alternatives = sum(len(task.get("decomposition_alternatives", []) or []) for task in tasks)
+    alternative_rescues = sum(1 for task in tasks if task.get("alternative_decomposition_rescued"))
+    capability_floor = sum(
+        1 for task in tasks
+        if str(task.get("status", "")).casefold() != "done"
+        and isinstance(task.get("failure_diagnosis"), dict)
+        and task["failure_diagnosis"].get("category") == "model_capability_floor"
+    )
+    searches = int(RUN.get("strategy_searches", 0) or 0)
+    rescues = int(RUN.get("strategy_rescues", 0) or 0)
+    RUN["terminal_too_broad_nodes"] = terminal
+    RUN["decomposition_backtracks"] = backtracks
+    RUN["alternative_decompositions"] = alternatives
+    RUN["alternative_decomposition_rescues"] = alternative_rescues
+    RUN["decomposition_backtrack_rescue_rate"] = (
+        round((alternative_rescues / backtracks) * 100, 2) if backtracks else None
+    )
+    RUN["capability_floor_nodes"] = capability_floor
+    RUN["strategy_rescue_rate"] = round((rescues / searches) * 100, 2) if searches else None
+    return {
+        "terminal_too_broad_nodes": terminal,
+        "decomposition_backtracks": backtracks,
+        "alternative_decompositions": alternatives,
+        "alternative_decomposition_rescues": alternative_rescues,
+        "decomposition_backtrack_rescue_rate": RUN["decomposition_backtrack_rescue_rate"],
+        "strategy_searches": searches,
+        "alternate_strategies_attempted": int(RUN.get("alternate_strategies_attempted", 0) or 0),
+        "strategy_rescues": rescues,
+        "strategy_rescue_rate": RUN["strategy_rescue_rate"],
+        "capability_floor_nodes": capability_floor,
+    }
+
+
 def recompute_integration_metrics():
     """Keep composition metrics derived from parent integration outcomes."""
     attempted = int(RUN.get("parent_integrations_attempted", 0) or 0)
@@ -2903,23 +3428,97 @@ def _register_resplit(task, leaf_result, trigger, decision=None):
 
 
 def _update_resplit_outcome(task, expected_children, completed, final_result=None):
-    record = task.get("resplit")
+    expected_ids = [str(child.get("id")) for child in (expected_children or []) if isinstance(child, dict)]
+    children_result = _resplit_children_snapshot(completed)
+    statuses = [str(item.get("status", "failed")).casefold() for item in children_result]
+    final_status = str((final_result or {}).get("status", task.get("status", "pending")))
+    all_children_returned = len(children_result) == len(expected_ids) and bool(expected_ids)
+    branch_status = "verified" if all_children_returned and all(status == "done" for status in statuses) and final_status == "done" else "failed"
+    terminal_child_ids = [
+        item.get("task", {}).get("id") for item in (completed or [])
+        if isinstance(item, dict)
+        and isinstance(item.get("task"), dict)
+        and int(item["task"].get("depth", 0) or 0) >= MAX_DEPTH
+        and isinstance(item.get("result"), dict)
+        and (item["result"].get("failure_type") == "TASK_TOO_BROAD" or
+             str(item["result"].get("status", "")).casefold() == "too_broad")
+    ]
+    failure_evidence = []
+    for item in completed or []:
+        result = item.get("result", {}) if isinstance(item, dict) else {}
+        if isinstance(result, dict) and result.get("status") != "done":
+            failure_evidence.extend(_failure_evidence_from_result(result))
+    if isinstance(final_result, dict):
+        failure_evidence.extend(_failure_evidence_from_result(final_result))
+    branch = None
+    history = task.setdefault("decomposition_history", []) if isinstance(task, dict) else []
+    active_id = str(task.get("active_decomposition_id", "")) if isinstance(task, dict) else ""
+    for item in reversed(history):
+        if isinstance(item, dict) and (not active_id or str(item.get("branch_id")) == active_id):
+            branch = item
+            break
+    if branch is None and expected_children:
+        # Keep deterministic test/custom decomposers and older callers
+        # auditable even when they do not call decompose_task's recorder.
+        branch = _record_decomposition_branch(
+            task,
+            [{"goal": child.get("goal", ""), "done_when": child.get("done_when", []),
+              "scope_hint": child.get("scope_hint", [])}
+             for child in expected_children if isinstance(child, dict)],
+            expected_children,
+            kind="legacy",
+        )
+    if branch is not None:
+        branch["child_ids"] = expected_ids or list(branch.get("child_ids", []))
+        branch["children_result"] = children_result
+        branch["status"] = branch_status
+        branch["terminal_child_ids"] = terminal_child_ids
+        branch["failure_evidence"] = failure_evidence[-4:]
+        branch["why_failed"] = (
+            "terminal child remained TASK_TOO_BROAD"
+            if terminal_child_ids else
+            compact_text((final_result or {}).get("summary", "decomposition branch failed"), 420)
+        ) if branch_status != "verified" else ""
+        task["failed_decompositions"] = [
+            item for item in history if isinstance(item, dict) and item.get("status") in {"failed", "exhausted", "blocked"}
+        ][-MAX_DECOMPOSITION_ALTERNATIVES - 1:]
+        for attempt in task.get("decomposition_alternatives", []) or []:
+            if isinstance(attempt, dict) and str(attempt.get("branch_id", "")) == str(branch.get("branch_id", "")):
+                attempt["status"] = branch_status
+                attempt["children_result"] = children_result
+                attempt["terminal_child_ids"] = terminal_child_ids
+                attempt["why_failed"] = branch.get("why_failed", "")
+                break
+    if branch is not None and branch.get("kind") == "alternative" and branch_status == "verified":
+        task["alternative_decomposition_rescued"] = True
+
+    record = task.get("resplit") if isinstance(task, dict) else None
     if not isinstance(record, dict):
         return
-    expected_ids = [str(child.get("id")) for child in (expected_children or []) if isinstance(child, dict)]
     record["child_ids"] = expected_ids or list(record.get("child_ids", []))
-    record["children_result"] = _resplit_children_snapshot(completed)
-    statuses = [str(item.get("status", "failed")).casefold() for item in record["children_result"]]
-    record["any_verified_child"] = any(status == "done" for status in statuses)
-    all_children_returned = len(record["children_result"]) == len(expected_ids) and bool(expected_ids)
-    final_status = str((final_result or {}).get("status", task.get("status", "pending")))
-    record["final_status"] = final_status
-    record["fully_recovered"] = bool(
-        all_children_returned and all(status == "done" for status in statuses) and final_status == "done"
+    record["children_result"] = children_result
+    record["decomposition_branches"] = [
+        {
+            "branch_id": item.get("branch_id"), "kind": item.get("kind"),
+            "child_ids": list(item.get("child_ids", [])), "status": item.get("status"),
+            "children_result": list(item.get("children_result", [])),
+            "terminal_child_ids": list(item.get("terminal_child_ids", [])),
+            "why_failed": item.get("why_failed", ""),
+        }
+        for item in history if isinstance(item, dict)
+    ][-MAX_DECOMPOSITION_ALTERNATIVES - 2:]
+    all_branch_statuses = [str(item.get("status", "failed")) for item in history if isinstance(item, dict)]
+    any_verified = any(
+        any(str(child.get("status", "")).casefold() == "done" for child in item.get("children_result", []))
+        for item in history if isinstance(item, dict)
     )
-    if record["fully_recovered"]:
+    fully_recovered = any(item == "verified" for item in all_branch_statuses)
+    record["any_verified_child"] = any_verified
+    record["fully_recovered"] = fully_recovered
+    record["final_status"] = final_status
+    if fully_recovered:
         record["outcome"] = "fully_recovered"
-    elif record["any_verified_child"]:
+    elif any_verified:
         record["outcome"] = "partial_child_rescue"
     elif statuses:
         record["outcome"] = "no_verified_child"
@@ -2930,6 +3529,7 @@ def _update_resplit_outcome(task, expected_children, completed, final_result=Non
         "resplit_outcome", task_id=task.get("id"), child_ids=record["child_ids"],
         children_result=record["children_result"], any_verified_child=record["any_verified_child"],
         fully_recovered=record["fully_recovered"], outcome=record["outcome"], final_status=final_status,
+        decomposition_branches=record.get("decomposition_branches", []),
     )
 
 
@@ -2979,6 +3579,12 @@ def build_node_diagnosis():
             "final_failure_diagnosis": str(task.get("failure_diagnosis", {}).get("category", ""))
             if isinstance(task.get("failure_diagnosis"), dict) else "",
             "failure_evidence": list(task.get("initial_failure_evidence", [])) or list(task.get("failure_evidence", [])),
+            "terminal_too_broad": task.get("terminal_too_broad"),
+            "decomposition_backtracks": int(task.get("decomposition_backtracks", 0) or 0),
+            "alternative_decompositions": list(task.get("decomposition_alternatives", []) or [])[-MAX_DECOMPOSITION_ALTERNATIVES:],
+            "failed_decompositions": compact_failed_decompositions(task),
+            "decomposition_search_exhausted": bool(task.get("decomposition_search_exhausted")),
+            "strategy_search": task.get("strategy_search"),
             "integration_preflight": task.get("integration_preflight"),
             "integration_conflicts": list(
                 ((task.get("integration_preflight") or {}).get("after") or
@@ -2996,6 +3602,21 @@ def print_resplit_metrics():
     print(f"resplit_nodes_with_any_verified_child: {RUN.get('resplit_nodes_with_any_verified_child', 0)}")
     print(f"resplit_nodes_fully_recovered: {RUN.get('resplit_nodes_fully_recovered', 0)}")
     print(f"granularity_rescue_rate: {RUN.get('granularity_rescue_rate', 0):g}%")
+
+
+def print_search_metrics():
+    recompute_search_metrics()
+    print("\n[DECOMPOSITION / STRATEGY SEARCH METRICS]")
+    for key in (
+        "terminal_too_broad_nodes", "decomposition_backtracks", "alternative_decompositions",
+        "alternative_decomposition_rescues", "strategy_searches", "alternate_strategies_attempted",
+        "strategy_rescues", "capability_floor_nodes",
+    ):
+        print(f"{key}: {RUN.get(key)}")
+    backtrack_rate = RUN.get("decomposition_backtrack_rescue_rate")
+    strategy_rate = RUN.get("strategy_rescue_rate")
+    print(f"decomposition_backtrack_rescue_rate: {'N/A' if backtrack_rate is None else f'{backtrack_rate:g}%'}")
+    print(f"strategy_rescue_rate: {'N/A' if strategy_rate is None else f'{strategy_rate:g}%'}")
 
 
 def print_node_diagnosis():
@@ -3018,6 +3639,20 @@ def print_node_diagnosis():
         rationale = compact_text(row.get("rationale", ""), 220)
         if rationale:
             print(f"  diagnosis: {rationale}")
+        if row.get("terminal_too_broad"):
+            print(
+                f"  terminal too broad: depth={row['terminal_too_broad'].get('depth')} "
+                f"next={'exhausted' if row.get('decomposition_search_exhausted') else 'backtrack'}"
+            )
+        if row.get("alternative_decompositions"):
+            alternatives = ", ".join(
+                f"#{item.get('attempt')}:{_report_status(item.get('status', 'failed'))}"
+                for item in row["alternative_decompositions"] if isinstance(item, dict)
+            )
+            print(f"  alternative decompositions: {alternatives or '-'}")
+        if row.get("strategy_search"):
+            strategy = row["strategy_search"]
+            print(f"  strategy search: {strategy.get('outcome', strategy.get('status', 'unknown'))}")
         evidence = compact_text(json.dumps(row.get("failure_evidence", []), ensure_ascii=False), 320)
         if evidence and evidence != "[]":
             print(f"  evidence: {evidence}")
@@ -4041,6 +4676,30 @@ def _can_expand(depth):
     return depth < MAX_DEPTH and RUN.get("tasks_created", 0) + 2 <= MAX_TOTAL_TASKS
 
 
+def _record_terminal_too_broad(task, result):
+    """Persist a depth-limit overflow so its parent can backtrack once."""
+    if not isinstance(task, dict) or not isinstance(result, dict):
+        return False
+    if int(task.get("depth", 0) or 0) < MAX_DEPTH:
+        return False
+    if result.get("failure_type") != "TASK_TOO_BROAD" and str(result.get("status", "")).casefold() != "too_broad":
+        return False
+    if task.get("terminal_too_broad") is None:
+        task["terminal_too_broad"] = {
+            "status": str(result.get("status", "too_broad")),
+            "failure_type": str(result.get("failure_type", "TASK_TOO_BROAD")),
+            "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "failure_evidence": _failure_evidence_from_result(result),
+            "depth": int(task.get("depth", 0) or 0),
+        }
+        record_run_event(
+            "terminal_too_broad", task_id=task.get("id"), depth=task.get("depth", 0),
+            failure_evidence=task["terminal_too_broad"]["failure_evidence"],
+        )
+    result["terminal_too_broad"] = True
+    return True
+
+
 def _mark_task_result(task, result, *, count=True):
     status = str(result.get("status", "failed"))
     task["status"] = status
@@ -4060,6 +4719,110 @@ def _mark_task_result(task, result, *, count=True):
                 result.setdefault("failure_diagnosis", diagnosis)
             RUN["failed_nodes"] += 1
     update_task_ledger(task)
+
+
+def _is_terminal_too_broad_child(child, result):
+    if not isinstance(child, dict) or not isinstance(result, dict):
+        return False
+    return (
+        int(child.get("depth", 0) or 0) >= MAX_DEPTH
+        and (result.get("failure_type") == "TASK_TOO_BROAD"
+             or str(result.get("status", "")).casefold() == "too_broad")
+    )
+
+
+def _materialize_alternative_children(task, specs, attempt):
+    branch_id = f"alternative-{attempt}"
+    children = []
+    for index, spec in enumerate(list(specs or [])[:MAX_CHILDREN], 1):
+        child_id = (
+            f"alt{attempt}.{index}" if task.get("id") == "ROOT"
+            else f"{task['id']}.alt{attempt}.{index}"
+        )
+        child = make_task(
+            child_id, spec["goal"], int(task.get("depth", 0)) + 1, task.get("id"),
+            spec.get("done_when", []), spec.get("scope_hint", []),
+        )
+        TASKS[child_id] = child
+        task.setdefault("children", []).append(child_id)
+        RUN["tasks_created"] += 1
+        RUN["max_depth"] = max(RUN.get("max_depth", 0), child["depth"])
+        update_task_ledger(child)
+        children.append(child)
+    _record_decomposition_branch(task, specs, children, kind="alternative", branch_id=branch_id)
+    return children, branch_id
+
+
+def _backtrack_decomposition(task, depth, contract, memory, repo_snapshot, parent_summary,
+                             dependency_summaries, failed_child, failed_result, fit_decider,
+                             leaf_executor, aggregator):
+    """Try at most two genuinely different child boundaries for one failed parent."""
+    if not _is_terminal_too_broad_child(failed_child, failed_result):
+        return None
+    attempts = task.setdefault("decomposition_alternatives", [])
+    if len(attempts) >= MAX_DECOMPOSITION_ALTERNATIVES:
+        task["decomposition_search_exhausted"] = True
+        return None
+    if not _can_expand(depth):
+        task["decomposition_backtrack_blocked_reason"] = "hard recursion/task budget reached"
+        return None
+
+    attempt_number = len(attempts) + 1
+    task["decomposition_backtracks"] = int(task.get("decomposition_backtracks", 0) or 0) + 1
+    event(
+        f"[BACKTRACK {task['id']}] terminal TASK_TOO_BROAD -> alternative decomposition #{attempt_number}",
+        role="Coordinator", task=task["id"], action="decomposition backtracking",
+    )
+    record_run_event(
+        "decomposition_backtrack", task_id=task.get("id"), depth=task.get("depth", depth),
+        attempt=attempt_number, failed_child_id=failed_child.get("id"),
+        terminal_failure=_failure_evidence_from_result(failed_result),
+        failed_decompositions=compact_failed_decompositions(task),
+    )
+    try:
+        specs = decompose_alternative_task(
+            task, contract, repo_snapshot, parent_summary, dependency_summaries, failed_result,
+        )
+    except ProviderError as exc:
+        attempts.append({
+            "attempt": attempt_number, "status": "provider_failure", "children": [],
+            "error": compact_text(str(exc), 300), "failed_child_id": str(failed_child.get("id", "")),
+        })
+        task["decomposition_backtrack_blocked_reason"] = "alternative decomposition provider failure"
+        record_run_event(
+            "alternative_decomposition_failed", task_id=task.get("id"), attempt=attempt_number,
+            failure_type="ENVIRONMENT_ERROR", summary=str(exc),
+        )
+        recompute_search_metrics()
+        return None
+    if len(specs) < 2:
+        attempts.append({
+            "attempt": attempt_number, "status": "rejected", "children": [],
+            "reason": "no materially different child boundaries were produced",
+            "failed_child_id": str(failed_child.get("id", "")),
+        })
+        if len(attempts) >= MAX_DECOMPOSITION_ALTERNATIVES:
+            task["decomposition_search_exhausted"] = True
+        recompute_search_metrics()
+        return None
+
+    children, branch_id = _materialize_alternative_children(task, specs, attempt_number)
+    attempts.append({
+        "attempt": attempt_number, "branch_id": branch_id, "status": "running",
+        "children": [_compact_decomposition_spec(spec) for spec in specs],
+        "child_ids": [child["id"] for child in children],
+        "failed_child_id": str(failed_child.get("id", "")),
+        "terminal_failure": {
+            "summary": compact_text(failed_result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "failure_evidence": _failure_evidence_from_result(failed_result),
+        },
+    })
+    RUN["splits"] += 1
+    recompute_search_metrics()
+    return _execute_children(
+        task, children, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+        fit_decider, leaf_executor, aggregator,
+    )
 
 
 def _execute_children(task, children, depth, contract, memory, repo_snapshot, parent_summary,
@@ -4095,6 +4858,16 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
                 "failure_type": result.get("failure_type", "CHILD_FAILURE"), "children": completed,
             }
             _update_resplit_outcome(task, children, completed, parent_result)
+            _record_task_failure(task, parent_result, phase="child_result")
+            alternative = _backtrack_decomposition(
+                task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                child, result, fit_decider, leaf_executor, aggregator,
+            )
+            if alternative is not None:
+                return alternative
+            if task.get("decomposition_search_exhausted"):
+                parent_result["decomposition_search_exhausted"] = True
+                _record_task_failure(task, parent_result, phase="decomposition_search")
             _mark_task_result(task, parent_result)
             return parent_result
 
@@ -4259,6 +5032,7 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     memory = leaf.get("memory", memory)
     is_too_broad = leaf.get("status") == "too_broad" or leaf.get("failure_type") == "TASK_TOO_BROAD"
     if is_too_broad:
+        _record_terminal_too_broad(task, leaf)
         _record_task_failure(task, leaf, phase="leaf")
         resplit = _resplit_too_broad(
             task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
@@ -4274,6 +5048,12 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         )
         if resplit is not None:
             return resplit
+        strategy_result = _maybe_search_alternate_strategy(
+            task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
+        )
+        if strategy_result is not None:
+            leaf = strategy_result
+            memory = leaf.get("memory", memory)
 
     leaf["memory"] = memory
     _mark_task_result(task, leaf)

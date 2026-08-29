@@ -135,12 +135,46 @@ task tree, for example:
 ```text
 node | scope | initial | re-split | children | why failed | next action
 1.2.2.4 | small | FAIL | yes | 1:PASS, 2:FAIL | implementation_strategy_wrong | search_or_mutate
-1.2.2.4.1.1 | terminal leaf | FAIL | no | - | unknown | collect_more_failure_evidence
+1.2.2.4.1.1 | terminal leaf | FAIL | no | - | scope_too_broad | backtrack_decomposition
 ```
 
 An ordinary `IMPLEMENTATION_ERROR` gets only a capacity probe; an `EXECUTE`
 fit decision does not get silently upgraded to `SPLIT`. This leaves room for
 the next search/mutation and challenger mechanisms to handle strategy failures.
+
+### v3 decomposition backtracking and strategy search
+
+The v3 controller keeps `MAX_DEPTH = 6` and `MAX_TOTAL_TASKS = 64`. A
+`TASK_TOO_BROAD` leaf at the depth limit is not immediately labeled a model
+capability floor. Its parent records the failed child boundaries, terminal
+evidence, and the failed decomposition in the next Node Packet, then requests
+up to `MAX_DECOMPOSITION_ALTERNATIVES = 2` materially different decompositions.
+Alternative child IDs are kept as separate `altN.*` branches so the original
+failure is never overwritten. A lexical boundary check rejects an alternative
+that merely paraphrases every failed child; the prompt also asks for observable
+state, input/output, interface, or deterministic behavior boundaries.
+
+The controller declares a capability-floor candidate only after the bounded
+alternative search is exhausted. The v3 search metrics are:
+
+```yaml
+terminal_too_broad_nodes: 1
+decomposition_backtracks: 1
+alternative_decompositions: 1
+alternative_decomposition_rescues: 1
+decomposition_backtrack_rescue_rate: 100.0
+strategy_searches: 0
+alternate_strategies_attempted: 0
+strategy_rescues: 0
+strategy_rescue_rate: N/A
+capability_floor_nodes: 0
+```
+
+For a small `IMPLEMENTATION_ERROR`, the controller does not split when the
+fit decision rejects granularity rescue. It can generate two non-mutating
+implementation strategies, let a read-only Challenger select one, and execute
+only that candidate. This route is bounded separately from decomposition and
+is not used for `TASK_TOO_BROAD` failures.
 
 ### Hierarchical Integration Contract
 
