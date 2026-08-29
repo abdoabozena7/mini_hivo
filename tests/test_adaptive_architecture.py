@@ -375,7 +375,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             ["collision reset is verified"], ["src/game.js"],
         )
         mini.TASKS[task["id"]] = task
-        failure = self.neutral_budget_failure()
+        failure = self.neutral_budget_failure(evidence=[{
+            "kind": "budget", "status": "NEUTRAL",
+            "evidence": "budget ended before implementation evidence was available",
+        }])
         with patch.object(mini, "decompose_task") as decompose, \
                 patch.object(mini, "_maybe_search_alternate_strategy", return_value=None) as strategy:
             result = mini.solve_task(
@@ -401,6 +404,9 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         initial["repair_history"] = [{
             "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "repair did not satisfy deterministic verification",
+        }, {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "second repair did not satisfy deterministic verification",
         }]
         strategy_failure = {
             "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
@@ -421,6 +427,12 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(mini.RUN["strategy_searches"], 1)
         self.assertEqual(mini.RUN["alternate_strategies_attempted"], 2)
         self.assertEqual(mini.RUN["strategy_rescues"], 0)
+        floor_evidence = task["failure_diagnosis"]["capability_floor_evidence"]
+        self.assertIn("strategy_A", floor_evidence["exhausted_recoveries"])
+        self.assertIn("strategy_B", floor_evidence["exhausted_recoveries"])
+        self.assertTrue(mini.can_declare_capability_floor(
+            task, task["failure_diagnosis"], result["failure_evidence"], result,
+        ))
         mini.recompute_search_metrics()
         self.assertEqual(mini.RUN["capability_floor_nodes"], 1)
 
@@ -965,21 +977,124 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "failure_evidence": [{"tool": "run_command", "target": "pytest", "result": "1 failed"}],
         }
         with patch.object(mini, "decompose_task") as decompose, \
-                patch.object(mini, "_maybe_search_alternate_strategy", return_value=None):
+                patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", return_value={
+                    "status": "done", "summary": "alternate strategy verified", "memory": {},
+                }) as strategy_leaf:
             result = mini.solve_task(
                 task, mini.MAX_DEPTH, contract, {}, {}, leaf_executor=Mock(return_value=leaf),
             )
 
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "done")
         decompose.assert_not_called()
         self.assertEqual(mini.RUN["re_splits"], 0)
         self.assertEqual(mini.RUN["max_depth_failures"], 1)
         diagnosis = task["failure_diagnosis"]
         self.assertTrue(diagnosis["at_max_depth"])
         self.assertTrue(diagnosis["automatic_resplit_blocked"])
-        self.assertEqual(diagnosis["category"], "model_capability_floor")
-        self.assertEqual(diagnosis["next_action"], "declare_limit")
-        self.assertEqual(mini.build_node_diagnosis()[0]["why_failed"], "model_capability_floor")
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertEqual(diagnosis["next_action"], "search_or_mutate")
+        self.assertEqual(diagnosis["capability_floor_blocked_by"], "strategy_search_not_attempted")
+        self.assertEqual(mini.RUN["capability_floor_guard_blocks"], 1)
+        self.assertEqual(mini.RUN["capability_floor_routed_to_strategy"], 1)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        strategy_leaf.assert_called_once()
+        self.assertEqual(mini.build_node_diagnosis()[0]["why_failed"], "implementation_strategy_wrong")
+
+    def test_capability_floor_guard_blocks_bounded_failure_before_strategy_search(self):
+        task = mini.make_task(
+            "guarded", "Implement collision reset for one existing function.", mini.MAX_DEPTH,
+            "parent", ["collision reset is verified"], ["src/game.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "EXECUTE", "reason": "hard recursion/task budget reached",
+        }
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "failed deterministic evidence gate after repair limit", "memory": {},
+            "failure_evidence": [{"tool": "run_command", "target": "pytest", "result": "1 failed"}],
+            "repair_history": [
+                {"status": "failed", "summary": "repair 1 failed"},
+                {"status": "failed", "summary": "repair 2 failed"},
+            ],
+        }
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertFalse(mini.can_declare_capability_floor(
+            task, "model_capability_floor", failure["failure_evidence"], failure,
+        ))
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertEqual(diagnosis["next_action"], "search_or_mutate")
+        self.assertEqual(diagnosis["capability_floor_blocked_by"], "strategy_search_not_attempted")
+        self.assertEqual(mini.RUN["capability_floor_guard_blocks"], 1)
+        self.assertEqual(mini.RUN["capability_floor_routed_to_strategy"], 0)
+        self.assertNotEqual(diagnosis["category"], "model_capability_floor")
+
+    def test_decomposition_exhaustion_does_not_skip_strategy_for_bounded_node(self):
+        task = mini.make_task(
+            "bounded-after-backtrack", "Implement collision reset for one existing function.", mini.MAX_DEPTH,
+            "parent", ["collision reset is verified"], ["src/game.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "EXECUTE", "reason": "hard recursion/task budget reached",
+        }
+        task["decomposition_search_exhausted"] = True
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "implementation remained incorrect after decomposition backtracking",
+            "failure_evidence": [{"name": "collision-check", "status": "FAIL"}],
+            "repair_history": [
+                {"status": "failed", "summary": "repair 1 failed"},
+                {"status": "failed", "summary": "repair 2 failed"},
+            ],
+        }
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", return_value={
+                    "status": "done", "summary": "strategy verified", "memory": {},
+                }) as strategy_leaf:
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["capability_floor_guard_blocks"], 1)
+        self.assertEqual(mini.RUN["capability_floor_routed_to_strategy"], 1)
+        strategy_leaf.assert_called_once()
+        self.assertNotEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
+
+    def test_unavailable_strategy_generation_blocks_capability_floor(self):
+        task = mini.make_task(
+            "unavailable-floor", "Implement collision reset for one existing function.", mini.MAX_DEPTH,
+            "parent", ["collision reset is verified"], ["src/game.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "EXECUTE", "reason": "hard recursion/task budget reached",
+        }
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "failed deterministic evidence gate after repair limit",
+            "failure_evidence": [{"name": "collision-check", "status": "FAIL"}],
+            "repair_history": [
+                {"status": "failed", "summary": "repair 1 failed"},
+                {"status": "failed", "summary": "repair 2 failed"},
+            ],
+        }
+        invalid = {"strategies": [{
+            "name": "only-one", "approach": "one approach", "scope": ["one function"],
+            "why_different": "only candidate",
+        }]}
+
+        with patch.object(mini, "structured_model_call", side_effect=[invalid, invalid]), \
+                patch.object(mini, "execute_leaf") as execute:
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["strategy_search_status"], mini.STRATEGY_SEARCH_UNAVAILABLE)
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertNotEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
+        self.assertEqual(mini.RUN["capability_floor_guard_blocks"], 1)
+        self.assertEqual(mini.RUN["capability_floor_routed_to_strategy"], 1)
+        execute.assert_not_called()
 
     def test_terminal_too_broad_backtracks_to_a_materially_different_decomposition(self):
         contract = self.contract(["state", "transition", "verification"])
@@ -1164,6 +1279,16 @@ class AdaptiveArchitectureTests(unittest.TestCase):
                     "status": "failed", "failure_type": failure_type, "summary": summary,
                     "failure_evidence": [{"name": "deterministic-check", "status": "FAIL"}],
                 }
+                if expected == "model_capability_floor":
+                    failed_attempts = [
+                        {"status": "FAIL", "name": "state_transition"},
+                        {"status": "FAIL", "name": "boundary_wrapper"},
+                    ]
+                    task["strategy_attempts"] = list(failed_attempts)
+                    task["strategy_search"] = {
+                        "status": "completed", "outcome": "failed",
+                        "attempts": list(failed_attempts),
+                    }
                 with patch.object(mini, "structured_model_call") as structured, \
                         patch.object(mini, "execute_leaf") as execute:
                     self.assertIsNone(mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {}))
@@ -1251,6 +1376,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(mini.RUN["alternate_strategies_attempted"], 0)
         self.assertEqual(mini.RUN["strategy_search_failures"], 0)
         self.assertEqual(mini.RUN["strategy_rescues"], 0)
+        self.assertNotEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
         self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
         self.assertEqual(
             task["failure_diagnosis"]["strategy_search_unavailable"],

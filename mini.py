@@ -984,6 +984,8 @@ def new_metrics(mode):
         "strategy_search_failures": 0,
         "strategy_rescue_rate": None,
         "capability_floor_nodes": 0,
+        "capability_floor_guard_blocks": 0,
+        "capability_floor_routed_to_strategy": 0,
         "execution_budget_exhaustions": 0,
         "budget_exhaustion_routed_to_scope": 0,
         "budget_exhaustion_routed_to_strategy": 0,
@@ -1114,6 +1116,15 @@ def compact_task_tree():
             entry["strategy_search"] = task.get("strategy_search")
         if task.get("strategy_attempts"):
             entry["strategy_attempts"] = task.get("strategy_attempts", [])[-MAX_STRATEGY_ALTERNATIVES:]
+        if task.get("capability_floor_blocked_by"):
+            entry["capability_floor_blocked_by"] = task.get("capability_floor_blocked_by")
+            entry["capability_floor_guard_evidence"] = task.get("capability_floor_guard_evidence", {})
+        if isinstance(task.get("failure_diagnosis"), dict) and task["failure_diagnosis"].get(
+            "capability_floor_evidence"
+        ):
+            entry["capability_floor_evidence"] = task["failure_diagnosis"].get(
+                "capability_floor_evidence"
+            )
         if task.get("integration_manifest") is not None:
             entry["integration_manifest"] = task.get("integration_manifest")
         if task.get("integration_preflight") is not None:
@@ -2327,6 +2338,18 @@ def search_alternate_strategies(task, contract, failure_result, memory, repo_sna
                                 parent_summary="", dependency_summaries=None):
     """Generate at most two non-mutating, materially different v5 strategies."""
     RUN["strategy_searches"] = RUN.get("strategy_searches", 0) + 1
+    if (
+        task.get("capability_floor_blocked_by") == "strategy_search_not_attempted"
+        and not task.get("_capability_floor_routed_to_strategy_counted")
+    ):
+        RUN["capability_floor_routed_to_strategy"] = RUN.get(
+            "capability_floor_routed_to_strategy", 0,
+        ) + 1
+        task["_capability_floor_routed_to_strategy_counted"] = True
+        record_run_event(
+            "capability_floor_routed_to_strategy", task_id=task.get("id"),
+            route="strategy_search",
+        )
     evidence = _failure_evidence_from_result(failure_result)
     failed_approach, previous_repair = _strategy_failure_summaries(task, failure_result)
     node_packet = build_node_context(
@@ -2697,27 +2720,47 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
             )
 
     RUN["strategy_search_failures"] = RUN.get("strategy_search_failures", 0) + 1
+    task["strategy_search"]["status"] = "completed"
+    task["strategy_search"]["outcome"] = "failed"
     final_evidence = _failure_evidence_from_result(last_result)
     final_diagnosis = diagnose_failure(task, last_result, final_evidence)
     if final_diagnosis.get("category") == "implementation_strategy_wrong":
-        final_diagnosis = {
-            "category": "model_capability_floor",
-            "confidence": "medium",
-            "rationale": compact_text(
-                "Two materially different bounded implementation strategies failed fresh deterministic verification; "
-                "do not keep splitting this node automatically.", 900,
-            ),
-            "next_action": "declare_limit",
-            "depth": int(task.get("depth", 0) or 0),
-            "at_max_depth": int(task.get("depth", 0) or 0) >= MAX_DEPTH,
-            "automatic_resplit_blocked": True,
-            "decomposition_search_exhausted": bool(task.get("decomposition_search_exhausted")),
-            "evidence": final_evidence,
-        }
+        floor_state = _capability_floor_recovery_state(
+            task, "model_capability_floor", final_evidence, last_result,
+        )
+        if floor_state["allowed"]:
+            final_diagnosis = {
+                "category": "model_capability_floor",
+                "confidence": "medium",
+                "rationale": compact_text(
+                    "Two materially different bounded implementation strategies failed fresh deterministic verification; "
+                    "do not keep splitting this node automatically.", 900,
+                ),
+                "next_action": "declare_limit",
+                "depth": int(task.get("depth", 0) or 0),
+                "at_max_depth": int(task.get("depth", 0) or 0) >= MAX_DEPTH,
+                "automatic_resplit_blocked": True,
+                "decomposition_search_exhausted": bool(task.get("decomposition_search_exhausted")),
+                "evidence": final_evidence,
+                "capability_floor_evidence": {
+                    "failure_class": floor_state.get("failure_class", "unknown"),
+                    "applicable_recoveries": list(floor_state.get("applicable_recoveries", [])),
+                    "exhausted_recoveries": list(floor_state.get("exhausted_recoveries", [])),
+                    "non_applicable_recoveries": list(floor_state.get("non_applicable_recoveries", [])),
+                },
+            }
+        else:
+            _record_capability_floor_guard_block(task, floor_state)
+            final_diagnosis = dict(final_diagnosis)
+            final_diagnosis["capability_floor_blocked_by"] = floor_state.get("blocked_by")
+            final_diagnosis["capability_floor_guard_evidence"] = {
+                "failure_class": floor_state.get("failure_class", "unknown"),
+                "applicable_recoveries": list(floor_state.get("applicable_recoveries", [])),
+                "exhausted_recoveries": list(floor_state.get("exhausted_recoveries", [])),
+                "non_applicable_recoveries": list(floor_state.get("non_applicable_recoveries", [])),
+            }
     task["failure_evidence"] = final_evidence
     task["failure_diagnosis"] = final_diagnosis
-    task["strategy_search"]["status"] = "completed"
-    task["strategy_search"]["outcome"] = "failed"
     task["strategy_search"]["result"] = compact_text((last_result or {}).get("summary", ""), MAX_NODE_SUMMARY_CHARS)
     task["strategy_search"]["final_diagnosis"] = final_diagnosis
     if isinstance(last_result, dict):
@@ -4362,6 +4405,209 @@ def _budget_evidence_is_environmental(searchable, result=None, evidence=None):
     )
 
 
+def _strategy_search_state(task, result=None):
+    """Return the existing bounded strategy-search state for one node."""
+    result = result if isinstance(result, dict) else {}
+    search = result.get("strategy_search")
+    if not isinstance(search, dict):
+        search = task.get("strategy_search") if isinstance(task, dict) else None
+    attempts = result.get("strategy_attempts")
+    if not isinstance(attempts, list):
+        attempts = task.get("strategy_attempts", []) if isinstance(task, dict) else []
+    if not isinstance(attempts, list) and isinstance(search, dict):
+        attempts = search.get("attempts", [])
+    attempts = [item for item in list(attempts or []) if isinstance(item, dict)]
+    if not attempts and isinstance(search, dict):
+        attempts = [item for item in list(search.get("attempts", []) or []) if isinstance(item, dict)]
+    return search if isinstance(search, dict) else {}, attempts[-MAX_STRATEGY_ALTERNATIVES:]
+
+
+def _is_bounded_implementation_failure(task, result, evidence):
+    """Identify a focused implementation failure eligible for strategy search."""
+    if not isinstance(task, dict) or not isinstance(result, dict):
+        return False
+    if task.get("kind", "implementation") != "implementation":
+        return False
+    failure_type = str(result.get("failure_type", ""))
+    if failure_type not in {"IMPLEMENTATION_ERROR", EXECUTION_BUDGET_EXHAUSTED}:
+        return False
+    if str(result.get("status", "")).casefold() == "too_broad":
+        return False
+    if failure_type == "TASK_TOO_BROAD":
+        return False
+    preflight = _effective_preflight(result.get("integration_preflight"))
+    if preflight and preflight.get("passed") is False:
+        return False
+    searchable = " ".join((
+        str(result.get("summary", "")),
+        json.dumps(evidence or [], ensure_ascii=False, default=str),
+    )).casefold()
+    if (
+        _budget_evidence_is_environmental(searchable, result, evidence)
+        or _verification_target_is_unresolved(result)
+        or _verification_target_is_unresolved(evidence)
+    ):
+        return False
+    if _has_positive_scope_evidence(task, result):
+        return False
+    fit = _fit_assessment(task, result)
+    if isinstance(fit, dict) and fit.get("decision"):
+        if str(fit.get("decision", "")).casefold() != "execute":
+            return False
+    return _strategy_scope_is_bounded(task, result) and _has_concrete_executable_failure(evidence)
+
+
+def _capability_floor_recovery_state(task, diagnosis=None, evidence=None, result=None):
+    """Compute deterministic recovery exhaustion before accepting a floor."""
+    task = task if isinstance(task, dict) else {}
+    result = result if isinstance(result, dict) else {}
+    if not result:
+        result = copy.deepcopy(task.get("initial_result") or {})
+        if not result:
+            result = {
+                "status": task.get("status", "failed"),
+                "failure_type": task.get("last_failure_type", ""),
+                "failure_evidence": task.get("failure_evidence", []),
+                "repair_history": task.get("repair_history", []),
+            }
+        elif task.get("repair_history") and not result.get("repair_history"):
+            result["repair_history"] = copy.deepcopy(task.get("repair_history", []))
+    evidence = list(evidence or [])
+    if not evidence:
+        evidence = _failure_evidence_from_result(result)
+    category = diagnosis.get("category") if isinstance(diagnosis, dict) else diagnosis
+    category = str(category or "").casefold()
+    failure_type = str(result.get("failure_type", ""))
+    searchable = " ".join((
+        str(result.get("summary", "")),
+        json.dumps(evidence, ensure_ascii=False, default=str),
+        str(result.get("provider_error", "")),
+    )).casefold()
+    state = {
+        "allowed": False,
+        "failure_class": category or "unknown",
+        "applicable_recoveries": [],
+        "exhausted_recoveries": [],
+        "non_applicable_recoveries": [],
+        "blocked_by": None,
+    }
+
+    if _budget_evidence_is_environmental(searchable, result, evidence):
+        state["blocked_by"] = "environment_failure"
+        state["non_applicable_recoveries"] = ["capability_floor"]
+        return state
+    if category in {
+        "environment_failure", "provider_failure", "verifier_builder_mismatch",
+        "dependency_error", "local_integration_state_corruption", "decomposition_error",
+    }:
+        state["blocked_by"] = f"{category}_recovery_unresolved"
+        state["applicable_recoveries"] = [f"{category}_recovery"]
+        return state
+
+    bounded_failure = (
+        category not in {"scope_too_broad", "dependency_error", "verifier_builder_mismatch"}
+        and _is_bounded_implementation_failure(task, result, evidence)
+    )
+    scope_failure = (
+        category == "scope_too_broad"
+        or str(result.get("status", "")).casefold() == "too_broad"
+        or failure_type in {"TASK_TOO_BROAD", "INTEGRATION_TOO_BROAD", "CHILD_FAILURE"}
+        or bool(task.get("terminal_too_broad"))
+    )
+
+    if bounded_failure:
+        state["failure_class"] = "bounded_implementation_failure"
+        state["applicable_recoveries"] = [
+            "normal_implementation", "repair", "strategy_search",
+        ]
+        state["exhausted_recoveries"] = ["normal_implementation"]
+
+        repair_history = result.get("repair_history")
+        if not isinstance(repair_history, list):
+            repair_history = task.get("repair_history", [])
+        repair_history = [item for item in list(repair_history or []) if isinstance(item, dict)]
+        if repair_history:
+            repair_failed = all(
+                str(item.get("status", "failed")).casefold() not in {"done", "pass", "passed"}
+                for item in repair_history[-MAX_REPAIRS_PER_LEAF:]
+            )
+            if len(repair_history) >= MAX_REPAIRS_PER_LEAF and repair_failed:
+                state["exhausted_recoveries"].append("repair")
+            else:
+                state["blocked_by"] = "repair_not_exhausted"
+                return state
+        else:
+            # Direct compatibility callers may enter the existing strategy
+            # path without the normal leaf loop. In that case no repair route
+            # was actually started, so it is not a pending recovery.
+            state["non_applicable_recoveries"].append("repair")
+
+        search, attempts = _strategy_search_state(task, result)
+        outcome = str(search.get("outcome", "")).casefold()
+        if (
+            outcome == "failed"
+            and len(attempts) >= MAX_STRATEGY_ALTERNATIVES
+            and all(str(item.get("status", "")).upper() != "PASS" for item in attempts)
+        ):
+            state["exhausted_recoveries"].extend(
+                ["strategy_search", "strategy_A", "strategy_B"],
+            )
+            state["allowed"] = True
+            return state
+        if outcome == "generation_unavailable":
+            state["blocked_by"] = "strategy_generation_unavailable"
+        elif outcome == "rescued":
+            state["blocked_by"] = "strategy_rescued"
+        elif not search:
+            state["blocked_by"] = "strategy_search_not_attempted"
+        else:
+            state["blocked_by"] = "strategy_search_incomplete"
+        return state
+
+    if scope_failure and task.get("kind", "implementation") != "integration":
+        state["failure_class"] = "scope_failure"
+        state["applicable_recoveries"] = [
+            "normal_decomposition", "decomposition_backtracking",
+        ]
+        if task.get("decomposition_search_exhausted") or result.get("decomposition_search_exhausted"):
+            state["exhausted_recoveries"] = list(state["applicable_recoveries"])
+            state["allowed"] = True
+        else:
+            state["blocked_by"] = "decomposition_search_not_exhausted"
+        return state
+
+    state["blocked_by"] = "no_applicable_recovery_exhaustion"
+    return state
+
+
+def can_declare_capability_floor(task, diagnosis=None, evidence=None, result=None):
+    """Return whether deterministic node state permits a capability-floor conclusion."""
+    return bool(_capability_floor_recovery_state(task, diagnosis, evidence, result)["allowed"])
+
+
+def _record_capability_floor_guard_block(task, state):
+    if state.get("allowed"):
+        return
+    blocked_by = state.get("blocked_by") or "recovery_not_exhausted"
+    task["capability_floor_blocked_by"] = blocked_by
+    task["capability_floor_guard_evidence"] = {
+        "failure_class": state.get("failure_class", "unknown"),
+        "applicable_recoveries": list(state.get("applicable_recoveries", [])),
+        "exhausted_recoveries": list(state.get("exhausted_recoveries", [])),
+        "non_applicable_recoveries": list(state.get("non_applicable_recoveries", [])),
+    }
+    if task.get("_capability_floor_guard_block_recorded"):
+        return
+    RUN["capability_floor_guard_blocks"] = RUN.get("capability_floor_guard_blocks", 0) + 1
+    task["_capability_floor_guard_block_recorded"] = True
+    record_run_event(
+        "capability_floor_guard_blocked", task_id=task.get("id"),
+        blocked_by=blocked_by,
+        applicable_recoveries=state.get("applicable_recoveries", []),
+        exhausted_recoveries=state.get("exhausted_recoveries", []),
+    )
+
+
 def _has_strong_capability_floor_evidence(task, result=None):
     """Only accept a capability-floor diagnosis after actual bounded search."""
     result = result if isinstance(result, dict) else {}
@@ -4412,6 +4658,7 @@ def diagnose_failure(task, result, evidence=None):
     category = "unknown"
     confidence = "low"
     rationale = "The available evidence does not distinguish scope, strategy, dependency, or verifier failure."
+    capability_floor_state = None
 
     effective_preflight = _effective_preflight(result.get("integration_preflight"))
     has_integration_preflight = (
@@ -4455,13 +4702,25 @@ def diagnose_failure(task, result, evidence=None):
         category = "verifier_builder_mismatch"
         confidence = "medium"
         rationale = "The neutral execution outcome did not produce the executable proof required by the verifier contract."
-    elif budget_exhausted and _has_strong_capability_floor_evidence(task, result):
-        category = "model_capability_floor"
-        confidence = "medium"
-        rationale = (
-            "A bounded strategy search recorded materially different implementation attempts that all failed; "
-            "the budget observation alone is not being used as capability-floor evidence."
+    elif budget_exhausted and _is_bounded_implementation_failure(task, result, evidence):
+        capability_floor_state = _capability_floor_recovery_state(
+            task, "model_capability_floor", evidence, result,
         )
+        if capability_floor_state["allowed"]:
+            category = "model_capability_floor"
+            confidence = "medium"
+            rationale = (
+                "A bounded strategy search recorded materially different implementation attempts that all failed; "
+                "the budget observation alone is not being used as capability-floor evidence."
+            )
+        else:
+            _record_capability_floor_guard_block(task, capability_floor_state)
+            category = "implementation_strategy_wrong"
+            confidence = "medium"
+            rationale = compact_text(
+                "The focused implementation failure still has an applicable recovery that has not been exhausted; "
+                f"capability-floor declaration is blocked by {capability_floor_state['blocked_by']}.", 900,
+            )
     elif budget_exhausted and _has_positive_scope_evidence(task, result):
         category = "scope_too_broad"
         confidence = "medium"
@@ -4499,13 +4758,41 @@ def diagnose_failure(task, result, evidence=None):
         category = "local_integration_state_corruption"
         confidence = "high" if has_integration_preflight else "medium"
         rationale = "Verified child work reached a parent integration boundary with concrete shared-state or interface conflicts."
-    elif result.get("decomposition_search_exhausted"):
-        category = "model_capability_floor"
-        confidence = "low"
-        rationale = (
-            "The original decomposition and the bounded alternative decomposition attempts all remained too broad; "
-            "this is evidence for a capability floor or a non-decomposition mechanism, not proof of either."
+    elif result.get("decomposition_search_exhausted") and not any(term in searchable for term in (
+        "module not found", "importerror", "undefined", "not defined", "cannot read", "dependency",
+        "interface", "api mismatch", "missing symbol", "no such file",
+        "builder_tool_evidence", "executable_verification", "no executable verification",
+    )):
+        capability_floor_state = _capability_floor_recovery_state(
+            task, "model_capability_floor", evidence, result,
         )
+        if capability_floor_state["allowed"]:
+            category = "model_capability_floor"
+            confidence = "low"
+            rationale = (
+                "The original decomposition and the bounded alternative decomposition attempts all remained too broad; "
+                "this is evidence for a capability floor or a non-decomposition mechanism, not proof of either."
+            )
+        elif _is_bounded_implementation_failure(task, result, evidence):
+            _record_capability_floor_guard_block(task, capability_floor_state)
+            category = "implementation_strategy_wrong"
+            confidence = "medium"
+            rationale = compact_text(
+                "Decomposition is exhausted, but this node is bounded and still has an applicable recovery; "
+                f"capability-floor declaration is blocked by {capability_floor_state['blocked_by']}.", 900,
+            )
+        elif task.get("kind", "implementation") == "integration":
+            category = "local_integration_state_corruption"
+            confidence = "medium"
+            rationale = "Integration decomposition is exhausted; preserve the existing integration recovery semantics."
+        else:
+            _record_capability_floor_guard_block(task, capability_floor_state)
+            category = "unknown"
+            confidence = "low"
+            rationale = compact_text(
+                "Decomposition search is exhausted, but the recorded failure does not establish that all applicable "
+                f"recovery mechanisms are exhausted ({capability_floor_state['blocked_by']}).", 900,
+            )
     elif status == "too_broad" or failure_type == "TASK_TOO_BROAD":
         category = "scope_too_broad"
         confidence = "high"
@@ -4544,10 +4831,36 @@ def diagnose_failure(task, result, evidence=None):
         confidence = "medium"
         rationale = "The evidence gate could not observe the executable proof required to judge the implementation."
     elif failure_type == "IMPLEMENTATION_ERROR":
-        if at_max_depth and _looks_like_tiny_scope(task) and repeated:
-            category = "model_capability_floor"
-            confidence = "medium"
-            rationale = "A tiny leaf still failed after focused repair attempts at the depth limit; this is a capability-floor hypothesis, not proof."
+        if at_max_depth and _is_bounded_implementation_failure(task, result, evidence):
+            capability_floor_state = _capability_floor_recovery_state(
+                task, "model_capability_floor", evidence, result,
+            )
+            if capability_floor_state["allowed"]:
+                category = "model_capability_floor"
+                confidence = "medium"
+                rationale = (
+                    "A tiny bounded implementation still failed after the existing recovery mechanisms, including "
+                    "the bounded strategy search; this is evidence for a capability floor."
+                )
+            else:
+                _record_capability_floor_guard_block(task, capability_floor_state)
+                category = "implementation_strategy_wrong"
+                confidence = "medium"
+                rationale = compact_text(
+                    "The node is a bounded implementation failure, but capability-floor declaration is blocked by "
+                    f"{capability_floor_state['blocked_by']}; use the existing strategy-search route.", 900,
+                )
+        elif at_max_depth and _looks_like_tiny_scope(task) and repeated:
+            capability_floor_state = _capability_floor_recovery_state(
+                task, "model_capability_floor", evidence, result,
+            )
+            _record_capability_floor_guard_block(task, capability_floor_state)
+            category = "unknown"
+            confidence = "low"
+            rationale = compact_text(
+                "A tiny leaf failed at the depth limit, but the evidence is insufficient to establish that all "
+                f"applicable recovery mechanisms are exhausted ({capability_floor_state['blocked_by']}).", 900,
+            )
         elif at_max_depth:
             category = "unknown"
             confidence = "low"
@@ -4586,6 +4899,34 @@ def diagnose_failure(task, result, evidence=None):
         "decomposition_search_exhausted": bool(result.get("decomposition_search_exhausted") or task.get("decomposition_search_exhausted")),
         "evidence": evidence,
     }
+    if category == "model_capability_floor":
+        if capability_floor_state is None:
+            capability_floor_state = _capability_floor_recovery_state(
+                task, category, evidence, result,
+            )
+        if capability_floor_state.get("allowed"):
+            diagnosis["capability_floor_evidence"] = {
+                "failure_class": capability_floor_state.get("failure_class", "unknown"),
+                "applicable_recoveries": list(capability_floor_state.get("applicable_recoveries", [])),
+                "exhausted_recoveries": list(capability_floor_state.get("exhausted_recoveries", [])),
+                "non_applicable_recoveries": list(capability_floor_state.get("non_applicable_recoveries", [])),
+            }
+        else:
+            # No floor-producing branch should bypass the guard. Keep a
+            # defensive fallback for future callers that add a candidate
+            # classification without adding its exhaustion check.
+            _record_capability_floor_guard_block(task, capability_floor_state)
+            diagnosis["category"] = "unknown"
+            diagnosis["confidence"] = "low"
+            diagnosis["next_action"] = "collect_more_failure_evidence"
+            diagnosis["rationale"] = compact_text(
+                "Capability-floor declaration was rejected because an applicable recovery remains available.", 900,
+            )
+    if task.get("capability_floor_blocked_by"):
+        diagnosis["capability_floor_blocked_by"] = task["capability_floor_blocked_by"]
+        diagnosis["capability_floor_guard_evidence"] = copy.deepcopy(
+            task.get("capability_floor_guard_evidence", {}),
+        )
     return diagnosis
 
 
@@ -4657,6 +4998,21 @@ def _record_task_failure(task, result, phase="execution"):
     diagnosis = result.get("failure_diagnosis")
     if not isinstance(diagnosis, dict) or not diagnosis.get("category"):
         diagnosis = diagnose_failure(task, result, evidence)
+    elif diagnosis.get("category") == "model_capability_floor":
+        floor_state = _capability_floor_recovery_state(
+            task, diagnosis, evidence, result,
+        )
+        if not floor_state["allowed"]:
+            _record_capability_floor_guard_block(task, floor_state)
+            diagnosis = diagnose_failure(task, result, evidence)
+        elif not diagnosis.get("capability_floor_evidence"):
+            diagnosis = dict(diagnosis)
+            diagnosis["capability_floor_evidence"] = {
+                "failure_class": floor_state.get("failure_class", "unknown"),
+                "applicable_recoveries": list(floor_state.get("applicable_recoveries", [])),
+                "exhausted_recoveries": list(floor_state.get("exhausted_recoveries", [])),
+                "non_applicable_recoveries": list(floor_state.get("non_applicable_recoveries", [])),
+            }
     task["failure_diagnosis"] = diagnosis
     if _is_execution_budget_exhausted(result):
         task["execution_outcome"] = EXECUTION_BUDGET_EXHAUSTED
@@ -4778,6 +5134,10 @@ def recompute_search_metrics():
         "strategy_search_failures": int(RUN.get("strategy_search_failures", 0) or 0),
         "strategy_rescue_rate": RUN["strategy_rescue_rate"],
         "capability_floor_nodes": capability_floor,
+        "capability_floor_guard_blocks": int(RUN.get("capability_floor_guard_blocks", 0) or 0),
+        "capability_floor_routed_to_strategy": int(
+            RUN.get("capability_floor_routed_to_strategy", 0) or 0
+        ),
         "execution_budget_exhaustions": int(RUN.get("execution_budget_exhaustions", 0) or 0),
         "budget_exhaustion_routed_to_scope": int(RUN.get("budget_exhaustion_routed_to_scope", 0) or 0),
         "budget_exhaustion_routed_to_strategy": int(RUN.get("budget_exhaustion_routed_to_strategy", 0) or 0),
@@ -5066,6 +5426,9 @@ def build_node_diagnosis():
             "failed_decompositions": compact_failed_decompositions(task),
             "decomposition_search_exhausted": bool(task.get("decomposition_search_exhausted")),
             "strategy_search": task.get("strategy_search"),
+            "capability_floor_blocked_by": task.get("capability_floor_blocked_by"),
+            "capability_floor_guard_evidence": task.get("capability_floor_guard_evidence"),
+            "capability_floor_evidence": (diagnosis or {}).get("capability_floor_evidence"),
             "integration_preflight": task.get("integration_preflight"),
             "integration_conflicts": list(
                 ((task.get("integration_preflight") or {}).get("after") or
@@ -5093,6 +5456,7 @@ def print_search_metrics():
         "alternative_decomposition_rescues", "strategy_searches", "strategy_generation_failures",
         "alternate_strategies_attempted",
         "strategy_rescues", "strategy_search_failures", "capability_floor_nodes",
+        "capability_floor_guard_blocks", "capability_floor_routed_to_strategy",
         "execution_budget_exhaustions", "budget_exhaustion_routed_to_scope",
         "budget_exhaustion_routed_to_strategy", "budget_exhaustion_routed_to_dependency",
         "budget_exhaustion_routed_to_other",
@@ -5138,6 +5502,8 @@ def print_node_diagnosis():
         if row.get("strategy_search"):
             strategy = row["strategy_search"]
             print(f"  strategy search: {strategy.get('outcome', strategy.get('status', 'unknown'))}")
+        if row.get("capability_floor_blocked_by"):
+            print(f"  capability floor guard: blocked by {row['capability_floor_blocked_by']}")
         evidence = compact_text(json.dumps(row.get("failure_evidence", []), ensure_ascii=False), 320)
         if evidence and evidence != "[]":
             print(f"  evidence: {evidence}")
