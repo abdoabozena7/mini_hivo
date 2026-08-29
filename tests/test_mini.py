@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -318,12 +319,209 @@ Requirements:
             "requirements": ["persist settings", "keyboard accessible", "reduced-motion support"],
         }
         mini.begin_durable_run(contract)
+        (mini.WORKSPACE / "index.html").write_text("<!doctype html><title>Timer</title>", encoding="utf-8")
         with patch.object(mini, "browser_workspace_snapshot", return_value={"passed": True}) as browser:
             result = mini.run_tool("verify_web_app", {"path": "index.html"}, role="Builder")
         profile = browser.call_args.kwargs["profile"]
         self.assertEqual(profile.kind, "timer")
         self.assertIn("settings_persistence", profile.required_interactions)
-        self.assertEqual(result, '{"passed": true}')
+        payload = json.loads(result)
+        self.assertTrue(payload["passed"])
+        self.assertEqual(payload["resolved_entrypoint"], "index.html")
+
+    def test_javascript_node_verification_is_normalized_to_referencing_html(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        (mini.WORKSPACE / "app.js").write_text("const ready = true;\n", encoding="utf-8")
+        mini.ACTIVE_TOOL_CONTRACT = {"goal": "Build a web app", "task_id": "1.1"}
+
+        with patch.object(mini, "browser_workspace_snapshot", return_value={"passed": True}) as browser:
+            result = json.loads(mini.run_tool("verify_web_app", {"path": "app.js"}, role="Builder"))
+
+        browser.assert_called_once()
+        self.assertEqual(browser.call_args.args[:2], ("index.html", "1.1"))
+        self.assertEqual(result["requested_from_node"], "app.js")
+        self.assertEqual(result["resolved_entrypoint"], "index.html")
+        self.assertEqual(result["resolution_source"], "script_reference")
+        self.assertEqual(result["resolution_status"], "RESOLVED")
+
+    def test_css_node_verification_is_normalized_to_linking_html(self):
+        (mini.WORKSPACE / "app.html").write_text(
+            '<!doctype html><link rel="stylesheet" href="styles/site.css">', encoding="utf-8",
+        )
+        styles = mini.WORKSPACE / "styles"
+        styles.mkdir()
+        (styles / "site.css").write_text("body { color: black; }\n", encoding="utf-8")
+
+        with patch.object(mini, "browser_workspace_snapshot", return_value={"passed": True}) as browser:
+            result = mini.verify_browser_application("styles/site.css", "2.1")
+
+        self.assertEqual(browser.call_args.args[0], "app.html")
+        self.assertEqual(result["resolution_source"], "stylesheet_reference")
+
+    def test_explicit_verified_entrypoint_has_priority_over_script_reference(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        (mini.WORKSPACE / "verified.html").write_text("<!doctype html>", encoding="utf-8")
+        (mini.WORKSPACE / "app.js").write_text("const ready = true;\n", encoding="utf-8")
+        evidence = {
+            "requested_from_node": "app.js",
+            "project_invariants": [{
+                "kind": "browser_entrypoint", "path": "verified.html",
+                "source": "verified_child",
+            }],
+        }
+
+        resolved = mini.resolve_browser_entrypoint(mini.WORKSPACE, evidence)
+
+        self.assertEqual(resolved, "verified.html")
+        self.assertEqual(evidence["resolution_source"], "verified_invariant")
+
+    def test_unique_root_html_entrypoint_resolves_without_guessing(self):
+        (mini.WORKSPACE / "application.html").write_text("<!doctype html>", encoding="utf-8")
+        evidence = {"requested_from_node": None}
+
+        resolved = mini.resolve_browser_entrypoint(mini.WORKSPACE, evidence)
+
+        self.assertEqual(resolved, "application.html")
+        self.assertEqual(evidence["resolution_source"], "unique_root_html")
+
+    def test_ambiguous_html_entrypoints_are_neutral_verifier_mismatch(self):
+        (mini.WORKSPACE / "admin.html").write_text("<!doctype html>", encoding="utf-8")
+        (mini.WORKSPACE / "application.html").write_text("<!doctype html>", encoding="utf-8")
+        with patch.object(mini, "browser_workspace_snapshot") as browser:
+            observation = mini.verify_browser_application(None, "3.1")
+
+        browser.assert_not_called()
+        self.assertEqual(observation["failure_type"], mini.VERIFICATION_TARGET_UNRESOLVED)
+        self.assertFalse(observation["environment_error"])
+        diagnosis = mini.diagnose_failure(
+            {"id": "3.1", "goal": "Verify one browser view", "depth": 2},
+            {"status": "failed", "failure_type": mini.VERIFICATION_TARGET_UNRESOLVED,
+             "browser": observation},
+        )
+        self.assertEqual(diagnosis["category"], "verifier_builder_mismatch")
+
+    def test_missing_html_after_neutral_budget_is_not_environment_failure(self):
+        (mini.WORKSPACE / "app.js").write_text("const ready = true;\n", encoding="utf-8")
+        observation = mini.verify_browser_application("app.js", "3.2")
+        result = {
+            "status": "budget_exhausted",
+            "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "execution_outcome": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "failure_evidence": [{
+                "tool": "verify_web_app", "target": "app.js",
+                "result": json.dumps(observation),
+            }],
+        }
+
+        diagnosis = mini.diagnose_failure(
+            {"id": "3.2", "goal": "Verify one browser module", "depth": 2}, result,
+        )
+
+        self.assertEqual(result["failure_type"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(diagnosis["category"], "verifier_builder_mismatch")
+        self.assertNotEqual(diagnosis["category"], "environment_failure")
+        legacy_observation = json.dumps({
+            "passed": False, "environment_error": False,
+            "evidence": "HTML entry not found: app.js",
+        })
+        legacy_result = {
+            "status": "budget_exhausted",
+            "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "execution_outcome": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "failure_evidence": [{"tool": "verify_web_app", "target": "app.js",
+                                  "result": legacy_observation}],
+        }
+        legacy_diagnosis = mini.diagnose_failure(
+            {"id": "3.2-old", "goal": "Verify one browser module", "depth": 2}, legacy_result,
+        )
+        self.assertNotEqual(legacy_diagnosis["category"], "environment_failure")
+
+    def test_syntax_failure_is_recorded_before_resolution_and_skips_browser(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        (mini.WORKSPACE / "app.js").write_text("const broken = ;\n", encoding="utf-8")
+
+        with patch.object(mini, "browser_workspace_snapshot") as browser:
+            result = mini.verify_browser_application("app.js", "4.1")
+
+        browser.assert_not_called()
+        self.assertTrue(result["syntax_failure"])
+        self.assertEqual(result["failure_type"], "IMPLEMENTATION_ERROR")
+        self.assertEqual(result["resolution_status"], "NOT_ATTEMPTED_SYNTAX_FAILURE")
+        self.assertFalse(result["environment_error"])
+        self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+
+    def test_fresh_browser_pass_does_not_hide_prior_syntax_failure(self):
+        syntax_observation = {
+            "passed": False, "environment_error": False,
+            "failure_type": "IMPLEMENTATION_ERROR", "syntax_failure": True,
+            "requested_from_node": "app.js", "resolved_entrypoint": "index.html",
+            "resolution_source": "script_reference", "resolution_status": "RESOLVED",
+        }
+        builder = {
+            "status": "done",
+            "tool_evidence": [{
+                "tool": "verify_web_app", "target": "app.js",
+                "result": json.dumps(syntax_observation),
+            }],
+        }
+        browser_pass = {
+            "passed": True, "entry_path": "index.html", "resolved_entrypoint": "index.html",
+        }
+
+        checks = mini.deterministic_quality_checks(builder, browser_result=browser_pass)
+
+        self.assertTrue(any(check["name"] == "executable_failures" for check in checks))
+
+    def test_real_browser_launch_failure_remains_environment_failure(self):
+        (mini.WORKSPACE / "index.html").write_text("<!doctype html>", encoding="utf-8")
+        with patch.object(
+            mini, "browser_workspace_snapshot",
+            return_value={"passed": False, "environment_error": True,
+                          "evidence": "browser executable unavailable"},
+        ):
+            browser = mini.verify_browser_application("index.html", "5.1")
+        builder = {"status": "done", "tool_evidence": [{
+            "tool": "verify_web_app", "target": "index.html", "result": json.dumps(browser),
+        }]}
+        gate = mini.evidence_gate(builder, browser_result=browser)
+
+        self.assertEqual(mini.classify_failure(builder, gate, browser), "ENVIRONMENT_ERROR")
+        diagnosis = mini.diagnose_failure(
+            {"id": "5.1", "goal": "Verify browser view", "depth": 1},
+            {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "browser": browser},
+        )
+        self.assertEqual(diagnosis["category"], "environment_failure")
+
+    def test_corrected_behavior_failure_can_still_route_to_existing_strategy_search(self):
+        failure = {
+            "passed": False, "environment_error": False,
+            "requested_from_node": "app.js", "resolved_entrypoint": "index.html",
+            "resolution_source": "script_reference", "resolution_status": "RESOLVED",
+            "interaction_checks": [{"name": "required_behavior", "passed": False}],
+        }
+        task = {
+            "id": "6.1", "goal": "Fix reset in update()", "done_when": ["reset is observable"],
+            "depth": 2, "fit_before_execution": {"decision": "execute", "reason": "one focused change"},
+            "repair_history": [{"status": "failed"}],
+        }
+        result = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "failure_evidence": [{
+                "tool": "verify_web_app", "target": "app.js", "result": json.dumps(failure),
+            }],
+            "repair_history": [{"status": "failed"}],
+        }
+
+        diagnosis = mini.diagnose_failure(task, result)
+
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertEqual(diagnosis["next_action"], "search_or_mutate")
 
     def test_falsifier_is_not_offered_mutating_tools(self):
         names = {item["function"]["name"] for item in mini.tools_for_role("Falsifier")}

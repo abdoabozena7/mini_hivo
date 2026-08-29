@@ -62,6 +62,7 @@ STRATEGY_SEARCH_UNAVAILABLE = "STRATEGY_SEARCH_UNAVAILABLE"
 # The failure router must inspect the resulting evidence before choosing a
 # decomposition, strategy, dependency, verifier, or capability path.
 EXECUTION_BUDGET_EXHAUSTED = "EXECUTION_BUDGET_EXHAUSTED"
+VERIFICATION_TARGET_UNRESOLVED = "VERIFICATION_TARGET_UNRESOLVED"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
 MAX_ALTERNATE_STRATEGIES = MAX_STRATEGY_ALTERNATIVES
@@ -712,7 +713,12 @@ def run_file(path):
                 return f"compile error:\n{build.stderr}"
             cmd = [str(exe)]
         elif ext in (".html", ".htm"):
-            return json.dumps(browser_workspace_snapshot(path, "run_file"), ensure_ascii=False)
+            return json.dumps(
+                verify_browser_application(
+                    path, "run_file", evidence={"requested_from_node": path},
+                ),
+                ensure_ascii=False,
+            )
         else:
             return f"error: unsupported file type for running: {ext}"
         result = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=30)
@@ -823,7 +829,17 @@ def run_tool(name, args, role="System"):
     if name == "verify_web_app":
         active = ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {}
         profile = infer_web_profile(str(active.get("goal") or "web"), active)
-        return json.dumps(browser_workspace_snapshot(args["path"], "tool", profile=profile), ensure_ascii=False)
+        target_evidence = {
+            "requested_from_node": args["path"],
+            "project_invariants": active.get("project_invariants", RUN.get("project_invariants", [])),
+        }
+        return json.dumps(
+            verify_browser_application(
+                args["path"], str(active.get("task_id") or "tool"),
+                profile=profile, evidence=target_evidence,
+            ),
+            ensure_ascii=False,
+        )
     return f"unknown tool: {name}"
 
 
@@ -1007,7 +1023,11 @@ def new_metrics(mode):
         # Retained as zero-valued historical fields; the experimental path no
         # longer hides work inside stage continuation/rewrite schedulers.
         "stage_continuations": 0, "coherent_rewrite_recoveries": 0,
-        "browser_checks": 0, "verification_failures": 0, "task_too_broad_count": 0,
+        "browser_checks": 0,
+        "browser_entrypoint_resolutions": 0,
+        "browser_entrypoint_resolution_failures": 0,
+        "browser_checks_skipped_for_syntax_failure": 0,
+        "verification_failures": 0, "task_too_broad_count": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
         "ollama_http_200": 0, "ollama_tool_call_responses": 0,
         "ollama_thinking_responses": 0, "ollama_terminal_empty_responses": 0,
@@ -2852,6 +2872,8 @@ def verification_failure_signature(result):
         return ()
     if not isinstance(payload, dict) or payload.get("passed"):
         return ()
+    if payload.get("failure_type") == VERIFICATION_TARGET_UNRESOLVED:
+        return ()
     if payload.get("environment_error"):
         return ("environment",)
     signatures = []
@@ -3298,23 +3320,386 @@ def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None):
             server.kill(); server.wait(timeout=3)
 
 
-def discover_web_entrypoint(task, contract=None):
-    combined = task.get("goal", "") + " " + compact_contract(contract or {})
-    if not any(word in combined.lower() for word in ("web", "browser", "html", "ui", "game", "timer", "frontend")):
+_BROWSER_HTML_SUFFIXES = {".html", ".htm"}
+_BROWSER_SOURCE_SUFFIXES = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".css"}
+
+
+def _browser_workspace_path(workspace, raw_path):
+    """Resolve one evidence path without allowing it to escape the workspace."""
+    if raw_path is None or not str(raw_path).strip():
         return None
-    preferred = WORKSPACE / "index.html"
-    if preferred.exists():
-        return {"path": "index.html"}
-    candidates = sorted(WORKSPACE.glob("*.htm*"))
-    return {"path": str(candidates[0].relative_to(WORKSPACE))} if candidates else None
+    root = Path(workspace).resolve()
+    try:
+        candidate = Path(str(raw_path))
+        candidate = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
+def _browser_html_candidates(workspace):
+    root = Path(workspace).resolve()
+    candidates = []
+    for current, dirs, names in os.walk(root):
+        current_path = Path(current)
+        try:
+            depth = len(current_path.relative_to(root).parts)
+        except ValueError:
+            continue
+        dirs[:] = [name for name in sorted(dirs)
+                   if name not in _SKIP_DIRS and depth < MAX_RECON_DEPTH]
+        for name in sorted(names):
+            path = current_path / name
+            if path.suffix.casefold() not in _BROWSER_HTML_SUFFIXES:
+                continue
+            try:
+                relative = path.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if relative.startswith((".agent_", ".hivo/")):
+                continue
+            candidates.append(path)
+            if len(candidates) >= MAX_RECON_FILES:
+                return candidates
+    return candidates
+
+
+def _local_html_asset_references(workspace, html_path):
+    """Return deterministic local script/style references from one HTML file."""
+    root = Path(workspace).resolve()
+    try:
+        text = Path(html_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    patterns = (
+        ("script", r"<script\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)['\"]"),
+        ("stylesheet", r"<link\b[^>]*\bhref\s*=\s*['\"]([^'\"]+)['\"]"),
+    )
+    references = []
+    for kind, pattern in patterns:
+        for raw in re.findall(pattern, text, flags=re.IGNORECASE):
+            clean = str(raw).split("#", 1)[0].split("?", 1)[0].strip()
+            if not clean or clean.startswith("//") or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", clean):
+                continue
+            try:
+                if clean.startswith("/"):
+                    target = (root / clean.lstrip("/\\")).resolve()
+                else:
+                    target = (Path(html_path).parent / clean).resolve()
+                target.relative_to(root)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            references.append({"kind": kind, "path": target})
+    return references
+
+
+def _trusted_entrypoint_value(container):
+    if isinstance(container, str):
+        return container
+    if not isinstance(container, dict):
+        return None
+    for key in ("browser_entrypoint", "web_entrypoint", "entrypoint", "path"):
+        value = container.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _explicit_browser_resolution(workspace, evidence):
+    """Resolve only evidence-backed explicit entrypoints, in trust order."""
+    evidence = evidence if isinstance(evidence, dict) else {}
+    groups = []
+    harness = evidence.get("harness_config")
+    harness_value = _trusted_entrypoint_value(harness)
+    if harness_value:
+        groups.append(("harness_config", [harness_value]))
+
+    verified = evidence.get("verified_entrypoint")
+    verified_value = _trusted_entrypoint_value(verified)
+    if verified_value:
+        groups.append(("verified_metadata", [verified_value]))
+
+    invariant_values = []
+    for item in evidence.get("project_invariants", []) or []:
+        if not isinstance(item, dict) or item.get("kind") != "browser_entrypoint":
+            continue
+        source = str(item.get("source", "")).casefold()
+        if not (source.startswith("deterministic") or source.startswith("verified") or source == "harness"):
+            continue
+        invariant_values.append(_trusted_entrypoint_value(item))
+    if invariant_values:
+        groups.append(("verified_invariant", invariant_values))
+
+    metadata = evidence.get("metadata")
+    if isinstance(metadata, dict):
+        source = str(metadata.get("source", "")).casefold()
+        metadata_value = _trusted_entrypoint_value(metadata)
+        if metadata_value and (
+            metadata.get("verified") is True or source.startswith(("deterministic", "verified", "harness"))
+        ):
+            groups.append(("verified_metadata", [metadata_value]))
+
+    for key in ("reconnaissance", "repository_snapshot"):
+        snapshot = evidence.get(key)
+        if not isinstance(snapshot, dict):
+            continue
+        html_entries = [
+            str(value) for value in snapshot.get("entrypoints", []) or []
+            if Path(str(value)).suffix.casefold() in _BROWSER_HTML_SUFFIXES
+        ]
+        if len(set(html_entries)) == 1:
+            groups.append(("deterministic_reconnaissance", html_entries))
+
+    for source, raw_values in groups:
+        raw_values = [value for value in raw_values if value]
+        if not raw_values:
+            return {
+                "resolution_status": VERIFICATION_TARGET_UNRESOLVED,
+                "resolution_source": f"invalid_{source}",
+                "resolved_entrypoint": None,
+            }
+        valid = []
+        invalid = []
+        for raw in raw_values:
+            path = _browser_workspace_path(workspace, raw)
+            if path is None or not path.is_file() or path.suffix.casefold() not in _BROWSER_HTML_SUFFIXES:
+                invalid.append(str(raw))
+            else:
+                valid.append(path)
+        unique = {path.resolve() for path in valid}
+        if invalid or len(unique) != 1:
+            return {
+                "resolution_status": VERIFICATION_TARGET_UNRESOLVED,
+                "resolution_source": f"conflicting_{source}" if len(unique) > 1 else f"invalid_{source}",
+                "resolved_entrypoint": None,
+                "candidates": sorted(set(invalid + [path.as_posix() for path in unique]))[:8],
+            }
+        selected = next(iter(unique))
+        return {
+            "resolution_status": "RESOLVED",
+            "resolution_source": source,
+            "resolved_entrypoint": selected.relative_to(Path(workspace).resolve()).as_posix(),
+        }
+    return None
+
+
+def _resolve_browser_entrypoint_details(workspace, evidence):
+    root = Path(workspace).resolve()
+    explicit = _explicit_browser_resolution(root, evidence)
+    if explicit is not None:
+        return explicit
+
+    requested = (evidence or {}).get("requested_from_node") if isinstance(evidence, dict) else None
+    requested_path = _browser_workspace_path(root, requested)
+    html_candidates = _browser_html_candidates(root)
+    if requested_path is not None and requested_path.suffix.casefold() in _BROWSER_SOURCE_SUFFIXES:
+        matches = []
+        match_kinds = set()
+        for html_path in html_candidates:
+            for reference in _local_html_asset_references(root, html_path):
+                if reference["path"] == requested_path:
+                    matches.append(html_path)
+                    match_kinds.add(reference["kind"])
+                    break
+        unique_matches = sorted(set(matches), key=lambda item: item.as_posix().casefold())
+        if len(unique_matches) == 1:
+            if match_kinds == {"script"}:
+                source = "script_reference"
+            elif match_kinds == {"stylesheet"}:
+                source = "stylesheet_reference"
+            else:
+                source = "asset_reference"
+            return {
+                "resolution_status": "RESOLVED", "resolution_source": source,
+                "resolved_entrypoint": unique_matches[0].relative_to(root).as_posix(),
+            }
+        if len(unique_matches) > 1:
+            return {
+                "resolution_status": VERIFICATION_TARGET_UNRESOLVED,
+                "resolution_source": "ambiguous_asset_references",
+                "resolved_entrypoint": None,
+                "candidates": [path.relative_to(root).as_posix() for path in unique_matches[:8]],
+            }
+
+    root_html = sorted(
+        [path for path in html_candidates if path.parent == root],
+        key=lambda item: item.name.casefold(),
+    )
+    if len(root_html) == 1:
+        return {
+            "resolution_status": "RESOLVED", "resolution_source": "unique_root_html",
+            "resolved_entrypoint": root_html[0].relative_to(root).as_posix(),
+        }
+    conventional = root / "index.html"
+    if conventional.is_file():
+        return {
+            "resolution_status": "RESOLVED", "resolution_source": "conventional_index_html",
+            "resolved_entrypoint": "index.html",
+        }
+    return {
+        "resolution_status": VERIFICATION_TARGET_UNRESOLVED,
+        "resolution_source": "ambiguous_html_candidates" if html_candidates else "missing_html_entrypoint",
+        "resolved_entrypoint": None,
+        "candidates": [path.relative_to(root).as_posix() for path in html_candidates[:8]],
+    }
+
+
+def resolve_browser_entrypoint(workspace, evidence):
+    """Return an evidence-backed HTML entrypoint or a neutral unresolved marker.
+
+    ``evidence`` is also populated with the compact resolution facts needed by
+    the run ledger. The resolver never accepts a source file as an entrypoint.
+    """
+    details = _resolve_browser_entrypoint_details(workspace, evidence)
+    if isinstance(evidence, dict):
+        evidence.update(details)
+    if details["resolution_status"] == "RESOLVED":
+        return details["resolved_entrypoint"]
+    return VERIFICATION_TARGET_UNRESOLVED
+
+
+def _browser_syntax_failures(workspace, entrypoint, requested_from_node=None):
+    root = Path(workspace).resolve()
+    paths = []
+    entry_path = _browser_workspace_path(root, entrypoint)
+    requested_path = _browser_workspace_path(root, requested_from_node)
+    for path in (entry_path, requested_path):
+        if path is not None and path.is_file() and path not in paths:
+            paths.append(path)
+    if entry_path is not None and entry_path.is_file():
+        for reference in _local_html_asset_references(root, entry_path):
+            path = reference["path"]
+            if path.is_file() and path.suffix.casefold() in {".js", ".mjs", ".cjs"} and path not in paths:
+                paths.append(path)
+    failures = []
+    for path in paths:
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        issue = source_validation_error(path, content)
+        if issue:
+            failures.append({"path": path.relative_to(root).as_posix(), "error": compact_text(issue, 700)})
+    return failures
+
+
+def verify_browser_application(requested_path=None, task_id="ROOT", profile=None, evidence=None):
+    """Syntax-gate, resolve, then verify the application through its HTML entrypoint."""
+    target_evidence = dict(evidence or {})
+    target_evidence["requested_from_node"] = requested_path
+    requested_syntax_failures = _browser_syntax_failures(WORKSPACE, None, requested_path)
+    if requested_syntax_failures:
+        compact_target = {
+            "requested_from_node": requested_path,
+            "resolved_entrypoint": None,
+            "resolution_source": "syntax_gate",
+            "resolution_status": "NOT_ATTEMPTED_SYNTAX_FAILURE",
+        }
+        RUN["browser_checks_skipped_for_syntax_failure"] = RUN.get(
+            "browser_checks_skipped_for_syntax_failure", 0,
+        ) + 1
+        record_run_event(
+            "browser_verification_syntax_failure", task_id=task_id,
+            syntax_errors=requested_syntax_failures,
+        )
+        record_run_event("browser_verification_target", task_id=task_id, **compact_target)
+        return {
+            **compact_target,
+            "passed": False,
+            "environment_error": False,
+            "failure_type": "IMPLEMENTATION_ERROR",
+            "syntax_failure": True,
+            "syntax_errors": requested_syntax_failures,
+            "evidence": "Syntax validation failed before entrypoint resolution and browser behavior verification.",
+        }
+
+    resolved = resolve_browser_entrypoint(WORKSPACE, target_evidence)
+    compact_target = {
+        "requested_from_node": requested_path,
+        "resolved_entrypoint": target_evidence.get("resolved_entrypoint"),
+        "resolution_source": target_evidence.get("resolution_source"),
+        "resolution_status": target_evidence.get("resolution_status"),
+    }
+    if resolved == VERIFICATION_TARGET_UNRESOLVED:
+        record_run_event("browser_verification_target", task_id=task_id, **compact_target)
+        RUN["browser_entrypoint_resolution_failures"] = RUN.get(
+            "browser_entrypoint_resolution_failures", 0,
+        ) + 1
+        return {
+            **compact_target,
+            "passed": False,
+            "environment_error": False,
+            "failure_type": VERIFICATION_TARGET_UNRESOLVED,
+            "evidence": "Browser application entrypoint could not be resolved deterministically.",
+        }
+
+    RUN["browser_entrypoint_resolutions"] = RUN.get("browser_entrypoint_resolutions", 0) + 1
+    syntax_failures = _browser_syntax_failures(WORKSPACE, resolved, requested_path)
+    if syntax_failures:
+        RUN["browser_checks_skipped_for_syntax_failure"] = RUN.get(
+            "browser_checks_skipped_for_syntax_failure", 0,
+        ) + 1
+        record_run_event(
+            "browser_verification_syntax_failure", task_id=task_id,
+            syntax_errors=syntax_failures,
+        )
+        record_run_event("browser_verification_target", task_id=task_id, **compact_target)
+        return {
+            **compact_target,
+            "passed": False,
+            "environment_error": False,
+            "failure_type": "IMPLEMENTATION_ERROR",
+            "syntax_failure": True,
+            "syntax_errors": syntax_failures,
+            "evidence": "Syntax validation failed before browser behavior verification; browser launch skipped.",
+        }
+
+    record_run_event("browser_verification_target", task_id=task_id, **compact_target)
+    browser_result = browser_workspace_snapshot(resolved, task_id, profile=profile)
+    return {**compact_target, **browser_result}
+
+
+def _web_verification_applicable(task, contract=None):
+    combined = task.get("goal", "") + " " + compact_contract(contract or {})
+    return any(word in combined.lower() for word in ("web", "browser", "html", "ui", "game", "timer", "frontend"))
+
+
+def _task_browser_requested_path(task):
+    for raw in task.get("scope_hint", []) or []:
+        path = _browser_workspace_path(WORKSPACE, raw)
+        if path is not None and path.is_file() and path.suffix.casefold() in (
+            _BROWSER_SOURCE_SUFFIXES | _BROWSER_HTML_SUFFIXES
+        ):
+            return path.relative_to(WORKSPACE.resolve()).as_posix()
+    return None
+
+
+def discover_web_entrypoint(task, contract=None):
+    if not _web_verification_applicable(task, contract):
+        return None
+    evidence = {
+        "requested_from_node": _task_browser_requested_path(task),
+        "project_invariants": RUN.get("project_invariants", []),
+        "repository_snapshot": inspect_repository(WORKSPACE),
+    }
+    resolved = resolve_browser_entrypoint(WORKSPACE, evidence)
+    return {"path": resolved} if resolved != VERIFICATION_TARGET_UNRESOLVED else None
 
 
 def optional_browser_check(task, contract=None):
-    target = discover_web_entrypoint(task, contract)
-    if not target:
+    if not _web_verification_applicable(task, contract):
         return None
     profile = infer_web_profile(task.get("goal", ""), contract or {})
-    return browser_workspace_snapshot(target["path"], task["id"], profile=profile)
+    requested = _task_browser_requested_path(task)
+    return verify_browser_application(
+        requested, task["id"], profile=profile,
+        evidence={
+            "requested_from_node": requested,
+            "project_invariants": RUN.get("project_invariants", []),
+            "repository_snapshot": inspect_repository(WORKSPACE),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3368,11 +3753,31 @@ def _current_verification_failures(builder_result, falsifier_result=None, browse
     # A separately executed browser check is newer evidence for the Builder's
     # earlier browser probe. It must never erase a concrete Falsifier failure.
     if browser_result and browser_result.get("passed"):
-        entry = str(browser_result.get("entry_path") or "index.html")
+        entry = str(browser_result.get("resolved_entrypoint") or browser_result.get("entry_path") or "index.html")
+        def superseded_builder_browser_failure(item):
+            if item not in builder_evidence or item.get("tool") != "verify_web_app":
+                return False
+            raw_result = str(item.get("result", ""))
+            try:
+                payload = json.loads(raw_result)
+            except (TypeError, ValueError):
+                payload = {}
+            # A later behavioral pass can supersede stale behavior evidence for
+            # the same normalized app target, but never a syntax-gate failure.
+            syntax_failure = bool(isinstance(payload, dict) and payload.get("syntax_failure"))
+            if not syntax_failure:
+                syntax_failure = bool(re.search(r'"syntax_failure"\s*:\s*true', raw_result, re.IGNORECASE))
+            if syntax_failure:
+                return False
+            normalized = payload.get("resolved_entrypoint") if isinstance(payload, dict) else None
+            if not normalized:
+                match = re.search(r'"resolved_entrypoint"\s*:\s*"([^"\\]+)"', raw_result)
+                normalized = match.group(1) if match else None
+            if not normalized and Path(str(item.get("target", ""))).suffix.casefold() in _BROWSER_HTML_SUFFIXES:
+                normalized = str(item.get("target"))
+            return str(normalized or "") == entry
         failures = [item for item in failures if not (
-            item in builder_evidence
-            and item.get("tool") == "verify_web_app"
-            and str(item.get("target")) == entry
+            superseded_builder_browser_failure(item)
         )]
     return failures
 
@@ -3453,6 +3858,73 @@ def _is_execution_budget_exhausted(result):
     )
 
 
+def _verification_target_is_unresolved(value):
+    if isinstance(value, dict):
+        if (
+            value.get("failure_type") == VERIFICATION_TARGET_UNRESOLVED
+            or value.get("resolution_status") == VERIFICATION_TARGET_UNRESOLVED
+        ):
+            return True
+        return any(_verification_target_is_unresolved(value.get(key)) for key in (
+            "result", "evidence", "browser", "failure_evidence", "deterministic_failures",
+            "tool_evidence", "execution_evidence",
+        ) if key in value)
+    if isinstance(value, (list, tuple)):
+        return any(_verification_target_is_unresolved(item) for item in value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text == VERIFICATION_TARGET_UNRESOLVED:
+            return True
+        if text.startswith(("{", "[")):
+            try:
+                return _verification_target_is_unresolved(json.loads(text))
+            except ValueError:
+                pass
+        return VERIFICATION_TARGET_UNRESOLVED in text
+    return False
+
+
+def _concrete_environment_failure(value):
+    """Require positive provider/runtime evidence; false JSON flags are not failures."""
+    if isinstance(value, dict):
+        if value.get("environment_error") is True:
+            return True
+        if str(value.get("failure_type", "")).upper() == "ENVIRONMENT_ERROR":
+            return True
+        if str(value.get("status", "")).casefold() == "provider_failure":
+            return True
+        if str(value.get("kind", "")).casefold() in {"browser_environment", "provider_failure"}:
+            return True
+        if value.get("provider_error"):
+            return True
+        return any(_concrete_environment_failure(value.get(key)) for key in (
+            "result", "evidence", "browser", "failure_evidence", "deterministic_failures",
+            "tool_evidence", "execution_evidence",
+        ) if key in value)
+    if isinstance(value, (list, tuple)):
+        return any(_concrete_environment_failure(item) for item in value)
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if text.startswith(("{", "[")):
+        try:
+            return _concrete_environment_failure(json.loads(text))
+        except ValueError:
+            pass
+    lower = text.casefold()
+    if re.search(r'["\']environment_error["\']\s*:\s*true', lower):
+        return True
+    if re.search(r'["\']environment_error["\']\s*:\s*false', lower):
+        return False
+    return any(term in lower for term in (
+        "provider unavailable", "provider failure", "ollama unavailable",
+        "ollama worker failure", "ollama transport failure", "transport failure",
+        "connection refused", "browser executable not found", "browser executable missing",
+        "browser executable unavailable", "playwright launch failed", "cuda out of memory",
+        "cuda initialization failed",
+    ))
+
+
 def classify_failure(builder_result, gate, browser_result=None, falsifier_result=None, vision_review=None):
     if vision_review is None and isinstance(falsifier_result, dict) and "tool_evidence" not in falsifier_result:
         # Compatibility with the old (builder, gate, browser, vision) call.
@@ -3465,6 +3937,8 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
         return "ENVIRONMENT_ERROR"
     if vision_review and vision_review.get("environment_error"):
         return "ENVIRONMENT_ERROR"
+    if _verification_target_is_unresolved(browser_result) or _verification_target_is_unresolved(gate):
+        return VERIFICATION_TARGET_UNRESOLVED
     preflight = _effective_preflight(builder_result.get("integration_preflight"))
     gate_has_preflight_failure = any(
         isinstance(item, dict) and item.get("name") == "integration_preflight"
@@ -3472,16 +3946,15 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
     )
     if (preflight and not preflight.get("passed")) or gate_has_preflight_failure:
         return "INTEGRATION_TOO_BROAD" if builder_result.get("status") == "too_broad" else "INTEGRATION_FAILURE"
-    text = json.dumps(gate.get("deterministic_failures", []), ensure_ascii=False).casefold()
-    if _is_execution_budget_exhausted(builder_result) and any(
-        term in text for term in ("cuda", "browser executable", "missing dependency", "provider", "ollama")
+    if _is_execution_budget_exhausted(builder_result) and _concrete_environment_failure(
+        gate.get("deterministic_failures", [])
     ):
         return "ENVIRONMENT_ERROR"
     if _is_execution_budget_exhausted(builder_result):
         return EXECUTION_BUDGET_EXHAUSTED
     if builder_result.get("status") == "too_broad":
         return "TASK_TOO_BROAD"
-    if any(term in text for term in ("cuda", "browser executable", "missing dependency", "provider")):
+    if _concrete_environment_failure(gate.get("deterministic_failures", [])):
         return "ENVIRONMENT_ERROR"
     return "IMPLEMENTATION_ERROR"
 
@@ -3494,7 +3967,11 @@ def _compact_failure_evidence(evidence, max_items=6, item_chars=900):
             compacted.append(compact_text(item, item_chars))
             continue
         projected = {}
-        for key in ("tool", "target", "kind", "name", "code", "status", "source", "evidence", "result"):
+        for key in (
+            "tool", "target", "kind", "name", "code", "status", "source", "evidence", "result",
+            "failure_type", "requested_from_node", "resolved_entrypoint", "resolution_source",
+            "resolution_status", "environment_error",
+        ):
             if key not in item:
                 continue
             value = item.get(key)
@@ -3540,11 +4017,23 @@ def _failure_evidence_from_result(result):
         if isinstance(source, dict):
             candidates.extend(evidence_for_review(source.get("tool_evidence", [])))
     browser = result.get("browser")
-    if isinstance(browser, dict) and browser.get("environment_error"):
-        candidates.append({
-            "kind": "browser_environment", "status": "FAIL", "source": "deterministic",
-            "evidence": compact_text(browser.get("evidence", "browser environment unavailable"), 900),
-        })
+    if isinstance(browser, dict) and not browser.get("passed"):
+        if browser.get("environment_error"):
+            candidates.append({
+                "kind": "browser_environment", "status": "FAIL", "source": "deterministic",
+                "environment_error": True,
+                "evidence": compact_text(browser.get("evidence", "browser environment unavailable"), 900),
+            })
+        else:
+            candidates.append({
+                "kind": "browser_verification", "status": "FAIL", "source": "deterministic",
+                "failure_type": browser.get("failure_type"),
+                "requested_from_node": browser.get("requested_from_node"),
+                "resolved_entrypoint": browser.get("resolved_entrypoint"),
+                "resolution_source": browser.get("resolution_source"),
+                "resolution_status": browser.get("resolution_status"),
+                "evidence": compact_text(browser.get("evidence", "browser verification failed"), 900),
+            })
     evidence = result.get("tool_evidence")
     if isinstance(evidence, list):
         candidates.extend(evidence_for_review(evidence) or evidence)
@@ -3642,11 +4131,12 @@ def _strategy_scope_is_bounded(task, result=None):
     return _looks_like_tiny_scope(task)
 
 
-def _budget_evidence_is_environmental(searchable):
-    return any(term in searchable for term in (
-        "environment_error", "provider", "ollama", "cuda", "browser executable",
-        "playwright", "connection refused", "timed out", "transport failure",
-    ))
+def _budget_evidence_is_environmental(searchable, result=None, evidence=None):
+    return (
+        _concrete_environment_failure(result)
+        or _concrete_environment_failure(evidence)
+        or _concrete_environment_failure(searchable)
+    )
 
 
 def _has_strong_capability_floor_evidence(task, result=None):
@@ -3706,12 +4196,24 @@ def diagnose_failure(task, result, evidence=None):
     ) or any(item.get("kind") == "integration_preflight" for item in evidence if isinstance(item, dict))
 
     budget_exhausted = _is_execution_budget_exhausted(result)
-    if budget_exhausted and _budget_evidence_is_environmental(searchable):
+    target_unresolved = (
+        failure_type == VERIFICATION_TARGET_UNRESOLVED
+        or _verification_target_is_unresolved(result)
+        or _verification_target_is_unresolved(evidence)
+    )
+    if budget_exhausted and _budget_evidence_is_environmental(searchable, result, evidence):
         category = "environment_failure"
         confidence = "high"
         rationale = (
             "The focused execution budget ended alongside provider/runtime evidence; preserve the neutral outcome "
             "and repair the environment before considering implementation routing."
+        )
+    elif budget_exhausted and target_unresolved:
+        category = "verifier_builder_mismatch"
+        confidence = "high"
+        rationale = (
+            "The browser verifier could not resolve an evidence-backed application entrypoint; preserve the neutral "
+            "execution outcome and inspect the verifier target contract."
         )
     elif budget_exhausted and (has_integration_preflight or failure_type in {"INTEGRATION_FAILURE", "INTEGRATION_TOO_BROAD"}):
         category = "local_integration_state_corruption"
@@ -3762,6 +4264,13 @@ def diagnose_failure(task, result, evidence=None):
         rationale = (
             "The focused execution budget ended without enough positive scope, dependency, verifier, environment, "
             "or strategy evidence to choose a recovery mechanism."
+        )
+    elif target_unresolved:
+        category = "verifier_builder_mismatch"
+        confidence = "high"
+        rationale = (
+            "The browser verifier could not resolve an evidence-backed HTML application entrypoint; this is a "
+            "verification-target mismatch, not an implementation, scope, or environment diagnosis."
         )
     elif has_integration_preflight or failure_type in {"INTEGRATION_FAILURE", "INTEGRATION_TOO_BROAD"}:
         category = "local_integration_state_corruption"
@@ -4471,8 +4980,11 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     RUN["_leaf_context_samples"].append(context_tokens)
     begin_transaction(task["id"])
     global ACTIVE_TOOL_CONTRACT
-    ACTIVE_TOOL_CONTRACT = {"goal": task["goal"], "requirements": task.get("done_when", []),
-                            "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", [])}
+    ACTIVE_TOOL_CONTRACT = {
+        "goal": task["goal"], "requirements": task.get("done_when", []),
+        "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
+        "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
+    }
     builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context)
     memory = builder["memory"]
     if _is_execution_budget_exhausted(builder):
@@ -4677,6 +5189,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     ACTIVE_TOOL_CONTRACT = {
         "goal": task["goal"], "requirements": task.get("done_when", []),
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
+        "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
     }
     builder = execute_agent_task(
         task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
@@ -6176,8 +6689,11 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
 
     begin_transaction(f"aggregate-{label}")
     global ACTIVE_TOOL_CONTRACT
-    ACTIVE_TOOL_CONTRACT = {"goal": task["goal"], "requirements": task.get("done_when", []),
-                            "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", [])}
+    ACTIVE_TOOL_CONTRACT = {
+        "goal": task["goal"], "requirements": task.get("done_when", []),
+        "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
+        "task_id": label, "project_invariants": RUN.get("project_invariants", []),
+    }
     context = (
         f"HIERARCHICAL INTEGRATION CONTRACT:\n{json.dumps(integration_contract, ensure_ascii=False)[:9000]}\n"
         f"REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1800)}\n"
