@@ -210,14 +210,37 @@ not depend on a hardcoded symbol such as `STORAGE_KEY`. The result
 is preserved as `integration_preflight` in `task_tree`, `node_diagnosis`, and
 the run event log. A failing preflight is routed as
 `local_integration_state_corruption`, with concrete conflicts and current
-syntax (`PASS`/`FAIL`) in the parent packet.
+syntax (`PASS`/`FAIL`) in the parent packet; blocking conflicts then enter the
+bounded integration-task path described below.
 
 Integration has its own bounded fit decision. A small integration uses one
-focused parent pass; a conflict-heavy integration can use only the dedicated
-milestones `normalize_shared_state`, `resolve_conflicts`, `connect_behaviors`,
-`syntax_build`, and `behavioral_verification`. This is not a general hidden
-stage scheduler and does not turn unrelated implementation failures into
+focused parent pass. When the preflight reports blocking conflicts, the
+controller groups the actual conflicts into small `kind: integration` task
+contracts and executes them sequentially through the same `solve_task()` /
+transaction / evidence-gate machinery. Each task receives only the root
+contract, parent goal, project invariants, relevant verified manifests,
+owned preflight conflicts, verified dependency summaries, current failure
+evidence, and bounded repository hints. It does not receive sibling chat
+histories or hidden reasoning.
+
+After every integration task, the workspace is checked with a fresh preflight;
+after the complete integration task set, a fresh preflight must show no
+blocking conflicts before parent-level verification can pass. If an
+integration task returns `INTEGRATION_TOO_BROAD` or `TASK_TOO_BROAD`, the same
+`solve_task()` path decomposes that concern into smaller integration children
+while budget remains. Provider/environment failures do not trigger a split.
+This is a bounded integration specialization, not a second recursive
+orchestrator, and it does not turn unrelated implementation failures into
 recursive splitting.
+
+The v4 integration-granularity metrics are
+`integration_tasks_created`, `integration_splits`, `integration_resplits`,
+`integration_verified_nodes`, `integration_too_broad_nodes`,
+`integration_granularity_rescues`,
+`preflight_blocking_conflicts_detected`, and
+`preflight_blocking_conflicts_resolved`. The reported
+`integration_conflict_resolution` is the absolute ratio
+`resolved/detected`; it is `N/A` when no blocking conflict was detected.
 
 The failure router therefore distinguishes `scope_too_broad` → re-split,
 `implementation_strategy_wrong` → search/mutate, `dependency_error` →

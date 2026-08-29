@@ -973,6 +973,15 @@ def new_metrics(mode):
         "integration_success_rate": 0.0,
         "integration_milestone_runs": 0,
         "integration_milestone_steps": 0,
+        "integration_tasks_created": 0,
+        "integration_splits": 0,
+        "integration_resplits": 0,
+        "integration_verified_nodes": 0,
+        "integration_too_broad_nodes": 0,
+        "integration_granularity_rescues": 0,
+        "preflight_blocking_conflicts_detected": 0,
+        "preflight_blocking_conflicts_resolved": 0,
+        "integration_conflict_resolution": None,
         "repairer_calls": 0, "falsifier_calls": 0, "falsifier_detected_failures": 0,
         "planner_structured_retries": 0, "model_calls": 0, "tool_calls": 0,
         "builder_calls": 0, "predictor_calls": 0, "challenger_calls": 0,
@@ -1020,6 +1029,7 @@ def compact_task_tree():
     for task_id, task in TASKS.items():
         entry = {
             "task_id": task_id, "parent_id": task.get("parent"), "depth": task.get("depth", 0),
+            "kind": task.get("kind", "implementation"),
             "goal": compact_text(task.get("goal", ""), 500), "status": task.get("status", "unknown"),
             "summary": compact_text(task.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
             "verification_status": task.get("verification_status", "unknown"),
@@ -1059,6 +1069,13 @@ def compact_task_tree():
             entry["integration_preflight"] = task.get("integration_preflight")
         if task.get("integration_outcome") is not None:
             entry["integration_outcome"] = task.get("integration_outcome")
+        if task.get("kind") == "integration":
+            entry["integration_conflicts"] = [
+                _normalize_integration_conflict(item)
+                for item in task.get("integration_conflicts", [])[:MAX_INTEGRATION_MANIFEST_ITEMS]
+            ]
+            entry["integration_resplit_attempts"] = int(task.get("integration_resplit_attempts", 0) or 0)
+            entry["integration_too_broad"] = bool(task.get("integration_too_broad"))
         result.append(entry)
     return sorted(result, key=lambda item: (item["depth"], item["task_id"]))
 
@@ -1734,10 +1751,17 @@ def contract_for_task(task, root_contract):
 # TASK CONTRACTS / NODE PACKETS / ADAPTIVE GRANULARITY
 # ---------------------------------------------------------------------------
 
-def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=None):
+def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=None,
+              kind="implementation", integration_conflicts=None, integration_context=None):
     return {
         "id": str(task_id), "parent": parent, "depth": int(depth), "goal": compact_text(goal, 1800),
         "done_when": bounded_list(done_when or [], 12, 700), "scope_hint": bounded_list(scope_hint or [], 10, 300),
+        "kind": str(kind or "implementation"),
+        "integration_conflicts": list(integration_conflicts or []) if kind == "integration" else [],
+        "integration_context": integration_context if kind == "integration" else None,
+        "integration_split_boundary": False,
+        "integration_resplit_attempts": 0,
+        "integration_too_broad": False,
         "status": "pending", "children": [], "summary": "", "verification_status": "unknown",
         "changed_files": [], "failure_evidence": [],
         # The first failed execution is retained independently from the final
@@ -1797,7 +1821,7 @@ def deterministic_fit_fallback(task, depth, contract, force_smaller=False):
     # An explicit TASK_TOO_BROAD result may force a smaller decomposition.  A
     # generic implementation failure only gets a split when the remaining
     # contract/evidence still indicates a broad scope.
-    if (force_smaller and task.get("initial_failure_type") == "TASK_TOO_BROAD") or len(responsibilities) >= 3:
+    if (force_smaller and task.get("initial_failure_type") in {"TASK_TOO_BROAD", "INTEGRATION_TOO_BROAD"}) or len(responsibilities) >= 3:
         return {"decision": "split", "reason": "deterministic bounded fallback"}
     text = task.get("goal", "")
     separators = len(re.findall(r"\b(?:and|plus|with|then)\b|[,;]", text, re.IGNORECASE))
@@ -1898,6 +1922,10 @@ def fallback_child_contracts(task):
 
 
 def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None, force_smaller=False):
+    if task.get("kind") == "integration":
+        return decompose_integration_task(
+            task, contract, repo_snapshot, parent_summary, dependency_summaries, force_smaller,
+        )
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if remaining < 2:
         return []
@@ -2369,6 +2397,11 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
                        dependency_summaries=None, failure_evidence=None):
     dependency_summaries = dependency_summaries or []
     failure_evidence = failure_evidence or task.get("failure_evidence", [])
+    if task.get("kind") == "integration":
+        return build_integration_node_packet(
+            task, root_contract, repo_snapshot, parent_summary,
+            dependency_summaries, failure_evidence,
+        )
     try:
         project_invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
     except Exception:
@@ -3375,6 +3408,33 @@ def recompute_integration_metrics():
     attempted = int(RUN.get("parent_integrations_attempted", 0) or 0)
     passed = int(RUN.get("parent_integrations_passed", 0) or 0)
     RUN["integration_success_rate"] = round((passed / attempted) * 100, 2) if attempted else 0.0
+    integration_tasks = [
+        task for task in TASKS.values()
+        if isinstance(task, dict) and task.get("kind") == "integration"
+    ]
+    RUN["integration_tasks_created"] = len(integration_tasks)
+    RUN["integration_splits"] = sum(
+        1 for task in TASKS.values()
+        if isinstance(task, dict) and task.get("integration_split_boundary")
+    )
+    RUN["integration_resplits"] = sum(
+        int(task.get("integration_resplit_attempts", 0) or 0) for task in integration_tasks
+    )
+    RUN["integration_verified_nodes"] = sum(
+        1 for task in integration_tasks if str(task.get("status", "")).casefold() == "done"
+    )
+    RUN["integration_too_broad_nodes"] = sum(
+        1 for task in integration_tasks if task.get("integration_too_broad")
+    )
+    RUN["integration_granularity_rescues"] = sum(
+        1 for task in integration_tasks
+        if task.get("integration_too_broad") and str(task.get("status", "")).casefold() == "done"
+    )
+    detected = int(RUN.get("preflight_blocking_conflicts_detected", 0) or 0)
+    resolved = int(RUN.get("preflight_blocking_conflicts_resolved", 0) or 0)
+    RUN["integration_conflict_resolution"] = (
+        round((resolved / detected) * 100, 2) if detected else None
+    )
     return {
         "parent_integrations_attempted": attempted,
         "parent_integrations_passed": passed,
@@ -3384,6 +3444,15 @@ def recompute_integration_metrics():
         "integration_conflicts_resolved": int(RUN.get("integration_conflicts_resolved", 0) or 0),
         "invariant_violations_detected": int(RUN.get("invariant_violations_detected", 0) or 0),
         "integration_milestone_runs": int(RUN.get("integration_milestone_runs", 0) or 0),
+        "integration_tasks_created": RUN["integration_tasks_created"],
+        "integration_splits": RUN["integration_splits"],
+        "integration_resplits": RUN["integration_resplits"],
+        "integration_verified_nodes": RUN["integration_verified_nodes"],
+        "integration_too_broad_nodes": RUN["integration_too_broad_nodes"],
+        "integration_granularity_rescues": RUN["integration_granularity_rescues"],
+        "preflight_blocking_conflicts_detected": detected,
+        "preflight_blocking_conflicts_resolved": resolved,
+        "integration_conflict_resolution": RUN["integration_conflict_resolution"],
         "integration_success_rate": RUN["integration_success_rate"],
     }
 
@@ -3395,9 +3464,19 @@ def print_integration_metrics():
         "parent_integrations_attempted", "parent_integrations_passed", "parent_integrations_failed",
         "parent_integrations_recovered", "integration_preflight_conflicts",
         "integration_conflicts_resolved", "invariant_violations_detected", "integration_milestone_runs",
+        "integration_tasks_created", "integration_splits", "integration_resplits",
+        "integration_verified_nodes", "integration_too_broad_nodes", "integration_granularity_rescues",
+        "preflight_blocking_conflicts_detected", "preflight_blocking_conflicts_resolved",
     ):
         print(f"{key}: {RUN.get(key, 0)}")
     print(f"integration_success_rate: {RUN.get('integration_success_rate', 0):g}%")
+    resolution = RUN.get("integration_conflict_resolution")
+    print(
+        "integration_conflict_resolution: "
+        f"{RUN.get('preflight_blocking_conflicts_resolved', 0)}/"
+        f"{RUN.get('preflight_blocking_conflicts_detected', 0)} "
+        f"({'N/A' if resolution is None else f'{resolution:g}%'})"
+    )
 
 
 def _register_resplit(task, leaf_result, trigger, decision=None):
@@ -3674,6 +3753,10 @@ def repair_task(task, contract, failure_evidence, memory, node_context):
 
 
 def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None):
+    if task.get("kind") == "integration":
+        return execute_integration_leaf(
+            task, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+        )
     dependency_summaries = dependency_summaries or []
     RUN["leaf_tasks"] += 1
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
@@ -3762,6 +3845,201 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     return {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "failed deterministic evidence gate after repair limit", "memory": memory,
             "failure_evidence": current_gate["deterministic_failures"]}
+
+
+def _integration_blocking_conflicts(preflight):
+    result = []
+    for item in (preflight or {}).get("conflicts", []):
+        severity = item.get("severity", "error") if isinstance(item, dict) else "error"
+        if str(severity).casefold() not in {"warning", "info"}:
+            result.append(_normalize_integration_conflict(item))
+    return result
+
+
+def _integration_owned_conflicts(task, preflight):
+    owned_keys = {
+        _integration_conflict_group_key(item)
+        for item in task.get("integration_conflicts", [])
+    }
+    if not owned_keys:
+        return _integration_blocking_conflicts(preflight)
+    return [
+        conflict for conflict in _integration_blocking_conflicts(preflight)
+        if _integration_conflict_group_key(conflict) in owned_keys
+    ]
+
+
+def _integration_child_preflight_check(task, preflight):
+    preflight = preflight if isinstance(preflight, dict) else {}
+    owned_remaining = _integration_owned_conflicts(task, preflight)
+    passed = preflight.get("current_syntax", "PASS") != "FAIL" and not owned_remaining
+    return {
+        "passed": bool(passed),
+        "current_syntax": preflight.get("current_syntax", "PASS"),
+        "owned_conflicts_remaining": owned_remaining,
+        "owned_conflicts_resolved": max(
+            0,
+            len(task.get("integration_conflicts", [])) - len(owned_remaining),
+        ),
+        "preflight": preflight,
+    }
+
+
+def _integration_child_gate(builder, falsifier, browser, preflight_check):
+    """Gate one integration concern without blocking on unrelated conflicts."""
+    deterministic = deterministic_quality_checks(
+        builder, falsifier, browser, integration_preflight=None,
+    )
+    if not preflight_check.get("passed"):
+        deterministic.append({
+            "name": "integration_task_preflight", "status": "FAIL", "source": "deterministic",
+            "evidence": compact_text(json.dumps({
+                "current_syntax": preflight_check.get("current_syntax"),
+                "owned_conflicts_remaining": preflight_check.get("owned_conflicts_remaining", []),
+            }, ensure_ascii=False), 1200),
+        })
+    passed = builder.get("status") == "done" and not deterministic
+    if not passed:
+        RUN["verification_failures"] += 1
+    return {
+        "passed": passed, "checks": deterministic,
+        "deterministic_failures": deterministic, "advisory_checks": [], "advisory_failures": [],
+    }
+
+
+def _integration_child_info_from_context(task):
+    context = task.get("integration_context") if isinstance(task.get("integration_context"), dict) else {}
+    return list(context.get("verified_child_manifests", []) or [])
+
+
+def _commit_verified_integration_leaf(task, contract, result, summary, memory, gate,
+                                      falsifier=None, browser=None, preflight=None):
+    changed = commit_transaction()
+    task["changed_files"] = [
+        str(Path(path).relative_to(WORKSPACE)) if WORKSPACE is not None and Path(path).is_relative_to(WORKSPACE)
+        else str(path)
+        for path in changed
+    ]
+    remember_verified_outcome(task, contract, summary, changed)
+    result = {
+        "status": "done", "summary": summary, "memory": memory, "builder": result,
+        "falsifier": falsifier, "browser": browser, "gate": gate,
+        "changed_files": changed, "integration_preflight": preflight,
+    }
+    attach_verified_manifest(task, result)
+    return result
+
+
+def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None):
+    """Execute one bounded integration concern through the normal leaf engine."""
+    dependency_summaries = dependency_summaries or []
+    RUN["leaf_tasks"] += 1
+    node_context = build_node_context(
+        task, contract, get_memory_store(), repo_snapshot,
+        parent_summary, dependency_summaries, task.get("failure_evidence"),
+    )
+    context_tokens = max(1, int(len(node_context) / 4))
+    RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
+    RUN["_leaf_context_samples"].append(context_tokens)
+    begin_transaction(task["id"])
+    global ACTIVE_TOOL_CONTRACT
+    ACTIVE_TOOL_CONTRACT = {
+        "goal": task["goal"], "requirements": task.get("done_when", []),
+        "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
+    }
+    builder = execute_agent_task(
+        task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
+    )
+    memory = builder.get("memory", memory)
+    if builder.get("status") == "too_broad":
+        RUN["task_too_broad_count"] += 1
+        task["integration_too_broad"] = True
+        rollback_transaction()
+        return {
+            "status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
+            "summary": builder.get("summary", "integration task exceeds capacity"),
+            "memory": memory, "builder": builder,
+            "failure_evidence": _compact_failure_evidence(builder.get("tool_evidence", [])),
+        }
+    if builder.get("status") == "provider_failure":
+        rollback_transaction()
+        return {
+            "status": "failed", "failure_type": "ENVIRONMENT_ERROR",
+            "summary": builder.get("summary", "integration provider failure"),
+            "memory": memory, "builder": builder,
+        }
+
+    preflight = run_integration_preflight(
+        task, _integration_child_info_from_context(task), contract,
+    )
+    task["integration_preflight"] = {"after": preflight}
+    preflight_check = _integration_child_preflight_check(task, preflight)
+    if preflight_check["passed"]:
+        falsifier = falsify_task(task, ACTIVE_TOOL_CONTRACT, memory, builder, repo_snapshot, node_context)
+    else:
+        falsifier = {"status": "skipped", "summary": "blocked by owned integration conflict",
+                     "tool_evidence": [], "memory": memory}
+    memory = falsifier.get("memory", memory)
+    if falsifier.get("status") == "provider_failure":
+        rollback_transaction()
+        return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
+                "summary": falsifier.get("summary", "integration falsifier provider failure"),
+                "memory": memory, "builder": builder, "falsifier": falsifier,
+                "integration_preflight": task["integration_preflight"]}
+    browser = optional_browser_check(task, contract) if preflight_check["passed"] else None
+    gate = _integration_child_gate(builder, falsifier, browser, preflight_check)
+    event(f"[VERIFY {task['id']}] {'PASS' if gate['passed'] else 'FAIL'}",
+          role="Quality Review", task=task["id"], action="integration task evidence gate")
+    if gate["passed"]:
+        return _commit_verified_integration_leaf(
+            task, contract, builder, builder.get("summary", "integration concern verified"), memory,
+            gate, falsifier, browser, preflight,
+        )
+
+    current_gate = gate
+    current_preflight = preflight
+    current_browser = browser
+    for _ in range(MAX_REPAIRS_PER_LEAF):
+        repaired = repair_task(task, contract, current_gate["deterministic_failures"], memory, node_context)
+        memory = repaired.get("memory", memory)
+        if repaired.get("status") == "provider_failure":
+            rollback_transaction()
+            return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
+                    "summary": repaired.get("summary", "integration repair provider failure"), "memory": memory}
+        if repaired.get("status") == "too_broad":
+            RUN["task_too_broad_count"] += 1
+            task["integration_too_broad"] = True
+            rollback_transaction()
+            return {"status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
+                    "summary": repaired.get("summary", "integration repair exceeds capacity"),
+                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"]}
+        current_preflight = run_integration_preflight(
+            task, _integration_child_info_from_context(task), contract,
+        )
+        task["integration_preflight"]["after"] = current_preflight
+        current_check = _integration_child_preflight_check(task, current_preflight)
+        current_browser = optional_browser_check(task, contract) if current_check["passed"] else None
+        current_gate = _integration_child_gate(repaired, None, current_browser, current_check)
+        event(f"[VERIFY {task['id']}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
+              role="Quality Review", task=task["id"], action="fresh integration task verification")
+        if current_gate["passed"]:
+            return _commit_verified_integration_leaf(
+                task, contract, repaired, repaired.get("summary", "integration concern verified"), memory,
+                current_gate, None, current_browser, current_preflight,
+            )
+        if current_preflight.get("current_syntax") == "PASS" and not _integration_owned_conflicts(task, current_preflight):
+            failure_type = classify_failure(repaired, current_gate, current_browser, None)
+            if failure_type != "IMPLEMENTATION_ERROR":
+                rollback_transaction()
+                return {"status": "failed", "failure_type": failure_type,
+                        "summary": "fresh integration task verification failed", "memory": memory,
+                        "gate": current_gate, "integration_preflight": task["integration_preflight"]}
+    rollback_transaction()
+    failure_type = "INTEGRATION_FAILURE" if _integration_owned_conflicts(task, current_preflight) else "IMPLEMENTATION_ERROR"
+    return {"status": "failed", "failure_type": failure_type,
+            "summary": "integration task failed after repair limit", "memory": memory,
+            "gate": current_gate, "integration_preflight": task["integration_preflight"],
+            "failure_evidence": current_gate.get("deterministic_failures", [])}
 
 
 # ---------------------------------------------------------------------------
@@ -4138,9 +4416,17 @@ def collect_project_invariants(source_files=None):
 
 
 def _preflight_conflict(kind, message, files=None, severity="error", **extra):
-    result = {"kind": kind, "severity": severity, "message": compact_text(message, 500)}
+    # ``kind`` is retained for compatibility with v2/v3 ledgers.  ``type``
+    # and ``evidence`` make the small conflict contract self-describing to
+    # integration-task grouping without introducing application-specific rules.
+    result = {
+        "kind": kind, "type": kind, "severity": severity,
+        "message": compact_text(message, 500),
+        "evidence": compact_text(message, 500),
+    }
     if files:
         result["files"] = _compact_manifest_values(files, 8, 180)
+        result["locations"] = _compact_manifest_values(files, 8, 180)
     result.update(extra)
     return result
 
@@ -4288,6 +4574,340 @@ def run_integration_preflight(task=None, child_info=None, contract=None):
     return result
 
 
+def _integration_conflict_type(conflict):
+    if not isinstance(conflict, dict):
+        return "integration_conflict"
+    return str(conflict.get("type") or conflict.get("kind") or "integration_conflict")
+
+
+def _normalize_integration_conflict(conflict):
+    """Project one deterministic preflight conflict into a small task fact."""
+    if not isinstance(conflict, dict):
+        message = compact_text(conflict, 500)
+        return {"type": "integration_conflict", "kind": "integration_conflict",
+                "severity": "blocking", "evidence": message, "message": message}
+    kind = _integration_conflict_type(conflict)
+    normalized = {
+        "type": kind, "kind": kind,
+        "severity": str(conflict.get("severity", "error")),
+        "evidence": compact_text(conflict.get("evidence") or conflict.get("message") or kind, 500),
+    }
+    for key in ("message", "symbol", "id", "keys", "symbols", "files", "locations", "lines", "declarations"):
+        if key not in conflict or conflict.get(key) in (None, [], ""):
+            continue
+        value = conflict.get(key)
+        if isinstance(value, (list, tuple, set)):
+            normalized[key] = _compact_manifest_values(value, 8, 180)
+        elif isinstance(value, dict):
+            normalized[key] = compact_text(json.dumps(value, ensure_ascii=False, sort_keys=True), 700)
+        else:
+            normalized[key] = compact_text(value, 500)
+    locations = normalized.get("locations") or []
+    if not locations:
+        declarations = normalized.get("declarations") or []
+        if declarations and normalized.get("files"):
+            locations = [
+                f"{file}:{item.get('line')}"
+                for file, item in zip(normalized.get("files", []), declarations)
+                if isinstance(item, dict) and item.get("line") is not None
+            ]
+        elif normalized.get("lines") and normalized.get("files"):
+            locations = [
+                f"{file}:{line}"
+                for file in normalized.get("files", [])
+                for line in normalized.get("lines", [])
+            ]
+    if locations:
+        normalized["locations"] = _compact_manifest_values(locations, 8, 180)
+    return normalized
+
+
+def _integration_conflict_subject(conflict):
+    conflict = _normalize_integration_conflict(conflict)
+    for key in ("symbol", "id"):
+        if conflict.get(key):
+            return compact_text(conflict[key], 180)
+    for key in ("symbols", "keys"):
+        values = conflict.get(key) or []
+        if values:
+            return ", ".join(_compact_manifest_values(values, 4, 100))
+    locations = conflict.get("locations") or conflict.get("files") or []
+    if locations:
+        return ", ".join(_compact_manifest_values(locations, 2, 120))
+    return compact_text(conflict.get("evidence") or conflict.get("message") or "the detected conflict", 180)
+
+
+def _integration_conflict_group_key(conflict):
+    conflict = _normalize_integration_conflict(conflict)
+    kind = _integration_conflict_type(conflict)
+    if kind == "duplicate_declaration":
+        return kind, str(conflict.get("symbol") or _integration_conflict_subject(conflict))
+    if kind == "duplicate_html_id":
+        return kind, str(conflict.get("id") or _integration_conflict_subject(conflict))
+    if kind in {"conflicting_persistence_ownership", "multiple_persistence_owners", "multiple_persistence_keys"}:
+        return kind, _integration_conflict_subject(conflict)
+    if kind in {"syntax_error", "invariant_violation"}:
+        return kind, _integration_conflict_subject(conflict)
+    if kind in {"multiple_obvious_game_loops", "conflicting_entry_points", "multiple_state_owners"}:
+        return kind, "shared-owner"
+    if kind == "duplicate_child_symbol":
+        return kind, _integration_conflict_subject(conflict)
+    return kind, compact_text(conflict.get("message") or conflict.get("evidence") or kind, 180)
+
+
+def _group_integration_conflicts(conflicts, max_groups=None):
+    """Group blocking facts by one deterministic integration concern."""
+    blocking = []
+    for item in conflicts or []:
+        severity = item.get("severity", "error") if isinstance(item, dict) else "error"
+        if str(severity).casefold() not in {"warning", "info"}:
+            blocking.append(_normalize_integration_conflict(item))
+    buckets = {}
+    for conflict in sorted(
+        blocking,
+        key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, default=str),
+    ):
+        buckets.setdefault(_integration_conflict_group_key(conflict), []).append(conflict)
+    groups = [buckets[key] for key in sorted(buckets, key=lambda value: repr(value))]
+    limit = int(max_groups or MAX_CHILDREN)
+    limit = max(1, min(MAX_CHILDREN, limit))
+    if len(groups) <= limit:
+        return groups
+    # Keep the first concerns independent and make the final bounded task own
+    # the remainder. No conflict is silently dropped; an oversized final group
+    # can itself use the same integration resplit path.
+    remainder = [conflict for group in groups[limit - 1:] for conflict in group]
+    return groups[:limit - 1] + [remainder]
+
+
+def _integration_task_spec(group, parent_scope=None):
+    group = [_normalize_integration_conflict(item) for item in (group or [])]
+    kinds = sorted({_integration_conflict_type(item) for item in group})
+    subject = _integration_conflict_subject(group[0]) if len(group) == 1 else "the grouped blocking conflicts"
+    kind = kinds[0] if len(kinds) == 1 else "mixed_integration_conflict"
+    if kind == "duplicate_declaration":
+        goal = f"Resolve the duplicate declaration of {subject}; preserve one canonical definition and current callers."
+    elif kind in {"conflicting_persistence_ownership", "multiple_persistence_owners", "multiple_persistence_keys"}:
+        goal = f"Normalize persistence ownership for {subject}; reuse one canonical owner without changing unrelated behavior."
+    elif kind == "duplicate_html_id":
+        goal = f"Resolve the duplicate HTML id {subject}; preserve the intended control and its consumers."
+    elif kind == "multiple_obvious_game_loops":
+        goal = "Preserve one canonical animation/timer loop and reconnect existing behavior to it."
+    elif kind == "conflicting_entry_points":
+        goal = "Preserve one canonical browser entry point and remove conflicting top-level entry ownership."
+    elif kind == "syntax_error":
+        goal = f"Repair the reported syntax error at {subject} with the smallest valid edit."
+    elif kind == "duplicate_child_symbol":
+        goal = f"Resolve duplicate child ownership for {subject}; preserve one canonical symbol owner."
+    elif kind == "invariant_violation":
+        goal = f"Resolve the detected project invariant violation at {subject} without redefining the invariant."
+    else:
+        goal = "Resolve the bounded integration conflict group using the deterministic evidence below."
+    labels = ", ".join(kinds)
+    done_when = [
+        f"Fresh preflight has no blocking {labels} conflict owned by this task.",
+        "Relevant syntax/build or executable verification passes after the repair.",
+    ]
+    scope = []
+    for conflict in group:
+        scope.extend(conflict.get("files", []))
+        scope.extend(conflict.get("locations", []))
+        if conflict.get("symbol"):
+            scope.append(str(conflict["symbol"]))
+    if not scope:
+        scope = list(parent_scope or [])
+    return {
+        "goal": compact_text(goal, 900),
+        "done_when": bounded_list(done_when, 4, 500),
+        "scope_hint": _compact_manifest_values(scope, 8, 180),
+        "conflicts": group,
+    }
+
+
+def _compact_integration_child_info(child_info):
+    projected = []
+    for item in list(child_info or [])[:MAX_INTEGRATION_MANIFEST_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        projected.append({
+            "task_id": str(item.get("task_id", ""))[:80],
+            "goal": compact_text(item.get("goal", ""), 280),
+            "status": str(item.get("status", ""))[:40],
+            "summary": compact_text(item.get("summary", ""), 420),
+            "changed_files": _compact_manifest_values(item.get("changed_files", []), 8, 140),
+            "verification": compact_text(item.get("verification", ""), 240),
+            "integration_manifest": compact_manifest(item.get("integration_manifest")),
+            "evidence": compact_text(item.get("evidence", ""), 520),
+        })
+    return projected
+
+
+def _integration_context_for_task(parent_task, child_info, preflight):
+    return {
+        "parent_goal": compact_text(parent_task.get("goal", ""), 1000),
+        "project_invariants": bounded_list(
+            (preflight or {}).get("project_invariants", []) or RUN.get("project_invariants", []),
+            12, MAX_INTEGRATION_FACT_CHARS,
+        ),
+        "verified_child_manifests": _compact_integration_child_info(child_info),
+    }
+
+
+def build_integration_node_packet(task, root_contract, repo_snapshot, parent_summary="",
+                                  dependency_summaries=None, failure_evidence=None):
+    """Build the bounded packet used only by an integration task leaf."""
+    context = task.get("integration_context") if isinstance(task.get("integration_context"), dict) else {}
+    try:
+        invariants = collect_project_invariants() if WORKSPACE is not None else []
+    except Exception:
+        invariants = []
+    if not invariants:
+        invariants = context.get("project_invariants") or RUN.get("project_invariants", [])
+    dependencies = []
+    for item in list(dependency_summaries or [])[-MAX_INTEGRATION_MANIFEST_ITEMS:]:
+        if not isinstance(item, dict) or str(item.get("status", "")).casefold() not in {"done", "verified", "passed"}:
+            continue
+        dependencies.append({
+            "task_id": str(item.get("task_id", ""))[:80],
+            "goal": compact_text(item.get("goal", ""), 280),
+            "status": str(item.get("status", ""))[:40],
+            "summary": compact_text(item.get("summary", ""), 420),
+            "changed_files": _compact_manifest_values(item.get("changed_files", []), 8, 140),
+            "evidence": compact_text(item.get("evidence", ""), 520),
+            "integration_manifest": compact_manifest(item.get("integration_manifest")),
+        })
+    failure_projection = _compact_failure_evidence(failure_evidence or task.get("failure_evidence", []), max_items=4)
+    packet = {
+        "ROOT CONTRACT": compact_contract(root_contract, max_chars=MAX_ROOT_PACKET_CHARS),
+        "PARENT GOAL": compact_text(context.get("parent_goal") or parent_summary or "(none)", 1000),
+        "CURRENT INTEGRATION TASK": {
+            "id": str(task.get("id", "")),
+            "kind": "integration",
+            "goal": compact_text(task.get("goal", ""), 900),
+            "done_when": bounded_list(task.get("done_when", []), 6, 260),
+            "scope_hint": bounded_list(task.get("scope_hint", []), 6, 180),
+        },
+        "PROJECT INVARIANTS": bounded_list(invariants, 12, MAX_INTEGRATION_FACT_CHARS),
+        "RELEVANT CHILD INTEGRATION MANIFESTS": context.get("verified_child_manifests", [])[:MAX_INTEGRATION_MANIFEST_ITEMS],
+        "RELEVANT PREFLIGHT CONFLICT(S)": bounded_list(
+            task.get("integration_conflicts", []), MAX_INTEGRATION_MANIFEST_ITEMS, 700,
+        ),
+        "VERIFIED DEPENDENCY SUMMARIES": dependencies,
+        "CURRENT FAILURE EVIDENCE": failure_projection,
+        "BOUNDED REPOSITORY HINTS": repository_hints(
+            repo_snapshot, task.get("scope_hint"), max_chars=1900,
+        ),
+    }
+    encoded = json.dumps(packet, ensure_ascii=False, default=str)
+    return "INTEGRATION NODE PACKET:\n" + encoded[:MAX_NODE_PACKET_CHARS - 24]
+
+
+def _materialize_integration_tasks(parent_task, specs, context):
+    children = []
+    for index, spec in enumerate(list(specs or [])[:MAX_CHILDREN], 1):
+        parent_id = str(parent_task.get("id", ""))
+        if parent_id == "ROOT":
+            child_id = f"I.{index}"
+        elif parent_id.startswith("I.") or ".I." in parent_id:
+            child_id = f"{parent_id}.{index}"
+        else:
+            child_id = f"{parent_id}.I.{index}"
+        child_context = dict(context or {})
+        child_context["parent_goal"] = compact_text(parent_task.get("goal", ""), 1000)
+        child = make_task(
+            child_id, spec["goal"], int(parent_task.get("depth", 0)) + 1, parent_task.get("id"),
+            spec.get("done_when", []), spec.get("scope_hint", []),
+            kind="integration", integration_conflicts=spec.get("conflicts", []),
+            integration_context=child_context,
+        )
+        TASKS[child_id] = child
+        parent_task.setdefault("children", []).append(child_id)
+        RUN["tasks_created"] += 1
+        RUN["max_depth"] = max(RUN.get("max_depth", 0), child["depth"])
+        update_task_ledger(child)
+        children.append(child)
+    return children
+
+
+def create_integration_tasks(parent_task, contract, child_info, preflight, root=False):
+    """Turn current blocking preflight facts into bounded integration nodes."""
+    conflicts = [
+        item for item in (preflight or {}).get("conflicts", [])
+        if (not isinstance(item, dict))
+        or str(item.get("severity", "error")).casefold() not in {"warning", "info"}
+    ]
+    if not conflicts:
+        return []
+    remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
+    if remaining < 1:
+        return []
+    groups = _group_integration_conflicts(conflicts, max_groups=min(MAX_CHILDREN, remaining))
+    context = _integration_context_for_task(parent_task, child_info, preflight)
+    specs = [_integration_task_spec(group, parent_task.get("scope_hint")) for group in groups]
+    children = _materialize_integration_tasks(parent_task, specs, context)
+    if children:
+        parent_task["integration_split_boundary"] = True
+        parent_task.setdefault("integration_preflight", {})["integration_tasks"] = [
+            {
+                "task_id": child.get("id"), "kind": child.get("kind"),
+                "goal": child.get("goal"), "done_when": child.get("done_when"),
+                "scope_hint": child.get("scope_hint"),
+                "conflicts": child.get("integration_conflicts", []),
+            }
+            for child in children
+        ]
+        RUN["integration_splits"] = RUN.get("integration_splits", 0) + 1
+        record_run_event(
+            "integration_tasks_created", parent_task_id=parent_task.get("id"),
+            task_ids=[child.get("id") for child in children],
+            conflicts=[_normalize_integration_conflict(item) for item in conflicts],
+        )
+    return children
+
+
+def _integration_stage_specs(task):
+    group = [_normalize_integration_conflict(item) for item in task.get("integration_conflicts", [])]
+    label = _integration_conflict_subject(group[0]) if group else "the current integration concern"
+    scope = list(task.get("scope_hint", []))
+    return [
+        {
+            "goal": f"Make the canonical owner for {label} explicit and remove only the conflicting definition.",
+            "done_when": ["the canonical owner is preserved", "affected source syntax passes"],
+            "scope_hint": scope, "conflicts": group,
+        },
+        {
+            "goal": f"Reconnect the affected consumers of {label} to the canonical owner and verify the focused behavior.",
+            "done_when": ["fresh preflight has no owned blocking conflict", "focused executable verification passes"],
+            "scope_hint": scope, "conflicts": group,
+        },
+    ]
+
+
+def decompose_integration_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None,
+                               force_smaller=False):
+    """Deterministically split one integration concern for solve_task()."""
+    remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
+    if remaining < 2:
+        return []
+    groups = _group_integration_conflicts(
+        task.get("integration_conflicts", []), max_groups=min(MAX_CHILDREN, remaining),
+    )
+    specs = [_integration_task_spec(group, task.get("scope_hint")) for group in groups]
+    if force_smaller and len(specs) < 2:
+        specs = _integration_stage_specs(task)
+    if len(specs) < 2:
+        return []
+    base_context = task.get("integration_context") if isinstance(task.get("integration_context"), dict) else {}
+    children = _materialize_integration_tasks(task, specs, base_context)
+    if not children:
+        return []
+    task["integration_split_boundary"] = True
+    _record_decomposition_branch(
+        task, specs, children, kind="integration_resplit" if force_smaller else "integration",
+    )
+    return children
+
+
 def build_integration_contract(task, contract, child_info, preflight, root=False, fit=None):
     """Create the parent-facing Hierarchical Integration Contract."""
     return {
@@ -4395,6 +5015,117 @@ def run_integration_milestones(task, contract, child_info, memory, repo_snapshot
             "integration_preflight": current}
 
 
+def _integration_fit_decider(task, depth, contract, repo_snapshot, parent_summary,
+                             dependency_summaries, force_smaller=False):
+    if task.get("kind") == "integration":
+        return {
+            "decision": "split" if force_smaller else "execute",
+            "reason": "integration conflict groups are already bounded" if not force_smaller
+            else "the integration concern exceeded one focused execution",
+        }
+    return decide_task_fit(
+        task, depth, contract, repo_snapshot, parent_summary,
+        dependency_summaries, force_smaller=force_smaller,
+    )
+
+
+def _integration_result_info(child_task, child_result):
+    child_task = child_task if isinstance(child_task, dict) else {}
+    child_result = child_result if isinstance(child_result, dict) else {}
+    if child_result.get("status") == "done":
+        attach_verified_manifest(child_task, child_result)
+    return {
+        "task_id": str(child_task.get("id", "")),
+        "goal": compact_text(child_task.get("goal", ""), 360),
+        "status": str(child_result.get("status", "failed")),
+        "summary": compact_text(child_result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+        "changed_files": _compact_manifest_values(child_result.get("changed_files", []), 12, 140),
+        "verification": child_task.get("verification_status", "unknown"),
+        "integration_manifest": compact_manifest(
+            child_result.get("integration_manifest") or child_task.get("integration_manifest")
+        ),
+        "evidence": compact_evidence_summary(child_result),
+    }
+
+
+def _aggregate_integration_children(task, contract, child_results, memory, repo_snapshot=None, root=False):
+    """Aggregate a split integration concern without invoking a second planner."""
+    child_info = [
+        _integration_result_info(
+            item.get("task", {}) if isinstance(item, dict) else {},
+            item.get("result", {}) if isinstance(item, dict) else {},
+        )
+        for item in child_results or []
+    ]
+    if any(item.get("status") != "done" for item in child_info):
+        return {
+            "status": "failed", "failure_type": "CHILD_FAILURE",
+            "summary": "not all integration children were verified", "memory": memory,
+            "children": child_info,
+        }
+    base_info = _integration_child_info_from_context(task)
+    preflight = run_integration_preflight(task, base_info + child_info, contract)
+    task["integration_preflight"] = {"after": preflight}
+    owned_remaining = _integration_owned_conflicts(task, preflight)
+    if preflight.get("current_syntax", "PASS") == "PASS" and not owned_remaining:
+        changed = []
+        for item in child_info:
+            for path in item.get("changed_files", []):
+                if path not in changed:
+                    changed.append(path)
+        return {
+            "status": "done", "summary": "integration concern subtree verified", "memory": memory,
+            "changed_files": changed, "children": child_info,
+            "integration_preflight": {"after": preflight},
+        }
+    return {
+        "status": "failed", "failure_type": "INTEGRATION_FAILURE",
+        "summary": "integration concern subtree still has an owned blocking conflict",
+        "memory": memory, "children": child_info,
+        "integration_preflight": {"after": preflight},
+        "failure_evidence": _integration_failure_evidence(preflight),
+    }
+
+
+def run_integration_tasks_sequentially(parent_task, contract, child_info, integration_tasks,
+                                       memory, repo_snapshot):
+    """Run integration nodes one at a time through solve_task()."""
+    results = []
+    integration_info = []
+    dependencies = list(child_info or [])
+    current_preflight = (parent_task.get("integration_preflight") or {}).get("before") or {}
+    for child in integration_tasks or []:
+        result = solve_task(
+            child, int(parent_task.get("depth", 0)), contract, memory, repo_snapshot,
+            parent_summary=f"Integration parent: {parent_task.get('goal', '')}",
+            dependency_summaries=dependencies,
+            fit_decider=_integration_fit_decider,
+            leaf_executor=None,
+            aggregator=_aggregate_integration_children,
+        )
+        memory = result.get("memory", memory)
+        results.append({"task": child, "result": result})
+        info = _integration_result_info(child, result)
+        integration_info.append(info)
+        dependencies.append(info)
+        current_preflight = run_integration_preflight(
+            parent_task, list(child_info or []) + integration_info, contract,
+        )
+        parent_task.setdefault("integration_preflight", {})["after"] = current_preflight
+        if result.get("status") != "done":
+            return {
+                "status": "failed", "failure_type": result.get("failure_type", "INTEGRATION_FAILURE"),
+                "summary": f"integration task {child.get('id')} failed: {result.get('summary', '')}",
+                "memory": memory, "children": results, "integration_children": integration_info,
+                "integration_preflight": current_preflight,
+            }
+    return {
+        "status": "done", "summary": "all integration tasks verified sequentially", "memory": memory,
+        "children": results, "integration_children": integration_info,
+        "integration_preflight": current_preflight,
+    }
+
+
 def _start_parent_integration(task, preflight):
     """Count one real parent integration boundary exactly once."""
     if not isinstance(task, dict) or task.get("_parent_integration_started"):
@@ -4413,6 +5144,9 @@ def _start_parent_integration(task, preflight):
     task["_parent_integration_initial_conflicts"] = initial_conflicts
     RUN["parent_integrations_attempted"] = RUN.get("parent_integrations_attempted", 0) + 1
     RUN["integration_preflight_conflicts"] = RUN.get("integration_preflight_conflicts", 0) + initial_conflicts
+    RUN["preflight_blocking_conflicts_detected"] = (
+        RUN.get("preflight_blocking_conflicts_detected", 0) + initial_conflicts
+    )
     RUN["invariant_violations_detected"] = RUN.get("invariant_violations_detected", 0) + invariant_violations
     recompute_integration_metrics()
     record_run_event(
@@ -4443,6 +5177,9 @@ def _finish_parent_integration(task, *, passed, recovered=False, preflight=None)
     else:
         RUN["parent_integrations_failed"] = RUN.get("parent_integrations_failed", 0) + 1
     RUN["integration_conflicts_resolved"] = RUN.get("integration_conflicts_resolved", 0) + resolved
+    RUN["preflight_blocking_conflicts_resolved"] = (
+        RUN.get("preflight_blocking_conflicts_resolved", 0) + resolved
+    )
     outcome = {
         "attempted": True, "passed": bool(passed), "recovered": bool(recovered and passed),
         "initial_conflicts": initial_conflicts, "final_conflicts": final_conflicts,
@@ -4526,6 +5263,59 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         role="Coordinator", task=label, action="integration preflight",
     )
 
+    # Blocking preflight facts become real sequential integration nodes. Each
+    # node owns one deterministic concern and runs through solve_task(), so a
+    # too-broad integration repair can use the same adaptive decomposition
+    # machinery as any other task.
+    integration_children = []
+    if not preflight_before.get("passed"):
+        integration_children = create_integration_tasks(
+            task, contract, child_info, preflight_before, root=root,
+        )
+        if not integration_children:
+            _finish_parent_integration(task, passed=False, preflight=preflight_before)
+            RUN["integration_failures"] += 1
+            return {
+                "status": "failed", "failure_type": "INTEGRATION_FAILURE",
+                "summary": "blocking integration conflicts remain but no integration task budget is available",
+                "memory": memory, "children": child_info,
+                "integration_preflight": task["integration_preflight"],
+            }
+        integration_result = run_integration_tasks_sequentially(
+            task, contract, child_info, integration_children, memory, repo_snapshot,
+        )
+        memory = integration_result.get("memory", memory)
+        integration_info = list(integration_result.get("integration_children", []) or [])
+        combined_child_info = child_info + integration_info
+        preflight_after_children = integration_result.get("integration_preflight")
+        if not isinstance(preflight_after_children, dict):
+            preflight_after_children = run_integration_preflight(
+                task, combined_child_info, contract,
+            )
+        task["integration_preflight"]["integration_children"] = integration_info
+        task["integration_preflight"]["after"] = preflight_after_children
+        if integration_result.get("status") != "done" or not preflight_after_children.get("passed"):
+            _finish_parent_integration(task, passed=False, preflight=preflight_after_children)
+            RUN["integration_failures"] += 1
+            failure_type = integration_result.get("failure_type", "INTEGRATION_FAILURE")
+            if failure_type == "CHILD_FAILURE":
+                failure_type = "INTEGRATION_FAILURE"
+            return {
+                "status": "failed", "failure_type": failure_type,
+                "summary": integration_result.get("summary", "integration tasks did not resolve all conflicts"),
+                "memory": memory, "children": combined_child_info,
+                "integration_preflight": task["integration_preflight"],
+                "integration_tasks": integration_info,
+                "failure_evidence": _integration_failure_evidence(preflight_after_children),
+            }
+        child_info = combined_child_info
+        preflight_before = preflight_after_children
+        fit = {"decision": "execute", "reason": "bounded integration tasks completed before parent verification"}
+        integration_contract = build_integration_contract(
+            task, contract, child_info, preflight_before, root=root, fit=fit,
+        )
+        integration_contract["integration_tasks"] = integration_info
+
     begin_transaction(f"aggregate-{label}")
     global ACTIVE_TOOL_CONTRACT
     ACTIVE_TOOL_CONTRACT = {"goal": task["goal"], "requirements": task.get("done_when", []),
@@ -4539,14 +5329,10 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         + ("At ROOT explicitly verify fidelity against the authoritative Goal Contract." if root else "")
     )
 
-    if fit.get("decision") == "split":
-        builder = run_integration_milestones(
-            task, contract, child_info, memory, repo_snapshot, integration_contract,
-        )
-        task["integration_preflight"]["milestones"] = builder.get("integration_milestones", [])
-    else:
-        builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=label, extra_context=context)
-    memory = builder["memory"]
+    # There is no second integration orchestrator: after bounded integration
+    # children, the existing parent Builder/evidence path verifies the result.
+    builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=label, extra_context=context)
+    memory = builder.get("memory", memory)
     builder["integration_contract"] = integration_contract
     if builder["status"] != "done":
         preflight_after = run_integration_preflight(task, child_info, contract)
@@ -4757,6 +5543,11 @@ def _backtrack_decomposition(task, depth, contract, memory, repo_snapshot, paren
                              dependency_summaries, failed_child, failed_result, fit_decider,
                              leaf_executor, aggregator):
     """Try at most two genuinely different child boundaries for one failed parent."""
+    if task.get("kind") == "integration":
+        # Integration concerns have their own deterministic conflict grouping;
+        # do not send them through the implementation-only v3 alternative
+        # decomposition search.
+        return None
     if not _is_terminal_too_broad_child(failed_child, failed_result):
         return None
     attempts = task.setdefault("decomposition_alternatives", [])
@@ -4871,7 +5662,9 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             _mark_task_result(task, parent_result)
             return parent_result
 
-    aggregate_fn = aggregator or aggregate_task
+    aggregate_fn = aggregator or (
+        _aggregate_integration_children if task.get("kind") == "integration" else aggregate_task
+    )
     try:
         aggregate = aggregate_fn(task, contract, completed, memory, repo_snapshot, root=(task["id"] == "ROOT"))
     except ProviderError as exc:
@@ -4890,12 +5683,14 @@ def _resplit_too_broad(task, depth, contract, memory, repo_snapshot, parent_summ
                        leaf_result, fit_decider, leaf_executor, aggregator):
     if not _can_expand(depth):
         return None
+    is_integration = task.get("kind") == "integration"
     RUN["re_splits"] += 1
     evidence = list(leaf_result.get("failure_evidence", []))
     if not evidence:
         evidence = [{"kind": "task_status", "result": leaf_result.get("summary", "TASK_TOO_BROAD")}]
     task["failure_evidence"] = evidence[-6:]
-    event(f"[RE-SPLIT {task['id']}] TASK_TOO_BROAD -> smaller granularity", role="Coordinator",
+    trigger = "INTEGRATION_TOO_BROAD" if is_integration else "TASK_TOO_BROAD"
+    event(f"[RE-SPLIT {task['id']}] {trigger} -> smaller granularity", role="Coordinator",
           task=task["id"], action="re-decompose")
     try:
         decision = (
@@ -4920,7 +5715,11 @@ def _resplit_too_broad(task, depth, contract, memory, repo_snapshot, parent_summ
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     if len(children) < 2:
         return None
-    _register_resplit(task, leaf_result, "TASK_TOO_BROAD", decision)
+    if is_integration:
+        task["integration_too_broad"] = True
+        task["integration_resplit_attempts"] = int(task.get("integration_resplit_attempts", 0) or 0) + 1
+        task["integration_split_boundary"] = True
+    _register_resplit(task, leaf_result, trigger, decision)
     RUN["splits"] += 1
     return _execute_children(
         task, children, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
@@ -5030,7 +5829,14 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     except ProviderError as exc:
         leaf = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     memory = leaf.get("memory", memory)
-    is_too_broad = leaf.get("status") == "too_broad" or leaf.get("failure_type") == "TASK_TOO_BROAD"
+    is_too_broad = (
+        leaf.get("status") == "too_broad"
+        or leaf.get("failure_type") == "TASK_TOO_BROAD"
+        or (
+            task.get("kind") == "integration"
+            and leaf.get("failure_type") == "INTEGRATION_TOO_BROAD"
+        )
+    )
     if is_too_broad:
         _record_terminal_too_broad(task, leaf)
         _record_task_failure(task, leaf, phase="leaf")
@@ -5048,12 +5854,13 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         )
         if resplit is not None:
             return resplit
-        strategy_result = _maybe_search_alternate_strategy(
-            task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
-        )
-        if strategy_result is not None:
-            leaf = strategy_result
-            memory = leaf.get("memory", memory)
+        if task.get("kind") != "integration":
+            strategy_result = _maybe_search_alternate_strategy(
+                task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
+            )
+            if strategy_result is not None:
+                leaf = strategy_result
+                memory = leaf.get("memory", memory)
 
     leaf["memory"] = memory
     _mark_task_result(task, leaf)

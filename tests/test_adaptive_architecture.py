@@ -819,6 +819,340 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertNotIn("private", record)
         self.assertIn("bounded fact", record)
 
+    def test_parent_without_blocking_preflight_conflicts_uses_normal_integration(self):
+        contract = self.contract(["integrated behavior"])
+        parent = mini.make_task("ROOT", "integrate verified children", 0, None, ["integrated"], [])
+        mini.TASKS["ROOT"] = parent
+        child_results = []
+        for index in (1, 2):
+            child = mini.make_task(str(index), f"child {index}", 1, "ROOT", ["verified"], [])
+            child["status"] = "done"
+            child["verification_status"] = "passed"
+            mini.TASKS[child["id"]] = child
+            child_results.append({"task": child, "result": {
+                "status": "done", "summary": "verified", "memory": {}, "changed_files": [],
+            }})
+        preflight = {"passed": True, "status": "PASS", "current_syntax": "PASS",
+                     "conflicts": [], "warnings": [], "project_invariants": [],
+                     "error_count": 0, "invariant_violation_count": 0}
+        builder = {"status": "done", "summary": "parent verified", "memory": {},
+                   "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]"}]}
+        with patch.object(mini, "run_integration_preflight", return_value=preflight), \
+                patch.object(mini, "execute_agent_task", return_value=builder) as execute, \
+                patch.object(mini, "falsify_task", return_value={"status": "skipped", "memory": {},
+                                                                    "tool_evidence": []}), \
+                patch.object(mini, "optional_browser_check", return_value=None):
+            result = mini.aggregate_task(parent, contract, child_results, {}, {}, root=True)
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(execute.call_args.kwargs["task_id"], "ROOT")
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["integration_tasks_created"], 0)
+        self.assertEqual(mini.RUN["integration_splits"], 0)
+        self.assertIsNone(mini.RUN["integration_conflict_resolution"])
+
+    def test_blocking_preflight_conflicts_create_sequential_integration_tasks(self):
+        contract = self.contract(["integrated behavior"])
+        parent = mini.make_task("ROOT", "integrate verified children", 0, None, ["integrated"], [])
+        mini.TASKS["ROOT"] = parent
+        child_results = []
+        for index in (1, 2):
+            child = mini.make_task(str(index), f"child {index}", 1, "ROOT", ["verified"], [])
+            child["status"] = "done"
+            child["verification_status"] = "passed"
+            mini.TASKS[child["id"]] = child
+            child_results.append({"task": child, "result": {
+                "status": "done", "summary": "verified", "memory": {}, "changed_files": [],
+            }})
+        before = {
+            "passed": False, "status": "FAIL", "current_syntax": "PASS", "error_count": 2,
+            "invariant_violation_count": 2, "warnings": [], "project_invariants": [],
+            "conflicts": [
+                {"kind": "duplicate_declaration", "severity": "error", "symbol": "formatValue",
+                 "files": ["app.js"], "message": "duplicate formatValue declaration"},
+                {"kind": "duplicate_html_id", "severity": "error", "id": "settings",
+                 "files": ["index.html"], "message": "duplicate HTML id settings"},
+            ],
+        }
+        after = {"passed": True, "status": "PASS", "current_syntax": "PASS", "error_count": 0,
+                 "invariant_violation_count": 0, "conflicts": [], "warnings": [],
+                 "project_invariants": []}
+        preflight_calls = []
+        order = []
+
+        def preflight(*_args, **_kwargs):
+            preflight_calls.append(True)
+            return before if len(preflight_calls) == 1 else after
+
+        def builder(_goal, memory, **kwargs):
+            task_id = kwargs["task_id"]
+            order.append(task_id)
+            if task_id.startswith("I."):
+                mini.write_file(f"{task_id}.txt", task_id)
+            return {"status": "done", "summary": f"verified {task_id}", "memory": memory,
+                    "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]"}]}
+
+        with patch.object(mini, "run_integration_preflight", side_effect=preflight), \
+                patch.object(mini, "execute_agent_task", side_effect=builder), \
+                patch.object(mini, "falsify_task", return_value={"status": "skipped", "memory": {},
+                                                                    "tool_evidence": []}), \
+                patch.object(mini, "optional_browser_check", return_value=None), \
+                patch.object(mini, "run_integration_milestones") as old_path:
+            result = mini.aggregate_task(parent, contract, child_results, {}, {}, root=True)
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(order, ["I.1", "I.2", "ROOT"])
+        old_path.assert_not_called()
+        self.assertEqual([mini.TASKS[item]["kind"] for item in ("I.1", "I.2")],
+                         ["integration", "integration"])
+        self.assertEqual(parent["children"][-2:], ["I.1", "I.2"])
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["integration_tasks_created"], 2)
+        self.assertEqual(mini.RUN["integration_splits"], 1)
+        self.assertEqual(mini.RUN["integration_verified_nodes"], 2)
+        self.assertGreaterEqual(len(preflight_calls), 5)
+
+    def test_integration_node_packet_contains_only_bounded_relevant_context(self):
+        conflict = {"kind": "duplicate_declaration", "type": "duplicate_declaration",
+                    "severity": "error", "symbol": "formatValue", "files": ["app.js"],
+                    "evidence": "two declarations"}
+        task = mini.make_task(
+            "I.2", "Resolve duplicate declaration of formatValue", 1, "ROOT",
+            ["fresh preflight has no owned conflict", "syntax passes"], ["app.js"],
+            kind="integration", integration_conflicts=[conflict], integration_context={
+                "parent_goal": "integrate verified children",
+                "project_invariants": [{"kind": "persistence_owner", "owner": "app.js",
+                                        "symbol": "PERSIST_KEY", "source": "deterministic_scan"}],
+                "verified_child_manifests": [{
+                    "task_id": "1", "status": "done", "goal": "child one",
+                    "integration_manifest": {"status": "verified", "changed_files": ["app.js"],
+                                              "interfaces": ["appState"], "verification": ["run_file"]},
+                }],
+            },
+        )
+        packet = mini.build_node_context(
+            task, self.contract(), None, {}, "parent summary",
+            [{"task_id": "previous", "status": "done", "goal": "dependency",
+              "summary": "verified", "evidence": "run command passed",
+              "integration_manifest": {"status": "verified"},
+              "model_history": "must not be copied"}],
+            [{"tool": "run_command", "target": "node", "result": "failure evidence"}],
+        )
+
+        for label in (
+            "ROOT CONTRACT", "PARENT GOAL", "CURRENT INTEGRATION TASK", "PROJECT INVARIANTS",
+            "RELEVANT CHILD INTEGRATION MANIFESTS", "RELEVANT PREFLIGHT CONFLICT(S)",
+            "VERIFIED DEPENDENCY SUMMARIES", "CURRENT FAILURE EVIDENCE", "BOUNDED REPOSITORY HINTS",
+        ):
+            self.assertIn(label, packet)
+        self.assertIn("formatValue", packet)
+        self.assertIn("PERSIST_KEY", packet)
+        self.assertNotIn("must not be copied", packet)
+        self.assertNotIn("RELEVANT PROJECT MEMORY", packet)
+        self.assertLessEqual(len(packet), mini.MAX_NODE_PACKET_CHARS)
+
+    def test_integration_tasks_are_sequential_and_share_verified_workspace_state(self):
+        parent = mini.make_task("ROOT", "integrate shared state", 0, None, ["integrated"], [])
+        mini.TASKS["ROOT"] = parent
+        before = {
+            "passed": False, "status": "FAIL", "current_syntax": "PASS", "error_count": 2,
+            "invariant_violation_count": 0, "warnings": [], "project_invariants": [],
+            "conflicts": [
+                {"kind": "duplicate_declaration", "severity": "error", "symbol": "first", "files": ["shared.js"]},
+                {"kind": "duplicate_declaration", "severity": "error", "symbol": "second", "files": ["shared.js"]},
+            ],
+        }
+        after = {"passed": True, "status": "PASS", "current_syntax": "PASS", "error_count": 0,
+                 "invariant_violation_count": 0, "warnings": [], "project_invariants": [],
+                 "conflicts": []}
+        parent["integration_preflight"] = {"before": before, "after": None}
+        tasks = mini.create_integration_tasks(parent, self.contract(), [], before, root=True)
+        observed = []
+        preflight_calls = []
+
+        def builder(_goal, memory, **kwargs):
+            task_id = kwargs["task_id"]
+            if task_id == "I.1":
+                mini.write_file("shared.js", "first\n")
+            elif task_id == "I.2":
+                content = (mini.WORKSPACE / "shared.js").read_text(encoding="utf-8")
+                observed.append("first" in content)
+                mini.edit_file("shared.js", "first\n", "first\nsecond\n")
+            return {"status": "done", "summary": task_id, "memory": memory,
+                    "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]"}]}
+
+        def fresh_preflight(*_args, **_kwargs):
+            preflight_calls.append(True)
+            return after
+
+        with patch.object(mini, "execute_agent_task", side_effect=builder), \
+                patch.object(mini, "run_integration_preflight", side_effect=fresh_preflight), \
+                patch.object(mini, "falsify_task", return_value={"status": "skipped", "memory": {},
+                                                                    "tool_evidence": []}), \
+                patch.object(mini, "optional_browser_check", return_value=None):
+            result = mini.run_integration_tasks_sequentially(
+                parent, self.contract(), [], tasks, {}, {},
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(observed, [True])
+        self.assertIn("second", (mini.WORKSPACE / "shared.js").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(preflight_calls), 4)
+
+    def test_integration_too_broad_resplits_through_same_solve_task_path(self):
+        task = mini.make_task(
+            "I.1", "Normalize persistence ownership", 0, "ROOT", ["ownership is verified"], ["app.js"],
+            kind="integration", integration_conflicts=[{
+                "kind": "conflicting_persistence_ownership", "severity": "error",
+                "symbol": "PERSIST_KEY", "files": ["app.js"], "message": "two owners",
+            }], integration_context={"parent_goal": "integrate", "project_invariants": [],
+                                       "verified_child_manifests": []},
+        )
+        mini.TASKS[task["id"]] = task
+        mini.RUN["tasks_created"] = 1
+        calls = []
+
+        def leaf(node, _contract, memory, _repo, _parent, _deps):
+            calls.append(node["id"])
+            if node["id"] == "I.1":
+                return {"status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
+                        "summary": "one integration concern is still too broad", "memory": memory}
+            return {"status": "done", "summary": f"verified {node['id']}", "memory": memory}
+
+        with patch.object(mini, "run_integration_preflight", return_value={
+            "passed": True, "status": "PASS", "current_syntax": "PASS", "conflicts": [],
+            "warnings": [], "project_invariants": [],
+        }):
+            result = mini.solve_task(
+                task, 0, self.contract(), {}, {},
+                fit_decider=mini._integration_fit_decider,
+                leaf_executor=leaf, aggregator=mini._aggregate_integration_children,
+            )
+
+        mini.recompute_integration_metrics()
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(calls, ["I.1", "I.1.1", "I.1.2"])
+        self.assertEqual(task["integration_resplit_attempts"], 1)
+        self.assertTrue(task["integration_too_broad"])
+        self.assertEqual(mini.RUN["integration_resplits"], 1)
+        self.assertEqual(mini.RUN["integration_too_broad_nodes"], 1)
+        self.assertEqual(mini.RUN["integration_granularity_rescues"], 1)
+
+    def test_integration_provider_failure_does_not_trigger_decomposition(self):
+        task = mini.make_task(
+            "I.1", "Resolve one integration conflict", 0, "ROOT", ["verified"], ["app.js"],
+            kind="integration", integration_conflicts=[{
+                "kind": "duplicate_declaration", "severity": "error", "symbol": "value",
+                "files": ["app.js"],
+            }], integration_context={"parent_goal": "integrate", "project_invariants": [],
+                                       "verified_child_manifests": []},
+        )
+        mini.TASKS[task["id"]] = task
+        mini.RUN["tasks_created"] = 1
+        leaf = Mock(return_value={"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
+                                  "summary": "provider unavailable", "memory": {}})
+        with patch.object(mini, "decompose_task") as decompose:
+            result = mini.solve_task(
+                task, 0, self.contract(), {}, {},
+                fit_decider=mini._integration_fit_decider, leaf_executor=leaf,
+            )
+
+        self.assertEqual(result["failure_type"], "ENVIRONMENT_ERROR")
+        self.assertEqual(task["integration_resplit_attempts"], 0)
+        self.assertEqual(task["children"], [])
+        decompose.assert_not_called()
+
+    def test_remaining_blocking_conflict_prevents_parent_verified(self):
+        contract = self.contract(["integrated behavior"])
+        parent = mini.make_task("ROOT", "integrate verified children", 0, None, ["integrated"], [])
+        mini.TASKS["ROOT"] = parent
+        child = mini.make_task("1", "verified child", 1, "ROOT", ["verified"], [])
+        child["status"] = "done"
+        child["verification_status"] = "passed"
+        mini.TASKS["1"] = child
+        child_results = [{"task": child, "result": {"status": "done", "summary": "verified",
+                                                       "memory": {}, "changed_files": []}}]
+        conflict = {"kind": "duplicate_declaration", "severity": "error", "symbol": "value",
+                    "files": ["app.js"], "message": "still duplicated"}
+        blocked = {"passed": False, "status": "FAIL", "current_syntax": "PASS", "error_count": 1,
+                   "invariant_violation_count": 1, "conflicts": [conflict], "warnings": [],
+                   "project_invariants": []}
+        integration_task = mini.make_task(
+            "I.1", "resolve value", 1, "ROOT", ["resolved"], ["app.js"],
+            kind="integration", integration_conflicts=[conflict], integration_context={},
+        )
+        integration_info = [{"task_id": "I.1", "goal": "resolve value", "status": "done",
+                             "summary": "verified", "changed_files": [], "verification": "passed",
+                             "integration_manifest": {"status": "verified"}, "evidence": "passed"}]
+        with patch.object(mini, "run_integration_preflight", return_value=blocked), \
+                patch.object(mini, "create_integration_tasks", return_value=[integration_task]), \
+                patch.object(mini, "run_integration_tasks_sequentially", return_value={
+                    "status": "done", "memory": {}, "integration_children": integration_info,
+                    "integration_preflight": blocked,
+                }), \
+                patch.object(mini, "execute_agent_task") as execute:
+            result = mini.aggregate_task(parent, contract, child_results, {}, {}, root=True)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "INTEGRATION_FAILURE")
+        execute.assert_not_called()
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 1)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 0)
+
+    def test_resolved_blocking_conflicts_allow_parent_verification(self):
+        contract = self.contract(["integrated behavior"])
+        parent = mini.make_task("ROOT", "integrate verified children", 0, None, ["integrated"], [])
+        mini.TASKS["ROOT"] = parent
+        child = mini.make_task("1", "verified child", 1, "ROOT", ["verified"], [])
+        child["status"] = "done"
+        child["verification_status"] = "passed"
+        mini.TASKS["1"] = child
+        child_results = [{"task": child, "result": {"status": "done", "summary": "verified",
+                                                       "memory": {}, "changed_files": []}}]
+        conflict = {"kind": "duplicate_declaration", "severity": "error", "symbol": "value",
+                    "files": ["app.js"], "message": "duplicated"}
+        before = {"passed": False, "status": "FAIL", "current_syntax": "PASS", "error_count": 1,
+                  "invariant_violation_count": 1, "conflicts": [conflict], "warnings": [],
+                  "project_invariants": []}
+        after = {"passed": True, "status": "PASS", "current_syntax": "PASS", "error_count": 0,
+                 "invariant_violation_count": 0, "conflicts": [], "warnings": [],
+                 "project_invariants": []}
+        integration_task = mini.make_task(
+            "I.1", "resolve value", 1, "ROOT", ["resolved"], ["app.js"],
+            kind="integration", integration_conflicts=[conflict], integration_context={},
+        )
+        integration_info = [{"task_id": "I.1", "goal": "resolve value", "status": "done",
+                             "summary": "verified", "changed_files": [], "verification": "passed",
+                             "integration_manifest": {"status": "verified"}, "evidence": "passed"}]
+        builder = {"status": "done", "summary": "parent verified", "memory": {},
+                   "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]"}]}
+        with patch.object(mini, "run_integration_preflight", side_effect=[before, after]), \
+                patch.object(mini, "create_integration_tasks", return_value=[integration_task]), \
+                patch.object(mini, "run_integration_tasks_sequentially", return_value={
+                    "status": "done", "memory": {}, "integration_children": integration_info,
+                    "integration_preflight": after,
+                }), \
+                patch.object(mini, "execute_agent_task", return_value=builder) as execute, \
+                patch.object(mini, "falsify_task", return_value={"status": "skipped", "memory": {},
+                                                                    "tool_evidence": []}), \
+                patch.object(mini, "optional_browser_check", return_value=None):
+            result = mini.aggregate_task(parent, contract, child_results, {}, {}, root=True)
+
+        self.assertEqual(result["status"], "done")
+        execute.assert_called_once()
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 1)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 1)
+        self.assertEqual(mini.RUN["integration_conflict_resolution"], 100.0)
+
+    def test_integration_conflict_resolution_reports_na_when_no_conflicts_exist(self):
+        mini.recompute_integration_metrics()
+        with patch("builtins.print") as printer:
+            mini.print_integration_metrics()
+        output = "\n".join(str(call.args[0]) for call in printer.call_args_list)
+        self.assertIn("integration_conflict_resolution: 0/0 (N/A)", output)
+
 
 if __name__ == "__main__":
     unittest.main()
