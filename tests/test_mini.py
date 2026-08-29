@@ -33,12 +33,15 @@ class MiniAgentRegressionTests(unittest.TestCase):
     def test_invalid_structured_task_fit_uses_nonfatal_fallback(self):
         task = {"id": "ROOT", "goal": "build several features", "depth": 0}
         contract = {"requirements": ["core", "tests", "polish"], "constraints": [], "success_criteria": []}
-        for failure in (mini.StructuredOutputError("invalid"), mini.ProviderError("cuda failure")):
-            with self.subTest(failure=type(failure).__name__), \
-                    patch.object(mini, "structured_model_call", side_effect=failure):
-                decision = mini.decide_task_fit(task, 0, contract)
-                self.assertEqual(decision["decision"], "split")
-                self.assertGreaterEqual(len(decision["subtasks"]), 2)
+        with patch.object(mini, "structured_model_call", side_effect=mini.StructuredOutputError("invalid")):
+            decision = mini.decide_task_fit(task, 0, contract)
+        self.assertEqual(decision["decision"], "split")
+
+        # Provider failure is environmental evidence, not permission to invent
+        # a task tree. The controller reports it to the caller instead.
+        with patch.object(mini, "structured_model_call", side_effect=mini.ProviderError("connection failure")):
+            with self.assertRaises(mini.ProviderError):
+                mini.decide_task_fit(task, 0, contract)
 
     def test_invalid_goal_json_fallback_preserves_the_full_request(self):
         raw = "Build a project with requirement " + ("detailed behavior " * 200)
@@ -195,9 +198,9 @@ Requirements:
             result = mini.execute_agent_task("fix timer", memory, role="Builder", task_id="T")
 
         self.assertEqual(result["status"], "too_broad")
-        self.assertEqual(result["recovery_strategy"], "fresh_focused")
+        self.assertEqual(result["failure_type"], "TASK_TOO_BROAD")
         self.assertEqual(ask.call_count, 3)
-        self.assertIn("STAGNANT_VERIFICATION", result["summary"])
+        self.assertIn("TASK_TOO_BROAD", result["summary"])
 
     def test_coherent_rewrite_rejects_catastrophic_fragment_before_mutation(self):
         target = mini.WORKSPACE / "script.js"
@@ -256,10 +259,9 @@ Requirements:
             result = mini.execute_agent_task("fix script", memory, role="Builder", task_id="T")
 
         self.assertEqual(result["status"], "too_broad")
-        self.assertEqual(result["recovery_strategy"], "rewrite_unverified")
-        self.assertEqual(result["recovery_targets"], ["script.js"])
+        self.assertEqual(result["failure_type"], "TASK_TOO_BROAD")
         self.assertEqual(ask.call_count, 4)
-        self.assertIn("STAGNANT_MUTATION", result["summary"])
+        self.assertIn("TASK_TOO_BROAD", result["summary"])
 
     def test_javascript_syntax_guard_accepts_unicode_on_windows(self):
         target = mini.WORKSPACE / "unicode.js"
@@ -368,7 +370,7 @@ Requirements:
         }
         self.assertNotIn("edit_file", offered_names)
 
-    def test_coherent_rewrite_unlocks_focused_edit_only_after_rewrite_and_failed_verify(self):
+    def test_coherent_rewrite_policy_remains_non_micro_mutating(self):
         responses = [
             {"role": "assistant", "content": "", "tool_calls": [{
                 "function": {"name": "write_file", "arguments": {"path": "app.js", "content": "draft"}},
@@ -409,8 +411,8 @@ Requirements:
         followup_names = {item["function"]["name"] for item in ask.call_args_list[2].kwargs["tools"]}
         self.assertNotIn("edit_file", first_names)
         self.assertNotIn("edit_file", pre_verify_names)
-        self.assertIn("edit_file", followup_names)
-        self.assertNotIn("write_file", followup_names)
+        self.assertNotIn("edit_file", followup_names)
+        self.assertIn("write_file", followup_names)
         self.assertEqual(result["status"], "done")
 
     def test_role_models_are_all_pinned_to_the_selected_gemma_model(self):
@@ -458,6 +460,146 @@ Requirements:
         self.assertEqual(request.call_args_list[1].kwargs["payload"]["options"]["num_gpu"], 0)
         self.assertTrue(mini.FORCE_CPU_FOR_RUN)
         self.assertTrue(sleep.called)
+
+    def test_runner_oom_is_classified_as_worker_failure_and_retried_cpu_only(self):
+        mini.MODEL = "gemma4:e4b"
+        crashed = Mock(status_code=500, text="llama runner process has terminated: CUDA out of memory")
+        recovered = Mock(status_code=200)
+        recovered.json.return_value = {"message": {"role": "assistant", "content": "recovered"}}
+        with patch.object(mini, "http_post_json", side_effect=[crashed, recovered]) as request, \
+                patch.object(mini.time, "sleep"):
+            message = mini.ask_ollama(
+                [{"role": "user", "content": "continue"}], tools=None,
+                provider_retries=1, role="Builder",
+            )
+
+        self.assertEqual(message["content"], "recovered")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(mini.RUN["ollama_worker_failures"], 1)
+        self.assertEqual(mini.RUN["ollama_timeout_failures"], 0)
+        self.assertEqual(request.call_args_list[1].kwargs["payload"]["options"]["num_gpu"], 0)
+
+    def test_timeout_retries_without_misclassifying_it_as_empty_response(self):
+        mini.MODEL = "gemma4:e4b"
+        recovered = Mock(status_code=200)
+        recovered.json.return_value = {"message": {"role": "assistant", "content": "recovered"}}
+        with patch.object(mini, "http_post_json", side_effect=[mini.HttpTransportError("timed out"), recovered]) as request, \
+                patch.object(mini.time, "sleep"):
+            message = mini.ask_ollama(
+                [{"role": "user", "content": "continue"}], tools=None,
+                provider_retries=1, role="Builder",
+            )
+
+        self.assertEqual(message["content"], "recovered")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(mini.RUN["ollama_timeout_failures"], 1)
+        self.assertEqual(mini.RUN["ollama_incomplete_responses"], 0)
+        self.assertFalse(mini.FORCE_CPU_FOR_RUN)
+
+    def test_http_200_empty_content_with_tool_calls_is_actionable(self):
+        mini.MODEL = "gemma4:e4b"
+        response = Mock(status_code=200, text="raw envelope")
+        response.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {"role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": {"path": "probe.txt", "content": "READY"}},
+            }]},
+        }
+        with patch.object(mini, "http_post_json", return_value=response) as request:
+            message = mini.ask_ollama([{"role": "user", "content": "use the tool"}], provider_retries=0)
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(message["content"], "")
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "write_file")
+        self.assertEqual(mini.RUN["ollama_http_200"], 1)
+        self.assertEqual(mini.RUN["ollama_tool_call_responses"], 1)
+
+    def test_terminal_empty_message_after_tool_is_not_provider_failure(self):
+        mini.MODEL = "gemma4:e4b"
+        response = Mock(status_code=200, text="raw envelope")
+        response.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {"role": "assistant", "content": ""},
+        }
+        messages = [
+            {"role": "user", "content": "use the tool, then finish"},
+            {"role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": {"path": "probe.txt", "content": "READY"}},
+            }]},
+            {"role": "tool", "tool_name": "write_file", "content": "wrote file: probe.txt"},
+        ]
+        with patch.object(mini, "http_post_json", return_value=response) as request:
+            message = mini.ask_ollama(messages, provider_retries=0)
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(message, {"role": "assistant", "content": ""})
+        self.assertEqual(mini.RUN["ollama_terminal_empty_responses"], 1)
+        self.assertEqual(mini.RUN["ollama_incomplete_responses"], 0)
+
+    def test_builder_continues_after_unverified_terminal_empty_message(self):
+        mini.MODEL = "gemma4:e4b"
+        first = Mock(status_code=200, text="tool envelope")
+        first.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {"role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": {"path": "probe.py", "content": "print('READY')"}},
+            }]},
+        }
+        empty = Mock(status_code=200, text="terminal envelope")
+        empty.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {"role": "assistant", "content": ""},
+        }
+        verify = Mock(status_code=200, text="verification envelope")
+        verify.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {"role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "run_file", "arguments": {"path": "probe.py"}},
+            }]},
+        }
+        with patch.object(mini, "http_post_json", side_effect=[first, empty, verify, empty]):
+            result = mini.execute_agent_task("create probe", {}, role="Builder", task_id="T", max_steps=4)
+
+        self.assertEqual(result["status"], "done")
+        self.assertTrue((mini.WORKSPACE / "probe.py").exists())
+        self.assertEqual(mini.RUN["ollama_terminal_empty_responses"], 2)
+        self.assertEqual(len(result["tool_evidence"]), 2)
+
+    def test_thinking_is_observed_without_being_propagated_or_persisted(self):
+        mini.MODEL = "gemma4:e4b"
+        response = Mock(status_code=200, text="raw envelope")
+        response.json.return_value = {
+            "done": True, "done_reason": "stop",
+            "message": {
+                "role": "assistant", "content": "", "thinking": "PRIVATE_REASONING",
+                "tool_calls": [{"name": "list_files", "arguments": {}}],
+            },
+        }
+        with patch.object(mini, "http_post_json", return_value=response):
+            message = mini.ask_ollama([{"role": "user", "content": "inspect"}], think=True, provider_retries=0)
+
+        self.assertNotIn("thinking", message)
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "list_files")
+        self.assertEqual(mini.RUN["ollama_thinking_responses"], 1)
+        records = list((mini.WORKSPACE / mini.RUNS_DIR).glob("*.jsonl"))
+        self.assertTrue(records)
+        self.assertNotIn("PRIVATE_REASONING", records[0].read_text(encoding="utf-8"))
+
+    def test_nonterminal_empty_response_retries_and_remains_an_environment_failure(self):
+        mini.MODEL = "gemma4:e4b"
+        response = Mock(status_code=200, text="raw envelope")
+        response.json.return_value = {
+            "done": False, "message": {"role": "assistant", "content": ""},
+        }
+        with patch.object(mini, "http_post_json", return_value=response) as request, \
+                patch.object(mini.time, "sleep"):
+            with self.assertRaises(mini.ProviderError) as raised:
+                mini.ask_ollama([{"role": "user", "content": "continue"}], provider_retries=1)
+
+        self.assertIn("no actionable content or tool_calls", str(raised.exception))
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(mini.RUN["ollama_incomplete_responses"], 2)
+        self.assertEqual(mini.RUN["ollama_retry_count"], 1)
 
     def test_builder_reserves_output_budget_and_compacts_old_tool_arguments(self):
         mini.MODEL = "gemma4:e4b"
@@ -578,7 +720,7 @@ Requirements:
         stream.flush()
         self.assertIn(b"Focus", raw.getvalue())
 
-    def test_cohesive_web_artifact_uses_vertical_stages_not_conflicting_recursive_children(self):
+    def test_cohesive_web_artifact_is_not_forced_into_baseline(self):
         contract = {
             "goal": "Create a self-contained browser focus timer",
             "requirements": ["timer", "settings", "persistence", "responsive UI"],
@@ -589,41 +731,48 @@ Requirements:
         choice = mini.normalize_execution_choice(
             {"mode": "recursive", "reason": "many features"}, contract
         )
-        self.assertEqual(choice["mode"], "baseline")
-        self.assertIn("vertical stages", choice["reason"])
+        self.assertEqual(choice["mode"], "recursive")
+        self.assertNotIn("vertical stages", choice["reason"])
 
-    def test_cohesive_web_mode_skips_model_router_call(self):
+    def test_auto_fit_considers_cohesive_web_tasks_after_reconnaissance(self):
         contract = {
             "goal": "Create a self-contained web app",
             "requirements": ["feature one", "feature two"],
             "constraints": ["no build step"],
             "original_goal": "Create a self-contained web app",
         }
-        with patch.object(mini, "structured_model_call") as structured:
+        with patch.object(mini, "structured_model_call", return_value={"decision": "split"}) as structured:
             choice = mini.decide_execution_mode(contract["original_goal"], contract)
-        structured.assert_not_called()
-        self.assertEqual(choice["mode"], "baseline")
+        structured.assert_called_once()
+        self.assertEqual(choice["mode"], "recursive")
 
-    def test_parent_aggregation_attempts_recovery_when_a_child_failed(self):
-        task = {"id": "ROOT", "goal": "integrate the complete app"}
+    def test_parent_aggregation_runs_only_after_children_are_verified(self):
+        task = {"id": "ROOT", "goal": "integrate the complete app", "done_when": ["integrated"]}
         contract = {"goal": task["goal"], "requirements": ["a", "b"], "constraints": [],
                     "success_criteria": ["verified"], "original_goal": task["goal"]}
         children = [
-            {"task": "a", "result": {"status": "done", "summary": "done"}},
-            {"task": "b", "result": {"status": "failed", "summary": "failed"}},
+            {"task": {"id": "a", "goal": "a", "verification_status": "passed"},
+             "result": {"status": "done", "summary": "done", "changed_files": []}},
+            {"task": {"id": "b", "goal": "b", "verification_status": "passed"},
+             "result": {"status": "done", "summary": "done", "changed_files": []}},
         ]
         builder = {"status": "done", "summary": "recovered", "memory": {},
                    "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]\nverified"}]}
-        quality = {"checks": [{"name": "tests", "status": "PASS", "evidence": "verified"}]}
         with patch.object(mini, "execute_agent_task", return_value=builder) as execute, \
-                patch.object(mini, "optional_browser_check", return_value=None), \
-                patch.object(mini, "maybe_vision_review", return_value=None), \
-                patch.object(mini, "review_quality", return_value=quality):
-            result = mini.aggregate_task(task, contract, children, {}, root=True)
+                patch.object(mini, "optional_browser_check", return_value=None):
+            result = mini.aggregate_task(task, contract, children, {}, {}, root=True)
         self.assertTrue(execute.called)
         self.assertEqual(result["status"], "done")
-        self.assertTrue(any(item["task"] == "b" and item["status"] == "failed"
-                            for item in result["children"]))
+        self.assertTrue(all(item["status"] == "done" for item in result["children"]))
+
+        failed_children = [
+            children[0], {"task": {"id": "b", "goal": "b", "verification_status": "failed"},
+                          "result": {"status": "failed", "summary": "failed"}},
+        ]
+        with patch.object(mini, "execute_agent_task") as not_called:
+            blocked = mini.aggregate_task(task, contract, failed_children, {}, {}, root=True)
+        self.assertEqual(blocked["failure_type"], "CHILD_FAILURE")
+        not_called.assert_not_called()
 
     def test_shell_composition_and_inline_code_are_refused(self):
         self.assertIsNotNone(mini._validated_command_parts("python -c \"print(1)\"")[1])
@@ -647,6 +796,7 @@ Requirements:
         self.assertFalse((mini.WORKSPACE / mini.MEMORY_FILE).exists())
         self.assertLessEqual(len(memory["operations"]), 8)
 
+    @unittest.skip("legacy deterministic stage scheduler was removed from the experimental path")
     def test_complex_builder_uses_bounded_gemma_authored_stages(self):
         contract = {
             "status": "ready",
@@ -686,6 +836,7 @@ Requirements:
         self.assertEqual([call["task_id"] for call in calls], [f"ROOT.S{i}" for i in range(1, len(calls) + 1)])
         self.assertTrue(all("sole author" in call["context"] for call in calls))
 
+    @unittest.skip("TASK_TOO_BROAD now re-splits through solve_task instead of continuing a hidden stage")
     def test_exhausted_stage_gets_one_fresh_context_continuation_in_same_transaction(self):
         contract = {
             "status": "ready",
@@ -741,6 +892,7 @@ Requirements:
         self.assertEqual(mini.RUN["stage_continuations"], 1)
         self.assertEqual(len(result["tool_evidence"]), 2)
 
+    @unittest.skip("duplicate continuation/rewrite scheduler is outside the research path")
     def test_stagnant_stage_continuation_requests_model_owned_coherent_rewrite(self):
         contract = {
             "status": "ready", "goal": "Build a focus timer",
@@ -786,6 +938,7 @@ Requirements:
         self.assertEqual(policies, [None, "coherent_rewrite"])
         self.assertEqual(mini.RUN["coherent_rewrite_recoveries"], 1)
 
+    @unittest.skip("node contracts replace deterministic stage slices in the experimental path")
     def test_each_builder_stage_verifies_only_its_own_contract_slice(self):
         contract = {
             "status": "ready",

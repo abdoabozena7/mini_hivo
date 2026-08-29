@@ -92,7 +92,12 @@ def _is_complex(contract: dict[str, Any], profile: str) -> bool:
 
 
 def build_execution_stages(contract: dict[str, Any], max_stages: int = 6) -> list[dict[str, Any]]:
-    """Create bounded, requirement-preserving stages without another model call."""
+    """Legacy bounded stage projection kept for callers outside the experiment.
+
+    The adaptive execution path deliberately does not call this helper.  Its
+    single source of granularity is ``mini.solve_task`` and model-produced
+    child contracts; this utility remains only for older integrations/tests.
+    """
     maximum = max(1, min(6, int(max_stages)))
     profile = classify_project(contract)
     requirements = [str(item).strip() for item in contract.get("requirements", []) if str(item).strip()]

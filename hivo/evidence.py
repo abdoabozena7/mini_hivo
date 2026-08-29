@@ -11,6 +11,18 @@ def result_not_applicable(result: object) -> bool:
     return str(result).strip().lower().startswith("[not_applicable]")
 
 
+def result_is_tool_rejection(result: object) -> bool:
+    """Identify orchestrator/sandbox refusal, not a failure inside the app."""
+    lower = str(result).strip().lower()
+    return lower.startswith((
+        "error: command refused:",
+        "error: tool ",
+        "error: falsifier is read-only",
+        "error: repairer may only",
+        "error: malformed tool call:",
+    ))
+
+
 def result_failed(result: object) -> bool:
     text = str(result).strip()
     lower = text.lower()
@@ -25,6 +37,11 @@ def result_failed(result: object) -> bool:
         return True
     exit_code = re.search(r"\[exit_code=(\d+)\]", lower)
     if exit_code and int(exit_code.group(1)) != 0:
+        return True
+    concrete_failures = re.search(r"\b([1-9]\d*)\s+(?:failed|failure|failures)\b", lower)
+    if concrete_failures:
+        return True
+    if re.search(r"\bfailures?\s*[:=]\s*[1-9]\d*\b", lower):
         return True
     if '"passed": false' in lower or "'passed': false" in lower:
         return True
@@ -50,8 +67,11 @@ def unresolved_tool_failures(evidence: list[dict]) -> list[dict]:
     a file and must not poison a later successful executable verification.
     """
     failures = [item for item in latest_verification_evidence(evidence)
-                if result_failed(item.get("result", ""))]
-    failures.extend(item for item in evidence if item.get("tool") == "malformed")
+                if result_failed(item.get("result", ""))
+                and not result_is_tool_rejection(item.get("result", ""))]
+    failures.extend(item for item in evidence
+                    if item.get("tool") == "malformed"
+                    and not result_is_tool_rejection(item.get("result", "")))
     return failures
 
 
