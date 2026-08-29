@@ -140,9 +140,9 @@ node | scope | initial | re-split | children | why failed | next action
 
 An ordinary `IMPLEMENTATION_ERROR` gets only a capacity probe; an `EXECUTE`
 fit decision does not get silently upgraded to `SPLIT`. This leaves room for
-the next search/mutation and challenger mechanisms to handle strategy failures.
+the bounded strategy-search route to handle implementation failures.
 
-### v3 decomposition backtracking and strategy search
+### v3 decomposition backtracking and v5 bounded strategy search
 
 The v3 controller keeps `MAX_DEPTH = 6` and `MAX_TOTAL_TASKS = 64`. A
 `TASK_TOO_BROAD` leaf at the depth limit is not immediately labeled a model
@@ -166,15 +166,27 @@ decomposition_backtrack_rescue_rate: 100.0
 strategy_searches: 0
 alternate_strategies_attempted: 0
 strategy_rescues: 0
+strategy_search_failures: 0
 strategy_rescue_rate: N/A
 capability_floor_nodes: 0
 ```
 
-For a small `IMPLEMENTATION_ERROR`, the controller does not split when the
-fit decision rejects granularity rescue. It can generate two non-mutating
-implementation strategies, let a read-only Challenger select one, and execute
-only that candidate. This route is bounded separately from decomposition and
-is not used for `TASK_TOO_BROAD` failures.
+For a sufficiently bounded `IMPLEMENTATION_ERROR`, the controller first
+requires the evidence-based `implementation_strategy_wrong` diagnosis. It can
+then generate at most two non-mutating implementation strategies. Strategy A
+is executed through the normal leaf engine; Strategy B is attempted only after
+A fails and its transaction is rolled back. There is no Challenger, ranking,
+voting, or parallel candidate execution. If both materially different
+strategies fail fresh deterministic verification, the node is recorded as a
+`model_capability_floor` candidate and is not automatically split again. This
+route is bounded separately from decomposition and is not used for
+`TASK_TOO_BROAD`, dependency, verifier, integration, or environment failures.
+
+The v5 strategy-search metrics are `strategy_searches` (nodes where planning
+started), `alternate_strategies_attempted` (candidates actually executed),
+`strategy_rescues`, `strategy_search_failures`, and
+`strategy_rescue_rate`. A strategy rescue remains separate from the v3
+granularity-rescue metrics.
 
 ### Hierarchical Integration Contract
 
@@ -243,7 +255,7 @@ The v4 integration-granularity metrics are
 `resolved/detected`; it is `N/A` when no blocking conflict was detected.
 
 The failure router therefore distinguishes `scope_too_broad` → re-split,
-`implementation_strategy_wrong` → search/mutate, `dependency_error` →
+`implementation_strategy_wrong` → bounded strategy search, `dependency_error` →
 dependency/interface repair, `verifier_builder_mismatch` → contract inspection,
 `local_integration_state_corruption` → parent normalization/integration repair,
 and `model_capability_floor` → record the limit.

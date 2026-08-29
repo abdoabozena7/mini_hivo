@@ -1,5 +1,6 @@
 import argparse
 import base64
+import copy
 import hashlib
 import importlib
 import importlib.util
@@ -54,7 +55,11 @@ MAX_DEPTH = 6
 MAX_CHILDREN = 4
 MAX_TOTAL_TASKS = 64
 MAX_DECOMPOSITION_ALTERNATIVES = 2
-MAX_ALTERNATE_STRATEGIES = 2
+# v5 strategy search is deliberately bounded to two sequential alternatives.
+MAX_STRATEGY_ALTERNATIVES = 2
+# Keep the old name as a read-only compatibility alias for callers that
+# inspected the v3 prototype; all new routing uses the v5 name above.
+MAX_ALTERNATE_STRATEGIES = MAX_STRATEGY_ALTERNATIVES
 MAX_CLARIFICATION_QUESTIONS = 5
 MAX_REPAIRS_PER_LEAF = 2
 MAX_STRUCTURED_RETRIES = 5
@@ -954,6 +959,7 @@ def new_metrics(mode):
         "strategy_searches": 0,
         "alternate_strategies_attempted": 0,
         "strategy_rescues": 0,
+        "strategy_search_failures": 0,
         "strategy_rescue_rate": None,
         "capability_floor_nodes": 0,
         "root_verified": False,
@@ -1065,6 +1071,8 @@ def compact_task_tree():
             entry["decomposition_search_exhausted"] = True
         if task.get("strategy_search") is not None:
             entry["strategy_search"] = task.get("strategy_search")
+        if task.get("strategy_attempts"):
+            entry["strategy_attempts"] = task.get("strategy_attempts", [])[-MAX_STRATEGY_ALTERNATIVES:]
         if task.get("integration_manifest") is not None:
             entry["integration_manifest"] = task.get("integration_manifest")
         if task.get("integration_preflight") is not None:
@@ -1783,6 +1791,7 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "terminal_too_broad": None,
         "decomposition_search_exhausted": False,
         "strategy_search": None,
+        "strategy_attempts": [],
         "integration_manifest": None,
         "integration_preflight": None,
     }
@@ -2154,249 +2163,464 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
 def alternate_strategy_schema():
     strategy = {
         "type": "object", "properties": {
-            "label": {"type": "string"},
+            "name": {"type": "string"},
             "approach": {"type": "string"},
+            "scope": {
+                "type": "array", "items": {"type": "string"},
+                "minItems": 1, "maxItems": 4,
+            },
+            "why_different": {"type": "string"},
             "verification_plan": {"type": "string"},
         },
-        "required": ["label", "approach", "verification_plan"],
+        "required": ["name", "approach", "scope", "why_different"],
         "additionalProperties": False,
     }
     return {
         "type": "object", "properties": {
             "strategies": {"type": "array", "items": strategy,
-                           "minItems": MAX_ALTERNATE_STRATEGIES, "maxItems": MAX_ALTERNATE_STRATEGIES},
+                           "minItems": MAX_STRATEGY_ALTERNATIVES,
+                           "maxItems": MAX_STRATEGY_ALTERNATIVES},
         },
         "required": ["strategies"], "additionalProperties": False,
     }
 
 
-def _alternate_strategy_validator(data):
-    if not isinstance(data, dict) or not isinstance(data.get("strategies"), list):
+def _normalize_alternate_strategy(strategy):
+    """Normalize the v5 strategy contract without preserving model chatter."""
+    if not isinstance(strategy, dict):
+        return None
+    legacy = "label" in strategy
+    name = strategy.get("name") or (strategy.get("label") if legacy else "")
+    approach = strategy.get("approach", "")
+    scope = strategy.get("scope")
+    why_different = strategy.get("why_different")
+    if legacy and scope is None:
+        scope = "the current bounded node"
+    if legacy and not why_different:
+        why_different = "changes the implementation boundary instead of repeating the failed path"
+    if isinstance(scope, (list, tuple)):
+        scope = "; ".join(str(item) for item in scope)
+    values = (name, approach, scope, why_different)
+    if not all(isinstance(value, str) and value.strip() for value in values):
+        return None
+    normalized = {
+        "name": compact_text(name, 100),
+        "approach": compact_text(approach, 900),
+        "scope": compact_text(scope, 360),
+        "why_different": compact_text(why_different, 500),
+    }
+    verification_plan = strategy.get("verification_plan", "")
+    if isinstance(verification_plan, str) and verification_plan.strip():
+        normalized["verification_plan"] = compact_text(verification_plan, 420)
+    return normalized
+
+
+def _normalized_alternate_strategies(value):
+    if not isinstance(value, list):
+        return []
+    normalized = [_normalize_alternate_strategy(item) for item in value]
+    return normalized if all(item is not None for item in normalized) else []
+
+
+def _strategy_tokens(strategy):
+    strategy = strategy if isinstance(strategy, dict) else {}
+    return _decomposition_tokens(" ".join(
+        str(strategy.get(key, "")) for key in ("approach", "scope")
+    ))
+
+
+def _strategies_are_materially_different(strategies):
+    strategies = _normalized_alternate_strategies(strategies)
+    if len(strategies) != MAX_STRATEGY_ALTERNATIVES:
         return False
-    strategies = data["strategies"]
-    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
+    first_name = re.sub(r"[^a-z0-9]+", "", strategies[0]["name"].casefold())
+    second_name = re.sub(r"[^a-z0-9]+", "", strategies[1]["name"].casefold())
+    if not first_name or first_name == second_name:
         return False
-    for strategy in strategies:
-        if not isinstance(strategy, dict) or not all(
-            isinstance(strategy.get(key), str) and strategy[key].strip()
-            for key in ("label", "approach", "verification_plan")
-        ):
-            return False
-    first = _decomposition_tokens(strategies[0]["approach"])
-    second = _decomposition_tokens(strategies[1]["approach"])
+    first = _strategy_tokens(strategies[0])
+    second = _strategy_tokens(strategies[1])
+    if not first or not second:
+        return False
     overlap = len(first & second) / max(1, len(first | second))
-    return overlap < 0.78 and strategies[0]["label"].casefold() != strategies[1]["label"].casefold()
+    return overlap < 0.78
+
+
+def _alternate_strategy_validator(data):
+    if not isinstance(data, dict):
+        return False
+    strategies = data.get("strategies")
+    return bool(
+        isinstance(strategies, list)
+        and len(strategies) == MAX_STRATEGY_ALTERNATIVES
+        and _strategies_are_materially_different(strategies)
+    )
 
 
 def _alternate_strategy_fallback(task):
     goal = compact_text(task.get("goal", "the focused node"), 620)
     return [
         {
-            "label": "extend_existing_boundary",
+            "name": "extend_existing_owner",
             "approach": (
-                f"Inspect the existing function or state boundary that already owns this behavior, then make one "
-                f"minimal local extension for: {goal}. Preserve existing control flow and interfaces."
+                f"Inspect the existing function or state owner for {goal}, then make one minimal local extension "
+                "inside that owner. Preserve its entry point and existing interfaces."
             ),
+            "scope": "one existing owner and its current entry point",
+            "why_different": "keeps the established ownership boundary and avoids introducing a parallel path",
             "verification_plan": "Run the narrowest deterministic check for the existing boundary and the requested outcome.",
         },
         {
-            "label": "explicit_state_transition",
+            "name": "explicit_transition_boundary",
             "approach": (
-                f"Model the requested behavior as one explicit input/state transition for: {goal}; implement the "
-                "smallest observable transition and connect it through the existing entry point."
+                f"Implement {goal} as one explicit input-to-state transition at the smallest observable caller "
+                "boundary, then connect it through the existing entry point without adding a second owner."
             ),
+            "scope": "one observable transition at the caller boundary",
+            "why_different": "moves the behavior boundary to an explicit transition instead of extending the owner internals",
             "verification_plan": "Exercise the input/state transition directly and verify the observable before/after state.",
         },
     ]
 
 
+def _strategy_failure_summaries(task, failure_result):
+    failure_result = failure_result if isinstance(failure_result, dict) else {}
+    attempts = []
+    for item in list(task.get("attempts", []) or [])[-3:]:
+        if isinstance(item, dict):
+            attempts.append({
+                "phase": str(item.get("phase", ""))[:40],
+                "summary": compact_text(item.get("summary", ""), 360),
+                "failure_type": str(item.get("failure_type", ""))[:60],
+            })
+    failed_approach = compact_text(
+        f"The current implementation approach for '{task.get('goal', '')}' ended with: "
+        f"{failure_result.get('summary', 'deterministic verification failure')}", 1000,
+    )
+    previous_repair = compact_text(json.dumps(attempts, ensure_ascii=False), 900) if attempts else "(none)"
+    return failed_approach, previous_repair
+
+
 def search_alternate_strategies(task, contract, failure_result, memory, repo_snapshot,
                                 parent_summary="", dependency_summaries=None):
-    """Plan two non-mutating strategies for a small implementation failure."""
+    """Generate at most two non-mutating, materially different v5 strategies."""
     RUN["strategy_searches"] = RUN.get("strategy_searches", 0) + 1
     evidence = _failure_evidence_from_result(failure_result)
+    failed_approach, previous_repair = _strategy_failure_summaries(task, failure_result)
     node_packet = build_node_context(
         task, contract, get_memory_store(), repo_snapshot, parent_summary, dependency_summaries, evidence,
     )
-    prompt_text = f"""Generate exactly TWO materially different implementation strategies for this SMALL failed node.
-Do not edit files. Do not propose another decomposition. Strategy A and Strategy B must use different
-implementation boundaries or mechanisms, and each must include a cheap executable verification plan.
-The current deterministic failure is evidence, not a request to repeat the same approach.
+    prompt_text = f"""Generate exactly TWO materially different implementation strategies for this SMALL failed implementation node.
+This is a planning-only call. Do not edit files, call tools, or change the workspace. Do not propose another
+decomposition. Execute candidates later in fixed order: Strategy A first, then Strategy B only if A fails.
+Each strategy must change the implementation boundary or mechanism materially, stay within the current node scope,
+and include a cheap executable verification plan. Do not return a minor patch, a renamed version, or a paraphrase
+of the failed approach.
 
-CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
-FAILURE EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:3600]}
+CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal', 'done_when', 'scope_hint')}, ensure_ascii=False)}
+FAILED APPROACH SUMMARY: {failed_approach}
+FAILED DETERMINISTIC EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:3600]}
+PREVIOUS REPAIR SUMMARY: {previous_repair}
 NODE PACKET: {node_packet[:5200]}
-Return only the two candidate strategies in the schema."""
-    try:
-        data = structured_model_call(
-            prompt_text, _alternate_strategy_validator, "alternate-strategy-search", alternate_strategy_schema(),
+Return only the two candidates in the schema with name, approach, scope, and why_different."""
+    rejected_candidates = []
+
+    def request_candidates(prompt, label):
+        nonlocal rejected_candidates
+        try:
+            data = structured_model_call(
+                prompt, _alternate_strategy_validator, label, alternate_strategy_schema(),
+            )
+            candidates = _normalized_alternate_strategies(data.get("strategies"))
+            if _strategies_are_materially_different(candidates):
+                return candidates
+            if candidates:
+                rejected_candidates = candidates[:MAX_STRATEGY_ALTERNATIVES]
+            elif isinstance(data, dict) and isinstance(data.get("strategies"), list):
+                rejected_candidates = list(data["strategies"])[:MAX_STRATEGY_ALTERNATIVES]
+            return None
+        except (ProviderError, StructuredOutputError, KeyError, TypeError, ValueError, StopIteration) as exc:
+            record_run_event("structured_strategy_error", label=label, error=str(exc))
+            return None
+
+    strategies = request_candidates(prompt_text, "alternate-strategy-search")
+    if strategies is None:
+        record_run_event(
+            "strategy_candidates_rejected", task_id=task.get("id"),
+            reason="invalid, duplicate, or paraphrased candidates",
         )
-        strategies = data["strategies"]
-    except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
-        strategies = _alternate_strategy_fallback(task)
-        record_run_event("structured_fallback", label="alternate-strategy-search", error=str(exc))
-    strategies = strategies[:MAX_ALTERNATE_STRATEGIES]
+        replacement_prompt = f"""Replace the rejected strategy pair for this bounded implementation node.
+Planning only: do not edit files or call tools. Return exactly TWO candidates. Keep the current node scope,
+but make the two mechanisms and ownership boundaries visibly different. The replacement must not be a minor patch
+or paraphrase of the failed approach or of the rejected pair. Strategy A is executed first; B is only a fallback.
+
+CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal', 'done_when', 'scope_hint')}, ensure_ascii=False)}
+FAILED APPROACH SUMMARY: {failed_approach}
+FAILED DETERMINISTIC EVIDENCE: {json.dumps(evidence, ensure_ascii=False)[:3000]}
+PREVIOUS REPAIR SUMMARY: {previous_repair}
+REJECTED PAIR: {json.dumps(rejected_candidates, ensure_ascii=False)[:3200]}
+Return only the schema fields name, approach, scope, and why_different, plus an optional verification_plan."""
+        strategies = request_candidates(replacement_prompt, "alternate-strategy-replacement")
+    if strategies is None:
+        strategies = [_normalize_alternate_strategy(item) for item in _alternate_strategy_fallback(task)]
+        record_run_event("structured_fallback", label="alternate-strategy-search", error="deterministic strategy pair")
+
+    strategies = strategies[:MAX_STRATEGY_ALTERNATIVES]
     task["strategy_search"] = {
         "status": "planned",
-        "strategies": [
-            {"label": compact_text(item.get("label", ""), 80),
-             "approach": compact_text(item.get("approach", ""), 700),
-             "verification_plan": compact_text(item.get("verification_plan", ""), 400)}
-            for item in strategies
-        ],
+        "strategies": strategies,
+        "execution_order": [item["name"] for item in strategies],
+        "failed_approach_summary": failed_approach,
+        "previous_repair_summary": previous_repair,
         "failure_evidence": evidence[-4:],
+        "attempts": [],
     }
+    task.setdefault("strategy_attempts", [])
     record_run_event(
         "strategy_search", task_id=task.get("id"),
-        strategies=[compact_text(item.get("label", ""), 80) for item in strategies],
+        strategies=[compact_text(item.get("name", ""), 80) for item in strategies],
     )
     return strategies
 
 
-def select_alternate_strategy(task, strategies, failure_result):
-    """Use one cheap challenger decision; only the selected strategy may mutate."""
-    strategies = list(strategies or [])
-    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
-        return 0
-    RUN["challenger_calls"] = RUN.get("challenger_calls", 0) + 1
-    schema = {
-        "type": "object", "properties": {
-            "selected_index": {"type": "integer", "enum": list(range(MAX_ALTERNATE_STRATEGIES))},
-            "rationale": {"type": "string"},
-        },
-        "required": ["selected_index", "rationale"], "additionalProperties": False,
-    }
+def select_alternate_strategy(task, strategies, failure_result=None):
+    """Compatibility helper: v5 always executes Strategy A before Strategy B.
 
-    def validator(data):
-        return (
-            isinstance(data, dict)
-            and data.get("selected_index") in range(MAX_ALTERNATE_STRATEGIES)
-            and isinstance(data.get("rationale"), str)
-            and bool(data["rationale"].strip())
-        )
-
-    prompt_text = f"""Act as a cheap read-only Challenger for one small failed coding node.
-Compare the TWO proposed strategies against the deterministic failure. Choose exactly one index for execution.
-Prefer the approach that changes the implementation boundary materially, preserves existing interfaces, and has
-an executable verification path. Do not edit files and do not invent a third strategy.
-NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
-FAILURE: {json.dumps(_failure_evidence_from_result(failure_result), ensure_ascii=False)[:2600]}
-STRATEGIES: {json.dumps(strategies, ensure_ascii=False)[:4200]}"""
-    try:
-        choice = structured_model_call(prompt_text, validator, "strategy-challenger", schema)
-    except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
-        choice = {"selected_index": 0, "rationale": "deterministic first-candidate fallback"}
-        record_run_event("structured_fallback", label="strategy-challenger", error=str(exc))
-    index = int(choice.get("selected_index", 0))
-    task.setdefault("strategy_search", {})["selected_index"] = index
-    task["strategy_search"]["challenger_rationale"] = compact_text(choice.get("rationale", ""), 420)
-    record_run_event(
-        "strategy_selected", task_id=task.get("id"), selected_index=index,
-        rationale=task["strategy_search"]["challenger_rationale"],
-    )
+    This intentionally performs no Challenger/model call.  The real execution
+    path does not use a selector; keeping the helper avoids breaking callers of
+    the v3 prototype while making the fixed order explicit.
+    """
+    strategies = _normalized_alternate_strategies(list(strategies or []))
+    index = 0
+    if not isinstance(task.get("strategy_search"), dict):
+        task["strategy_search"] = {}
+    task["strategy_search"]["selected_index"] = index
+    task["strategy_search"]["selection"] = "deterministic_order"
+    record_run_event("strategy_order", task_id=task.get("id"), first_index=index)
     return index
 
 
-def execute_selected_strategy(task, contract, strategy, failure_result, memory, repo_snapshot,
-                              parent_summary="", dependency_summaries=None):
-    """Execute and verify only the challenger-selected strategy."""
-    strategy = strategy if isinstance(strategy, dict) else {}
+def _strategy_task_snapshot(task):
+    excluded = {"strategy_search", "strategy_attempts"}
+    return {
+        key: copy.deepcopy(value) for key, value in task.items() if key not in excluded
+    }
+
+
+def _restore_strategy_task_snapshot(task, snapshot):
+    excluded = {"strategy_search", "strategy_attempts"}
+    for key in list(task):
+        if key not in excluded and key not in snapshot:
+            task.pop(key, None)
+    for key, value in snapshot.items():
+        task[key] = copy.deepcopy(value)
+
+
+def _record_strategy_attempt(task, strategy, result, attempt_index):
+    strategy = _normalize_alternate_strategy(strategy) or {"name": "alternative"}
+    result = result if isinstance(result, dict) else {}
+    attempt = {
+        "index": int(attempt_index),
+        "name": strategy.get("name", "alternative"),
+        "status": "PASS" if result.get("status") == "done" else "FAIL",
+        "failure_type": str(result.get("failure_type", ""))[:80],
+        "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+        "changed_files": bounded_list(result.get("changed_files", []), 8, 140),
+        "failure_evidence": _failure_evidence_from_result(result)[-4:],
+    }
+    task.setdefault("strategy_attempts", []).append(attempt)
+    if not isinstance(task.get("strategy_search"), dict):
+        task["strategy_search"] = {}
+    search = task["strategy_search"]
+    search.setdefault("attempts", []).append(attempt)
+    record_run_event("strategy_attempt", task_id=task.get("id"), **attempt)
+    return attempt
+
+
+def _strategy_context(strategy, task, failure_result):
+    failed_approach, previous_repair = _strategy_failure_summaries(task, failure_result)
+    return {
+        "failed_approach_summary": failed_approach,
+        "current_deterministic_failure": _failure_evidence_from_result(failure_result)[-4:],
+        "previous_repair_summary": previous_repair,
+        "strategy": _normalize_alternate_strategy(strategy) or {},
+    }
+
+
+def execute_strategy_attempt(task, contract, strategy, failure_result, memory, repo_snapshot,
+                             parent_summary="", dependency_summaries=None, attempt_index=0):
+    """Run one candidate through the normal leaf Builder/repair/verification engine."""
+    strategy = _normalize_alternate_strategy(strategy) or {}
     RUN["alternate_strategies_attempted"] = RUN.get("alternate_strategies_attempted", 0) + 1
-    label = compact_text(strategy.get("label", "alternative"), 80).replace(" ", "-") or "alternative"
-    task_id = f"{task.get('id', 'NODE')}:strategy:{label}"
-    node_context = build_node_context(
-        task, contract, get_memory_store(), repo_snapshot, parent_summary, dependency_summaries,
-        _failure_evidence_from_result(failure_result),
-    )
-    context = (
-        f"{node_context}\n\nSELECTED ALTERNATE STRATEGY (the only candidate to execute):\n"
-        f"{json.dumps(strategy, ensure_ascii=False)[:2400]}\n"
-        "Implement only this strategy for the current small node. Do not broaden scope or try another strategy. "
-        "Run the stated executable verification before stopping."
-    )
-    global ACTIVE_TOOL_CONTRACT
-    ACTIVE_TOOL_CONTRACT = {
-        "goal": task["goal"], "requirements": task.get("done_when", []),
-        "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
-    }
-    begin_transaction(task_id)
-    builder = execute_agent_task(
-        task["goal"], memory, role="Builder", task_id=task_id, extra_context=context,
-    )
-    memory = builder.get("memory", memory)
-    if builder.get("status") in {"provider_failure", "too_broad"}:
-        rollback_transaction()
-        result = {
-            "status": "failed" if builder.get("status") == "provider_failure" else "too_broad",
-            "failure_type": "ENVIRONMENT_ERROR" if builder.get("status") == "provider_failure" else "TASK_TOO_BROAD",
-            "summary": builder.get("summary", "alternate strategy execution failed"),
-            "memory": memory, "builder": builder,
-        }
-        task.setdefault("strategy_search", {})["outcome"] = "failed"
-        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
-        return result
-    falsifier = falsify_task(task, ACTIVE_TOOL_CONTRACT, memory, builder, repo_snapshot, node_context)
-    memory = falsifier.get("memory", memory)
-    if falsifier.get("status") == "provider_failure":
-        rollback_transaction()
-        result = {
-            "status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": falsifier.get("summary", ""),
-            "memory": memory, "builder": builder, "falsifier": falsifier,
-        }
-        task.setdefault("strategy_search", {})["outcome"] = "failed"
-        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
-        return result
-    browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT)
-    gate = evidence_gate(builder, falsifier, browser)
+    baseline_task = _strategy_task_snapshot(task)
+    baseline_memory = copy.deepcopy(memory)
+    baseline_repo = copy.deepcopy(repo_snapshot)
+    baseline_dependencies = copy.deepcopy(list(dependency_summaries or []))
+    label = compact_text(strategy.get("name", f"strategy_{attempt_index + 1}"), 80)
     event(
-        f"[STRATEGY VERIFY {task.get('id')}] {'PASS' if gate.get('passed') else 'FAIL'}",
-        role="Quality Review", task=task.get("id"), action="alternate strategy verification",
+        f"[STRATEGY {chr(65 + int(attempt_index))} {task.get('id')}] execute {label}",
+        role="Builder", task=task.get("id"), action="bounded alternate strategy",
     )
-    if not gate.get("passed"):
-        rollback_transaction()
+    try:
+        result = execute_leaf(
+            task, contract, baseline_memory, baseline_repo, parent_summary, baseline_dependencies,
+            strategy_context=_strategy_context(strategy, task, failure_result),
+        )
+    except ProviderError as exc:
+        if ACTIVE_TRANSACTION is not None:
+            rollback_transaction()
         result = {
-            "status": "failed", "failure_type": classify_failure(builder, gate, browser, falsifier),
-            "summary": "alternate strategy failed deterministic evidence gate", "memory": memory,
-            "builder": builder, "falsifier": falsifier, "browser": browser, "gate": gate,
-            "failure_evidence": gate.get("deterministic_failures", []),
+            "status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc),
+            "memory": baseline_memory,
         }
-        task.setdefault("strategy_search", {})["outcome"] = "failed"
-        task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
-        return result
-    changed = commit_transaction()
-    remember_verified_outcome(task, contract, builder.get("summary", "alternate strategy verified"), changed)
-    result = {
-        "status": "done", "summary": builder.get("summary", "alternate strategy verified"),
-        "memory": memory, "builder": builder, "falsifier": falsifier, "browser": browser,
-        "gate": gate, "changed_files": changed, "strategy": strategy,
-    }
-    task.setdefault("strategy_search", {})["outcome"] = "rescued"
-    task["strategy_search"]["result"] = compact_text(result["summary"], MAX_NODE_SUMMARY_CHARS)
-    RUN["strategy_rescues"] = RUN.get("strategy_rescues", 0) + 1
-    record_run_event("strategy_rescue", task_id=task.get("id"), strategy=label, changed_files=changed)
+    except (RuntimeError, TypeError) as exc:
+        # A failed candidate must never leave a live transaction that can bleed
+        # into candidate B.  The production leaf engine accepts strategy_context;
+        # TypeError remains a bounded failure for injected test engines.
+        if ACTIVE_TRANSACTION is not None:
+            rollback_transaction()
+        result = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": f"alternate strategy execution failed: {exc}", "memory": baseline_memory,
+        }
+    if not isinstance(result, dict):
+        result = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "alternate strategy returned no result", "memory": baseline_memory,
+        }
+    if result.get("status") == "done":
+        if ACTIVE_TRANSACTION is not None:
+            changed = commit_transaction()
+            result.setdefault("changed_files", changed)
+    else:
+        # The normal leaf engine already rolls back on failure. Calling the
+        # idempotent guard here also protects the A -> B boundary when a test
+        # or injected leaf engine reports failure after managing its own state.
+        rollback_transaction()
+
+    result["strategy"] = strategy
+    result["strategy_attempt_index"] = int(attempt_index)
+    _record_strategy_attempt(task, strategy, result, attempt_index)
+    if result.get("status") != "done":
+        _restore_strategy_task_snapshot(task, baseline_task)
     return result
+
+
+def execute_selected_strategy(task, contract, strategy, failure_result, memory, repo_snapshot,
+                              parent_summary="", dependency_summaries=None, attempt_index=0):
+    """Compatibility wrapper for one fixed-order v5 strategy attempt."""
+    return execute_strategy_attempt(
+        task, contract, strategy, failure_result, memory, repo_snapshot,
+        parent_summary, dependency_summaries, attempt_index,
+    )
 
 
 def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_snapshot,
                                      parent_summary="", dependency_summaries=None):
     if not isinstance(task, dict) or not isinstance(leaf_result, dict):
         return None
-    if leaf_result.get("failure_type") != "IMPLEMENTATION_ERROR" or not _looks_like_tiny_scope(task):
+    if task.get("kind") == "integration":
+        return None
+    evidence = _failure_evidence_from_result(leaf_result)
+    existing_diagnosis = task.get("failure_diagnosis")
+    diagnosis = (
+        existing_diagnosis
+        if isinstance(existing_diagnosis, dict) and existing_diagnosis.get("category")
+        else diagnose_failure(task, leaf_result, evidence)
+    )
+    task["failure_diagnosis"] = diagnosis
+    blocked_categories = {
+        "scope_too_broad", "dependency_error", "verifier_builder_mismatch",
+        "local_integration_state_corruption", "model_capability_floor", "environment_failure",
+        "provider_failure", "unknown", "decomposition_error",
+    }
+    if (
+        leaf_result.get("failure_type") != "IMPLEMENTATION_ERROR"
+        or diagnosis.get("category") != "implementation_strategy_wrong"
+        or diagnosis.get("category") in blocked_categories
+        or not _looks_like_tiny_scope(task)
+        or not evidence
+        or not any(
+            isinstance(item, dict) and (
+                str(item.get("status", "")).upper() in {"FAIL", "FAILED", "ERROR"}
+                or (item.get("tool") in {"run_file", "run_command", "verify_web_app"}
+                    and evidence_result_failed(item.get("result", "")))
+            )
+            or (not isinstance(item, dict) and evidence_result_failed(item))
+            for item in evidence
+        )
+    ):
+        return None
+    if isinstance(task.get("strategy_search"), dict):
+        # One search per failed node. A completed search must not turn into a
+        # new recursion or strategy loop.
         return None
     strategies = search_alternate_strategies(
         task, contract, leaf_result, memory, repo_snapshot, parent_summary, dependency_summaries,
     )
-    if len(strategies) != MAX_ALTERNATE_STRATEGIES:
+    if len(strategies) != MAX_STRATEGY_ALTERNATIVES:
         return None
-    selected = select_alternate_strategy(task, strategies, leaf_result)
-    return execute_selected_strategy(
-        task, contract, strategies[selected], leaf_result, memory, repo_snapshot,
-        parent_summary, dependency_summaries,
-    )
+    task["strategy_search"]["status"] = "running"
+    task["strategy_search"]["execution_order"] = [item["name"] for item in strategies]
+    base_memory = copy.deepcopy(memory)
+    base_repo = copy.deepcopy(repo_snapshot)
+    base_dependencies = copy.deepcopy(list(dependency_summaries or []))
+    last_result = None
+    for index, strategy in enumerate(strategies):
+        last_result = execute_strategy_attempt(
+            task, contract, strategy, leaf_result, copy.deepcopy(base_memory), copy.deepcopy(base_repo),
+            parent_summary, copy.deepcopy(base_dependencies), attempt_index=index,
+        )
+        if last_result.get("status") == "done":
+            task["strategy_search"]["status"] = "completed"
+            task["strategy_search"]["outcome"] = "rescued"
+            task["strategy_search"]["selected_strategy"] = strategy.get("name")
+            task["strategy_search"]["result"] = compact_text(last_result.get("summary", ""), MAX_NODE_SUMMARY_CHARS)
+            RUN["strategy_rescues"] = RUN.get("strategy_rescues", 0) + 1
+            record_run_event(
+                "strategy_rescue", task_id=task.get("id"), strategy=strategy.get("name"),
+                changed_files=last_result.get("changed_files", []), attempt_index=index,
+            )
+            recompute_search_metrics()
+            return last_result
+        if index == 0:
+            record_run_event(
+                "strategy_attempt_rolled_back", task_id=task.get("id"),
+                strategy=strategy.get("name"), next_attempt="B",
+            )
+
+    RUN["strategy_search_failures"] = RUN.get("strategy_search_failures", 0) + 1
+    final_evidence = _failure_evidence_from_result(last_result)
+    final_diagnosis = diagnose_failure(task, last_result, final_evidence)
+    if final_diagnosis.get("category") == "implementation_strategy_wrong":
+        final_diagnosis = {
+            "category": "model_capability_floor",
+            "confidence": "medium",
+            "rationale": compact_text(
+                "Two materially different bounded implementation strategies failed fresh deterministic verification; "
+                "do not keep splitting this node automatically.", 900,
+            ),
+            "next_action": "declare_limit",
+            "depth": int(task.get("depth", 0) or 0),
+            "at_max_depth": int(task.get("depth", 0) or 0) >= MAX_DEPTH,
+            "automatic_resplit_blocked": True,
+            "decomposition_search_exhausted": bool(task.get("decomposition_search_exhausted")),
+            "evidence": final_evidence,
+        }
+    task["failure_evidence"] = final_evidence
+    task["failure_diagnosis"] = final_diagnosis
+    task["strategy_search"]["status"] = "completed"
+    task["strategy_search"]["outcome"] = "failed"
+    task["strategy_search"]["result"] = compact_text((last_result or {}).get("summary", ""), MAX_NODE_SUMMARY_CHARS)
+    task["strategy_search"]["final_diagnosis"] = final_diagnosis
+    if isinstance(last_result, dict):
+        last_result["failure_diagnosis"] = final_diagnosis
+        last_result["strategy_search"] = task["strategy_search"]
+    recompute_search_metrics()
+    return last_result
 
 
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
-                       dependency_summaries=None, failure_evidence=None):
+                       dependency_summaries=None, failure_evidence=None, strategy_context=None):
     dependency_summaries = dependency_summaries or []
     failure_evidence = failure_evidence or task.get("failure_evidence", [])
     if task.get("kind") == "integration":
@@ -2459,6 +2683,27 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"REPOSITORY HINTS:\n{repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1900)}\n\n"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
     )
+    if isinstance(strategy_context, dict):
+        strategy = _normalize_alternate_strategy(strategy_context.get("strategy", {})) or {}
+        strategy_section = (
+            "\n\nFAILED APPROACH SUMMARY:\n"
+            f"{compact_text(strategy_context.get('failed_approach_summary', ''), 900) or '(none)'}\n\n"
+            "CURRENT DETERMINISTIC FAILURE:\n"
+            f"{json.dumps(_compact_failure_evidence(strategy_context.get('current_deterministic_failure', [])), ensure_ascii=False)[:1800] or '(none)'}\n\n"
+            "PREVIOUS REPAIR SUMMARY:\n"
+            f"{compact_text(strategy_context.get('previous_repair_summary', ''), 900) or '(none)'}\n\n"
+            "ALTERNATIVE STRATEGY ATTEMPT:\n"
+            "Previous approach failed. Do NOT continue the previous implementation strategy.\n"
+            "Use this strategy:\n"
+            f"{json.dumps(strategy, ensure_ascii=False)[:2400]}\n"
+            "Failure evidence:\n"
+            f"{json.dumps(_compact_failure_evidence(strategy_context.get('current_deterministic_failure', [])), ensure_ascii=False)[:1800] or '(none)'}\n"
+            "Inspect the CURRENT real workspace before editing.\n\n"
+            "CURRENT ALTERNATIVE STRATEGY:\n"
+            f"{json.dumps(strategy, ensure_ascii=False)[:2400]}\n"
+            "Execute only this bounded strategy through the current node's existing entry point; do not broaden scope."
+        )
+        packet = packet[:max(256, MAX_NODE_PACKET_CHARS - len(strategy_section) - 2)] + strategy_section
     return packet[:MAX_NODE_PACKET_CHARS]
 
 
@@ -3301,7 +3546,9 @@ def _record_task_failure(task, result, phase="execution"):
         task["initial_status"] = projection["status"]
         task["initial_failure_type"] = projection["failure_type"]
         task["initial_failure_evidence"] = list(evidence)
-    diagnosis = diagnose_failure(task, result, evidence)
+    diagnosis = result.get("failure_diagnosis")
+    if not isinstance(diagnosis, dict) or not diagnosis.get("category"):
+        diagnosis = diagnose_failure(task, result, evidence)
     task["failure_diagnosis"] = diagnosis
     if task.get("initial_failure_diagnosis") is None:
         task["initial_failure_diagnosis"] = diagnosis
@@ -3400,6 +3647,7 @@ def recompute_search_metrics():
         "strategy_searches": searches,
         "alternate_strategies_attempted": int(RUN.get("alternate_strategies_attempted", 0) or 0),
         "strategy_rescues": rescues,
+        "strategy_search_failures": int(RUN.get("strategy_search_failures", 0) or 0),
         "strategy_rescue_rate": RUN["strategy_rescue_rate"],
         "capability_floor_nodes": capability_floor,
     }
@@ -3689,7 +3937,7 @@ def print_search_metrics():
     for key in (
         "terminal_too_broad_nodes", "decomposition_backtracks", "alternative_decompositions",
         "alternative_decomposition_rescues", "strategy_searches", "alternate_strategies_attempted",
-        "strategy_rescues", "capability_floor_nodes",
+        "strategy_rescues", "strategy_search_failures", "capability_floor_nodes",
     ):
         print(f"{key}: {RUN.get(key)}")
     backtrack_rate = RUN.get("decomposition_backtrack_rescue_rate")
@@ -3752,7 +4000,8 @@ def repair_task(task, contract, failure_evidence, memory, node_context):
     return execute_agent_task(task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context)
 
 
-def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None):
+def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None,
+                 strategy_context=None):
     if task.get("kind") == "integration":
         return execute_integration_leaf(
             task, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
@@ -3760,7 +4009,8 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     dependency_summaries = dependency_summaries or []
     RUN["leaf_tasks"] += 1
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
-                                      parent_summary, dependency_summaries, task.get("failure_evidence"))
+                                      parent_summary, dependency_summaries, task.get("failure_evidence"),
+                                      strategy_context=strategy_context)
     context_tokens = max(1, int(len(node_context) / 4))
     RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
     RUN["_leaf_context_samples"].append(context_tokens)
@@ -5950,19 +6200,24 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
             return resplit
     elif leaf.get("failure_type") == "IMPLEMENTATION_ERROR":
         _record_task_failure(task, leaf, phase="leaf")
-        resplit = _resplit_after_leaf_failure(
-            task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
-            leaf, fit_decider, leaf_executor, aggregator,
-        )
-        if resplit is not None:
-            return resplit
+        strategy_result = None
         if task.get("kind") != "integration":
             strategy_result = _maybe_search_alternate_strategy(
                 task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
             )
-            if strategy_result is not None:
-                leaf = strategy_result
-                memory = leaf.get("memory", memory)
+        if strategy_result is not None:
+            # A started strategy search owns this failure route. In particular,
+            # two failed strategies must not fall back into another automatic
+            # split merely because the candidates failed.
+            leaf = strategy_result
+            memory = leaf.get("memory", memory)
+        else:
+            resplit = _resplit_after_leaf_failure(
+                task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                leaf, fit_decider, leaf_executor, aggregator,
+            )
+            if resplit is not None:
+                return resplit
 
     leaf["memory"] = memory
     _mark_task_result(task, leaf)

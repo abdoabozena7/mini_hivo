@@ -1,8 +1,10 @@
 import json
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from contextlib import redirect_stdout
 
 import mini
 
@@ -30,6 +32,25 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "success_criteria": ["all requested behavior has executable evidence"],
             "original_goal": "Build a difficult single-file browser application",
         }
+
+    @staticmethod
+    def strategy_pair():
+        return [
+            {
+                "name": "state_transition",
+                "approach": "set one explicit collision state transition then reset it",
+                "scope": "one update function state boundary",
+                "why_different": "uses an explicit state transition inside the existing owner",
+                "verification_plan": "check the deterministic before and after state",
+            },
+            {
+                "name": "boundary_wrapper",
+                "approach": "wrap the existing collision boundary and delegate reset through the caller",
+                "scope": "one caller boundary around the existing function",
+                "why_different": "moves the implementation boundary to the caller instead of editing the state transition",
+                "verification_plan": "check the existing function result at the caller",
+            },
+        ]
 
     def test_hard_mock_reaches_depth_four_and_exceeds_old_eight_task_limit(self):
         contract = self.contract()
@@ -675,7 +696,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(mini.RUN["capability_floor_nodes"], 1)
         aggregator.assert_not_called()
 
-    def test_strategy_search_is_bounded_to_two_candidates_and_one_execution_choice(self):
+    def test_strategy_search_is_bounded_and_uses_fixed_a_then_b_order(self):
         task = mini.make_task(
             "1.2.2.4.1.1", "Implement collision reset in updateCollision()", 6, "1.2.2.4.1",
             ["collision reset is verified"], ["src/game.js"],
@@ -684,22 +705,228 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "deterministic check failed", "failure_evidence": [{"name": "check", "status": "FAIL"}],
         }
-        strategies = [
-            {"label": "state transition", "approach": "set explicit collision state then reset", "verification_plan": "check before and after state"},
-            {"label": "boundary wrapper", "approach": "wrap the existing collision boundary and delegate reset", "verification_plan": "check the existing function result"},
-        ]
-        with patch.object(mini, "structured_model_call", side_effect=[
-            {"strategies": strategies}, {"selected_index": 1, "rationale": "different boundary"},
-        ]):
+        strategies = self.strategy_pair()
+        prompts = []
+
+        def plan(prompt, *_args):
+            prompts.append(prompt)
+            return {"strategies": strategies}
+
+        with patch.object(mini, "structured_model_call", side_effect=plan):
             planned = mini.search_alternate_strategies(task, self.contract(), failure, {}, {})
             selected = mini.select_alternate_strategy(task, planned, failure)
 
-        self.assertEqual(len(planned), mini.MAX_ALTERNATE_STRATEGIES)
-        self.assertEqual(selected, 1)
+        self.assertEqual(len(planned), mini.MAX_STRATEGY_ALTERNATIVES)
+        self.assertEqual(selected, 0)
         self.assertEqual(mini.RUN["strategy_searches"], 1)
-        self.assertEqual(mini.RUN["challenger_calls"], 1)
+        self.assertEqual(mini.RUN["challenger_calls"], 0)
+        self.assertEqual(len(prompts), 1)
+        for marker in ("FAILED APPROACH SUMMARY", "FAILED DETERMINISTIC EVIDENCE", "PREVIOUS REPAIR SUMMARY"):
+            self.assertIn(marker, prompts[0])
         mini.recompute_search_metrics()
         self.assertEqual(mini.RUN["strategy_rescue_rate"], 0.0)
+
+    def test_bounded_implementation_failure_triggers_strategy_rescue_before_resplit(self):
+        task = mini.make_task(
+            "1", "Implement collision reset in updateCollision()", 1, "ROOT",
+            ["collision reset is verified"], ["src/game.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "deterministic check failed",
+            "failure_evidence": [{"name": "collision-check", "status": "FAIL"}],
+        }
+        executed = []
+
+        def leaf(*_args, **kwargs):
+            executed.append(kwargs["strategy_context"]["strategy"]["name"])
+            return {"status": "done", "summary": "strategy A verified", "memory": {},
+                    "changed_files": ["src/game.js"]}
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", side_effect=leaf):
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(executed, ["state_transition"])
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 1)
+        self.assertEqual(mini.RUN["strategy_rescues"], 1)
+        self.assertEqual(mini.RUN["strategy_search_failures"], 0)
+        self.assertEqual(mini.RUN["failed_nodes_resplit"], 0)
+        self.assertEqual(task["strategy_search"]["outcome"], "rescued")
+        self.assertEqual(len(task["strategy_attempts"]), 1)
+
+    def test_strategy_trigger_excludes_non_strategy_failure_diagnoses(self):
+        cases = [
+            ("scope_too_broad", 1, "TASK_TOO_BROAD", "scope overflow"),
+            ("environment_failure", 1, "ENVIRONMENT_ERROR", "provider unavailable"),
+            ("dependency_error", 1, "IMPLEMENTATION_ERROR", "Module not found: state.js"),
+            ("verifier_builder_mismatch", 1, "IMPLEMENTATION_ERROR", "no executable verification was attempted"),
+            ("model_capability_floor", mini.MAX_DEPTH, "IMPLEMENTATION_ERROR",
+             "failed deterministic evidence gate after repair limit"),
+        ]
+        for expected, depth, failure_type, summary in cases:
+            with self.subTest(expected=expected):
+                task = mini.make_task(
+                    f"node-{expected}", "Implement one focused behavior", depth, "ROOT",
+                    ["behavior is verified"], ["src/app.js"],
+                )
+                failure = {
+                    "status": "failed", "failure_type": failure_type, "summary": summary,
+                    "failure_evidence": [{"name": "deterministic-check", "status": "FAIL"}],
+                }
+                with patch.object(mini, "structured_model_call") as structured, \
+                        patch.object(mini, "execute_leaf") as execute:
+                    self.assertIsNone(mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {}))
+                self.assertEqual(task["failure_diagnosis"]["category"], expected)
+                structured.assert_not_called()
+                execute.assert_not_called()
+
+    def test_duplicate_strategy_pair_gets_one_bounded_replacement(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        duplicate = [
+            {"name": "path_a", "approach": "use existing state and reset the value in one function",
+             "scope": "one function", "why_different": "first path"},
+            {"name": "path_b", "approach": "use existing state and reset the value in one function",
+             "scope": "one function", "why_different": "second path"},
+        ]
+        responses = [{"strategies": duplicate}, {"strategies": self.strategy_pair()}]
+        with patch.object(mini, "structured_model_call", side_effect=responses) as structured:
+            planned = mini.search_alternate_strategies(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(structured.call_count, 2)
+        self.assertEqual([item["name"] for item in planned], ["state_transition", "boundary_wrapper"])
+        self.assertEqual(len(planned), mini.MAX_STRATEGY_ALTERNATIVES)
+
+    def test_strategy_generation_is_non_mutating_and_has_bounded_packet(self):
+        target = mini.WORKSPACE / "app.js"
+        target.write_text("original\n", encoding="utf-8")
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "run_tool") as run_tool, \
+                patch.object(mini, "execute_agent_task") as agent:
+            planned = mini.search_alternate_strategies(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(len(planned), 2)
+        self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
+        run_tool.assert_not_called()
+        agent.assert_not_called()
+
+    def test_strategy_attempt_uses_normal_leaf_engine_with_active_strategy_packet(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        strategy = self.strategy_pair()[0]
+        with patch.object(mini, "execute_leaf", return_value={
+            "status": "done", "summary": "verified", "memory": {}, "changed_files": [],
+        }) as leaf, patch.object(mini, "execute_agent_task") as agent:
+            result = mini.execute_strategy_attempt(task, self.contract(), strategy, failure, {}, {}, attempt_index=0)
+
+        self.assertEqual(result["status"], "done")
+        leaf.assert_called_once()
+        agent.assert_not_called()
+        context = leaf.call_args.kwargs["strategy_context"]
+        self.assertEqual(context["strategy"]["name"], "state_transition")
+        packet = mini.build_node_context(
+            task, self.contract(), None, {}, strategy_context=context,
+        )
+        self.assertLessEqual(len(packet), mini.MAX_NODE_PACKET_CHARS)
+        for marker in ("FAILED APPROACH SUMMARY", "CURRENT DETERMINISTIC FAILURE", "CURRENT ALTERNATIVE STRATEGY"):
+            self.assertIn(marker, packet)
+
+    def test_strategy_a_failure_rolls_back_before_b_and_preserves_verified_dependencies(self):
+        target = mini.WORKSPACE / "app.js"
+        target.write_text("base\n", encoding="utf-8")
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        dependencies = [{"task_id": "0", "status": "done", "summary": "verified dependency"}]
+        observations = []
+
+        def leaf(_task, _contract, memory, _repo, _parent, deps, strategy_context=None):
+            name = strategy_context["strategy"]["name"]
+            observations.append((name, target.read_text(encoding="utf-8"), dict(memory), list(deps)))
+            memory["attempt"] = name
+            mini.begin_transaction(task["id"])
+            mini._transaction_capture(target)
+            target.write_text(name, encoding="utf-8")
+            if name == "state_transition":
+                return {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "A failed",
+                        "memory": memory, "failure_evidence": [{"name": "check", "status": "FAIL"}]}
+            return {"status": "done", "summary": "B verified", "memory": memory}
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", side_effect=leaf):
+            result = mini._maybe_search_alternate_strategy(
+                task, self.contract(), failure, {"seed": "same"}, {}, dependency_summaries=dependencies,
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual([item[0] for item in observations], ["state_transition", "boundary_wrapper"])
+        self.assertEqual(observations[0][1], "base\n")
+        self.assertEqual(observations[1][1], "base\n")
+        self.assertEqual(observations[0][2], {"seed": "same"})
+        self.assertEqual(observations[1][2], {"seed": "same"})
+        self.assertEqual(observations[0][3], dependencies)
+        self.assertEqual(observations[1][3], dependencies)
+        self.assertEqual(target.read_text(encoding="utf-8"), "boundary_wrapper")
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 2)
+        self.assertEqual(mini.RUN["strategy_rescues"], 1)
+
+    def test_both_strategy_failures_record_capability_floor_without_resplit(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "initial check failed",
+            "memory": {}, "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", side_effect=[failure, failure]), \
+                patch.object(mini, "_resplit_after_leaf_failure") as resplit:
+            result = mini.solve_task(
+                task, 1, self.contract(), {}, {}, fit_decider=lambda *_args: {"decision": "execute"},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
+        self.assertEqual(len(task["strategy_attempts"]), 2)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 2)
+        self.assertEqual(mini.RUN["strategy_rescues"], 0)
+        self.assertEqual(mini.RUN["strategy_search_failures"], 1)
+        self.assertEqual(mini.RUN["failed_nodes_resplit"], 0)
+        resplit.assert_not_called()
+
+    def test_strategy_rescue_rate_is_na_when_no_strategy_search_started(self):
+        mini.recompute_search_metrics()
+        self.assertIsNone(mini.RUN["strategy_rescue_rate"])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            mini.print_search_metrics()
+        self.assertIn("strategy_rescue_rate: N/A", output.getvalue())
 
     def test_implementation_failure_does_not_force_split_when_fit_rejects_granularity_rescue(self):
         contract = self.contract(["one focused behavior"])
