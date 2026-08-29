@@ -2947,6 +2947,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         task_text = f"{context}\n\nCURRENT TASK:\n{task_text}"
     messages.append({"role": "user", "content": task_text})
     evidence = []
+    # Keep syntax-validation outcomes local to this focused execution.  A
+    # rejected source mutation is not a workspace mutation, but it still
+    # invalidates a browser opportunity later in the same verification cycle
+    # until a fresh source check or valid source mutation clears it.
+    verification_cycle = {"syntax_failures": {}}
     repeated_failures = {}
     mutation_failures = {}
     last_verification_signature = ()
@@ -3036,7 +3041,24 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     result = f"error: tool {name!r} is unavailable for role {role}"
             else:
                 issue = tool_argument_error(name, args)
-                result = issue if issue else run_tool(name, args, role=role)
+                if issue:
+                    result = issue
+                elif _browser_tool_request(name, args):
+                    current_syntax_failures = _cycle_syntax_failures_for_target(
+                        verification_cycle, args.get("path")
+                    )
+                    if current_syntax_failures:
+                        result = json.dumps(
+                            _verification_cycle_syntax_failure(
+                                args.get("path"), task_id, current_syntax_failures,
+                            ),
+                            ensure_ascii=False,
+                        )
+                    else:
+                        result = run_tool(name, args, role=role)
+                else:
+                    result = run_tool(name, args, role=role)
+            _update_verification_cycle(verification_cycle, name, args, result)
             projected = str(result)[:1600]
             evidence.append({"tool": name, "target": target, "result": projected})
             memory = update_memory(memory, name, args, result, role=role, task_id=task_id)
@@ -3103,6 +3125,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "memory": memory, "tool_evidence": evidence, "provider_error": provider_error,
         "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
         "step_budget": int(step_budget), "tool_steps_used": len(evidence),
+        "syntax_validation_failures": list(verification_cycle["syntax_failures"].values()),
         "failure_type": (
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
@@ -3394,6 +3417,234 @@ def _local_html_asset_references(workspace, html_path):
     return references
 
 
+_SOURCE_MUTATION_TOOLS = frozenset({"write_file", "edit_file", "edit_file_range"})
+
+
+def _browser_relative_path(raw_path):
+    if raw_path is None or not str(raw_path).strip() or WORKSPACE is None:
+        return None
+    resolved = _browser_workspace_path(WORKSPACE, raw_path)
+    if resolved is None:
+        return str(raw_path)
+    try:
+        return resolved.relative_to(Path(WORKSPACE).resolve()).as_posix()
+    except ValueError:
+        return str(raw_path)
+
+
+def _node_check_target(command):
+    try:
+        parts = shlex.split(str(command), posix=(os.name != "nt"))
+    except ValueError:
+        return None
+    for index, part in enumerate(parts):
+        if str(part).casefold() in {"--check", "-c"} and index + 1 < len(parts):
+            candidate = parts[index + 1]
+            if not str(candidate).startswith("-"):
+                return candidate
+    return None
+
+
+def _syntax_validation_failures_from_result(name, args, result):
+    """Extract only deterministic source-syntax failures from one tool result."""
+    payload = None
+    raw = str(result)
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            payload = parsed
+    except (TypeError, ValueError):
+        pass
+    if isinstance(payload, dict) and payload.get("syntax_failure"):
+        entries = payload.get("syntax_errors") or []
+        normalized = []
+        for item in entries:
+            if isinstance(item, dict):
+                path = item.get("path") or args.get("path")
+                error = item.get("error") or item.get("evidence") or raw
+            else:
+                path = args.get("path")
+                error = item
+            normalized.append({
+                "path": _browser_relative_path(path) or str(path or "unknown"),
+                "error": compact_text(error, 700),
+            })
+        if normalized:
+            return normalized
+
+    lower = raw.casefold()
+    deterministic_syntax = "syntax validation failed" in lower
+    if name == "run_command" and re.search(r"(?:^|\s)node(?:\.exe)?\s+--check(?:\s|$)", str(args.get("command", "")), re.IGNORECASE):
+        deterministic_syntax = deterministic_syntax or (
+            "syntaxerror" in lower and tool_result_failed(result)
+        )
+        target = _node_check_target(args.get("command", "")) or args.get("path")
+    else:
+        target = args.get("path")
+    if name == "run_file" and Path(str(target or "")).suffix.casefold() in {".js", ".mjs", ".cjs"}:
+        deterministic_syntax = deterministic_syntax or (
+            "syntaxerror" in lower and tool_result_failed(result)
+        )
+    if not deterministic_syntax:
+        return []
+    return [{
+        "path": _browser_relative_path(target) or str(target or "unknown"),
+        "error": compact_text(raw, 700),
+    }]
+
+
+def _browser_tool_request(name, args):
+    if name == "verify_web_app":
+        return True
+    if name != "run_file":
+        return False
+    return Path(str((args or {}).get("path", ""))).suffix.casefold() in _BROWSER_HTML_SUFFIXES
+
+
+def _browser_relevant_paths(requested_path):
+    """Return source/entrypoint paths that one browser request would exercise."""
+    if WORKSPACE is None:
+        return set()
+    root = Path(WORKSPACE).resolve()
+    relevant = set()
+    requested = _browser_workspace_path(root, requested_path)
+
+    def add(path):
+        if path is None:
+            return
+        try:
+            relevant.add(path.relative_to(root).as_posix())
+        except ValueError:
+            return
+
+    def add_html_assets(html_path):
+        add(html_path)
+        for reference in _local_html_asset_references(root, html_path):
+            add(reference.get("path"))
+
+    if requested is not None:
+        add(requested)
+        if requested.suffix.casefold() in _BROWSER_HTML_SUFFIXES:
+            if requested.is_file():
+                add_html_assets(requested)
+        elif requested.suffix.casefold() in _BROWSER_SOURCE_SUFFIXES:
+            for html_path in _browser_html_candidates(root):
+                references = _local_html_asset_references(root, html_path)
+                if any(reference.get("path") == requested for reference in references):
+                    add_html_assets(html_path)
+                    break
+        return relevant
+
+    details = _resolve_browser_entrypoint_details(root, {"requested_from_node": None})
+    resolved = details.get("resolved_entrypoint") if isinstance(details, dict) else None
+    resolved_path = _browser_workspace_path(root, resolved)
+    if resolved_path is not None and resolved_path.is_file():
+        add_html_assets(resolved_path)
+    return relevant
+
+
+def _syntax_failures_for_target(failures, requested_path):
+    relevant_paths = _browser_relevant_paths(requested_path)
+    if not relevant_paths:
+        return []
+    selected = []
+    for item in failures or []:
+        if not isinstance(item, dict):
+            continue
+        path = _browser_relative_path(item.get("path")) or str(item.get("path", "unknown"))
+        if path in relevant_paths:
+            selected.append({
+                "path": path,
+                "error": compact_text(item.get("error", item.get("evidence", "syntax validation failed")), 700),
+            })
+    return selected
+
+
+def _combined_syntax_validation_failures(*results):
+    combined = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        for item in result.get("syntax_validation_failures", []) or []:
+            if not isinstance(item, dict):
+                continue
+            key = _browser_relative_path(item.get("path")) or str(item.get("path", "unknown"))
+            combined[key] = item
+    return list(combined.values())
+
+
+def _cycle_syntax_failures_for_target(cycle, requested_path):
+    failures = (cycle or {}).get("syntax_failures", {})
+    return _syntax_failures_for_target(list(failures.values()), requested_path)
+
+
+def _verification_cycle_syntax_failure(
+    requested_path, task_id, syntax_failures, compact_target=None, evidence=None,
+):
+    target = dict(compact_target or {
+        "requested_from_node": requested_path,
+        "resolved_entrypoint": None,
+        "resolution_source": "syntax_gate",
+        "resolution_status": "NOT_ATTEMPTED_SYNTAX_FAILURE",
+    })
+    failures = list(syntax_failures or [])
+    RUN["browser_checks_skipped_for_syntax_failure"] = RUN.get(
+        "browser_checks_skipped_for_syntax_failure", 0,
+    ) + 1
+    record_run_event(
+        "browser_verification_syntax_failure", task_id=task_id,
+        syntax_errors=failures,
+    )
+    record_run_event("browser_verification_target", task_id=task_id, **target)
+    return {
+        **target,
+        "passed": False,
+        "environment_error": False,
+        "failure_type": "IMPLEMENTATION_ERROR",
+        "syntax_failure": True,
+        "syntax_errors": failures,
+        "verification_cycle": {
+            "requested_source": requested_path,
+            "syntax_status": "FAIL",
+            "syntax_evidence": failures,
+            "browser_skipped": True,
+            "browser_skip_reason": "syntax_failure",
+        },
+        "evidence": evidence or "Syntax validation failed before browser behavior verification; browser launch skipped.",
+    }
+
+
+def _update_verification_cycle(cycle, name, args, result):
+    if not isinstance(cycle, dict):
+        return
+    failures = _syntax_validation_failures_from_result(name, args or {}, result)
+    if failures:
+        for item in failures:
+            key = _browser_relative_path(item.get("path")) or str(item.get("path", "unknown"))
+            cycle.setdefault("syntax_failures", {})[key] = item
+        return
+
+    if name in _SOURCE_MUTATION_TOOLS and not tool_result_failed(result):
+        key = _browser_relative_path((args or {}).get("path"))
+        if key:
+            cycle.setdefault("syntax_failures", {}).pop(key, None)
+        return
+
+    if name == "run_file" and not result_not_applicable(result) and not tool_result_failed(result):
+        key = _browser_relative_path((args or {}).get("path"))
+        if key and Path(key).suffix.casefold() in {".js", ".mjs", ".cjs", ".py", ".json"}:
+            cycle.setdefault("syntax_failures", {}).pop(key, None)
+        return
+
+    if name == "run_command" and re.search(
+        r"(?:^|\s)node(?:\.exe)?\s+--check(?:\s|$)",
+        str((args or {}).get("command", "")), re.IGNORECASE,
+    ) and not tool_result_failed(result):
+        key = _browser_relative_path(_node_check_target((args or {}).get("command", "")))
+        if key:
+            cycle.setdefault("syntax_failures", {}).pop(key, None)
+
+
 def _trusted_entrypoint_value(container):
     if isinstance(container, str):
         return container
@@ -3590,29 +3841,10 @@ def verify_browser_application(requested_path=None, task_id="ROOT", profile=None
     target_evidence["requested_from_node"] = requested_path
     requested_syntax_failures = _browser_syntax_failures(WORKSPACE, None, requested_path)
     if requested_syntax_failures:
-        compact_target = {
-            "requested_from_node": requested_path,
-            "resolved_entrypoint": None,
-            "resolution_source": "syntax_gate",
-            "resolution_status": "NOT_ATTEMPTED_SYNTAX_FAILURE",
-        }
-        RUN["browser_checks_skipped_for_syntax_failure"] = RUN.get(
-            "browser_checks_skipped_for_syntax_failure", 0,
-        ) + 1
-        record_run_event(
-            "browser_verification_syntax_failure", task_id=task_id,
-            syntax_errors=requested_syntax_failures,
+        return _verification_cycle_syntax_failure(
+            requested_path, task_id, requested_syntax_failures,
+            evidence="Syntax validation failed before entrypoint resolution and browser behavior verification.",
         )
-        record_run_event("browser_verification_target", task_id=task_id, **compact_target)
-        return {
-            **compact_target,
-            "passed": False,
-            "environment_error": False,
-            "failure_type": "IMPLEMENTATION_ERROR",
-            "syntax_failure": True,
-            "syntax_errors": requested_syntax_failures,
-            "evidence": "Syntax validation failed before entrypoint resolution and browser behavior verification.",
-        }
 
     resolved = resolve_browser_entrypoint(WORKSPACE, target_evidence)
     compact_target = {
@@ -3637,23 +3869,9 @@ def verify_browser_application(requested_path=None, task_id="ROOT", profile=None
     RUN["browser_entrypoint_resolutions"] = RUN.get("browser_entrypoint_resolutions", 0) + 1
     syntax_failures = _browser_syntax_failures(WORKSPACE, resolved, requested_path)
     if syntax_failures:
-        RUN["browser_checks_skipped_for_syntax_failure"] = RUN.get(
-            "browser_checks_skipped_for_syntax_failure", 0,
-        ) + 1
-        record_run_event(
-            "browser_verification_syntax_failure", task_id=task_id,
-            syntax_errors=syntax_failures,
+        return _verification_cycle_syntax_failure(
+            requested_path, task_id, syntax_failures, compact_target=compact_target,
         )
-        record_run_event("browser_verification_target", task_id=task_id, **compact_target)
-        return {
-            **compact_target,
-            "passed": False,
-            "environment_error": False,
-            "failure_type": "IMPLEMENTATION_ERROR",
-            "syntax_failure": True,
-            "syntax_errors": syntax_failures,
-            "evidence": "Syntax validation failed before browser behavior verification; browser launch skipped.",
-        }
 
     record_run_event("browser_verification_target", task_id=task_id, **compact_target)
     browser_result = browser_workspace_snapshot(resolved, task_id, profile=profile)
@@ -3687,11 +3905,16 @@ def discover_web_entrypoint(task, contract=None):
     return {"path": resolved} if resolved != VERIFICATION_TARGET_UNRESOLVED else None
 
 
-def optional_browser_check(task, contract=None):
+def optional_browser_check(task, contract=None, syntax_failures=None):
     if not _web_verification_applicable(task, contract):
         return None
     profile = infer_web_profile(task.get("goal", ""), contract or {})
     requested = _task_browser_requested_path(task)
+    current_syntax_failures = _syntax_failures_for_target(syntax_failures, requested)
+    if current_syntax_failures:
+        return _verification_cycle_syntax_failure(
+            requested, task["id"], current_syntax_failures,
+        )
     return verify_browser_application(
         requested, task["id"], profile=profile,
         evidence={
@@ -5012,7 +5235,10 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": falsifier.get("summary", "falsifier provider failure"),
                 "memory": memory, "builder": builder, "falsifier": falsifier}
-    browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT)
+    browser = optional_browser_check(
+        task, ACTIVE_TOOL_CONTRACT,
+        syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+    )
     gate = evidence_gate(builder, falsifier, browser)
     verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and gate["passed"] else "VERIFY " + task["id"]
     event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}", role="Quality Review",
@@ -5065,7 +5291,10 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                     "memory": memory, "failure_evidence": current_gate["deterministic_failures"],
                     "repair_history": repair_history}
         # Fresh verification only: do not carry stale Builder/Falsifier failures into the post-repair gate.
-        current_browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT)
+        current_browser = optional_browser_check(
+            task, ACTIVE_TOOL_CONTRACT,
+            syntax_failures=_combined_syntax_validation_failures(repaired),
+        )
         current_gate = evidence_gate(repaired, None, current_browser)
         verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and current_gate["passed"] else "VERIFY " + task["id"]
         event(f"[{verify_label}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
@@ -5236,7 +5465,13 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
                 "summary": falsifier.get("summary", "integration falsifier provider failure"),
                 "memory": memory, "builder": builder, "falsifier": falsifier,
                 "integration_preflight": task["integration_preflight"]}
-    browser = optional_browser_check(task, contract) if preflight_check["passed"] else None
+    browser = (
+        optional_browser_check(
+            task, contract,
+            syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+        )
+        if preflight_check["passed"] else None
+    )
     gate = _integration_child_gate(builder, falsifier, browser, preflight_check)
     event(f"[VERIFY {task['id']}] {'PASS' if gate['passed'] else 'FAIL'}",
           role="Quality Review", task=task["id"], action="integration task evidence gate")
@@ -5286,7 +5521,13 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         )
         task["integration_preflight"]["after"] = current_preflight
         current_check = _integration_child_preflight_check(task, current_preflight)
-        current_browser = optional_browser_check(task, contract) if current_check["passed"] else None
+        current_browser = (
+            optional_browser_check(
+                task, contract,
+                syntax_failures=_combined_syntax_validation_failures(repaired),
+            )
+            if current_check["passed"] else None
+        )
         current_gate = _integration_child_gate(repaired, None, current_browser, current_check)
         event(f"[VERIFY {task['id']}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
               role="Quality Review", task=task["id"], action="fresh integration task verification")
@@ -6736,7 +6977,13 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         rollback_transaction(); RUN["integration_failures"] += 1
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": falsifier.get("summary", ""),
                 "memory": memory, "children": child_info, "integration_preflight": task["integration_preflight"]}
-    browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT) if preflight_after.get("passed") else None
+    browser = (
+        optional_browser_check(
+            task, ACTIVE_TOOL_CONTRACT,
+            syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+        )
+        if preflight_after.get("passed") else None
+    )
     gate = evidence_gate(builder, falsifier, browser, integration_preflight=preflight_after)
     verify_label = "ROOT VERIFIED" if root and gate["passed"] else ("ROOT VERIFY" if root else "VERIFY " + label)
     event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}",
@@ -6785,7 +7032,13 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                         "integration_preflight": task["integration_preflight"]}
             current_preflight = run_integration_preflight(task, child_info, contract)
             task["integration_preflight"]["after"] = current_preflight
-            current_browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT) if current_preflight.get("passed") else None
+            current_browser = (
+                optional_browser_check(
+                    task, ACTIVE_TOOL_CONTRACT,
+                    syntax_failures=_combined_syntax_validation_failures(repaired),
+                )
+                if current_preflight.get("passed") else None
+            )
             current_gate = evidence_gate(repaired, None, current_browser,
                                          integration_preflight=current_preflight)
             verify_label = "ROOT VERIFIED" if root and current_gate["passed"] else ("ROOT VERIFY" if root else "VERIFY " + label)

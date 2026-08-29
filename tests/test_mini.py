@@ -456,6 +456,121 @@ Requirements:
         self.assertFalse(result["environment_error"])
         self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
 
+    def test_fresh_valid_source_after_syntax_failure_allows_browser_once(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        source = mini.WORKSPACE / "app.js"
+        source.write_text("const broken = ;\n", encoding="utf-8")
+
+        with patch.object(
+            mini, "browser_workspace_snapshot", return_value={"passed": True},
+        ) as browser:
+            first = mini.verify_browser_application("app.js", "4.2")
+            self.assertTrue(first["syntax_failure"])
+            browser.assert_not_called()
+            self.assertEqual(mini.RUN["browser_checks"], 0)
+            self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+
+            source.write_text("const ready = true;\n", encoding="utf-8")
+            second = mini.verify_browser_application("app.js", "4.2")
+
+        browser.assert_called_once_with("index.html", "4.2", profile=None)
+        self.assertTrue(second["passed"])
+        self.assertFalse(second.get("syntax_failure", False))
+        self.assertEqual(mini.RUN["browser_checks"], 0)
+        self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+
+    def test_linked_javascript_syntax_failure_skips_browser_after_resolution(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        (mini.WORKSPACE / "app.js").write_text("const broken = ;\n", encoding="utf-8")
+
+        with patch.object(mini, "browser_workspace_snapshot") as browser:
+            result = mini.verify_browser_application("index.html", "4.3")
+
+        browser.assert_not_called()
+        self.assertTrue(result["syntax_failure"])
+        self.assertEqual(result["resolved_entrypoint"], "index.html")
+        self.assertEqual(result["resolution_status"], "RESOLVED")
+        self.assertEqual(result["syntax_errors"][0]["path"], "app.js")
+        self.assertFalse(result["environment_error"])
+        self.assertEqual(mini.RUN["browser_checks"], 0)
+        self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+
+    def test_focused_cycle_blocks_browser_after_syntax_validation_failure_then_allows_fresh_pass(self):
+        (mini.WORKSPACE / "index.html").write_text(
+            '<!doctype html><script src="app.js"></script>', encoding="utf-8",
+        )
+        source = mini.WORKSPACE / "app.js"
+        source.write_text("const ready = true;\n", encoding="utf-8")
+        invalid_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {
+                    "name": "edit_file_range",
+                    "arguments": {"path": "app.js", "start_line": 1, "end_line": 1,
+                                  "new": "const ready = ;"},
+                },
+            }],
+        }
+        browser_request = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {
+                    "name": "verify_web_app", "arguments": {"path": "app.js"},
+                },
+            }],
+        }
+        terminal = {"role": "assistant", "content": "cycle complete", "tool_calls": []}
+        memory = mini.load_memory()
+        mini.ACTIVE_TOOL_CONTRACT = {"goal": "fix the browser app", "task_id": "4.4"}
+
+        with patch.object(mini, "ask_ollama", side_effect=[invalid_edit, browser_request, terminal]), \
+                patch.object(mini, "browser_workspace_snapshot") as browser:
+            blocked = mini.execute_agent_task(
+                "fix the browser app", memory, role="Builder", task_id="4.4", max_steps=3,
+            )
+
+        browser.assert_not_called()
+        self.assertEqual(mini.RUN["browser_checks"], 0)
+        self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+        self.assertEqual(len(blocked["syntax_validation_failures"]), 1)
+        self.assertIn("JavaScript syntax validation failed", blocked["syntax_validation_failures"][0]["error"])
+        self.assertIn('"syntax_failure": true', blocked["tool_evidence"][-1]["result"])
+
+        valid_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {
+                    "name": "edit_file_range",
+                    "arguments": {"path": "app.js", "start_line": 1, "end_line": 1,
+                                  "new": "const ready = false;"},
+                },
+            }],
+        }
+        browser_request_after_repair = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {
+                    "name": "verify_web_app", "arguments": {"path": "app.js"},
+                },
+            }],
+        }
+        with patch.object(
+            mini, "ask_ollama", side_effect=[valid_edit, browser_request_after_repair],
+        ), patch.object(
+            mini, "browser_workspace_snapshot", return_value={"passed": True},
+        ) as repaired_browser:
+            repaired = mini.execute_agent_task(
+                "repair the browser app", memory, role="Repairer", task_id="4.4", max_steps=2,
+            )
+
+        repaired_browser.assert_called_once()
+        self.assertEqual(repaired_browser.call_args.args[:2], ("index.html", "4.4"))
+        self.assertEqual(repaired_browser.call_args.kwargs["profile"].kind, "web")
+        self.assertEqual(repaired["status"], "done")
+        self.assertEqual(repaired["syntax_validation_failures"], [])
+        self.assertEqual(mini.RUN["browser_checks"], 0)
+        self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
+
     def test_fresh_browser_pass_does_not_hide_prior_syntax_failure(self):
         syntax_observation = {
             "passed": False, "environment_error": False,
