@@ -1146,6 +1146,78 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 1)
         self.assertEqual(mini.RUN["integration_conflict_resolution"], 100.0)
 
+    def test_same_blocking_conflict_in_three_preflights_counts_once(self):
+        for line_numbers, message in (
+            ([10, 20], "duplicate value declaration"),
+            ([31, 44], "duplicate value declaration after edit"),
+            ([58, 72], "duplicate value declaration after another edit"),
+        ):
+            mini._record_preflight_conflict_snapshot({
+                "conflicts": [{
+                    "kind": "duplicate_declaration", "severity": "error", "symbol": "value",
+                    "files": [f"app.js:{line}" for line in line_numbers], "message": message,
+                }],
+            })
+
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 1)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 0)
+
+    def test_two_structurally_different_conflicts_count_twice(self):
+        mini._record_preflight_conflict_snapshot({
+            "conflicts": [
+                {"kind": "duplicate_declaration", "severity": "error", "symbol": "first",
+                 "files": ["app.js:1", "app.js:2"]},
+                {"kind": "duplicate_declaration", "severity": "error", "symbol": "second",
+                 "files": ["app.js:4", "app.js:5"]},
+            ],
+        })
+
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 2)
+
+    def test_conflict_disappearance_is_resolved_once(self):
+        conflict = {"kind": "duplicate_html_id", "severity": "error", "id": "game",
+                    "files": ["index.html"], "message": "duplicate id"}
+        mini._record_preflight_conflict_snapshot({"conflicts": [conflict]})
+        mini._record_preflight_conflict_snapshot({"conflicts": []})
+        mini._record_preflight_conflict_snapshot({"conflicts": []})
+
+        mini.recompute_integration_metrics()
+        fingerprint = mini._preflight_conflict_fingerprint(conflict)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 1)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 1)
+        self.assertEqual(mini.PREFLIGHT_CONFLICT_STATE["registry"][fingerprint]["resolved_after"], 2)
+
+    def test_reappearing_conflict_is_not_new_and_is_finally_unresolved(self):
+        conflict = {"kind": "duplicate_declaration", "severity": "error", "symbol": "value",
+                    "files": ["app.js:10", "app.js:20"]}
+        mini._record_preflight_conflict_snapshot({"conflicts": [conflict]})
+        mini._record_preflight_conflict_snapshot({"conflicts": []})
+        mini._record_preflight_conflict_snapshot({"conflicts": [conflict]})
+
+        mini.recompute_integration_metrics()
+        fingerprint = mini._preflight_conflict_fingerprint(conflict)
+        record = mini.PREFLIGHT_CONFLICT_STATE["registry"][fingerprint]
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 1)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 0)
+        self.assertEqual(record["status"], "unresolved")
+
+    def test_preflight_sequence_a_b_c_then_b_c_then_c_resolves_two_unique_conflicts(self):
+        conflicts = {
+            name: {"kind": "duplicate_declaration", "severity": "error", "symbol": name,
+                   "files": ["app.js:1", "app.js:2"]}
+            for name in ("A", "B", "C")
+        }
+        mini._record_preflight_conflict_snapshot({"conflicts": list(conflicts.values())})
+        mini._record_preflight_conflict_snapshot({"conflicts": [conflicts["B"], conflicts["C"]]})
+        mini._record_preflight_conflict_snapshot({"conflicts": [conflicts["C"]]})
+
+        mini.recompute_integration_metrics()
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_detected"], 3)
+        self.assertEqual(mini.RUN["preflight_blocking_conflicts_resolved"], 2)
+        self.assertEqual(mini.RUN["integration_conflict_resolution"], 66.67)
+
     def test_integration_conflict_resolution_reports_na_when_no_conflicts_exist(self):
         mini.recompute_integration_metrics()
         with patch("builtins.print") as printer:

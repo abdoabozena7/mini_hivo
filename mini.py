@@ -113,6 +113,7 @@ ACTIVE_CONTRACT = None
 ACTIVE_TOOL_CONTRACT = None
 MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
+PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
 
 
 class ProviderError(RuntimeError):
@@ -1005,7 +1006,7 @@ def new_metrics(mode):
 def reset_run(mode):
     global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, RUN_ID
     global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, FORCE_CPU_FOR_RUN
-    global VISION_ENABLED_FOR_RUN, VISION_ERROR
+    global VISION_ENABLED_FOR_RUN, VISION_ERROR, PREFLIGHT_CONFLICT_STATE
     RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     ACTIVE_TRANSACTION = None
     LAST_COMMITTED_TRANSACTION = None
@@ -1014,6 +1015,7 @@ def reset_run(mode):
     FORCE_CPU_FOR_RUN = False
     RUN = new_metrics(mode)
     TASKS = {}
+    PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
     ROLE_STATUS = {"Coordinator": "active", "Builder": "waiting", "Falsifier": "waiting",
                    "Repairer": "unused", "Browser": "waiting", "Quality Review": "waiting"}
     DASHBOARD = {"mode": mode, "context": 0, "active_role": "Coordinator", "active_task": "ROOT",
@@ -3430,11 +3432,9 @@ def recompute_integration_metrics():
         1 for task in integration_tasks
         if task.get("integration_too_broad") and str(task.get("status", "")).casefold() == "done"
     )
-    detected = int(RUN.get("preflight_blocking_conflicts_detected", 0) or 0)
-    resolved = int(RUN.get("preflight_blocking_conflicts_resolved", 0) or 0)
-    RUN["integration_conflict_resolution"] = (
-        round((resolved / detected) * 100, 2) if detected else None
-    )
+    _update_unique_preflight_conflict_metrics()
+    detected = RUN["preflight_blocking_conflicts_detected"]
+    resolved = RUN["preflight_blocking_conflicts_resolved"]
     return {
         "parent_integrations_attempted": attempted,
         "parent_integrations_passed": passed,
@@ -4431,6 +4431,111 @@ def _preflight_conflict(kind, message, files=None, severity="error", **extra):
     return result
 
 
+def _stable_conflict_identity_value(value, *, file_like=False):
+    """Canonicalize structured conflict data while ignoring volatile evidence."""
+    if isinstance(value, dict):
+        return {
+            str(key): _stable_conflict_identity_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            if str(key) not in {"line", "lines", "column", "columns"}
+        }
+    if isinstance(value, (list, tuple, set)):
+        values = [_stable_conflict_identity_value(item, file_like=file_like) for item in value]
+        return sorted(values, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, default=str))
+    text = str(value).strip().replace("\\", "/")
+    if file_like:
+        # A duplicate declaration currently arrives as ``file:line``.  Keep
+        # the source identity, but do not make a line number the conflict ID.
+        text = re.sub(r":\d+(?::\d+)?$", "", text)
+        text = text.casefold()
+    return text
+
+
+def _preflight_conflict_fingerprint(conflict):
+    """Return a stable ID for one blocking conflict observation.
+
+    The ID is intentionally built from the conflict type, structured target,
+    and normalized source identity.  Messages, parser text, and line numbers
+    are evidence, not logical conflict identity.
+    """
+    normalized = _normalize_integration_conflict(conflict)
+    identity = {"type": _integration_conflict_type(normalized)}
+    target_fields = (
+        "symbol", "id", "owner", "identifier", "target", "conflict_target",
+        "state_owner", "entry_point", "symbols", "keys", "owners", "entry_points",
+    )
+    for key in target_fields:
+        value = conflict.get(key) if isinstance(conflict, dict) else None
+        if value in (None, [], ""):
+            value = normalized.get(key)
+        if value not in (None, [], ""):
+            identity[key] = _stable_conflict_identity_value(value)
+
+    files = None
+    if isinstance(conflict, dict):
+        files = conflict.get("files") or conflict.get("locations")
+    if files in (None, [], ""):
+        files = normalized.get("files") or normalized.get("locations")
+    if files not in (None, [], ""):
+        identity["files"] = _stable_conflict_identity_value(files, file_like=True)
+
+    # Unknown conflict kinds still get a deterministic type-level identity.
+    # We never fall back to message/evidence because those are transient.
+    return json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _update_unique_preflight_conflict_metrics():
+    registry = PREFLIGHT_CONFLICT_STATE.get("registry", {})
+    if not isinstance(registry, dict):
+        registry = {}
+    detected = len(registry)
+    resolved = sum(
+        1 for item in registry.values()
+        if isinstance(item, dict) and item.get("status") == "resolved"
+    )
+    RUN["preflight_blocking_conflicts_detected"] = detected
+    RUN["preflight_blocking_conflicts_resolved"] = resolved
+    RUN["integration_conflict_resolution"] = (
+        round((resolved / detected) * 100, 2) if detected else None
+    )
+
+
+def _record_preflight_conflict_snapshot(preflight):
+    """Update unique conflict state from one fresh deterministic preflight."""
+    if not isinstance(preflight, dict) or "conflicts" not in preflight:
+        return
+    registry = PREFLIGHT_CONFLICT_STATE.setdefault("registry", {})
+    previous_active = set(PREFLIGHT_CONFLICT_STATE.get("active", set()))
+    current = {}
+    for item in preflight.get("conflicts", []):
+        severity = item.get("severity", "error") if isinstance(item, dict) else "error"
+        if str(severity).casefold() in {"warning", "info"}:
+            continue
+        fingerprint = _preflight_conflict_fingerprint(item)
+        current[fingerprint] = _normalize_integration_conflict(item)
+
+    PREFLIGHT_CONFLICT_STATE["sequence"] = int(PREFLIGHT_CONFLICT_STATE.get("sequence", 0)) + 1
+    sequence = PREFLIGHT_CONFLICT_STATE["sequence"]
+    for fingerprint, conflict in current.items():
+        record = registry.setdefault(
+            fingerprint,
+            {"first_observed": sequence, "observations": 0, "status": "unresolved"},
+        )
+        record["observations"] = int(record.get("observations", 0) or 0) + 1
+        record["last_observed"] = sequence
+        record["conflict"] = conflict
+        # A reappearing conflict is active again and therefore not finally
+        # resolved, even if an earlier preflight had cleared it.
+        record["status"] = "unresolved"
+    for fingerprint in previous_active - set(current):
+        record = registry.get(fingerprint)
+        if isinstance(record, dict):
+            record["status"] = "resolved"
+            record["resolved_after"] = sequence
+    PREFLIGHT_CONFLICT_STATE["active"] = set(current)
+    _update_unique_preflight_conflict_metrics()
+
+
 _INVARIANT_CONFLICT_KINDS = frozenset({
     "conflicting_entry_points", "conflicting_persistence_ownership", "duplicate_declaration",
     "duplicate_html_id", "duplicate_child_symbol", "multiple_obvious_game_loops",
@@ -4566,6 +4671,7 @@ def run_integration_preflight(task=None, child_info=None, contract=None):
         "project_invariants": project_invariants,
         "current_syntax": "FAIL" if syntax_errors else "PASS",
     }
+    _record_preflight_conflict_snapshot(result)
     record_run_event(
         "integration_preflight", task_id=(task or {}).get("id") if isinstance(task, dict) else None,
         passed=result["passed"], current_syntax=result["current_syntax"],
@@ -5144,9 +5250,7 @@ def _start_parent_integration(task, preflight):
     task["_parent_integration_initial_conflicts"] = initial_conflicts
     RUN["parent_integrations_attempted"] = RUN.get("parent_integrations_attempted", 0) + 1
     RUN["integration_preflight_conflicts"] = RUN.get("integration_preflight_conflicts", 0) + initial_conflicts
-    RUN["preflight_blocking_conflicts_detected"] = (
-        RUN.get("preflight_blocking_conflicts_detected", 0) + initial_conflicts
-    )
+    _record_preflight_conflict_snapshot(preflight)
     RUN["invariant_violations_detected"] = RUN.get("invariant_violations_detected", 0) + invariant_violations
     recompute_integration_metrics()
     record_run_event(
@@ -5162,6 +5266,7 @@ def _finish_parent_integration(task, *, passed, recovered=False, preflight=None)
     if task.get("_parent_integration_recorded"):
         return task.get("integration_outcome")
     preflight = preflight if isinstance(preflight, dict) else {}
+    _record_preflight_conflict_snapshot(preflight)
     final_conflicts = int(preflight.get("error_count", 0) or 0)
     if not final_conflicts:
         final_conflicts = sum(
@@ -5177,9 +5282,6 @@ def _finish_parent_integration(task, *, passed, recovered=False, preflight=None)
     else:
         RUN["parent_integrations_failed"] = RUN.get("parent_integrations_failed", 0) + 1
     RUN["integration_conflicts_resolved"] = RUN.get("integration_conflicts_resolved", 0) + resolved
-    RUN["preflight_blocking_conflicts_resolved"] = (
-        RUN.get("preflight_blocking_conflicts_resolved", 0) + resolved
-    )
     outcome = {
         "attempted": True, "passed": bool(passed), "recovered": bool(recovered and passed),
         "initial_conflicts": initial_conflicts, "final_conflicts": final_conflicts,
