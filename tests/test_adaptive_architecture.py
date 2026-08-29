@@ -52,6 +52,223 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             },
         ]
 
+    @staticmethod
+    def neutral_budget_failure(evidence=None):
+        return {
+            "status": "budget_exhausted",
+            "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "execution_outcome": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "summary": "focused execution ended without verified completion",
+            "memory": {},
+            "step_budget": mini.MAX_TOOL_STEPS,
+            "tool_steps_used": mini.MAX_TOOL_STEPS,
+            "failure_evidence": evidence or [{
+                "tool": "run_command", "target": "pytest", "result": "[exit_code=1]",
+            }],
+        }
+
+    def test_focused_tool_budget_exhaustion_is_neutral_not_task_too_broad(self):
+        tool_call = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "run_command", "arguments": {"command": "pytest"}},
+            }],
+        }
+        with patch.object(mini, "ask_ollama", return_value=tool_call), \
+                patch.object(mini, "run_tool", return_value="tool completed without verification"):
+            result = mini.execute_agent_task(
+                "Implement one focused behavior", {}, role="Builder", task_id="budget", max_steps=2,
+            )
+
+        self.assertEqual(result["status"], "budget_exhausted")
+        self.assertEqual(result["failure_type"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(result["execution_outcome"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertNotEqual(result["failure_type"], "TASK_TOO_BROAD")
+        self.assertEqual(result["tool_steps_used"], 2)
+        self.assertEqual(mini.RUN["execution_budget_exhaustions"], 1)
+        self.assertEqual(mini.RUN["task_too_broad_count"], 0)
+
+    def test_neutral_bounded_failure_routes_to_existing_strategy_search(self):
+        task = mini.make_task(
+            "budget-strategy", "Implement collision reset in updateCollision()", 1, "ROOT",
+            ["collision reset is verified"], ["src/game.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        failure = self.neutral_budget_failure()
+        failure["repair_history"] = [{
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "repair did not satisfy deterministic verification",
+        }]
+
+        def strategy_leaf(*_args, **_kwargs):
+            return {"status": "done", "summary": "alternative strategy verified", "memory": {},
+                    "changed_files": ["src/game.js"]}
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", side_effect=strategy_leaf):
+            result = mini.solve_task(
+                task, 1, self.contract(), {}, {},
+                fit_decider=lambda *_args: {"decision": "execute", "reason": "focused node"},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(task["fit_before_execution"]["decision"], "EXECUTE")
+        self.assertEqual(task["initial_failure_type"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(task["execution_outcome"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertEqual(task["budget_exhaustion_routing"], "strategy")
+        self.assertEqual(mini.RUN["budget_exhaustion_routed_to_strategy"], 1)
+        self.assertEqual(mini.RUN["failed_nodes_resplit"], 0)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["strategy_rescues"], 1)
+        row = mini.build_node_diagnosis()[0]
+        self.assertEqual(row["initial_result"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(row["final_result"], "PASS")
+
+    def test_neutral_broad_failure_routes_to_existing_decomposition(self):
+        contract = self.contract(["state", "behavior", "verification"])
+        root = mini.root_task_from_contract(contract)
+        mini.TASKS["ROOT"] = root
+        failure = self.neutral_budget_failure()
+        leaf_calls = []
+
+        def fit(*_args):
+            return {"decision": "execute", "reason": "initial fit accepted"}
+
+        def decompose(task, *_args, **_kwargs):
+            children = []
+            for index in (1, 2):
+                child_id = f"{task['id']}.{index}"
+                child = mini.make_task(
+                    child_id, f"focused child {index}", task["depth"] + 1, task["id"],
+                    [f"child {index} is verified"], ["src/game.js"],
+                )
+                mini.TASKS[child_id] = child
+                task["children"].append(child_id)
+                mini.RUN["tasks_created"] += 1
+                children.append(child)
+            return children
+
+        def leaf(task, _contract, memory, _repo, _parent, _deps):
+            leaf_calls.append(task["id"])
+            return failure if task["id"] == "ROOT" else {
+                "status": "done", "summary": f"verified {task['id']}", "memory": memory,
+            }
+
+        with patch.object(mini, "decompose_task", side_effect=decompose):
+            result = mini.solve_task(
+                root, 0, contract, {}, {}, fit_decider=fit, leaf_executor=leaf,
+                aggregator=lambda _task, _contract, _children, memory, _repo, root=False: {
+                    "status": "done", "summary": "integrated", "memory": memory,
+                },
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(leaf_calls, ["ROOT", "ROOT.1", "ROOT.2"])
+        self.assertEqual(root["resplit"]["trigger"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(root["initial_failure_type"], mini.EXECUTION_BUDGET_EXHAUSTED)
+        self.assertEqual(mini.RUN["budget_exhaustion_routed_to_scope"], 1)
+        self.assertEqual(mini.RUN["failed_nodes_resplit"], 1)
+        self.assertEqual(mini.RUN["strategy_searches"], 0)
+
+    def test_neutral_provider_dependency_and_verifier_failures_do_not_route_to_search(self):
+        cases = [
+            ("environment_failure", [{"tool": "run_command", "result": "provider unavailable"}]),
+            ("dependency_error", [{"tool": "run_command", "result": "Module not found: state.js"}]),
+            ("verifier_builder_mismatch", [{
+                "kind": "builder_tool_evidence", "status": "FAIL",
+                "evidence": "no executable verification was attempted",
+            }]),
+        ]
+        for expected, evidence in cases:
+            with self.subTest(expected=expected):
+                task = mini.make_task(
+                    f"budget-{expected}", "Implement one focused behavior", 1, "ROOT",
+                    ["behavior is verified"], ["src/app.js"],
+                )
+                mini.TASKS[task["id"]] = task
+                failure = self.neutral_budget_failure(evidence)
+                with patch.object(mini, "decompose_task") as decompose, \
+                        patch.object(mini, "_maybe_search_alternate_strategy") as strategy:
+                    result = mini.solve_task(
+                        task, 1, self.contract(["one focused behavior"]), {}, {},
+                        fit_decider=lambda *_args: {"decision": "execute", "reason": "focused node"},
+                        leaf_executor=Mock(return_value=failure),
+                    )
+
+                self.assertEqual(result["failure_type"], mini.EXECUTION_BUDGET_EXHAUSTED)
+                self.assertEqual(task["failure_diagnosis"]["category"], expected)
+                decompose.assert_not_called()
+                strategy.assert_not_called()
+
+    def test_budget_neutral_terminal_leaf_is_not_capability_floor_without_strategy_search(self):
+        task = mini.make_task(
+            "terminal", "Implement collision reset in updateCollision()", mini.MAX_DEPTH, "parent",
+            ["collision reset is verified"], ["src/game.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        failure = self.neutral_budget_failure()
+        with patch.object(mini, "decompose_task") as decompose, \
+                patch.object(mini, "_maybe_search_alternate_strategy", return_value=None) as strategy:
+            result = mini.solve_task(
+                task, mini.MAX_DEPTH, self.contract(["one focused behavior"]), {}, {},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "budget_exhausted")
+        self.assertEqual(task["failure_diagnosis"]["category"], "unknown")
+        self.assertNotEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
+        strategy.assert_not_called()
+        decompose.assert_not_called()
+        mini.recompute_search_metrics()
+        self.assertEqual(mini.RUN["capability_floor_nodes"], 0)
+
+    def test_neutral_failure_with_two_failed_strategies_can_reach_capability_floor(self):
+        task = mini.make_task(
+            "strategy-floor", "Implement one focused behavior", 1, "ROOT",
+            ["behavior is verified"], ["src/app.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        initial = self.neutral_budget_failure()
+        initial["repair_history"] = [{
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "repair did not satisfy deterministic verification",
+        }]
+        strategy_failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "alternate strategy verification failed", "memory": {},
+            "failure_evidence": [{"tool": "run_command", "target": "pytest", "result": "[exit_code=1]"}],
+        }
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", side_effect=[strategy_failure, strategy_failure]):
+            result = mini.solve_task(
+                task, 1, self.contract(["one focused behavior"]), {}, {},
+                fit_decider=lambda *_args: {"decision": "execute", "reason": "focused node"},
+                leaf_executor=Mock(return_value=initial),
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(task["failure_diagnosis"]["category"], "model_capability_floor")
+        self.assertEqual(len(task["strategy_attempts"]), 2)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 2)
+        self.assertEqual(mini.RUN["strategy_rescues"], 0)
+        mini.recompute_search_metrics()
+        self.assertEqual(mini.RUN["capability_floor_nodes"], 1)
+
+    def test_budget_outcome_does_not_override_integration_preflight_failure(self):
+        builder = {
+            "status": "budget_exhausted", "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+        }
+        gate = {"deterministic_failures": [{
+            "name": "integration_preflight", "status": "FAIL", "kind": "integration_preflight",
+        }]}
+
+        self.assertEqual(
+            mini.classify_failure(builder, gate),
+            "INTEGRATION_FAILURE",
+        )
+
     def test_hard_mock_reaches_depth_four_and_exceeds_old_eight_task_limit(self):
         contract = self.contract()
         root = mini.root_task_from_contract(contract)

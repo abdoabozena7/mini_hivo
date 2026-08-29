@@ -58,6 +58,10 @@ MAX_DECOMPOSITION_ALTERNATIVES = 2
 # v5 strategy search is deliberately bounded to two sequential alternatives.
 MAX_STRATEGY_ALTERNATIVES = 2
 STRATEGY_SEARCH_UNAVAILABLE = "STRATEGY_SEARCH_UNAVAILABLE"
+# Reaching the focused execution budget is an observation, not a diagnosis.
+# The failure router must inspect the resulting evidence before choosing a
+# decomposition, strategy, dependency, verifier, or capability path.
+EXECUTION_BUDGET_EXHAUSTED = "EXECUTION_BUDGET_EXHAUSTED"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
 MAX_ALTERNATE_STRATEGIES = MAX_STRATEGY_ALTERNATIVES
@@ -964,6 +968,11 @@ def new_metrics(mode):
         "strategy_search_failures": 0,
         "strategy_rescue_rate": None,
         "capability_floor_nodes": 0,
+        "execution_budget_exhaustions": 0,
+        "budget_exhaustion_routed_to_scope": 0,
+        "budget_exhaustion_routed_to_strategy": 0,
+        "budget_exhaustion_routed_to_dependency": 0,
+        "budget_exhaustion_routed_to_other": 0,
         "root_verified": False,
         "verified_nodes": 0, "failed_nodes": 0, "integration_failures": 0,
         "max_depth_failures": 0,
@@ -1055,6 +1064,16 @@ def compact_task_tree():
             entry["initial_failure_type"] = task.get("initial_failure_type")
             entry["initial_failure_evidence"] = task.get("initial_failure_evidence", [])
             entry["initial_failure_diagnosis"] = task.get("initial_failure_diagnosis")
+        if task.get("fit_before_execution") is not None:
+            entry["fit_before_execution"] = task.get("fit_before_execution")
+        if task.get("execution_outcome") is not None:
+            entry["execution_outcome"] = task.get("execution_outcome")
+        if task.get("execution_budget_exhausted"):
+            entry["execution_budget_exhausted"] = True
+        if task.get("repair_history"):
+            entry["repair_history"] = task.get("repair_history", [])[-MAX_REPAIRS_PER_LEAF:]
+        if task.get("budget_exhaustion_routing"):
+            entry["budget_exhaustion_routing"] = task.get("budget_exhaustion_routing")
         if task.get("attempts"):
             entry["attempts"] = task.get("attempts", [])
         if task.get("failure_diagnosis") is not None:
@@ -1106,6 +1125,7 @@ def print_task_tree():
     def status_label(task):
         status = str(task.get("status", "pending")).casefold()
         return {"done": "PASS", "failed": "FAIL", "too_broad": "TOO_BROAD",
+                "budget_exhausted": EXECUTION_BUDGET_EXHAUSTED,
                 "running": "RUN", "pending": "PENDING"}.get(status, status.upper())
 
     lines = ["\n[TASK TREE]"]
@@ -1783,6 +1803,11 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "initial_failure_evidence": [], "initial_failure_diagnosis": None,
         "attempts": [], "failure_diagnosis": None,
         "last_failure_type": None,
+        "fit_before_execution": None,
+        "execution_outcome": None,
+        "execution_budget_exhausted": False,
+        "repair_history": [],
+        "budget_exhaustion_routing": None,
         "resplit": None,
         "decomposition_history": [],
         "failed_decompositions": [],
@@ -2124,7 +2149,9 @@ def decompose_alternative_task(task, contract, repo_snapshot, parent_summary="",
     goal = compact_text(task.get("goal", "task"), 1000)
     terminal_failure = terminal_failure if isinstance(terminal_failure, dict) else {}
     prompt_text = f"""Create 2-4 ALTERNATIVE structured child contracts for the current parent node.
-This is decomposition BACKTRACKING after a terminal child still returned TASK_TOO_BROAD.
+This is decomposition BACKTRACKING after a terminal child remained unresolved
+after a bounded focused execution (including TASK_TOO_BROAD or
+EXECUTION_BUDGET_EXHAUSTED).
 Do NOT continue the same decomposition direction and do NOT paraphrase a failed child.
 The new children must be materially smaller in simultaneous reasoning load and use
 different observable boundaries. Prefer one state transition, one input/output,
@@ -2550,7 +2577,12 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
         "provider_failure", "unknown", "decomposition_error",
     }
     if (
-        leaf_result.get("failure_type") != "IMPLEMENTATION_ERROR"
+        not (
+            leaf_result.get("failure_type") == "IMPLEMENTATION_ERROR"
+            or _is_execution_budget_exhausted(leaf_result)
+        )
+        or (_is_execution_budget_exhausted(leaf_result)
+            and not _has_failed_repair_history(task, leaf_result))
         or diagnosis.get("category") != "implementation_strategy_wrong"
         or diagnosis.get("category") in blocked_categories
         or not _looks_like_tiny_scope(task)
@@ -2702,9 +2734,14 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         except Exception:
             memory_excerpt = ""
     current_node = {
+        "kind": str(task.get("kind", "implementation")),
+        "depth": int(task.get("depth", 0) or 0),
         "goal": compact_text(task.get("goal", ""), 1100),
         "done_when": bounded_list(task.get("done_when", []), 6, 260),
         "scope_hint": bounded_list(task.get("scope_hint", []), 5, 180),
+        "fit_before_execution": task.get("fit_before_execution"),
+        "execution_outcome": task.get("execution_outcome"),
+        "repair_history": list(task.get("repair_history", []) or [])[-MAX_REPAIRS_PER_LEAF:],
     }
     dependencies = []
     for item in dependency_summaries[-4:]:
@@ -2871,6 +2908,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     provider_error = None
     summary = ""
     status = "unknown"
+    execution_budget_exhausted = False
     offered_tools = tools_for_role(role, tool_policy=tool_policy)
     offered_names = {item["function"]["name"] for item in offered_tools}
     if role == "Builder":
@@ -2994,16 +3032,35 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         if stop:
             break
     else:
-        status = "too_broad"
-        summary = "TASK_TOO_BROAD: maximum focused tool-step budget reached"
+        # The v6 neutral outcome applies to implementation executions. Keep
+        # the separate Falsifier loop's historical exhaustion behavior intact.
+        if role in {"Builder", "Repairer"}:
+            status = "budget_exhausted"
+            execution_budget_exhausted = True
+            summary = (
+                f"{EXECUTION_BUDGET_EXHAUSTED}: focused tool-step budget was used "
+                "without verified completion"
+            )
+            RUN["execution_budget_exhaustions"] = RUN.get("execution_budget_exhaustions", 0) + 1
+            record_run_event(
+                "execution_budget_exhausted", role=role, task_id=task_id,
+                step_budget=int(step_budget), tool_steps_used=len(evidence),
+            )
+        else:
+            status = "too_broad"
+            summary = "TASK_TOO_BROAD: maximum focused tool-step budget reached"
 
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
                      summary=compact_text(summary, MAX_NODE_SUMMARY_CHARS), evidence_count=len(evidence))
     return {
         "status": status, "summary": compact_text(summary, MAX_NODE_SUMMARY_CHARS), "messages": messages,
         "memory": memory, "tool_evidence": evidence, "provider_error": provider_error,
-        "failure_type": "TASK_TOO_BROAD" if status == "too_broad" else (
-            "ENVIRONMENT_ERROR" if status == "provider_failure" else None
+        "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
+        "step_budget": int(step_budget), "tool_steps_used": len(evidence),
+        "failure_type": (
+            "TASK_TOO_BROAD" if status == "too_broad" else
+            EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
+            ("ENVIRONMENT_ERROR" if status == "provider_failure" else None)
         ),
     }
 
@@ -3359,6 +3416,19 @@ def evidence_gate(builder_result, falsifier_result=None, browser_result=None, mo
                                   if isinstance(item, dict) and str(item.get("status", "")).upper() == "FAIL"]}
 
 
+def _is_execution_budget_exhausted(result):
+    if not isinstance(result, dict):
+        return False
+    return (
+        str(result.get("execution_outcome", "")) == EXECUTION_BUDGET_EXHAUSTED
+        or str(result.get("status", "")).casefold() == "budget_exhausted"
+        or (
+            str(result.get("failure_type", "")) == EXECUTION_BUDGET_EXHAUSTED
+            and not isinstance(result.get("children"), list)
+        )
+    )
+
+
 def classify_failure(builder_result, gate, browser_result=None, falsifier_result=None, vision_review=None):
     if vision_review is None and isinstance(falsifier_result, dict) and "tool_evidence" not in falsifier_result:
         # Compatibility with the old (builder, gate, browser, vision) call.
@@ -3378,9 +3448,15 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
     )
     if (preflight and not preflight.get("passed")) or gate_has_preflight_failure:
         return "INTEGRATION_TOO_BROAD" if builder_result.get("status") == "too_broad" else "INTEGRATION_FAILURE"
+    text = json.dumps(gate.get("deterministic_failures", []), ensure_ascii=False).casefold()
+    if _is_execution_budget_exhausted(builder_result) and any(
+        term in text for term in ("cuda", "browser executable", "missing dependency", "provider", "ollama")
+    ):
+        return "ENVIRONMENT_ERROR"
+    if _is_execution_budget_exhausted(builder_result):
+        return EXECUTION_BUDGET_EXHAUSTED
     if builder_result.get("status") == "too_broad":
         return "TASK_TOO_BROAD"
-    text = json.dumps(gate.get("deterministic_failures", []), ensure_ascii=False).casefold()
     if any(term in text for term in ("cuda", "browser executable", "missing dependency", "provider")):
         return "ENVIRONMENT_ERROR"
     return "IMPLEMENTATION_ERROR"
@@ -3428,21 +3504,30 @@ def _failure_evidence_from_result(result):
         return _integration_failure_evidence(preflight) + _compact_failure_evidence(
             result.get("failure_evidence", []), max_items=4,
         )
+    candidates = []
     direct = result.get("failure_evidence")
-    if isinstance(direct, list) and direct:
-        return _compact_failure_evidence(direct)
+    if isinstance(direct, list):
+        candidates.extend(direct)
     gate = result.get("gate")
-    if isinstance(gate, dict) and gate.get("deterministic_failures"):
-        return _compact_failure_evidence(gate.get("deterministic_failures"))
-    builder = result.get("builder")
-    if isinstance(builder, dict):
-        builder_evidence = evidence_for_review(builder.get("tool_evidence", []))
-        if builder_evidence:
-            return _compact_failure_evidence(builder_evidence)
+    if isinstance(gate, dict):
+        candidates.extend(gate.get("deterministic_failures", []) or [])
+    for source_name in ("builder", "falsifier"):
+        source = result.get(source_name)
+        if isinstance(source, dict):
+            candidates.extend(evidence_for_review(source.get("tool_evidence", [])))
+    browser = result.get("browser")
+    if isinstance(browser, dict) and browser.get("environment_error"):
+        candidates.append({
+            "kind": "browser_environment", "status": "FAIL", "source": "deterministic",
+            "evidence": compact_text(browser.get("evidence", "browser environment unavailable"), 900),
+        })
     evidence = result.get("tool_evidence")
-    if isinstance(evidence, list) and evidence:
-        return _compact_failure_evidence(evidence_for_review(evidence) or evidence)
-    return []
+    if isinstance(evidence, list):
+        candidates.extend(evidence_for_review(evidence) or evidence)
+    execution_evidence = result.get("execution_evidence")
+    if isinstance(execution_evidence, list):
+        candidates.extend(execution_evidence)
+    return _compact_failure_evidence(candidates)
 
 
 def _looks_like_tiny_scope(task):
@@ -3459,6 +3544,86 @@ def _looks_like_tiny_scope(task):
     )
 
 
+def _fit_assessment(task, result=None):
+    """Return the controller's bounded fit evidence without inventing facts."""
+    result = result if isinstance(result, dict) else {}
+    for candidate in (
+        result.get("fresh_fit_assessment"), result.get("fit_after_execution"),
+        task.get("fresh_fit_assessment"), task.get("fit_before_execution"),
+    ):
+        if isinstance(candidate, dict) and str(candidate.get("decision", "")).casefold() in {"execute", "split"}:
+            return candidate
+    return {}
+
+
+def _has_positive_scope_evidence(task, result=None):
+    """Require positive scope evidence before routing neutral exhaustion to split."""
+    result = result if isinstance(result, dict) else {}
+    fit = _fit_assessment(task, result)
+    if str(fit.get("decision", "")).casefold() == "split":
+        return True
+    for source in (task, result):
+        for key in ("scope_evidence", "responsibilities", "substantial_responsibilities"):
+            values = source.get(key)
+            if isinstance(values, (list, tuple)) and len([item for item in values if str(item).strip()]) >= 2:
+                return True
+    # Multiple independent completion conditions are a deterministic, model-
+    # agnostic indication that the node carries more than one responsibility.
+    if len([item for item in task.get("done_when", []) if str(item).strip()]) >= 3:
+        return True
+    return False
+
+
+def _has_concrete_executable_failure(evidence):
+    for item in evidence or []:
+        if not isinstance(item, dict):
+            if evidence_result_failed(item):
+                return True
+            continue
+        tool = item.get("tool")
+        if tool in {"run_file", "run_command", "verify_web_app"} and evidence_result_failed(item.get("result", "")):
+            return True
+        if str(item.get("status", "")).upper() in {"FAIL", "FAILED", "ERROR"}:
+            return True
+    return False
+
+
+def _has_failed_repair_history(task, result=None):
+    result = result if isinstance(result, dict) else {}
+    history = result.get("repair_history")
+    if not isinstance(history, list):
+        history = task.get("repair_history", [])
+    return any(
+        isinstance(item, dict)
+        and str(item.get("status", "")).casefold() not in {"done", "pass", "passed"}
+        for item in history
+    )
+
+
+def _budget_evidence_is_environmental(searchable):
+    return any(term in searchable for term in (
+        "environment_error", "provider", "ollama", "cuda", "browser executable",
+        "playwright", "connection refused", "timed out", "transport failure",
+    ))
+
+
+def _has_strong_capability_floor_evidence(task, result=None):
+    """Only accept a capability-floor diagnosis after actual bounded search."""
+    result = result if isinstance(result, dict) else {}
+    if result.get("capability_floor_evidence") is True:
+        return True
+    search = result.get("strategy_search")
+    if not isinstance(search, dict):
+        search = task.get("strategy_search")
+    attempts = result.get("strategy_attempts")
+    if not isinstance(attempts, list):
+        attempts = task.get("strategy_attempts", [])
+    attempts = [item for item in list(attempts or []) if isinstance(item, dict)][-MAX_STRATEGY_ALTERNATIVES:]
+    if not isinstance(search, dict) or search.get("outcome") != "failed" or len(attempts) < MAX_STRATEGY_ALTERNATIVES:
+        return False
+    return all(str(item.get("status", "")).upper() != "PASS" for item in attempts)
+
+
 def diagnose_failure(task, result, evidence=None):
     """Classify why a node failed and choose the next mechanism.
 
@@ -3471,7 +3636,16 @@ def diagnose_failure(task, result, evidence=None):
     failure_type = str(result.get("failure_type", "UNKNOWN_FAILURE"))
     evidence = _compact_failure_evidence(evidence if evidence is not None else _failure_evidence_from_result(result))
     summary = compact_text(result.get("summary", ""), 900)
-    searchable = json.dumps({"summary": summary, "evidence": evidence}, ensure_ascii=False).casefold()
+    searchable = " ".join((
+        summary,
+        json.dumps(evidence, ensure_ascii=False, default=str),
+        str(result.get("provider_error", "")),
+        str(result.get("environment_error", "")),
+        str(result.get("verification_status", "")),
+        str(result.get("dependency_error", "")),
+        str(result.get("missing_dependencies", "")),
+        str(result.get("verifier_mismatch", "")),
+    )).casefold()
     depth = int(task.get("depth", 0) or 0)
     at_max_depth = depth >= MAX_DEPTH
     repeated = (
@@ -3489,7 +3663,65 @@ def diagnose_failure(task, result, evidence=None):
         bool(effective_preflight) and not effective_preflight.get("passed")
     ) or any(item.get("kind") == "integration_preflight" for item in evidence if isinstance(item, dict))
 
-    if has_integration_preflight or failure_type in {"INTEGRATION_FAILURE", "INTEGRATION_TOO_BROAD"}:
+    budget_exhausted = _is_execution_budget_exhausted(result)
+    if budget_exhausted and _budget_evidence_is_environmental(searchable):
+        category = "environment_failure"
+        confidence = "high"
+        rationale = (
+            "The focused execution budget ended alongside provider/runtime evidence; preserve the neutral outcome "
+            "and repair the environment before considering implementation routing."
+        )
+    elif budget_exhausted and (has_integration_preflight or failure_type in {"INTEGRATION_FAILURE", "INTEGRATION_TOO_BROAD"}):
+        category = "local_integration_state_corruption"
+        confidence = "high" if has_integration_preflight else "medium"
+        rationale = "The neutral execution outcome was accompanied by a concrete parent integration conflict; use the integration repair path."
+    elif budget_exhausted and any(term in searchable for term in (
+        "module not found", "importerror", "undefined", "not defined", "cannot read", "dependency",
+        "interface", "api mismatch", "missing symbol", "no such file",
+    )):
+        category = "dependency_error"
+        confidence = "medium"
+        rationale = "The neutral execution outcome was accompanied by a missing or incompatible dependency/interface."
+    elif budget_exhausted and any(term in searchable for term in (
+        "builder_tool_evidence", "executable_verification", "no executable verification",
+    )):
+        category = "verifier_builder_mismatch"
+        confidence = "medium"
+        rationale = "The neutral execution outcome did not produce the executable proof required by the verifier contract."
+    elif budget_exhausted and _has_strong_capability_floor_evidence(task, result):
+        category = "model_capability_floor"
+        confidence = "medium"
+        rationale = (
+            "A bounded strategy search recorded materially different implementation attempts that all failed; "
+            "the budget observation alone is not being used as capability-floor evidence."
+        )
+    elif budget_exhausted and _has_positive_scope_evidence(task, result):
+        category = "scope_too_broad"
+        confidence = "medium"
+        rationale = (
+            "The focused budget ended, but the node has positive evidence of multiple substantial responsibilities "
+            "or a fit assessment that rejects one focused execution; route to existing decomposition."
+        )
+    elif (
+        budget_exhausted
+        and _looks_like_tiny_scope(task)
+        and _has_concrete_executable_failure(evidence)
+        and _has_failed_repair_history(task, result)
+    ):
+        category = "implementation_strategy_wrong"
+        confidence = "medium"
+        rationale = (
+            "The node was accepted as focused, made meaningful executable progress, and still has a concrete "
+            "failure after failed repair attempts; treat implementation strategy as the hypothesis."
+        )
+    elif budget_exhausted:
+        category = "unknown"
+        confidence = "low"
+        rationale = (
+            "The focused execution budget ended without enough positive scope, dependency, verifier, environment, "
+            "or strategy evidence to choose a recovery mechanism."
+        )
+    elif has_integration_preflight or failure_type in {"INTEGRATION_FAILURE", "INTEGRATION_TOO_BROAD"}:
         category = "local_integration_state_corruption"
         confidence = "high" if has_integration_preflight else "medium"
         rationale = "Verified child work reached a parent integration boundary with concrete shared-state or interface conflicts."
@@ -3554,7 +3786,10 @@ def diagnose_failure(task, result, evidence=None):
     actions = {
         "scope_too_broad": (
             "backtrack_decomposition"
-            if at_max_depth and (task.get("terminal_too_broad") or result.get("terminal_too_broad"))
+            if at_max_depth and (
+                task.get("terminal_too_broad") or result.get("terminal_too_broad")
+                or (budget_exhausted and category == "scope_too_broad")
+            )
             else ("split" if not at_max_depth else "manual_decomposition_or_budget_review")
         ),
         "implementation_strategy_wrong": "search_or_mutate",
@@ -3580,6 +3815,30 @@ def diagnose_failure(task, result, evidence=None):
     return diagnosis
 
 
+def _bounded_execution_context(task, dependency_summaries=None):
+    """Persist node facts needed for later diagnosis, never model reasoning."""
+    return {
+        "node_kind": str(task.get("kind", "implementation")),
+        "depth": int(task.get("depth", 0) or 0),
+        "contract": {
+            "goal": compact_text(task.get("goal", ""), 500),
+            "done_when": bounded_list(task.get("done_when", []), 6, 300),
+            "scope_hint": bounded_list(task.get("scope_hint", []), 6, 180),
+        },
+        "fit_before_execution": copy.deepcopy(task.get("fit_before_execution")),
+        "dependency_summaries": [
+            compact_text(json.dumps(item, ensure_ascii=False, default=str), 700)
+            if isinstance(item, (dict, list)) else compact_text(item, 700)
+            for item in list(dependency_summaries or [])[-4:]
+        ],
+        "project_invariants": [
+            compact_text(json.dumps(item, ensure_ascii=False, default=str), 500)
+            if isinstance(item, (dict, list)) else compact_text(item, 500)
+            for item in list(RUN.get("project_invariants", []) or [])[:8]
+        ],
+    }
+
+
 def _record_task_failure(task, result, phase="execution"):
     """Attach a bounded failed attempt and diagnosis to the durable node ledger."""
     if not isinstance(task, dict) or not isinstance(result, dict):
@@ -3593,6 +3852,21 @@ def _record_task_failure(task, result, phase="execution"):
         "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
         "failure_evidence": evidence,
     }
+    if _is_execution_budget_exhausted(result):
+        projection.update({
+            "execution_outcome": EXECUTION_BUDGET_EXHAUSTED,
+            "step_budget": int(result.get("step_budget", 0) or 0),
+            "tool_steps_used": int(result.get("tool_steps_used", 0) or 0),
+            "changed_files": bounded_list(result.get("changed_files", []), 8, 140),
+        })
+        if result.get("repair_history"):
+            projection["repair_history"] = list(result.get("repair_history", []))[-MAX_REPAIRS_PER_LEAF:]
+        if result.get("execution_evidence"):
+            projection["execution_evidence"] = _compact_failure_evidence(
+                result.get("execution_evidence", []), max_items=8,
+            )
+        if isinstance(result.get("execution_context"), dict):
+            projection["execution_context"] = copy.deepcopy(result["execution_context"])
     signature = json.dumps(projection, ensure_ascii=False, sort_keys=True, default=str)
     if task.get("_last_failure_signature") == signature and task.get("_last_failure_phase") == phase:
         return task.get("failure_diagnosis")
@@ -3610,6 +3884,24 @@ def _record_task_failure(task, result, phase="execution"):
     if not isinstance(diagnosis, dict) or not diagnosis.get("category"):
         diagnosis = diagnose_failure(task, result, evidence)
     task["failure_diagnosis"] = diagnosis
+    if _is_execution_budget_exhausted(result):
+        task["execution_outcome"] = EXECUTION_BUDGET_EXHAUSTED
+        task["execution_budget_exhausted"] = True
+        if result.get("repair_history"):
+            task["repair_history"] = list(result.get("repair_history", []))[-MAX_REPAIRS_PER_LEAF:]
+        route_key = {
+            "scope_too_broad": "budget_exhaustion_routed_to_scope",
+            "implementation_strategy_wrong": "budget_exhaustion_routed_to_strategy",
+            "dependency_error": "budget_exhaustion_routed_to_dependency",
+        }.get(diagnosis.get("category"), "budget_exhaustion_routed_to_other")
+        if not task.get("_budget_exhaustion_route_counted"):
+            RUN[route_key] = RUN.get(route_key, 0) + 1
+            task["_budget_exhaustion_route_counted"] = True
+            task["budget_exhaustion_routing"] = route_key.replace("budget_exhaustion_routed_to_", "", 1)
+            record_run_event(
+                "budget_exhaustion_routed", task_id=task.get("id"),
+                diagnosis=diagnosis.get("category"), route=task["budget_exhaustion_routing"],
+            )
     if task.get("initial_failure_diagnosis") is None:
         task["initial_failure_diagnosis"] = diagnosis
     if diagnosis.get("at_max_depth") and not task.get("_max_depth_failure_counted"):
@@ -3647,6 +3939,7 @@ def _resplit_children_snapshot(completed):
             "verification_status": str(child_task.get("verification_status", "unknown")),
             "summary": compact_text(child_result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
             "failure_type": str(child_result.get("failure_type", "")),
+            "execution_outcome": child_result.get("execution_outcome"),
             "integration_manifest": compact_manifest(
                 child_result.get("integration_manifest") or child_task.get("integration_manifest")
             ),
@@ -3711,6 +4004,11 @@ def recompute_search_metrics():
         "strategy_search_failures": int(RUN.get("strategy_search_failures", 0) or 0),
         "strategy_rescue_rate": RUN["strategy_rescue_rate"],
         "capability_floor_nodes": capability_floor,
+        "execution_budget_exhaustions": int(RUN.get("execution_budget_exhaustions", 0) or 0),
+        "budget_exhaustion_routed_to_scope": int(RUN.get("budget_exhaustion_routed_to_scope", 0) or 0),
+        "budget_exhaustion_routed_to_strategy": int(RUN.get("budget_exhaustion_routed_to_strategy", 0) or 0),
+        "budget_exhaustion_routed_to_dependency": int(RUN.get("budget_exhaustion_routed_to_dependency", 0) or 0),
+        "budget_exhaustion_routed_to_other": int(RUN.get("budget_exhaustion_routed_to_other", 0) or 0),
     }
 
 
@@ -3828,8 +4126,15 @@ def _update_resplit_outcome(task, expected_children, completed, final_result=Non
         and isinstance(item.get("task"), dict)
         and int(item["task"].get("depth", 0) or 0) >= MAX_DEPTH
         and isinstance(item.get("result"), dict)
-        and (item["result"].get("failure_type") == "TASK_TOO_BROAD" or
-             str(item["result"].get("status", "")).casefold() == "too_broad")
+        and _is_terminal_too_broad_child(item["task"], item["result"])
+    ]
+    terminal_budget_child_ids = [
+        item.get("task", {}).get("id") for item in (completed or [])
+        if isinstance(item, dict)
+        and isinstance(item.get("task"), dict)
+        and isinstance(item.get("result"), dict)
+        and _is_execution_budget_exhausted(item["result"])
+        and int(item["task"].get("depth", 0) or 0) >= MAX_DEPTH
     ]
     failure_evidence = []
     for item in completed or []:
@@ -3863,7 +4168,15 @@ def _update_resplit_outcome(task, expected_children, completed, final_result=Non
         branch["terminal_child_ids"] = terminal_child_ids
         branch["failure_evidence"] = failure_evidence[-4:]
         branch["why_failed"] = (
-            "terminal child remained TASK_TOO_BROAD"
+            (
+                "terminal child remained EXECUTION_BUDGET_EXHAUSTED"
+                if terminal_budget_child_ids and len(terminal_budget_child_ids) == len(terminal_child_ids)
+                else (
+                    "terminal child remained TASK_TOO_BROAD"
+                    if not terminal_budget_child_ids
+                    else "terminal child remained unresolved after bounded execution"
+                )
+            )
             if terminal_child_ids else
             compact_text((final_result or {}).get("summary", "decomposition branch failed"), 420)
         ) if branch_status != "verified" else ""
@@ -3935,6 +4248,7 @@ def _scope_label(depth):
 
 def _report_status(status):
     return {"done": "PASS", "failed": "FAIL", "too_broad": "TOO_BROAD",
+            "budget_exhausted": EXECUTION_BUDGET_EXHAUSTED,
             "running": "RUN", "pending": "PENDING"}.get(str(status).casefold(), str(status).upper())
 
 
@@ -3955,6 +4269,10 @@ def build_node_diagnosis():
             "goal": compact_text(task.get("goal", ""), 420),
             "initial_result": _report_status(initial.get("status", task.get("status", "failed"))),
             "initial_failure_type": initial.get("failure_type", ""),
+            "fit_before_execution": task.get("fit_before_execution"),
+            "execution_outcome": task.get("execution_outcome"),
+            "repair_history": list(task.get("repair_history", []) or [])[-MAX_REPAIRS_PER_LEAF:],
+            "budget_exhaustion_routing": task.get("budget_exhaustion_routing"),
             "resplit": bool(record),
             "children_result": children_result,
             "why_failed": (diagnosis or {}).get("category", "unknown"),
@@ -3967,6 +4285,7 @@ def build_node_diagnosis():
             "final_failure_diagnosis": str(task.get("failure_diagnosis", {}).get("category", ""))
             if isinstance(task.get("failure_diagnosis"), dict) else "",
             "failure_evidence": list(task.get("initial_failure_evidence", [])) or list(task.get("failure_evidence", [])),
+            "execution_evidence": list(initial.get("execution_evidence", []) or []),
             "terminal_too_broad": task.get("terminal_too_broad"),
             "decomposition_backtracks": int(task.get("decomposition_backtracks", 0) or 0),
             "alternative_decompositions": list(task.get("decomposition_alternatives", []) or [])[-MAX_DECOMPOSITION_ALTERNATIVES:],
@@ -4000,6 +4319,9 @@ def print_search_metrics():
         "alternative_decomposition_rescues", "strategy_searches", "strategy_generation_failures",
         "alternate_strategies_attempted",
         "strategy_rescues", "strategy_search_failures", "capability_floor_nodes",
+        "execution_budget_exhaustions", "budget_exhaustion_routed_to_scope",
+        "budget_exhaustion_routed_to_strategy", "budget_exhaustion_routed_to_dependency",
+        "budget_exhaustion_routed_to_other",
     ):
         print(f"{key}: {RUN.get(key)}")
     backtrack_rate = RUN.get("decomposition_backtrack_rescue_rate")
@@ -4062,6 +4384,35 @@ def repair_task(task, contract, failure_evidence, memory, node_context):
     return execute_agent_task(task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context)
 
 
+def _neutral_budget_result(task, worker_result, memory, dependency_summaries=None,
+                           repair_history=None, failure_evidence=None, **extra):
+    evidence = list(failure_evidence or [])
+    evidence.extend(evidence_for_review(worker_result.get("tool_evidence", [])))
+    if not evidence:
+        evidence = [{
+            "kind": "execution_outcome", "status": "FAIL", "source": "deterministic",
+            "evidence": EXECUTION_BUDGET_EXHAUSTED,
+        }]
+    result = {
+        "status": "budget_exhausted",
+        "failure_type": EXECUTION_BUDGET_EXHAUSTED,
+        "execution_outcome": EXECUTION_BUDGET_EXHAUSTED,
+        "summary": worker_result.get(
+            "summary", f"{EXECUTION_BUDGET_EXHAUSTED}: focused execution ended without verified completion",
+        ),
+        "memory": memory,
+        "failure_evidence": _compact_failure_evidence(evidence),
+        "execution_evidence": _compact_failure_evidence(worker_result.get("tool_evidence", []), max_items=8),
+        "changed_files": bounded_list(worker_result.get("changed_files", []), 8, 140),
+        "repair_history": list(repair_history or [])[-MAX_REPAIRS_PER_LEAF:],
+        "step_budget": int(worker_result.get("step_budget", 0) or 0),
+        "tool_steps_used": int(worker_result.get("tool_steps_used", 0) or 0),
+        "execution_context": _bounded_execution_context(task, dependency_summaries),
+    }
+    result.update(extra)
+    return result
+
+
 def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None,
                  strategy_context=None):
     if task.get("kind") == "integration":
@@ -4082,6 +4433,12 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                             "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", [])}
     builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context)
     memory = builder["memory"]
+    if _is_execution_budget_exhausted(builder):
+        rollback_transaction()
+        return _neutral_budget_result(
+            task, builder, memory, dependency_summaries,
+            builder=builder,
+        )
     if builder["status"] == "too_broad":
         RUN["task_too_broad_count"] += 1
         rollback_transaction()
@@ -4124,17 +4481,35 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
 
     current_gate = gate
     current_browser = browser
+    repair_history = []
     for _ in range(MAX_REPAIRS_PER_LEAF):
         repaired = repair_task(task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context)
         memory = repaired["memory"]
+        repair_history.append({
+            "status": str(repaired.get("status", "failed")),
+            "failure_type": str(repaired.get("failure_type", "")),
+            "summary": compact_text(repaired.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "tool_steps_used": int(repaired.get("tool_steps_used", 0) or 0),
+        })
         if repaired["status"] == "provider_failure":
             rollback_transaction()
-            return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": repaired["summary"], "memory": memory}
+            return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": repaired["summary"],
+                    "memory": memory, "repair_history": repair_history}
+        if _is_execution_budget_exhausted(repaired):
+            rollback_transaction()
+            return _neutral_budget_result(
+                task, repaired, memory, dependency_summaries,
+                repair_history=repair_history,
+                failure_evidence=current_gate.get("deterministic_failures", []),
+                builder=repaired, repairer=repaired, falsifier=falsifier,
+                browser=current_browser, gate=current_gate,
+            )
         if repaired["status"] == "too_broad":
             RUN["task_too_broad_count"] += 1
             rollback_transaction()
             return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": repaired["summary"],
-                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"]}
+                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"],
+                    "repair_history": repair_history}
         # Fresh verification only: do not carry stale Builder/Falsifier failures into the post-repair gate.
         current_browser = optional_browser_check(task, ACTIVE_TOOL_CONTRACT)
         current_gate = evidence_gate(repaired, None, current_browser)
@@ -4145,18 +4520,20 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             changed = commit_transaction()
             remember_verified_outcome(task, contract, repaired["summary"], changed)
             result = {"status": "done", "summary": repaired["summary"], "memory": memory, "builder": repaired,
-                      "falsifier": falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed}
+                      "falsifier": falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed,
+                      "repair_history": repair_history}
             attach_verified_manifest(task, result)
             return result
         failure_type = classify_failure(repaired, current_gate, current_browser, None)
         if failure_type != "IMPLEMENTATION_ERROR":
             rollback_transaction()
             return {"status": "failed", "failure_type": failure_type, "summary": f"fresh verification failed: {failure_type}",
-                    "memory": memory}
+                    "memory": memory, "repair_history": repair_history}
     rollback_transaction()
     return {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "failed deterministic evidence gate after repair limit", "memory": memory,
-            "failure_evidence": current_gate["deterministic_failures"]}
+            "failure_evidence": current_gate["deterministic_failures"],
+            "repair_history": repair_history}
 
 
 def _integration_blocking_conflicts(preflight):
@@ -4263,6 +4640,12 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
     )
     memory = builder.get("memory", memory)
+    if _is_execution_budget_exhausted(builder):
+        rollback_transaction()
+        return _neutral_budget_result(
+            task, builder, memory, dependency_summaries,
+            builder=builder,
+        )
     if builder.get("status") == "too_broad":
         RUN["task_too_broad_count"] += 1
         task["integration_too_broad"] = True
@@ -4311,20 +4694,38 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     current_gate = gate
     current_preflight = preflight
     current_browser = browser
+    repair_history = []
     for _ in range(MAX_REPAIRS_PER_LEAF):
         repaired = repair_task(task, contract, current_gate["deterministic_failures"], memory, node_context)
         memory = repaired.get("memory", memory)
+        repair_history.append({
+            "status": str(repaired.get("status", "failed")),
+            "failure_type": str(repaired.get("failure_type", "")),
+            "summary": compact_text(repaired.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "tool_steps_used": int(repaired.get("tool_steps_used", 0) or 0),
+        })
         if repaired.get("status") == "provider_failure":
             rollback_transaction()
             return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
-                    "summary": repaired.get("summary", "integration repair provider failure"), "memory": memory}
+                    "summary": repaired.get("summary", "integration repair provider failure"), "memory": memory,
+                    "repair_history": repair_history}
+        if _is_execution_budget_exhausted(repaired):
+            rollback_transaction()
+            return _neutral_budget_result(
+                task, repaired, memory, dependency_summaries,
+                repair_history=repair_history,
+                failure_evidence=current_gate.get("deterministic_failures", []),
+                builder=repaired, repairer=repaired, browser=current_browser,
+                gate=current_gate, integration_preflight=task.get("integration_preflight"),
+            )
         if repaired.get("status") == "too_broad":
             RUN["task_too_broad_count"] += 1
             task["integration_too_broad"] = True
             rollback_transaction()
             return {"status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
                     "summary": repaired.get("summary", "integration repair exceeds capacity"),
-                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"]}
+                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"],
+                    "repair_history": repair_history}
         current_preflight = run_integration_preflight(
             task, _integration_child_info_from_context(task), contract,
         )
@@ -4351,7 +4752,8 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     return {"status": "failed", "failure_type": failure_type,
             "summary": "integration task failed after repair limit", "memory": memory,
             "gate": current_gate, "integration_preflight": task["integration_preflight"],
-            "failure_evidence": current_gate.get("deterministic_failures", [])}
+            "failure_evidence": current_gate.get("deterministic_failures", []),
+            "repair_history": repair_history}
 
 
 # ---------------------------------------------------------------------------
@@ -5924,10 +6326,20 @@ def _mark_task_result(task, result, *, count=True):
 def _is_terminal_too_broad_child(child, result):
     if not isinstance(child, dict) or not isinstance(result, dict):
         return False
+    diagnosis = result.get("failure_diagnosis")
+    if not isinstance(diagnosis, dict):
+        diagnosis = child.get("failure_diagnosis")
     return (
         int(child.get("depth", 0) or 0) >= MAX_DEPTH
-        and (result.get("failure_type") == "TASK_TOO_BROAD"
-             or str(result.get("status", "")).casefold() == "too_broad")
+        and (
+            result.get("failure_type") == "TASK_TOO_BROAD"
+            or str(result.get("status", "")).casefold() == "too_broad"
+            or (
+                _is_execution_budget_exhausted(result)
+                and isinstance(diagnosis, dict)
+                and diagnosis.get("category") == "scope_too_broad"
+            )
+        )
     )
 
 
@@ -5974,8 +6386,12 @@ def _backtrack_decomposition(task, depth, contract, memory, repo_snapshot, paren
 
     attempt_number = len(attempts) + 1
     task["decomposition_backtracks"] = int(task.get("decomposition_backtracks", 0) or 0) + 1
+    terminal_label = (
+        EXECUTION_BUDGET_EXHAUSTED
+        if _is_execution_budget_exhausted(failed_result) else "TASK_TOO_BROAD"
+    )
     event(
-        f"[BACKTRACK {task['id']}] terminal TASK_TOO_BROAD -> alternative decomposition #{attempt_number}",
+        f"[BACKTRACK {task['id']}] terminal {terminal_label} -> alternative decomposition #{attempt_number}",
         role="Coordinator", task=task["id"], action="decomposition backtracking",
     )
     record_run_event(
@@ -6101,9 +6517,14 @@ def _resplit_too_broad(task, depth, contract, memory, repo_snapshot, parent_summ
     RUN["re_splits"] += 1
     evidence = list(leaf_result.get("failure_evidence", []))
     if not evidence:
-        evidence = [{"kind": "task_status", "result": leaf_result.get("summary", "TASK_TOO_BROAD")}]
+        evidence = [{"kind": "task_status", "result": leaf_result.get(
+            "summary", EXECUTION_BUDGET_EXHAUSTED if _is_execution_budget_exhausted(leaf_result) else "TASK_TOO_BROAD",
+        )}]
     task["failure_evidence"] = evidence[-6:]
-    trigger = "INTEGRATION_TOO_BROAD" if is_integration else "TASK_TOO_BROAD"
+    trigger = (
+        "INTEGRATION_TOO_BROAD" if is_integration else
+        (EXECUTION_BUDGET_EXHAUSTED if _is_execution_budget_exhausted(leaf_result) else "TASK_TOO_BROAD")
+    )
     event(f"[RE-SPLIT {task['id']}] {trigger} -> smaller granularity", role="Coordinator",
           task=task["id"], action="re-decompose")
     try:
@@ -6119,7 +6540,7 @@ def _resplit_too_broad(task, depth, contract, memory, repo_snapshot, parent_summ
     # response. Ask for fit evidence, then force the smaller decomposition while
     # recursion and task budgets remain available.
     if str((decision or {}).get("decision", "")).lower() != "split":
-        event(f"[FIT {task['id']}] SPLIT (forced after TASK_TOO_BROAD)", role="Coordinator",
+        event(f"[FIT {task['id']}] SPLIT (forced after {trigger})", role="Coordinator",
               task=task["id"], action="smaller granularity")
     try:
         children = decompose_task(
@@ -6220,6 +6641,12 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     else:
         decision = {"decision": "execute", "reason": "hard recursion/task budget reached"}
     decision_name = str((decision or {}).get("decision", "execute")).lower()
+    if task.get("fit_before_execution") is None:
+        task["fit_before_execution"] = {
+            "decision": decision_name.upper(),
+            "reason": compact_text((decision or {}).get("reason", ""), 500),
+        }
+        update_task_ledger(task)
     event(f"[FIT {label}] {decision_name.upper()}", role="Coordinator", task=label, action="granularity decision")
 
     if decision_name == "split" and can_split:
@@ -6260,6 +6687,28 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         )
         if resplit is not None:
             return resplit
+    elif _is_execution_budget_exhausted(leaf):
+        # The focused loop reported an observation only. Diagnose it once from
+        # the retained contract/evidence before selecting an existing route.
+        diagnosis = _record_task_failure(task, leaf, phase="leaf")
+        leaf["failure_diagnosis"] = diagnosis
+        if diagnosis and diagnosis.get("category") == "scope_too_broad":
+            resplit = _resplit_too_broad(
+                task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                leaf, fit_decider, leaf_executor, aggregator,
+            )
+            if resplit is not None:
+                return resplit
+        elif diagnosis and diagnosis.get("category") == "implementation_strategy_wrong" and task.get("kind") != "integration":
+            strategy_result = _maybe_search_alternate_strategy(
+                task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
+            )
+            if strategy_result is not None:
+                # Existing bounded v5 strategy search owns this route; neutral
+                # budget exhaustion is never counted as a strategy rescue by
+                # itself, only a verified candidate can become one.
+                leaf = strategy_result
+                memory = leaf.get("memory", memory)
     elif leaf.get("failure_type") == "IMPLEMENTATION_ERROR":
         _record_task_failure(task, leaf, phase="leaf")
         strategy_result = None
