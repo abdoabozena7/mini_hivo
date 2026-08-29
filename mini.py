@@ -57,6 +57,7 @@ MAX_TOTAL_TASKS = 64
 MAX_DECOMPOSITION_ALTERNATIVES = 2
 # v5 strategy search is deliberately bounded to two sequential alternatives.
 MAX_STRATEGY_ALTERNATIVES = 2
+STRATEGY_SEARCH_UNAVAILABLE = "STRATEGY_SEARCH_UNAVAILABLE"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
 MAX_ALTERNATE_STRATEGIES = MAX_STRATEGY_ALTERNATIVES
@@ -957,6 +958,7 @@ def new_metrics(mode):
         "alternative_decomposition_rescues": 0,
         "decomposition_backtrack_rescue_rate": None,
         "strategy_searches": 0,
+        "strategy_generation_failures": 0,
         "alternate_strategies_attempted": 0,
         "strategy_rescues": 0,
         "strategy_search_failures": 0,
@@ -2256,32 +2258,6 @@ def _alternate_strategy_validator(data):
     )
 
 
-def _alternate_strategy_fallback(task):
-    goal = compact_text(task.get("goal", "the focused node"), 620)
-    return [
-        {
-            "name": "extend_existing_owner",
-            "approach": (
-                f"Inspect the existing function or state owner for {goal}, then make one minimal local extension "
-                "inside that owner. Preserve its entry point and existing interfaces."
-            ),
-            "scope": "one existing owner and its current entry point",
-            "why_different": "keeps the established ownership boundary and avoids introducing a parallel path",
-            "verification_plan": "Run the narrowest deterministic check for the existing boundary and the requested outcome.",
-        },
-        {
-            "name": "explicit_transition_boundary",
-            "approach": (
-                f"Implement {goal} as one explicit input-to-state transition at the smallest observable caller "
-                "boundary, then connect it through the existing entry point without adding a second owner."
-            ),
-            "scope": "one observable transition at the caller boundary",
-            "why_different": "moves the behavior boundary to an explicit transition instead of extending the owner internals",
-            "verification_plan": "Exercise the input/state transition directly and verify the observable before/after state.",
-        },
-    ]
-
-
 def _strategy_failure_summaries(task, failure_result):
     failure_result = failure_result if isinstance(failure_result, dict) else {}
     attempts = []
@@ -2323,22 +2299,42 @@ PREVIOUS REPAIR SUMMARY: {previous_repair}
 NODE PACKET: {node_packet[:5200]}
 Return only the two candidates in the schema with name, approach, scope, and why_different."""
     rejected_candidates = []
+    generation_attempts = []
 
     def request_candidates(prompt, label):
         nonlocal rejected_candidates
+        attempt = {"label": label}
         try:
             data = structured_model_call(
                 prompt, _alternate_strategy_validator, label, alternate_strategy_schema(),
             )
-            candidates = _normalized_alternate_strategies(data.get("strategies"))
+            raw_candidates = data.get("strategies") if isinstance(data, dict) else None
+            attempt["candidate_count"] = len(raw_candidates) if isinstance(raw_candidates, list) else 0
+            candidates = _normalized_alternate_strategies(raw_candidates)
             if _strategies_are_materially_different(candidates):
+                attempt["status"] = "valid"
+                generation_attempts.append(attempt)
                 return candidates
             if candidates:
                 rejected_candidates = candidates[:MAX_STRATEGY_ALTERNATIVES]
-            elif isinstance(data, dict) and isinstance(data.get("strategies"), list):
-                rejected_candidates = list(data["strategies"])[:MAX_STRATEGY_ALTERNATIVES]
+            elif isinstance(raw_candidates, list):
+                rejected_candidates = list(raw_candidates)[:MAX_STRATEGY_ALTERNATIVES]
+            if not isinstance(data, dict) or not isinstance(raw_candidates, list):
+                attempt["reason"] = "invalid_strategy_shape"
+            elif len(raw_candidates) != MAX_STRATEGY_ALTERNATIVES:
+                attempt["reason"] = "requires_exactly_two_strategies"
+            elif not candidates:
+                attempt["reason"] = "invalid_strategy_fields"
+            else:
+                attempt["reason"] = "strategies_not_materially_different"
+            attempt["status"] = "rejected"
+            generation_attempts.append(attempt)
             return None
         except (ProviderError, StructuredOutputError, KeyError, TypeError, ValueError, StopIteration) as exc:
+            attempt["status"] = "error"
+            attempt["error_type"] = type(exc).__name__
+            attempt["error"] = compact_text(str(exc), 180)
+            generation_attempts.append(attempt)
             record_run_event("structured_strategy_error", label=label, error=str(exc))
             return None
 
@@ -2361,8 +2357,27 @@ REJECTED PAIR: {json.dumps(rejected_candidates, ensure_ascii=False)[:3200]}
 Return only the schema fields name, approach, scope, and why_different, plus an optional verification_plan."""
         strategies = request_candidates(replacement_prompt, "alternate-strategy-replacement")
     if strategies is None:
-        strategies = [_normalize_alternate_strategy(item) for item in _alternate_strategy_fallback(task)]
-        record_run_event("structured_fallback", label="alternate-strategy-search", error="deterministic strategy pair")
+        if not task.get("_strategy_generation_failure_counted"):
+            RUN["strategy_generation_failures"] = RUN.get("strategy_generation_failures", 0) + 1
+            task["_strategy_generation_failure_counted"] = True
+        task["strategy_search"] = {
+            "status": "generation_unavailable",
+            "outcome": "generation_unavailable",
+            "failure_type": STRATEGY_SEARCH_UNAVAILABLE,
+            "strategies": [],
+            "execution_order": [],
+            "failed_approach_summary": failed_approach,
+            "previous_repair_summary": previous_repair,
+            "failure_evidence": evidence[-4:],
+            "generation_attempts": generation_attempts[-2:],
+            "attempts": [],
+        }
+        record_run_event(
+            "strategy_search_unavailable", task_id=task.get("id"),
+            failure_type=STRATEGY_SEARCH_UNAVAILABLE,
+            generation_attempts=generation_attempts[-2:],
+        )
+        return []
 
     strategies = strategies[:MAX_STRATEGY_ALTERNATIVES]
     task["strategy_search"] = {
@@ -2372,6 +2387,7 @@ Return only the schema fields name, approach, scope, and why_different, plus an 
         "failed_approach_summary": failed_approach,
         "previous_repair_summary": previous_repair,
         "failure_evidence": evidence[-4:],
+        "generation_attempts": generation_attempts[-2:],
         "attempts": [],
     }
     task.setdefault("strategy_attempts", [])
@@ -2553,12 +2569,56 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
     if isinstance(task.get("strategy_search"), dict):
         # One search per failed node. A completed search must not turn into a
         # new recursion or strategy loop.
+        if task["strategy_search"].get("outcome") == "generation_unavailable":
+            unavailable_result = dict(leaf_result)
+            unavailable_result["strategy_search_status"] = STRATEGY_SEARCH_UNAVAILABLE
+            unavailable_result["strategy_search"] = copy.deepcopy(task["strategy_search"])
+            if isinstance(task.get("failure_diagnosis"), dict):
+                unavailable_result["failure_diagnosis"] = task["failure_diagnosis"]
+            return unavailable_result
         return None
     strategies = search_alternate_strategies(
         task, contract, leaf_result, memory, repo_snapshot, parent_summary, dependency_summaries,
     )
     if len(strategies) != MAX_STRATEGY_ALTERNATIVES:
-        return None
+        final_evidence = _failure_evidence_from_result(leaf_result)
+        final_diagnosis = diagnose_failure(task, leaf_result, final_evidence)
+        if final_diagnosis.get("category") == "implementation_strategy_wrong":
+            final_diagnosis = dict(final_diagnosis)
+            final_diagnosis["next_action"] = "strategy_search_unavailable"
+            final_diagnosis["strategy_search_unavailable"] = STRATEGY_SEARCH_UNAVAILABLE
+            final_diagnosis["rationale"] = compact_text(
+                f"{final_diagnosis.get('rationale', '')} The bounded strategy-generation budget produced no "
+                "valid pair of materially different alternatives, so no strategy was executed.", 900,
+            )
+        task["failure_evidence"] = final_evidence
+        task["failure_diagnosis"] = final_diagnosis
+        search = task.get("strategy_search")
+        if not isinstance(search, dict):
+            search = {
+                "status": "generation_unavailable",
+                "outcome": "generation_unavailable",
+                "failure_type": STRATEGY_SEARCH_UNAVAILABLE,
+                "strategies": [], "execution_order": [], "attempts": [],
+            }
+            task["strategy_search"] = search
+        search["fresh_diagnosis"] = final_diagnosis
+        search["result"] = compact_text(
+            "No valid materially different alternative strategies were generated; no strategy was executed.",
+            MAX_NODE_SUMMARY_CHARS,
+        )
+        unavailable_result = dict(leaf_result)
+        unavailable_result["strategy_search_status"] = STRATEGY_SEARCH_UNAVAILABLE
+        unavailable_result["strategy_search"] = copy.deepcopy(search)
+        unavailable_result["failure_evidence"] = final_evidence
+        unavailable_result["failure_diagnosis"] = final_diagnosis
+        record_run_event(
+            "strategy_search_unavailable_routed", task_id=task.get("id"),
+            failure_type=STRATEGY_SEARCH_UNAVAILABLE,
+            diagnosis=final_diagnosis.get("category"),
+        )
+        recompute_search_metrics()
+        return unavailable_result
     task["strategy_search"]["status"] = "running"
     task["strategy_search"]["execution_order"] = [item["name"] for item in strategies]
     base_memory = copy.deepcopy(memory)
@@ -3645,6 +3705,7 @@ def recompute_search_metrics():
         "alternative_decomposition_rescues": alternative_rescues,
         "decomposition_backtrack_rescue_rate": RUN["decomposition_backtrack_rescue_rate"],
         "strategy_searches": searches,
+        "strategy_generation_failures": int(RUN.get("strategy_generation_failures", 0) or 0),
         "alternate_strategies_attempted": int(RUN.get("alternate_strategies_attempted", 0) or 0),
         "strategy_rescues": rescues,
         "strategy_search_failures": int(RUN.get("strategy_search_failures", 0) or 0),
@@ -3936,7 +3997,8 @@ def print_search_metrics():
     print("\n[DECOMPOSITION / STRATEGY SEARCH METRICS]")
     for key in (
         "terminal_too_broad_nodes", "decomposition_backtracks", "alternative_decompositions",
-        "alternative_decomposition_rescues", "strategy_searches", "alternate_strategies_attempted",
+        "alternative_decomposition_rescues", "strategy_searches", "strategy_generation_failures",
+        "alternate_strategies_attempted",
         "strategy_rescues", "strategy_search_failures", "capability_floor_nodes",
     ):
         print(f"{key}: {RUN.get(key)}")

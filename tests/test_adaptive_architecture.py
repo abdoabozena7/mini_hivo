@@ -804,6 +804,101 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(structured.call_count, 2)
         self.assertEqual([item["name"] for item in planned], ["state_transition", "boundary_wrapper"])
         self.assertEqual(len(planned), mini.MAX_STRATEGY_ALTERNATIVES)
+        self.assertEqual(
+            [item["status"] for item in task["strategy_search"]["generation_attempts"]],
+            ["rejected", "valid"],
+        )
+
+    def test_valid_replacement_strategies_execute_normally(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        invalid = {"strategies": [{"name": "one", "approach": "one path", "scope": ["one function"],
+                                    "why_different": "only candidate"}]}
+        executed = []
+
+        def leaf(*_args, **kwargs):
+            executed.append(kwargs["strategy_context"]["strategy"]["name"])
+            return {"status": "done", "summary": "replacement verified", "memory": {}}
+
+        with patch.object(mini, "structured_model_call", side_effect=[invalid, {"strategies": self.strategy_pair()}]) as structured, \
+                patch.object(mini, "execute_leaf", side_effect=leaf):
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(structured.call_count, 2)
+        self.assertEqual(executed, ["state_transition"])
+        self.assertEqual(mini.RUN["strategy_generation_failures"], 0)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 1)
+        self.assertEqual(mini.RUN["strategy_rescues"], 1)
+
+    def test_invalid_strategy_generation_is_unavailable_without_fallback_or_execution(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        invalid = {"strategies": [{"name": "one", "approach": "one path", "scope": ["one function"],
+                                    "why_different": "only candidate"}]}
+        with patch.object(mini, "structured_model_call", side_effect=[invalid, invalid]) as structured, \
+                patch.object(mini, "execute_leaf") as execute:
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["strategy_search_status"], mini.STRATEGY_SEARCH_UNAVAILABLE)
+        self.assertEqual(structured.call_count, 2)
+        execute.assert_not_called()
+        self.assertEqual(task["strategy_search"]["strategies"], [])
+        self.assertEqual(task["strategy_search"]["outcome"], "generation_unavailable")
+        self.assertEqual(len(task["strategy_search"]["generation_attempts"]), 2)
+        self.assertEqual(len(task["strategy_attempts"]), 0)
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["strategy_generation_failures"], 1)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 0)
+        self.assertEqual(mini.RUN["strategy_search_failures"], 0)
+        self.assertEqual(mini.RUN["strategy_rescues"], 0)
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertEqual(
+            task["failure_diagnosis"]["strategy_search_unavailable"],
+            mini.STRATEGY_SEARCH_UNAVAILABLE,
+        )
+
+    def test_paraphrased_pair_and_invalid_replacement_fail_without_false_rescue(self):
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["src/app.js"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        paraphrased = [
+            {"name": "path_a", "approach": "use existing state and reset the value in one function",
+             "scope": ["one function"], "why_different": "first path"},
+            {"name": "path_b", "approach": "use existing state and reset the value in one function",
+             "scope": ["one function"], "why_different": "second path"},
+        ]
+        with patch.object(mini, "structured_model_call", side_effect=[
+            {"strategies": paraphrased}, {"strategies": paraphrased},
+        ]) as structured, patch.object(mini, "execute_leaf") as execute:
+            result = mini._maybe_search_alternate_strategy(task, self.contract(), failure, {}, {})
+
+        self.assertEqual(result["strategy_search_status"], mini.STRATEGY_SEARCH_UNAVAILABLE)
+        self.assertEqual(structured.call_count, 2)
+        execute.assert_not_called()
+        attempts = task["strategy_search"]["generation_attempts"]
+        self.assertEqual([item["reason"] for item in attempts], [
+            "strategies_not_materially_different", "strategies_not_materially_different",
+        ])
+        self.assertEqual(mini.RUN["strategy_generation_failures"], 1)
+        self.assertEqual(mini.RUN["alternate_strategies_attempted"], 0)
+        self.assertEqual(mini.RUN["strategy_search_failures"], 0)
+        self.assertEqual(mini.RUN["strategy_rescues"], 0)
 
     def test_strategy_generation_is_non_mutating_and_has_bounded_packet(self):
         target = mini.WORKSPACE / "app.js"

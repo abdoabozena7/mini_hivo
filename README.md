@@ -164,6 +164,7 @@ alternative_decompositions: 1
 alternative_decomposition_rescues: 1
 decomposition_backtrack_rescue_rate: 100.0
 strategy_searches: 0
+strategy_generation_failures: 0
 alternate_strategies_attempted: 0
 strategy_rescues: 0
 strategy_search_failures: 0
@@ -181,12 +182,17 @@ strategies fail fresh deterministic verification, the node is recorded as a
 `model_capability_floor` candidate and is not automatically split again. This
 route is bounded separately from decomposition and is not used for
 `TASK_TOO_BROAD`, dependency, verifier, integration, or environment failures.
+If the model cannot produce two valid materially different strategies after
+the single bounded replacement request, the search records
+`STRATEGY_SEARCH_UNAVAILABLE` and executes no candidate. It does not fabricate
+a deterministic fallback pair; fresh existing diagnosis remains in control.
 
 The v5 strategy-search metrics are `strategy_searches` (nodes where planning
-started), `alternate_strategies_attempted` (candidates actually executed),
-`strategy_rescues`, `strategy_search_failures`, and
-`strategy_rescue_rate`. A strategy rescue remains separate from the v3
-granularity-rescue metrics.
+started), `strategy_generation_failures` (triggered searches with no valid pair
+after generation and replacement), `alternate_strategies_attempted` (candidates
+actually executed), `strategy_rescues`, `strategy_search_failures` (valid
+candidates executed but all failed), and `strategy_rescue_rate`. A strategy
+rescue remains separate from the v3 granularity-rescue metrics.
 
 ### Hierarchical Integration Contract
 
