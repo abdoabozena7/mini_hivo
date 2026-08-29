@@ -2558,17 +2558,15 @@ def execute_selected_strategy(task, contract, strategy, failure_result, memory, 
 
 
 def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_snapshot,
-                                     parent_summary="", dependency_summaries=None):
+                                     parent_summary="", dependency_summaries=None,
+                                     diagnosis=None):
     if not isinstance(task, dict) or not isinstance(leaf_result, dict):
         return None
-    if task.get("kind") == "integration":
+    if task.get("kind", "implementation") != "implementation":
         return None
     evidence = _failure_evidence_from_result(leaf_result)
-    existing_diagnosis = task.get("failure_diagnosis")
-    diagnosis = (
-        existing_diagnosis
-        if isinstance(existing_diagnosis, dict) and existing_diagnosis.get("category")
-        else diagnose_failure(task, leaf_result, evidence)
+    diagnosis = diagnosis if isinstance(diagnosis, dict) and diagnosis.get("category") else diagnose_failure(
+        task, leaf_result, evidence,
     )
     task["failure_diagnosis"] = diagnosis
     blocked_categories = {
@@ -2581,11 +2579,9 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
             leaf_result.get("failure_type") == "IMPLEMENTATION_ERROR"
             or _is_execution_budget_exhausted(leaf_result)
         )
-        or (_is_execution_budget_exhausted(leaf_result)
-            and not _has_failed_repair_history(task, leaf_result))
         or diagnosis.get("category") != "implementation_strategy_wrong"
         or diagnosis.get("category") in blocked_categories
-        or not _looks_like_tiny_scope(task)
+        or not _strategy_scope_is_bounded(task, leaf_result)
         or not evidence
         or not any(
             isinstance(item, dict) and (
@@ -2709,6 +2705,34 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
         last_result["strategy_search"] = task["strategy_search"]
     recompute_search_metrics()
     return last_result
+
+
+def route_recovery_from_diagnosis(task, contract, leaf_result, diagnosis, memory, repo_snapshot,
+                                  parent_summary="", dependency_summaries=None):
+    """Invoke one existing recovery mechanism from the final diagnosis.
+
+    This is deliberately a small post-diagnosis router. It does not plan or
+    execute recovery itself; the existing bounded strategy-search path remains
+    responsible for generation, transactions, candidate execution, and metrics.
+    """
+    if not isinstance(task, dict) or not isinstance(leaf_result, dict):
+        return None
+    if not isinstance(diagnosis, dict) or not diagnosis.get("category"):
+        return None
+    if task.get("kind", "implementation") != "implementation":
+        return None
+    if diagnosis.get("category") != "implementation_strategy_wrong":
+        return None
+    result = _maybe_search_alternate_strategy(
+        task, contract, leaf_result, memory, repo_snapshot,
+        parent_summary, dependency_summaries, diagnosis=diagnosis,
+    )
+    if result is not None:
+        record_run_event(
+            "diagnosis_recovery_route", task_id=task.get("id"),
+            diagnosis=diagnosis.get("category"), route="strategy_search",
+        )
+    return result
 
 
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
@@ -3598,6 +3622,24 @@ def _has_failed_repair_history(task, result=None):
         and str(item.get("status", "")).casefold() not in {"done", "pass", "passed"}
         for item in history
     )
+
+
+def _strategy_scope_is_bounded(task, result=None):
+    """Use the existing fit decision to decide whether strategy search fits."""
+    fit = _fit_assessment(task, result)
+    if isinstance(fit, dict) and fit.get("decision"):
+        if str(fit.get("decision", "")).casefold() != "execute":
+            return False
+        # At a hard depth/task boundary, EXECUTE is forced rather than an
+        # affirmative fit assessment. Keep the old narrow lexical fallback for
+        # that case so a broad forced leaf cannot enter strategy search.
+        reason = str(fit.get("reason", "")).casefold()
+        if "hard recursion/task budget reached" in reason:
+            return _looks_like_tiny_scope(task)
+        return True
+    # Direct compatibility callers may not have passed through solve_task yet.
+    # Production nodes carry fit_before_execution before final routing.
+    return _looks_like_tiny_scope(task)
 
 
 def _budget_evidence_is_environmental(searchable):
@@ -6687,46 +6729,33 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         )
         if resplit is not None:
             return resplit
-    elif _is_execution_budget_exhausted(leaf):
-        # The focused loop reported an observation only. Diagnose it once from
-        # the retained contract/evidence before selecting an existing route.
+    elif _is_execution_budget_exhausted(leaf) or leaf.get("failure_type") == "IMPLEMENTATION_ERROR":
+        # The focused loop reports an observation. Record the final evidence
+        # and diagnosis first, then let the diagnosis select one existing
+        # recovery mechanism regardless of the raw failure origin.
         diagnosis = _record_task_failure(task, leaf, phase="leaf")
         leaf["failure_diagnosis"] = diagnosis
-        if diagnosis and diagnosis.get("category") == "scope_too_broad":
-            resplit = _resplit_too_broad(
-                task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
-                leaf, fit_decider, leaf_executor, aggregator,
-            )
-            if resplit is not None:
-                return resplit
-        elif diagnosis and diagnosis.get("category") == "implementation_strategy_wrong" and task.get("kind") != "integration":
-            strategy_result = _maybe_search_alternate_strategy(
-                task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
-            )
-            if strategy_result is not None:
-                # Existing bounded v5 strategy search owns this route; neutral
-                # budget exhaustion is never counted as a strategy rescue by
-                # itself, only a verified candidate can become one.
-                leaf = strategy_result
-                memory = leaf.get("memory", memory)
-    elif leaf.get("failure_type") == "IMPLEMENTATION_ERROR":
-        _record_task_failure(task, leaf, phase="leaf")
-        strategy_result = None
-        if task.get("kind") != "integration":
-            strategy_result = _maybe_search_alternate_strategy(
-                task, contract, leaf, memory, repo_snapshot, parent_summary, dependency_summaries,
-            )
-        if strategy_result is not None:
+        recovery = route_recovery_from_diagnosis(
+            task, contract, leaf, diagnosis, memory, repo_snapshot,
+            parent_summary, dependency_summaries,
+        )
+        if recovery is not None:
             # A started strategy search owns this failure route. In particular,
-            # two failed strategies must not fall back into another automatic
-            # split merely because the candidates failed.
-            leaf = strategy_result
+            # a failed or unavailable search must not fall through to another
+            # automatic split or a second strategy search.
+            leaf = recovery
             memory = leaf.get("memory", memory)
-        else:
-            resplit = _resplit_after_leaf_failure(
-                task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
-                leaf, fit_decider, leaf_executor, aggregator,
-            )
+        elif diagnosis and diagnosis.get("category") == "scope_too_broad":
+            if _is_execution_budget_exhausted(leaf):
+                resplit = _resplit_too_broad(
+                    task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                    leaf, fit_decider, leaf_executor, aggregator,
+                )
+            else:
+                resplit = _resplit_after_leaf_failure(
+                    task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                    leaf, fit_decider, leaf_executor, aggregator,
+                )
             if resplit is not None:
                 return resplit
 
