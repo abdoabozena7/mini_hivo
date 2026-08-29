@@ -2626,15 +2626,7 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
         or diagnosis.get("category") in blocked_categories
         or not _strategy_scope_is_bounded(task, leaf_result)
         or not evidence
-        or not any(
-            isinstance(item, dict) and (
-                str(item.get("status", "")).upper() in {"FAIL", "FAILED", "ERROR"}
-                or (item.get("tool") in {"run_file", "run_command", "verify_web_app"}
-                    and evidence_result_failed(item.get("result", "")))
-            )
-            or (not isinstance(item, dict) and evidence_result_failed(item))
-            for item in evidence
-        )
+        or not _has_concrete_executable_failure(evidence)
     ):
         return None
     if isinstance(task.get("strategy_search"), dict):
@@ -4300,6 +4292,12 @@ def _failure_evidence_from_result(result):
                 "resolution_status": browser.get("resolution_status"),
                 "evidence": compact_text(browser.get("evidence", "browser verification failed"), 900),
             })
+    syntax_failures = result.get("syntax_validation_failures") or result.get("syntax_errors")
+    if syntax_failures:
+        candidates.append({
+            "kind": "syntax_failure", "status": "FAIL", "source": "deterministic",
+            "evidence": compact_text(json.dumps(syntax_failures, ensure_ascii=False, default=str), 900),
+        })
     evidence = result.get("tool_evidence")
     if isinstance(evidence, list):
         candidates.extend(evidence_for_review(evidence) or evidence)
@@ -4336,33 +4334,80 @@ def _fit_assessment(task, result=None):
 
 
 def _has_positive_scope_evidence(task, result=None):
-    """Require positive scope evidence before routing neutral exhaustion to split."""
+    """Return only explicit evidence that the current node is too broad."""
     result = result if isinstance(result, dict) else {}
     fit = _fit_assessment(task, result)
     if str(fit.get("decision", "")).casefold() == "split":
+        return True
+    if str(result.get("status", "")).casefold() == "too_broad" or str(
+        result.get("failure_type", "")
+    ).casefold() == "task_too_broad":
         return True
     for source in (task, result):
         for key in ("scope_evidence", "responsibilities", "substantial_responsibilities"):
             values = source.get(key)
             if isinstance(values, (list, tuple)) and len([item for item in values if str(item).strip()]) >= 2:
                 return True
-    # Multiple independent completion conditions are a deterministic, model-
-    # agnostic indication that the node carries more than one responsibility.
-    if len([item for item in task.get("done_when", []) if str(item).strip()]) >= 3:
-        return True
+    # A completion-condition count is not scope evidence by itself. A bounded
+    # node can legitimately have several acceptance checks, and the v10 live
+    # failure showed that treating that count as width masked implementation
+    # evidence.
     return False
 
 
 def _has_concrete_executable_failure(evidence):
+    """Return concrete implementation evidence, excluding neutral budget facts."""
+    def implementation_failure_text(value):
+        lower = str(value or "").casefold()
+        lower = lower.replace(EXECUTION_BUDGET_EXHAUSTED.casefold(), "")
+        return bool(re.search(
+            r"syntax(?:error| failure| validation failed)|parse (?:error|failure)|unexpected token|unexpected identifier|"
+            r"assertion(?:error| failure| failed)|uncaught exception|typeerror|referenceerror|runtime(?:error| error)|"
+            r"application error|\"passed\"\s*:\s*false|'passed'\s*:\s*false|"
+            r"missing required|missing_game_bridge|missing interaction|browser contract",
+            lower,
+        ))
+
+    def neutral_budget_text(value):
+        lower = str(value or "").casefold()
+        return any(marker in lower for marker in (
+            EXECUTION_BUDGET_EXHAUSTED.casefold(), "execution budget", "focused execution ended",
+            "tool-step budget", "tool step budget", "budget exhausted", "budget ended",
+        ))
+
     for item in evidence or []:
         if not isinstance(item, dict):
-            if evidence_result_failed(item):
+            if implementation_failure_text(item) or evidence_result_failed(item):
                 return True
             continue
+        kind = str(item.get("kind", "")).casefold()
+        failure_type = str(item.get("failure_type", "")).casefold()
+        if item.get("environment_error") is True or kind in {"browser_environment", "provider_failure", "environment"}:
+            continue
+        if failure_type in {VERIFICATION_TARGET_UNRESOLVED.casefold(), "environment_error"}:
+            continue
+        nested_text = " ".join(
+            str(item.get(key, "")) for key in ("result", "evidence", "summary", "failure_type")
+        )
+        if neutral_budget_text(nested_text) and not implementation_failure_text(nested_text):
+            continue
+        if kind in {"scope", "task_status"}:
+            continue
+        if kind in {"budget", "execution_outcome"} and not implementation_failure_text(nested_text):
+            continue
+        if item.get("syntax_failure") is True or failure_type == "implementation_error":
+            return True
+        if kind in {
+            "browser_verification", "syntax_failure", "parse_failure", "test_assertion",
+            "runtime_error", "executable_failure", "falsifier_failure",
+        }:
+            return True
         tool = item.get("tool")
         if tool in {"run_file", "run_command", "verify_web_app"} and evidence_result_failed(item.get("result", "")):
             return True
         if str(item.get("status", "")).upper() in {"FAIL", "FAILED", "ERROR"}:
+            return True
+        if implementation_failure_text(nested_text):
             return True
     return False
 
@@ -4385,12 +4430,9 @@ def _strategy_scope_is_bounded(task, result=None):
     if isinstance(fit, dict) and fit.get("decision"):
         if str(fit.get("decision", "")).casefold() != "execute":
             return False
-        # At a hard depth/task boundary, EXECUTE is forced rather than an
-        # affirmative fit assessment. Keep the old narrow lexical fallback for
-        # that case so a broad forced leaf cannot enter strategy search.
-        reason = str(fit.get("reason", "")).casefold()
-        if "hard recursion/task budget reached" in reason:
-            return _looks_like_tiny_scope(task)
+        # A recorded EXECUTE decision is the existing bounded-fit evidence.
+        # The hard depth/task boundary limits decomposition; it is not new
+        # scope evidence and must not suppress implementation recovery.
         return True
     # Direct compatibility callers may not have passed through solve_task yet.
     # Production nodes carry fit_before_execution before final routing.
@@ -4666,6 +4708,8 @@ def diagnose_failure(task, result, evidence=None):
     ) or any(item.get("kind") == "integration_preflight" for item in evidence if isinstance(item, dict))
 
     budget_exhausted = _is_execution_budget_exhausted(result)
+    positive_scope_evidence = _has_positive_scope_evidence(task, result)
+    implementation_evidence = _has_concrete_executable_failure(evidence)
     target_unresolved = (
         failure_type == VERIFICATION_TARGET_UNRESOLVED
         or _verification_target_is_unresolved(result)
@@ -4721,7 +4765,7 @@ def diagnose_failure(task, result, evidence=None):
                 "The focused implementation failure still has an applicable recovery that has not been exhausted; "
                 f"capability-floor declaration is blocked by {capability_floor_state['blocked_by']}.", 900,
             )
-    elif budget_exhausted and _has_positive_scope_evidence(task, result):
+    elif budget_exhausted and positive_scope_evidence:
         category = "scope_too_broad"
         confidence = "medium"
         rationale = (
@@ -4898,6 +4942,15 @@ def diagnose_failure(task, result, evidence=None):
         "automatic_resplit_blocked": at_max_depth,
         "decomposition_search_exhausted": bool(result.get("decomposition_search_exhausted") or task.get("decomposition_search_exhausted")),
         "evidence": evidence,
+        "diagnosis_evidence": {
+            "execution_observation": EXECUTION_BUDGET_EXHAUSTED if budget_exhausted else None,
+            "fit_before_execution": copy.deepcopy(task.get("fit_before_execution")),
+            "positive_scope_evidence": bool(positive_scope_evidence),
+            "implementation_evidence": bool(implementation_evidence),
+            "environment_healthy": not (
+                _concrete_environment_failure(result) or _concrete_environment_failure(evidence)
+            ),
+        },
     }
     if category == "model_capability_floor":
         if capability_floor_state is None:

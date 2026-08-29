@@ -125,6 +125,181 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(row["initial_result"], mini.EXECUTION_BUDGET_EXHAUSTED)
         self.assertEqual(row["final_result"], "PASS")
 
+    def test_budget_observation_alone_does_not_diagnose_scope(self):
+        task = mini.make_task(
+            "budget-only", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified", "state is preserved", "result is observable"], ["src/app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        failure = self.neutral_budget_failure(evidence=[{
+            "kind": "execution_outcome", "status": "FAIL",
+            "evidence": mini.EXECUTION_BUDGET_EXHAUSTED,
+        }])
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertEqual(diagnosis["category"], "unknown")
+        self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+
+    def test_v10_shape_persistent_syntax_failure_outweighs_budget_and_depth(self):
+        task = mini.make_task(
+            "v10-shape", "Define and initialize the core state and basic execution loop.", mini.MAX_DEPTH,
+            "parent", ["state exists", "loop exists", "update and draw exist"], ["app.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "EXECUTE", "reason": "hard recursion/task budget reached",
+        }
+        failure = self.neutral_budget_failure(evidence=[{
+            "tool": "edit_file_range", "target": "app.js",
+            "result": "error: JavaScript syntax validation failed: Unexpected token '}'",
+        }])
+        failure["repair_history"] = [{
+            "status": "budget_exhausted", "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "summary": "fresh repair reached the focused budget with the same syntax failure",
+        }]
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertEqual(diagnosis["next_action"], "search_or_mutate")
+        self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+        self.assertFalse(diagnosis["diagnosis_evidence"]["positive_scope_evidence"])
+        self.assertTrue(diagnosis["diagnosis_evidence"]["implementation_evidence"])
+        self.assertEqual(
+            diagnosis["diagnosis_evidence"]["execution_observation"],
+            mini.EXECUTION_BUDGET_EXHAUSTED,
+        )
+        self.assertTrue(mini._is_bounded_implementation_failure(
+            task, failure, failure["failure_evidence"],
+        ))
+
+    def test_behavioral_failure_after_repair_does_not_become_scope_from_budget(self):
+        task = mini.make_task(
+            "behavior-budget", "Implement one focused behavior", 3, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        browser_failure = {
+            "passed": False, "environment_error": False,
+            "resolved_entrypoint": "index.html", "resolution_status": "RESOLVED",
+            "failures": [{"code": "required_behavior", "evidence": "behavior did not occur"}],
+        }
+        failure = self.neutral_budget_failure(evidence=[{
+            "tool": "verify_web_app", "target": "index.html",
+            "result": json.dumps(browser_failure),
+        }])
+        failure["repair_history"] = [
+            {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "repair 1 failed"},
+            {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "repair 2 failed"},
+        ]
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+
+    def test_execute_failure_reaches_existing_strategy_search_after_evidence_precedence(self):
+        task = mini.make_task(
+            "syntax-strategy", "Define one focused executable behavior", mini.MAX_DEPTH, "ROOT",
+            ["behavior is verified", "syntax remains valid", "the result is observable"], ["app.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        failure = self.neutral_budget_failure(evidence=[{
+            "tool": "edit_file_range", "target": "app.js",
+            "result": "error: JavaScript syntax validation failed: Unexpected token '}'",
+        }])
+        failure["repair_history"] = [{
+            "status": "budget_exhausted", "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "summary": "same syntax failure after repair",
+        }]
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", return_value={
+                    "status": "done", "summary": "strategy verified", "memory": {},
+                }) as strategy_leaf:
+            result = mini.solve_task(
+                task, mini.MAX_DEPTH, self.contract(), {}, {},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        self.assertEqual(mini.RUN["budget_exhaustion_routed_to_strategy"], 1)
+        strategy_leaf.assert_called_once()
+
+    def test_explicit_split_fit_still_permits_scope_diagnosis(self):
+        task = mini.make_task(
+            "split-fit", "Implement a node with multiple responsibilities", 2, "ROOT",
+            ["first", "second"], ["app.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "SPLIT", "reason": "multiple independent responsibilities",
+        }
+        failure = self.neutral_budget_failure(evidence=[{
+            "kind": "execution_outcome", "status": "FAIL",
+            "evidence": mini.EXECUTION_BUDGET_EXHAUSTED,
+        }])
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertEqual(diagnosis["category"], "scope_too_broad")
+
+    def test_new_explicit_scope_evidence_can_overturn_execute_fit(self):
+        task = mini.make_task(
+            "new-scope", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        failure = self.neutral_budget_failure(evidence=[{
+            "kind": "execution_outcome", "status": "FAIL",
+            "evidence": mini.EXECUTION_BUDGET_EXHAUSTED,
+        }])
+        failure["scope_evidence"] = [
+            "independent state transition responsibility",
+            "independent browser contract responsibility",
+        ]
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertEqual(diagnosis["category"], "scope_too_broad")
+
+    def test_depth_repair_limit_and_syntax_are_not_scope_evidence(self):
+        cases = [
+            ("depth", mini.MAX_DEPTH, mini.EXECUTION_BUDGET_EXHAUSTED, [{
+                "kind": "execution_outcome", "status": "FAIL",
+                "evidence": mini.EXECUTION_BUDGET_EXHAUSTED,
+            }], [], "unknown"),
+            ("repair-limit", mini.MAX_DEPTH, "IMPLEMENTATION_ERROR", [], [
+                {"status": "failed"}, {"status": "failed"},
+            ], "unknown"),
+            ("syntax", 2, "IMPLEMENTATION_ERROR", [{
+                "tool": "edit_file_range", "target": "app.js",
+                "result": "error: JavaScript syntax validation failed: Unexpected token '}'",
+            }], [], "implementation_strategy_wrong"),
+        ]
+        for label, depth, failure_type, evidence, repairs, expected in cases:
+            with self.subTest(label=label):
+                task = mini.make_task(
+                    f"non-scope-{label}", "Implement one focused behavior", depth, "ROOT",
+                    ["behavior is verified"], ["app.js"],
+                )
+                task["fit_before_execution"] = {
+                    "decision": "EXECUTE", "reason": "hard recursion/task budget reached",
+                }
+                result = {
+                    "status": "budget_exhausted" if failure_type == mini.EXECUTION_BUDGET_EXHAUSTED else "failed",
+                    "failure_type": failure_type,
+                    "execution_outcome": failure_type if failure_type == mini.EXECUTION_BUDGET_EXHAUSTED else None,
+                    "summary": "failed deterministic evidence gate after repair limit",
+                    "failure_evidence": evidence, "repair_history": repairs,
+                }
+
+                diagnosis = mini.diagnose_failure(task, result)
+
+                self.assertEqual(diagnosis["category"], expected)
+                self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+
     def test_final_implementation_diagnosis_routes_after_repair_limit_without_budget_exhaustion(self):
         task = mini.make_task(
             "diagnosis-route",
@@ -298,6 +473,11 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         root = mini.root_task_from_contract(contract)
         mini.TASKS["ROOT"] = root
         failure = self.neutral_budget_failure()
+        failure["scope_evidence"] = [
+            "independent state responsibility",
+            "independent behavior responsibility",
+            "independent verification responsibility",
+        ]
         leaf_calls = []
 
         def fit(*_args):
