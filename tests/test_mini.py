@@ -263,6 +263,116 @@ Requirements:
         self.assertEqual(result["failure_type"], "TASK_TOO_BROAD")
         self.assertEqual(ask.call_count, 4)
         self.assertIn("TASK_TOO_BROAD", result["summary"])
+        self.assertEqual(len(result["mutation_failures"]), 1)
+        self.assertEqual(result["mutation_failures"][0]["category"], "SYNTAX_INVALID_MUTATION")
+        self.assertEqual(result["mutation_failures"][0]["count"], 4)
+        self.assertEqual(mini.RUN["mutation_failures_recorded"], 4)
+
+    def test_builder_mutation_evidence_survives_task_too_broad_and_reaches_diagnosis(self):
+        task = mini.make_task(
+            "mutation-evidence", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        record = mini.mutation_failure_record(
+            "edit_file", "app.js", "error: malformed edit request", role="Builder",
+        )
+        builder = {
+            "status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+            "summary": "TASK_TOO_BROAD after repeated invalid mutations", "memory": {},
+            "tool_evidence": [{
+                "tool": "edit_file", "target": "app.js", "result": "error: malformed edit request",
+            }],
+            "mutation_failures": [record],
+        }
+        with patch.object(mini, "execute_agent_task", return_value=builder):
+            leaf = mini.execute_leaf(task, {}, {}, {})
+
+        self.assertFalse(mini._has_positive_scope_evidence(task, leaf))
+        self.assertTrue(any(
+            item.get("kind") == "mutation_failure" for item in leaf["failure_evidence"]
+        ))
+        diagnosis = mini.diagnose_failure(task, leaf)
+        self.assertFalse(diagnosis["diagnosis_evidence"]["positive_scope_evidence"])
+        self.assertTrue(diagnosis["diagnosis_evidence"]["implementation_evidence"])
+        self.assertEqual(diagnosis["diagnosis_evidence"]["mutation_evidence"][0]["category"], "INVALID_MUTATION")
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+
+    def test_historical_invalid_mutation_does_not_override_later_verification_pass(self):
+        invalid_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.js", "old": "missing", "new": "replacement",
+                }},
+            }],
+        }
+        browser_request = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "verify_web_app", "arguments": {"path": "index.html"}},
+            }],
+        }
+        with patch.object(mini, "ask_ollama", side_effect=[invalid_edit, browser_request]), \
+                patch.object(mini, "run_tool", side_effect=[
+                    "error: malformed edit request", '{"passed": true}',
+                ]):
+            result = mini.execute_agent_task(
+                "finish the focused browser behavior", {}, role="Builder", task_id="history", max_steps=2,
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["mutation_failures"][0]["category"], "INVALID_MUTATION")
+        self.assertEqual(result["mutation_failures"][0]["count"], 1)
+
+    def test_repairer_mutation_failures_use_the_same_structured_evidence(self):
+        invalid_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file_range", "arguments": {
+                    "path": "app.js", "start_line": 9, "end_line": 2, "new": "replacement",
+                }},
+            }],
+        }
+        with patch.object(mini, "ask_ollama", return_value=invalid_edit), \
+                patch.object(mini, "run_tool", return_value="error: invalid line range 9-2; file has 12 lines"):
+            result = mini.execute_agent_task(
+                "repair the focused behavior", {}, role="Repairer", task_id="repair", max_steps=1,
+            )
+
+        self.assertEqual(result["status"], "budget_exhausted")
+        self.assertEqual(len(result["mutation_failures"]), 1)
+        self.assertEqual(result["mutation_failures"][0]["category"], "STALE_TARGET")
+        self.assertEqual(result["mutation_failures"][0]["count"], 1)
+
+    def test_safety_rejected_mutation_does_not_become_implementation_strategy(self):
+        task = mini.make_task(
+            "safety-mutation", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        record = mini.mutation_failure_record(
+            "edit_file", "../app.js", "error: path is outside the workspace", role="Builder",
+        )
+        diagnosis = mini.diagnose_failure(task, {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "mutation rejected by workspace safety", "failure_evidence": [record],
+        })
+
+        self.assertFalse(diagnosis["diagnosis_evidence"]["implementation_evidence"])
+        self.assertNotEqual(diagnosis["category"], "implementation_strategy_wrong")
+
+    def test_mutation_environment_failure_remains_environment_failure(self):
+        task = mini.make_task(
+            "environment-mutation", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        record = mini.mutation_failure_record(
+            "write_file", "app.js", "error writing file: permission denied", role="Builder",
+        )
+        diagnosis = mini.diagnose_failure(task, {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
+            "summary": "filesystem failure", "failure_evidence": [record],
+        })
+
+        self.assertEqual(diagnosis["category"], "environment_failure")
+        self.assertFalse(diagnosis["diagnosis_evidence"]["implementation_evidence"])
 
     def test_javascript_syntax_guard_accepts_unicode_on_windows(self):
         target = mini.WORKSPACE / "unicode.js"

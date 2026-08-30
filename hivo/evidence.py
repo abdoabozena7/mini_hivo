@@ -5,6 +5,7 @@ import re
 
 
 VERIFICATION_TOOLS = frozenset({"run_file", "run_command", "verify_web_app"})
+MUTATION_TOOLS = frozenset({"write_file", "edit_file", "edit_file_range"})
 
 
 def result_not_applicable(result: object) -> bool:
@@ -33,7 +34,10 @@ def result_failed(result: object) -> bool:
             payload = None
         if isinstance(payload, dict) and payload.get("passed") is False:
             return True
-    if lower.startswith(("error:", "tool error:", "compile error:", "traceback")):
+    if lower.startswith((
+        "error:", "error writing file:", "error reading file:",
+        "tool error:", "compile error:", "traceback",
+    )):
         return True
     exit_code = re.search(r"\[exit_code=(\d+)\]", lower)
     if exit_code and int(exit_code.group(1)) != 0:
@@ -46,6 +50,55 @@ def result_failed(result: object) -> bool:
     if '"passed": false' in lower or "'passed': false" in lower:
         return True
     return any(term in lower for term in ("syntaxerror", "assertionerror", "uncaught exception"))
+
+
+def mutation_failure_record(tool: object, target: object, result: object, role: object = None) -> dict | None:
+    """Classify one deterministic failed source mutation without copying its payload."""
+    tool_name = str(tool)
+    if tool_name not in MUTATION_TOOLS or not result_failed(result):
+        return None
+    text = " ".join(str(result).strip().split())
+    lower = text.casefold()
+    if any(marker in lower for marker in (
+        "syntax validation failed", "syntaxerror", "parse error", "unexpected token",
+        "unexpected identifier",
+    )):
+        category = "SYNTAX_INVALID_MUTATION"
+    elif any(marker in lower for marker in (
+        "outside the workspace", "outside workspace", "command refused", "forbidden mutation",
+        "not allowed", "repairer cannot", "unavailable for role", "unavailable under the active",
+    )):
+        category = "SAFETY_REJECTED_MUTATION"
+    elif any(marker in lower for marker in (
+        "error writing file:", "error reading file:", "backup failed", "i/o error",
+        "oserror", "operating system error", "permission denied",
+    )):
+        category = "ENVIRONMENT_FAILURE"
+    elif any(marker in lower for marker in (
+        "file does not exist", "target does not exist", "no such file or directory",
+        "missing target",
+    )):
+        category = "MISSING_TARGET"
+    elif any(marker in lower for marker in (
+        "invalid line range", "exact replacement(s), found 0", "exact text not found",
+        "stale target", "stale context", "context does not match", "patch context",
+    )):
+        category = "STALE_TARGET"
+    else:
+        category = "INVALID_MUTATION"
+    record = {
+        "kind": "mutation_failure",
+        "tool": tool_name,
+        "category": category,
+        "target": " ".join(str(target).strip().split())[:240],
+        "deterministic": True,
+        "status": "FAIL",
+        "summary": text[:700],
+        "count": 1,
+    }
+    if role is not None:
+        record["role"] = str(role)
+    return record
 
 
 def latest_verification_evidence(evidence: list[dict]) -> list[dict]:

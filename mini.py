@@ -21,6 +21,7 @@ from pathlib import Path
 from hivo.browser_checks import run_profile_interactions
 from hivo.context import compact_messages
 from hivo.evidence import evidence_for_review
+from hivo.evidence import mutation_failure_record
 from hivo.evidence import result_failed as evidence_result_failed
 from hivo.evidence import result_not_applicable
 from hivo.evidence import result_is_tool_rejection
@@ -78,6 +79,7 @@ MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
 MAX_MEMORY_CONTEXT_CHARS = 1800
 MAX_FALSIFIER_STEPS = 8
+MAX_MUTATION_FAILURE_RECORDS = 6
 MAX_INTEGRATION_MANIFEST_ITEMS = 8
 MAX_INTEGRATION_FACT_CHARS = 280
 MAX_INTEGRATION_CONFLICTS = 24
@@ -1030,6 +1032,7 @@ def new_metrics(mode):
         "browser_entrypoint_resolution_failures": 0,
         "browser_checks_skipped_for_syntax_failure": 0,
         "verification_failures": 0, "task_too_broad_count": 0,
+        "mutation_failures_recorded": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
         "ollama_http_200": 0, "ollama_tool_call_responses": 0,
         "ollama_thinking_responses": 0, "ollama_terminal_empty_responses": 0,
@@ -2988,7 +2991,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     # until a fresh source check or valid source mutation clears it.
     verification_cycle = {"syntax_failures": {}}
     repeated_failures = {}
-    mutation_failures = {}
+    mutation_failure_counts = {}
+    mutation_failure_records = []
     last_verification_signature = ()
     stagnant_verifications = 0
     provider_error = None
@@ -3096,6 +3100,18 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             _update_verification_cycle(verification_cycle, name, args, result)
             projected = str(result)[:1600]
             evidence.append({"tool": name, "target": target, "result": projected})
+            mutation_record = mutation_failure_record(name, target, result, role=role)
+            if mutation_record is not None:
+                RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
+                record_run_event(
+                    "mutation_failure_recorded", role=role, task_id=task_id,
+                    tool=mutation_record.get("tool"), target=mutation_record.get("target"),
+                    category=mutation_record.get("category"), deterministic=True,
+                    summary=mutation_record.get("summary", ""),
+                )
+                mutation_failure_records = _merge_mutation_failure_records(
+                    mutation_failure_records, [mutation_record],
+                )
             memory = update_memory(memory, name, args, result, role=role, task_id=task_id)
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
@@ -3107,8 +3123,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 messages.append({"role": "user", "content": hint})
 
             if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result):
-                mutation_failures[str(target)] = mutation_failures.get(str(target), 0) + 1
-                if mutation_failures[str(target)] >= 4:
+                mutation_failure_counts[str(target)] = mutation_failure_counts.get(str(target), 0) + 1
+                if mutation_failure_counts[str(target)] >= 4:
                     status = "too_broad"
                     summary = "TASK_TOO_BROAD: repeated invalid mutations show the current node exceeds reliable focused capacity"
                     stop = True
@@ -3161,6 +3177,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
         "step_budget": int(step_budget), "tool_steps_used": len(evidence),
         "syntax_validation_failures": list(verification_cycle["syntax_failures"].values()),
+        "mutation_failures": mutation_failure_records,
         "failure_type": (
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
@@ -4147,6 +4164,11 @@ def _concrete_environment_failure(value):
     if isinstance(value, dict):
         if value.get("environment_error") is True:
             return True
+        if (
+            str(value.get("kind", "")).casefold() == "mutation_failure"
+            and str(value.get("category", "")).upper() == "ENVIRONMENT_FAILURE"
+        ):
+            return True
         if str(value.get("failure_type", "")).upper() == "ENVIRONMENT_ERROR":
             return True
         if str(value.get("status", "")).casefold() == "provider_failure":
@@ -4219,8 +4241,22 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
 
 def _compact_failure_evidence(evidence, max_items=6, item_chars=900):
     """Keep deterministic failure facts without copying model conversations."""
+    all_items = list(evidence or [])
+    selected = all_items[-max_items:]
+    # Structured mutation failures are compact diagnosis facts, not raw model
+    # history. Keep them visible even when later verification records fill the
+    # normal evidence window.
+    for item in all_items:
+        if (
+            isinstance(item, dict)
+            and item.get("kind") == "mutation_failure"
+            and item not in selected
+        ):
+            if len(selected) >= max_items:
+                selected.pop(0)
+            selected.append(item)
     compacted = []
-    for item in list(evidence or [])[-max_items:]:
+    for item in selected:
         if not isinstance(item, dict):
             compacted.append(compact_text(item, item_chars))
             continue
@@ -4228,7 +4264,8 @@ def _compact_failure_evidence(evidence, max_items=6, item_chars=900):
         for key in (
             "tool", "target", "kind", "name", "code", "status", "source", "evidence", "result",
             "failure_type", "requested_from_node", "resolved_entrypoint", "resolution_source",
-            "resolution_status", "environment_error",
+            "resolution_status", "environment_error", "category", "deterministic", "summary",
+            "count", "role",
         ):
             if key not in item:
                 continue
@@ -4240,6 +4277,78 @@ def _compact_failure_evidence(evidence, max_items=6, item_chars=900):
             projected[key] = value
         compacted.append(projected or {"evidence": compact_text(item, item_chars)})
     return compacted
+
+
+def _mutation_failure_records(value):
+    if not isinstance(value, dict):
+        return []
+    return [
+        copy.deepcopy(item)
+        for item in (value.get("mutation_failures", []) or [])
+        if isinstance(item, dict) and item.get("kind") == "mutation_failure"
+    ]
+
+
+def _failure_evidence_key(item):
+    if isinstance(item, dict) and item.get("kind") == "mutation_failure":
+        return (
+            "mutation_failure", item.get("category"), item.get("tool"),
+            item.get("target"), item.get("role"),
+        )
+    if isinstance(item, dict):
+        return ("dict", json.dumps(item, ensure_ascii=False, sort_keys=True, default=str))
+    return ("value", str(item))
+
+
+def _unique_failure_evidence(items):
+    unique = []
+    seen = set()
+    for item in items or []:
+        key = _failure_evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _merge_mutation_failure_records(*groups):
+    """Aggregate a bounded mutation-failure history without retaining payloads."""
+    merged = []
+    positions = {}
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, dict) or item.get("kind") != "mutation_failure":
+                continue
+            key = (
+                item.get("category"), item.get("tool"), item.get("target"), item.get("role"),
+            )
+            try:
+                count = max(1, int(item.get("count", 1) or 1))
+            except (TypeError, ValueError):
+                count = 1
+            if key in positions:
+                current = merged[positions[key]]
+                current["count"] = int(current.get("count", 1) or 1) + count
+                if item.get("summary"):
+                    current["summary"] = item["summary"]
+                continue
+            if len(merged) >= MAX_MUTATION_FAILURE_RECORDS:
+                continue
+            current = copy.deepcopy(item)
+            current["count"] = count
+            merged.append(current)
+            positions[key] = len(merged) - 1
+    return merged
+
+
+def _worker_failure_evidence(worker_result):
+    if not isinstance(worker_result, dict):
+        return []
+    return _unique_failure_evidence(
+        list(evidence_for_review(worker_result.get("tool_evidence", [])))
+        + _mutation_failure_records(worker_result)
+    )
 
 
 def _effective_preflight(value):
@@ -4260,20 +4369,26 @@ def _failure_evidence_from_result(result):
         return []
     preflight = _effective_preflight(result.get("integration_preflight"))
     if preflight and not preflight.get("passed"):
-        return _integration_failure_evidence(preflight) + _compact_failure_evidence(
-            result.get("failure_evidence", []), max_items=4,
+        return _compact_failure_evidence(
+            _unique_failure_evidence(
+                _integration_failure_evidence(preflight)
+                + list(result.get("failure_evidence", []) or [])
+                + _mutation_failure_records(result)
+            ),
+            max_items=6,
         )
     candidates = []
     direct = result.get("failure_evidence")
     if isinstance(direct, list):
         candidates.extend(direct)
+    candidates.extend(_mutation_failure_records(result))
     gate = result.get("gate")
     if isinstance(gate, dict):
         candidates.extend(gate.get("deterministic_failures", []) or [])
-    for source_name in ("builder", "falsifier"):
+    for source_name in ("builder", "repairer", "falsifier"):
         source = result.get(source_name)
         if isinstance(source, dict):
-            candidates.extend(evidence_for_review(source.get("tool_evidence", [])))
+            candidates.extend(_worker_failure_evidence(source))
     browser = result.get("browser")
     if isinstance(browser, dict) and not browser.get("passed"):
         if browser.get("environment_error"):
@@ -4304,7 +4419,7 @@ def _failure_evidence_from_result(result):
     execution_evidence = result.get("execution_evidence")
     if isinstance(execution_evidence, list):
         candidates.extend(execution_evidence)
-    return _compact_failure_evidence(candidates)
+    return _compact_failure_evidence(_unique_failure_evidence(candidates))
 
 
 def _looks_like_tiny_scope(task):
@@ -4424,6 +4539,19 @@ def _has_concrete_executable_failure(evidence):
         failure_type = str(item.get("failure_type", "")).casefold()
         if item.get("environment_error") is True or kind in {"browser_environment", "provider_failure", "environment"}:
             continue
+        if kind == "mutation_failure":
+            category = str(item.get("category", "")).upper()
+            try:
+                mutation_count = max(1, int(item.get("count", 1) or 1))
+            except (TypeError, ValueError):
+                mutation_count = 1
+            if category in {"SAFETY_REJECTED_MUTATION", "ENVIRONMENT_FAILURE", "MISSING_TARGET"}:
+                continue
+            if category == "STALE_TARGET" and mutation_count < 2:
+                continue
+            if category in {"INVALID_MUTATION", "SYNTAX_INVALID_MUTATION", "STALE_TARGET"}:
+                return True
+            continue
         if failure_type in {VERIFICATION_TARGET_UNRESOLVED.casefold(), "environment_error"}:
             continue
         nested_text = " ".join(
@@ -4450,6 +4578,18 @@ def _has_concrete_executable_failure(evidence):
         if implementation_failure_text(nested_text):
             return True
     return False
+
+
+def _has_only_non_implementation_mutation_evidence(evidence):
+    records = [
+        item for item in evidence or []
+        if isinstance(item, dict) and item.get("kind") == "mutation_failure"
+    ]
+    if not records or _has_concrete_executable_failure(evidence):
+        return False
+    return all(str(item.get("category", "")).upper() in {
+        "SAFETY_REJECTED_MUTATION", "ENVIRONMENT_FAILURE", "MISSING_TARGET",
+    } for item in records)
 
 
 def _has_failed_repair_history(task, result=None):
@@ -4904,6 +5044,14 @@ def diagnose_failure(task, result, evidence=None):
                 "The execution reported TASK_TOO_BROAD without task-fit or scope-assessment provenance; do not treat "
                 "the marker itself as positive scope evidence."
             )
+    elif _concrete_environment_failure(evidence):
+        category = "environment_failure"
+        confidence = "high"
+        rationale = "The mutation evidence identifies an external runtime or filesystem failure; keep it separate from implementation strategy evidence."
+    elif _has_only_non_implementation_mutation_evidence(evidence):
+        category = "unknown"
+        confidence = "low"
+        rationale = "The recorded mutation was rejected by a tool/safety or target contract, not by the application; do not infer an implementation strategy failure."
     elif failure_type == "ENVIRONMENT_ERROR":
         category = "environment_failure"
         confidence = "high"
@@ -4989,6 +5137,10 @@ def diagnose_failure(task, result, evidence=None):
         "environment_failure": "environment_retry",
         "unknown": "collect_more_failure_evidence",
     }
+    mutation_evidence = [
+        copy.deepcopy(item) for item in evidence
+        if isinstance(item, dict) and item.get("kind") == "mutation_failure"
+    ]
     diagnosis = {
         "category": category,
         "confidence": confidence,
@@ -5004,6 +5156,7 @@ def diagnose_failure(task, result, evidence=None):
             "fit_before_execution": copy.deepcopy(task.get("fit_before_execution")),
             "positive_scope_evidence": bool(positive_scope_evidence),
             "implementation_evidence": bool(implementation_evidence),
+            "mutation_evidence": mutation_evidence,
             "environment_healthy": not (
                 _concrete_environment_failure(result) or _concrete_environment_failure(evidence)
             ),
@@ -5077,6 +5230,10 @@ def _record_task_failure(task, result, phase="execution"):
         "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
         "failure_evidence": evidence,
     }
+    if result.get("mutation_failures"):
+        projection["mutation_failures"] = _compact_failure_evidence(
+            result.get("mutation_failures", []), max_items=MAX_MUTATION_FAILURE_RECORDS,
+        )
     if _is_execution_budget_exhausted(result):
         projection.update({
             "execution_outcome": EXECUTION_BUDGET_EXHAUSTED,
@@ -5569,7 +5726,7 @@ def print_search_metrics():
         "capability_floor_guard_blocks", "capability_floor_routed_to_strategy",
         "execution_budget_exhaustions", "budget_exhaustion_routed_to_scope",
         "budget_exhaustion_routed_to_strategy", "budget_exhaustion_routed_to_dependency",
-        "budget_exhaustion_routed_to_other",
+        "budget_exhaustion_routed_to_other", "mutation_failures_recorded",
     ):
         print(f"{key}: {RUN.get(key)}")
     backtrack_rate = RUN.get("decomposition_backtrack_rescue_rate")
@@ -5637,12 +5794,13 @@ def repair_task(task, contract, failure_evidence, memory, node_context):
 def _neutral_budget_result(task, worker_result, memory, dependency_summaries=None,
                            repair_history=None, failure_evidence=None, **extra):
     evidence = list(failure_evidence or [])
-    evidence.extend(evidence_for_review(worker_result.get("tool_evidence", [])))
+    evidence.extend(_worker_failure_evidence(worker_result))
     if not evidence:
         evidence = [{
             "kind": "execution_outcome", "status": "FAIL", "source": "deterministic",
             "evidence": EXECUTION_BUDGET_EXHAUSTED,
         }]
+    mutation_records = _mutation_failure_records(worker_result)
     result = {
         "status": "budget_exhausted",
         "failure_type": EXECUTION_BUDGET_EXHAUSTED,
@@ -5651,8 +5809,9 @@ def _neutral_budget_result(task, worker_result, memory, dependency_summaries=Non
             "summary", f"{EXECUTION_BUDGET_EXHAUSTED}: focused execution ended without verified completion",
         ),
         "memory": memory,
-        "failure_evidence": _compact_failure_evidence(evidence),
-        "execution_evidence": _compact_failure_evidence(worker_result.get("tool_evidence", []), max_items=8),
+        "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(evidence)),
+        "execution_evidence": _compact_failure_evidence(_worker_failure_evidence(worker_result), max_items=8),
+        "mutation_failures": mutation_records,
         "changed_files": bounded_list(worker_result.get("changed_files", []), 8, 140),
         "repair_history": list(repair_history or [])[-MAX_REPAIRS_PER_LEAF:],
         "step_budget": int(worker_result.get("step_budget", 0) or 0),
@@ -5695,11 +5854,14 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     if builder["status"] == "too_broad":
         RUN["task_too_broad_count"] += 1
         rollback_transaction()
-        failure_evidence = list(evidence_for_review(builder.get("tool_evidence", [])))
+        failure_evidence = _worker_failure_evidence(builder)
         failure_evidence.append({"kind": "task_status", "result": builder.get("summary", "TASK_TOO_BROAD")})
         return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": builder["summary"],
                 "memory": memory, "builder": builder,
-                "failure_evidence": failure_evidence[-6:]}
+                "failure_evidence": _compact_failure_evidence(
+                    _unique_failure_evidence(failure_evidence), max_items=8,
+                ),
+                "mutation_failures": _mutation_failure_records(builder)}
     if builder["status"] == "provider_failure":
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": builder["summary"],
@@ -5738,9 +5900,13 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     current_gate = gate
     current_browser = browser
     repair_history = []
+    repair_mutation_failures = _mutation_failure_records(builder)
     for _ in range(MAX_REPAIRS_PER_LEAF):
         repaired = repair_task(task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context)
         memory = repaired["memory"]
+        repair_mutation_failures = _merge_mutation_failure_records(
+            repair_mutation_failures, _mutation_failure_records(repaired),
+        )
         repair_history.append({
             "status": str(repaired.get("status", "failed")),
             "failure_type": str(repaired.get("failure_type", "")),
@@ -5750,22 +5916,31 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         if repaired["status"] == "provider_failure":
             rollback_transaction()
             return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": repaired["summary"],
-                    "memory": memory, "repair_history": repair_history}
+                    "memory": memory, "repair_history": repair_history,
+                    "repairer": repaired, "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(repair_mutation_failures)}
         if _is_execution_budget_exhausted(repaired):
             rollback_transaction()
             return _neutral_budget_result(
                 task, repaired, memory, dependency_summaries,
                 repair_history=repair_history,
-                failure_evidence=current_gate.get("deterministic_failures", []),
+                failure_evidence=_unique_failure_evidence(
+                    current_gate.get("deterministic_failures", []) + repair_mutation_failures,
+                ),
                 builder=repaired, repairer=repaired, falsifier=falsifier,
                 browser=current_browser, gate=current_gate,
+                mutation_failures=repair_mutation_failures,
             )
         if repaired["status"] == "too_broad":
             RUN["task_too_broad_count"] += 1
             rollback_transaction()
             return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": repaired["summary"],
-                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"],
-                    "repair_history": repair_history}
+                    "memory": memory,
+                    "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(
+                        current_gate["deterministic_failures"] + repair_mutation_failures,
+                    )),
+                    "repair_history": repair_history, "repairer": repaired,
+                    "mutation_failures": repair_mutation_failures}
         # Fresh verification only: do not carry stale Builder/Falsifier failures into the post-repair gate.
         current_browser = optional_browser_check(
             task, ACTIVE_TOOL_CONTRACT,
@@ -5780,19 +5955,24 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             remember_verified_outcome(task, contract, repaired["summary"], changed)
             result = {"status": "done", "summary": repaired["summary"], "memory": memory, "builder": repaired,
                       "falsifier": falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed,
-                      "repair_history": repair_history}
+                      "repair_history": repair_history, "mutation_failures": repair_mutation_failures}
             attach_verified_manifest(task, result)
             return result
         failure_type = classify_failure(repaired, current_gate, current_browser, None)
         if failure_type != "IMPLEMENTATION_ERROR":
             rollback_transaction()
             return {"status": "failed", "failure_type": failure_type, "summary": f"fresh verification failed: {failure_type}",
-                    "memory": memory, "repair_history": repair_history}
+                    "memory": memory, "repair_history": repair_history, "repairer": repaired,
+                    "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(repair_mutation_failures)}
     rollback_transaction()
     return {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR",
             "summary": "failed deterministic evidence gate after repair limit", "memory": memory,
-            "failure_evidence": current_gate["deterministic_failures"],
-            "repair_history": repair_history}
+            "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(
+                current_gate["deterministic_failures"] + repair_mutation_failures,
+            )),
+            "repair_history": repair_history, "repairer": repaired,
+            "mutation_failures": repair_mutation_failures}
 
 
 def _integration_blocking_conflicts(preflight):
@@ -5914,7 +6094,8 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             "status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
             "summary": builder.get("summary", "integration task exceeds capacity"),
             "memory": memory, "builder": builder,
-            "failure_evidence": _compact_failure_evidence(builder.get("tool_evidence", [])),
+            "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
+            "mutation_failures": _mutation_failure_records(builder),
         }
     if builder.get("status") == "provider_failure":
         rollback_transaction()
@@ -5961,9 +6142,13 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     current_preflight = preflight
     current_browser = browser
     repair_history = []
+    repair_mutation_failures = []
     for _ in range(MAX_REPAIRS_PER_LEAF):
         repaired = repair_task(task, contract, current_gate["deterministic_failures"], memory, node_context)
         memory = repaired.get("memory", memory)
+        repair_mutation_failures = _merge_mutation_failure_records(
+            repair_mutation_failures, _mutation_failure_records(repaired),
+        )
         repair_history.append({
             "status": str(repaired.get("status", "failed")),
             "failure_type": str(repaired.get("failure_type", "")),
@@ -5974,15 +6159,20 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             rollback_transaction()
             return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
                     "summary": repaired.get("summary", "integration repair provider failure"), "memory": memory,
-                    "repair_history": repair_history}
+                    "repair_history": repair_history, "repairer": repaired,
+                    "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(repair_mutation_failures)}
         if _is_execution_budget_exhausted(repaired):
             rollback_transaction()
             return _neutral_budget_result(
                 task, repaired, memory, dependency_summaries,
                 repair_history=repair_history,
-                failure_evidence=current_gate.get("deterministic_failures", []),
+                failure_evidence=_unique_failure_evidence(
+                    current_gate.get("deterministic_failures", []) + repair_mutation_failures,
+                ),
                 builder=repaired, repairer=repaired, browser=current_browser,
                 gate=current_gate, integration_preflight=task.get("integration_preflight"),
+                mutation_failures=repair_mutation_failures,
             )
         if repaired.get("status") == "too_broad":
             RUN["task_too_broad_count"] += 1
@@ -5990,8 +6180,12 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             rollback_transaction()
             return {"status": "too_broad", "failure_type": "INTEGRATION_TOO_BROAD",
                     "summary": repaired.get("summary", "integration repair exceeds capacity"),
-                    "memory": memory, "failure_evidence": current_gate["deterministic_failures"],
-                    "repair_history": repair_history}
+                    "memory": memory,
+                    "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(
+                        current_gate["deterministic_failures"] + repair_mutation_failures,
+                    )),
+                    "repair_history": repair_history, "repairer": repaired,
+                    "mutation_failures": repair_mutation_failures}
         current_preflight = run_integration_preflight(
             task, _integration_child_info_from_context(task), contract,
         )
@@ -6024,8 +6218,11 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     return {"status": "failed", "failure_type": failure_type,
             "summary": "integration task failed after repair limit", "memory": memory,
             "gate": current_gate, "integration_preflight": task["integration_preflight"],
-            "failure_evidence": current_gate.get("deterministic_failures", []),
-            "repair_history": repair_history}
+            "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(
+                current_gate.get("deterministic_failures", []) + repair_mutation_failures,
+            )),
+            "repair_history": repair_history, "repairer": repaired,
+            "mutation_failures": repair_mutation_failures}
 
 
 # ---------------------------------------------------------------------------
@@ -7082,10 +7279,11 @@ def run_integration_milestones(task, contract, child_info, memory, repo_snapshot
         result = execute_agent_task(goal, memory, role="Builder", task_id=f"{label}:integration:{milestone_id}",
                                     extra_context=context)
         memory = result.get("memory", memory)
-        evidence.extend(result.get("tool_evidence", []))
+        milestone_evidence = _worker_failure_evidence(result)
+        evidence.extend(milestone_evidence)
         records.append({"id": milestone_id, "status": result.get("status", "failed"),
                         "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
-                        "evidence": _compact_failure_evidence(result.get("tool_evidence", []), max_items=4)})
+                        "evidence": _compact_failure_evidence(milestone_evidence, max_items=4)})
         if result.get("status") != "done":
             failure_type = "ENVIRONMENT_ERROR" if result.get("status") == "provider_failure" else (
                 "INTEGRATION_TOO_BROAD" if result.get("status") == "too_broad" else "INTEGRATION_FAILURE"
@@ -7093,6 +7291,9 @@ def run_integration_milestones(task, contract, child_info, memory, repo_snapshot
             return {"status": "failed", "failure_type": failure_type,
                     "summary": f"integration milestone {milestone_id} failed: {result.get('summary', '')}",
                     "memory": memory, "tool_evidence": evidence, "integration_milestones": records,
+                    "mutation_failures": _merge_mutation_failure_records(
+                        _mutation_failure_records(result),
+                    ),
                     "failure_evidence": _integration_failure_evidence(current) or _compact_failure_evidence(evidence)}
         refreshed = run_integration_preflight(task, child_info, contract)
         current = dict(current)
@@ -7433,9 +7634,12 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         failure_type = "ENVIRONMENT_ERROR" if builder["status"] == "provider_failure" else (
             "INTEGRATION_TOO_BROAD" if builder["status"] == "too_broad" else "INTEGRATION_FAILURE"
         )
+        parent_failure_evidence = _integration_failure_evidence(preflight_after) + _worker_failure_evidence(builder)
         return {"status": "failed",
                 "failure_type": failure_type, "summary": builder["summary"], "memory": memory,
-                "failure_evidence": _integration_failure_evidence(preflight_after) or builder.get("tool_evidence", []),
+                "builder": builder,
+                "mutation_failures": _mutation_failure_records(builder),
+                "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(parent_failure_evidence)),
                 "integration_preflight": task["integration_preflight"],
                 "integration_milestones": builder.get("integration_milestones", []), "children": child_info}
 
@@ -7491,21 +7695,30 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         current_browser = browser
         current_preflight = preflight_after
         repaired = None
+        integration_repair_mutation_failures = []
         for _ in range(MAX_REPAIRS_PER_LEAF):
             repaired = repair_task(task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"],
                                    memory, integration_context)
             memory = repaired["memory"]
+            integration_repair_mutation_failures = _merge_mutation_failure_records(
+                integration_repair_mutation_failures, _mutation_failure_records(repaired),
+            )
             if repaired["status"] == "provider_failure":
                 _finish_parent_integration(task, passed=False, preflight=current_preflight)
                 rollback_transaction(); RUN["integration_failures"] += 1
                 return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
-                        "summary": repaired["summary"], "memory": memory, "children": child_info}
+                        "summary": repaired["summary"], "memory": memory, "children": child_info,
+                        "repairer": repaired, "mutation_failures": integration_repair_mutation_failures,
+                        "failure_evidence": _compact_failure_evidence(integration_repair_mutation_failures)}
             if repaired["status"] == "too_broad":
                 _finish_parent_integration(task, passed=False, preflight=current_preflight)
                 rollback_transaction(); RUN["integration_failures"] += 1
                 return {"status": "failed", "failure_type": "INTEGRATION_TOO_BROAD",
                         "summary": repaired["summary"], "memory": memory, "children": child_info,
-                        "integration_preflight": task["integration_preflight"]}
+                        "integration_preflight": task["integration_preflight"],
+                        "repairer": repaired,
+                        "mutation_failures": integration_repair_mutation_failures,
+                        "failure_evidence": _compact_failure_evidence(integration_repair_mutation_failures)}
             current_preflight = run_integration_preflight(task, child_info, contract)
             task["integration_preflight"]["after"] = current_preflight
             current_browser = (
@@ -7540,15 +7753,21 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                 rollback_transaction(); RUN["integration_failures"] += 1
                 return {"status": "failed", "failure_type": failure_type,
                         "summary": "fresh parent verification failed", "memory": memory, "gate": current_gate,
-                        "children": child_info, "integration_preflight": task["integration_preflight"]}
+                        "children": child_info, "integration_preflight": task["integration_preflight"],
+                        "repairer": repaired, "mutation_failures": integration_repair_mutation_failures,
+                        "failure_evidence": _compact_failure_evidence(integration_repair_mutation_failures)}
         _finish_parent_integration(task, passed=False, preflight=current_preflight)
         rollback_transaction(); RUN["integration_failures"] += 1
         terminal_failure_type = "INTEGRATION_FAILURE" if not current_preflight.get("passed") else "IMPLEMENTATION_ERROR"
         return {"status": "failed", "failure_type": terminal_failure_type,
                 "summary": "parent integration failed after repair limit", "memory": memory, "gate": current_gate,
                 "children": child_info, "integration_preflight": task["integration_preflight"],
-                "failure_evidence": _integration_failure_evidence(task["integration_preflight"].get("after"))
-                or current_gate.get("deterministic_failures", [])}
+                "repairer": repaired, "mutation_failures": integration_repair_mutation_failures,
+                "failure_evidence": _compact_failure_evidence(_unique_failure_evidence(
+                    _integration_failure_evidence(task["integration_preflight"].get("after"))
+                    + current_gate.get("deterministic_failures", [])
+                    + integration_repair_mutation_failures,
+                ))}
     changed = commit_transaction()
     remember_verified_outcome(task, contract, builder["summary"], changed)
     _finish_parent_integration(

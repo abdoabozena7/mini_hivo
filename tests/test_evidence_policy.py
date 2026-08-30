@@ -2,6 +2,32 @@ import unittest
 
 
 class EvidencePolicyTests(unittest.TestCase):
+    def test_mutation_failure_record_classifies_deterministic_categories(self):
+        from hivo.evidence import mutation_failure_record
+
+        cases = [
+            ("error: malformed edit request", "INVALID_MUTATION"),
+            ("error: JavaScript syntax validation failed: Unexpected token '}'", "SYNTAX_INVALID_MUTATION"),
+            ("error: path is outside the workspace", "SAFETY_REJECTED_MUTATION"),
+            ("error: expected 1 exact replacement(s), found 0; file was not changed", "STALE_TARGET"),
+            ("error: file does not exist: app.js", "MISSING_TARGET"),
+            ("error writing file: permission denied", "ENVIRONMENT_FAILURE"),
+        ]
+        for result, expected in cases:
+            with self.subTest(expected=expected):
+                record = mutation_failure_record("edit_file", "app.js", result, role="Builder")
+                self.assertIsNotNone(record)
+                self.assertEqual(record["kind"], "mutation_failure")
+                self.assertEqual(record["category"], expected)
+                self.assertTrue(record["deterministic"])
+                self.assertEqual(record["count"], 1)
+
+    def test_mutation_failure_record_only_accepts_failed_mutation_tools(self):
+        from hivo.evidence import mutation_failure_record
+
+        self.assertIsNone(mutation_failure_record("edit_file", "app.js", "edited app.js"))
+        self.assertIsNone(mutation_failure_record("run_command", "pytest", "error: malformed command"))
+
     def test_not_applicable_runtime_probe_is_neither_success_nor_failure_evidence(self):
         from hivo.evidence import latest_verification_evidence, unresolved_tool_failures
 

@@ -173,6 +173,34 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             task, failure, failure["failure_evidence"],
         ))
 
+    def test_v12_shape_preserves_repeated_mutation_evidence_at_max_depth(self):
+        task = mini.make_task(
+            "v12-mutation-shape", "Implement one focused behavior", mini.MAX_DEPTH,
+            "parent", ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {
+            "decision": "EXECUTE", "reason": "bounded focused node",
+        }
+        mutation = mini.mutation_failure_record(
+            "edit_file", "app.js", "error: malformed edit request", role="Builder",
+        )
+        mutation["count"] = 2
+        failure = self.neutral_budget_failure(evidence=[mutation])
+        failure["repair_history"] = [{
+            "status": "failed", "failure_type": mini.EXECUTION_BUDGET_EXHAUSTED,
+            "summary": "repair retained the mutation failure",
+        }]
+
+        diagnosis = mini.diagnose_failure(task, failure)
+
+        self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+        self.assertEqual(diagnosis["category"], "implementation_strategy_wrong")
+        self.assertTrue(diagnosis["diagnosis_evidence"]["implementation_evidence"])
+        self.assertEqual(
+            diagnosis["diagnosis_evidence"]["mutation_evidence"][0]["category"],
+            "INVALID_MUTATION",
+        )
+
     def test_behavioral_failure_after_repair_does_not_become_scope_from_budget(self):
         task = mini.make_task(
             "behavior-budget", "Implement one focused behavior", 3, "ROOT",
@@ -418,6 +446,37 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(result["status"], "done")
         self.assertFalse(task["failure_diagnosis"]["diagnosis_evidence"]["positive_scope_evidence"])
         self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        strategy_leaf.assert_called_once()
+
+    def test_structured_mutation_evidence_reaches_existing_strategy_search(self):
+        task = mini.make_task(
+            "mutation-strategy", "Implement one focused behavior", mini.MAX_DEPTH, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        mutation = mini.mutation_failure_record(
+            "edit_file", "app.js", "error: malformed edit request", role="Builder",
+        )
+        failure = {
+            "status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+            "summary": "Builder stopped after repeated invalid mutations", "memory": {},
+            "failure_evidence": [mutation], "mutation_failures": [mutation],
+        }
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", return_value={
+                    "status": "done", "summary": "strategy verified", "memory": {},
+                }) as strategy_leaf:
+            result = mini.solve_task(
+                task, task["depth"], self.contract(), {}, {},
+                fit_decider=lambda *_args: {"decision": "execute", "reason": "focused node"},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertTrue(task["failure_diagnosis"]["diagnosis_evidence"]["mutation_evidence"])
         self.assertEqual(mini.RUN["strategy_searches"], 1)
         strategy_leaf.assert_called_once()
 
