@@ -32,7 +32,7 @@ migrated once into `list/project-1`.
 
 ## Browser-game verification contract
 
-Generated browser games must expose `window.__AGENT_GAME__` with real adapters
+Generated browser games must expose `window.AGENT_GAME` with real adapters
 to the application logic:
 
 - `getState()`

@@ -59,6 +59,7 @@ from hivo.requirements import retention_summary
 from hivo.requirements import source_contract_from_ledger
 from hivo.requirements import specification_coverage
 from hivo.requirements import thaw
+from hivo.verification import GAME_BRIDGE_EXPRESSION, GAME_BRIDGE_NAME
 from hivo.verification import evaluate_web_snapshot, infer_web_profile
 
 # ---------------------------------------------------------------------------
@@ -1464,7 +1465,7 @@ SYSTEM_PROMPT = (
     "model-owned drafts; use focused edit_file/edit_file_range for existing files. Keep changes scoped to CURRENT NODE. "
     "Before stopping, run at least one relevant executable verification covering the current node; a file-write-only "
     "result is incomplete. Use tests, commands, or browser checks before claiming completion. For browser games expose "
-    "window.__AGENT_GAME__ with getState(), start(), restart(), move(direction), plus forceCollision/forceCollect/forceWin "
+    f"{GAME_BRIDGE_EXPRESSION} with getState(), start(), restart(), move(direction), plus forceCollision/forceCollect/forceWin "
     "when those mechanics are requested. If tools or environment fail, report truthfully. Do not reveal hidden reasoning."
 )
 ROLE_SYSTEM_PROMPTS = {
@@ -5178,17 +5179,17 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
             page.wait_for_timeout(500)
             title = page.title()
             text = page.locator("body").inner_text(timeout=5000)[:4000]
-            runtime_state = page.evaluate("""() => {
-                const bridge = window.__AGENT_GAME__ || window.__HOPLINE__ || null;
+            runtime_state = page.evaluate(f"""() => {{
+                const bridge = {GAME_BRIDGE_EXPRESSION} || null;
                 const state = bridge && typeof bridge.getState === 'function' ? bridge.getState() : null;
-                return {canvasCount: document.querySelectorAll('canvas').length,
-                        gameBridge: bridge ? {name: window.__AGENT_GAME__ ? '__AGENT_GAME__' : '__HOPLINE__', state} : null,
-                        debugState: state};
-            }""")
+                return {{canvasCount: document.querySelectorAll('canvas').length,
+                        gameBridge: bridge ? {{name: {json.dumps(GAME_BRIDGE_NAME)}, state}} : null,
+                        debugState: state}};
+            }}""")
             interaction_checks = []
             has_game_probe = bool(runtime_state.get("gameBridge"))
             if has_game_probe:
-                bridge_expr = "window.__AGENT_GAME__ || window.__HOPLINE__"
+                bridge_expr = GAME_BRIDGE_EXPRESSION
                 page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
                 page.wait_for_timeout(100)
                 before_move = page.evaluate(f"() => ({bridge_expr}).getState()")
@@ -5255,10 +5256,10 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
                     if best_before is not None:
                         page.reload(wait_until="domcontentloaded", timeout=15000)
                         page.wait_for_timeout(350)
-                        persisted = page.evaluate("""() => {
-                            const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        persisted = page.evaluate(f"""() => {{
+                            const game = {GAME_BRIDGE_EXPRESSION};
                             return game && typeof game.getState === 'function' ? game.getState() : null;
-                        }""")
+                        }}""")
                         best_after = (persisted or {}).get("best")
                         interaction_checks.append({
                             "name": "score_persistence",
@@ -5277,20 +5278,20 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
                     button = page.locator(selector).first
                     available = button.count() > 0 and button.is_visible()
                     if available:
-                        page.evaluate("""() => {
-                            const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        page.evaluate(f"""() => {{
+                            const game = {GAME_BRIDGE_EXPRESSION};
                             if (game && typeof game.restart === 'function') game.restart();
                             if (game && typeof game.start === 'function') game.start();
-                        }""")
-                        before_touch = page.evaluate("""() => {
-                            const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        }}""")
+                        before_touch = page.evaluate(f"""() => {{
+                            const game = {GAME_BRIDGE_EXPRESSION};
                             return game && game.getState ? game.getState() : null;
-                        }""")
+                        }}""")
                         button.click(); page.wait_for_timeout(650)
-                        after_touch = page.evaluate("""() => {
-                            const game = window.__AGENT_GAME__ || window.__HOPLINE__;
+                        after_touch = page.evaluate(f"""() => {{
+                            const game = {GAME_BRIDGE_EXPRESSION};
                             return game && game.getState ? game.getState() : null;
-                        }""")
+                        }}""")
                         interaction_checks.append({"name": "touch_control", "passed": after_touch != before_touch,
                                                    "before": before_touch, "after": after_touch})
                     else:
@@ -10648,6 +10649,19 @@ def run_self_test(install_browser=False):
             "window.AGENT_GAME", "getState()", "start()", "restart()",
             "move(direction)", "forceCollision()", "forceCollect()", "forceWin()",
         ]
+        v16_bridge_profile = infer_web_profile("Build a browser game", {})
+        v16_bridge_verification = evaluate_web_snapshot({
+            "title": "Arena Game", "text": "Playable arena game",
+            "console_errors": [], "page_errors": [], "network_errors": [],
+            "runtime_state": {
+                "canvasCount": 1,
+                "gameBridge": {"name": GAME_BRIDGE_NAME, "state": {"status": "playing"}},
+            },
+            "interaction_checks": [
+                {"name": name, "passed": True}
+                for name in v16_bridge_profile.required_interactions
+            ],
+        }, v16_bridge_profile)
         v16_conflict_raw = "Build a timer.\n- restart resets everything\n- persist the best score"
         v16_conflict_ledger = extract_source_requirement_ledger(v16_conflict_raw, use_model=False)
         v16_blocking_questions = clarify_request(v16_conflict_raw, v16_conflict_ledger)
@@ -10746,6 +10760,18 @@ def run_self_test(install_browser=False):
             "exact identifier preservation": (
                 "window.AGENT_GAME" in v16_inline_records[0].get("explicit_items", [])
                 and "forceCollision()" in v16_inline_records[0].get("explicit_items", [])
+            ),
+            "source contract bridge": (
+                GAME_BRIDGE_NAME == "AGENT_GAME"
+                and GAME_BRIDGE_EXPRESSION == "window.AGENT_GAME"
+                and v16_inline_records[0].get("explicit_items", [])[0] == GAME_BRIDGE_EXPRESSION
+            ),
+            "verification bridge": (
+                v16_bridge_verification["passed"]
+                and not any(
+                    item.get("code") == "missing_game_bridge"
+                    for item in v16_bridge_verification.get("failures", [])
+                )
             ),
             "clarifier true contradiction": (
                 len(v16_blocking_questions["conflicts"]) == 1
