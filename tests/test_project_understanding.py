@@ -75,6 +75,99 @@ class ProjectUnderstandingTests(unittest.TestCase):
 }
 """, encoding="utf-8")
 
+    def write_controlled_fixture(self):
+        """Small deterministic existing project used by the v17.2 evidence tests."""
+        src = mini.WORKSPACE / "src"
+        tests = mini.WORKSPACE / "tests"
+        src.mkdir(parents=True, exist_ok=True)
+        tests.mkdir(parents=True, exist_ok=True)
+        (src / "input.js").write_text(
+            """export class InputManager {
+  constructor() {
+    this.keys = new Set();
+  }
+  onKeyDown(event) {
+    const key = event.key;
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"].includes(key)) {
+      this.keys.add(key);
+    }
+  }
+  isPressed(key) {
+    return this.keys.has(key);
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        (src / "game.js").write_text(
+            """export class GameState {
+  constructor() {
+    this.paused = false;
+    this.score = 0;
+  }
+  togglePause() {
+    this.paused = !this.paused;
+  }
+  addScore(points) {
+    this.score += points;
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        (src / "storage.js").write_text(
+            """const BEST_SCORE_KEY = "existing-game.best-score";
+export function loadBestScore(storage = localStorage) {
+  return Number(storage.getItem(BEST_SCORE_KEY) || 0);
+}
+export function saveBestScore(score, storage = localStorage) {
+  storage.setItem(BEST_SCORE_KEY, String(score));
+}
+""",
+            encoding="utf-8",
+        )
+        (tests / "input.test.js").write_text(
+            """import { InputManager } from "../src/input.js";
+describe("keyboard input", () => {
+  it("keeps arrow controls", () => {
+    const input = new InputManager();
+    expect(input.isPressed("ArrowUp")).toBe(false);
+  });
+});
+""",
+            encoding="utf-8",
+        )
+        (mini.WORKSPACE / "index.html").write_text(
+            """<!doctype html>
+<html><body>
+  <script type="module" src="src/input.js"></script>
+  <script type="module" src="src/game.js"></script>
+  <script type="module" src="src/storage.js"></script>
+</body></html>
+""",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def controlled_task():
+        return (
+            "Add Escape-key pause/resume support to the existing game. Reuse the current input and "
+            "pause-state architecture instead of creating duplicate input state or another game-state owner. "
+            "Preserve the current WASD/arrow controls and persistent best-score behavior. "
+            "Update or add the relevant tests."
+        )
+
+    def controlled_recon(self):
+        self.write_controlled_fixture()
+        raw = self.controlled_task()
+        ledger = mini.extract_source_requirement_ledger(raw, use_model=False)
+        contract = self.contract(raw)
+        inventory = understanding.inventory_repository(mini.WORKSPACE)
+        recon = understanding.run_repository_reconnaissance(
+            mini.WORKSPACE, raw, mini.ledger_requirements(ledger), inventory=inventory,
+        )
+        return raw, ledger, contract, inventory, recon
+
     def pause_recon(self):
         raw = "Change pause keyboard behavior.\n- Escape toggles pause."
         contract = self.contract(raw)
@@ -83,6 +176,157 @@ class ProjectUnderstandingTests(unittest.TestCase):
             raw, contract, inventory=classification["inventory"], use_model_scout=False,
         )
         return raw, contract, classification, recon
+
+    def test_task_grounded_search_vocabulary_is_bounded_and_semantic(self):
+        raw = self.controlled_task()
+        terms = understanding.repository_search_terms(raw)
+        self.assertLessEqual(len(terms), understanding.MAX_RECON_SEARCHES)
+        self.assertIn("WASD", terms)
+        self.assertIn("tests", terms)
+        self.assertTrue(any("pause" in item.casefold() for item in terms))
+        self.assertTrue(any("state" in item.casefold() for item in terms))
+        self.assertTrue(any("score" in item.casefold() for item in terms))
+        self.assertTrue(any("input" in item.casefold() for item in terms))
+        self.assertNotIn("Reuse", terms)
+        self.assertNotIn("Preserve", terms)
+        self.assertNotIn("Update", terms)
+        self.assertNotIn("InputManager", terms)
+        self.assertEqual(
+            understanding._search_term_variants("pause-state"),
+            ["pause-state", "pause state", "pause", "state"],
+        )
+
+    def test_compound_source_requirements_preserve_all_explicit_constraints(self):
+        raw = self.controlled_task()
+        ledger = mini.extract_source_requirement_ledger(raw, use_model=False)
+        records = mini.ledger_requirements(ledger)
+        text = " ".join(item.get("text", "") for item in records)
+        self.assertEqual(ledger.get("immutable"), True)
+        self.assertEqual(sum([
+            "Escape-key pause/resume" in text,
+            "current input" in text and "architecture" in text,
+            "pause-state architecture" in text,
+            "duplicate input state" in text,
+            "another game-state owner" in text,
+            "WASD/arrow controls" in text,
+            "persistent best-score behavior" in text,
+            "relevant tests" in text,
+        ]), 8)
+        self.assertTrue(all(item.get("provenance") == mini.USER_STATED for item in records))
+        self.assertTrue(all(item.get("source_segments") == [1] for item in records))
+
+    def test_equivalent_compound_reuse_and_preservation_constraints_stay_user_stated(self):
+        examples = (
+            "Reuse the current authentication service instead of creating another token owner.",
+            "Preserve the existing API contract while replacing the storage layer.",
+            "Keep the current router and extend it rather than adding a second routing system.",
+            "Use the existing cache implementation and do not introduce another cache owner.",
+            "Replace X while preserving Y.",
+        )
+        for raw in examples:
+            records = mini.ledger_requirements(mini.extract_source_requirement_ledger(raw, use_model=False))
+            self.assertTrue(records, raw)
+            text = " ".join(item.get("text", "") for item in records)
+            self.assertIn(raw.split(".")[0], text)
+            self.assertTrue(all(item.get("provenance") == mini.USER_STATED for item in records))
+            self.assertTrue(all(item.get("source_segments") == [1] for item in records))
+
+    def test_descriptive_or_repository_observation_is_not_promoted_as_user_constraint(self):
+        descriptive = mini.ledger_requirements(
+            mini.extract_source_requirement_ledger("This makes the UI easier to understand.", use_model=False)
+        )
+        observation = mini.ledger_requirements(
+            mini.extract_source_requirement_ledger("The project currently uses React.", use_model=False)
+        )
+        self.assertFalse(descriptive)
+        self.assertFalse(observation)
+
+    def test_controlled_recon_extracts_owner_state_interfaces_persistence_and_test(self):
+        _raw, _ledger, _contract, _inventory, recon = self.controlled_recon()
+        evidence = recon["evidence"]
+        ranked_paths = [item.get("path") for item in recon["search"]["candidates"]]
+        self.assertLess(ranked_paths.index("src/game.js"), ranked_paths.index("index.html"))
+        self.assertLess(ranked_paths.index("src/input.js"), ranked_paths.index("index.html"))
+        self.assertEqual(recon["status"], understanding.REPOSITORY_RECONNAISSANCE_COMPLETE)
+        self.assertTrue(recon["read_only"])
+        self.assertLessEqual(len(evidence), understanding.MAX_TASK_BRAIN_EVIDENCE)
+        self.assertTrue(any(item.get("category") == "CURRENT_OWNER" and item.get("symbol") == "InputManager" for item in evidence))
+        self.assertTrue(any(item.get("category") == "CURRENT_STATE_OWNER" and item.get("symbol") == "InputManager" for item in evidence))
+        self.assertTrue(any(item.get("category") == "CURRENT_STATE_OWNER" and item.get("symbol") == "GameState" and "paused" in item.get("fact", "") for item in evidence))
+        self.assertTrue(any(item.get("category") == "CURRENT_INTERFACE" and "togglePause" in item.get("symbol", "") for item in evidence))
+        self.assertTrue(any(item.get("category") == "CURRENT_INTERFACE" and "isPressed" in item.get("symbol", "") for item in evidence))
+        persistence = [item for item in evidence if item.get("category") == "CURRENT_PERSISTENCE"]
+        self.assertTrue(any(item.get("path") == "src/storage.js" and item.get("symbol") == "BEST_SCORE_KEY" for item in persistence))
+        self.assertFalse(any(item.get("path") == "index.html" for item in persistence))
+        self.assertTrue(any(item.get("category") == "CURRENT_TEST" and item.get("path") == "tests/input.test.js" and item.get("symbol") == "InputManager" for item in evidence))
+        self.assertFalse(any(item.get("category") == "CURRENT_INTERFACE" and item.get("symbol") in {"assert", "input"} for item in evidence))
+        self.assertTrue(all(understanding.validate_repository_evidence(item, mini.WORKSPACE) for item in evidence))
+
+    def test_repository_evidence_validation_rejects_wrong_category_stale_hash_and_guesses(self):
+        _raw, _ledger, _contract, _inventory, recon = self.controlled_recon()
+        owner = next(item for item in recon["evidence"] if item.get("symbol") == "InputManager" and item.get("category") == "CURRENT_OWNER")
+        fake = dict(owner, evidence_id="REPO-999", symbol="NoSuchOwner", fact="NoSuchOwner owns input", support="NoSuchOwner owns input")
+        self.assertFalse(understanding.validate_repository_evidence(fake, mini.WORKSPACE))
+        stale = dict(owner, evidence_id="REPO-998", file_sha256="0" * 64)
+        self.assertFalse(understanding.validate_repository_evidence(stale, mini.WORKSPACE))
+        html = next(item for item in recon["evidence"] if item.get("category") == "CURRENT_ENTRYPOINT")
+        script_as_persistence = dict(html, evidence_id="REPO-997", category="CURRENT_PERSISTENCE")
+        self.assertFalse(understanding.validate_repository_evidence(script_as_persistence, mini.WORKSPACE))
+        test_fact = next(item for item in recon["evidence"] if item.get("category") == "CURRENT_TEST")
+        assert_as_interface = dict(test_fact, evidence_id="REPO-994", category="CURRENT_INTERFACE", symbol="assert")
+        input_as_interface = dict(test_fact, evidence_id="REPO-993", category="CURRENT_INTERFACE", symbol="input")
+        self.assertFalse(understanding.validate_repository_evidence(assert_as_interface, mini.WORKSPACE))
+        self.assertFalse(understanding.validate_repository_evidence(input_as_interface, mini.WORKSPACE))
+        model_guess = {"evidence_id": "REPO-996", "category": "CURRENT_OWNER", "path": "src/input.js", "fact": "probably owns input", "evidence_type": understanding.DIRECT_OBSERVATION, "provenance": understanding.REPOSITORY_EVIDENCE}
+        self.assertFalse(understanding.validate_repository_evidence(model_guess, mini.WORKSPACE))
+        self.assertFalse(understanding.validate_repository_evidence(
+            dict(fake, evidence_id="REPO-995", file_sha256=owner["file_sha256"]),
+        ))
+
+    def test_evidence_deduplication_and_category_diversity_happen_before_cap(self):
+        _raw, _ledger, _contract, _inventory, recon = self.controlled_recon()
+        evidence = recon["evidence"]
+        duplicates = [dict(item, evidence_id=f"REPO-{100 + index:03d}") for index, item in enumerate(evidence)]
+        entrypoint = next(item for item in evidence if item.get("category") == "CURRENT_ENTRYPOINT")
+        low_value_flood = [
+            dict(entrypoint, evidence_id=f"REPO-{200 + index:03d}", _semantic_key=f"flood-{index}")
+            for index in range(40)
+        ]
+        selected, duplicate_count, truncated = understanding._select_evidence(
+            evidence + duplicates + low_value_flood,
+            recon.get("search_terms", []), understanding.MAX_TASK_BRAIN_EVIDENCE,
+        )
+        categories = {item.get("category") for item in selected}
+        self.assertGreaterEqual(duplicate_count, len(evidence))
+        self.assertLessEqual(len(selected), understanding.MAX_TASK_BRAIN_EVIDENCE)
+        self.assertGreater(truncated, 0)
+        self.assertTrue({"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_INTERFACE", "CURRENT_PERSISTENCE", "CURRENT_TEST"}.issubset(categories))
+
+    def test_task_brain_contains_semantic_facts_without_raw_repository_payloads(self):
+        raw, ledger, contract, _inventory, recon = self.controlled_recon()
+        project_brain = mini.build_project_brain(
+            contract, empty_specification(contract["goal"]), mini.inspect_repository(),
+            repository_evidence=recon["evidence"],
+        )
+        task_brain = understanding.build_task_brain(
+            "ROOT", raw, mini.EXISTING_PROJECT, contract, {}, recon["evidence"], [],
+        )
+        encoded = json.dumps(task_brain, ensure_ascii=False)
+        self.assertTrue(any("InputManager" in json.dumps(item) for item in task_brain["current_owners"]))
+        self.assertTrue(any("GameState" in json.dumps(item) and "paused" in json.dumps(item) for item in task_brain["current_state_ownership"]))
+        self.assertTrue(any("togglePause" in json.dumps(item) for item in task_brain["current_interfaces"]))
+        self.assertTrue(any("InputManager" in json.dumps(item) for item in task_brain["relevant_tests"]))
+        self.assertIn("BEST_SCORE_KEY", encoded)
+        self.assertNotIn("const BEST_SCORE_KEY", encoded)
+        self.assertNotIn("this.keys = new Set", encoded)
+        self.assertNotIn("this.paused = !this.paused", encoded)
+        self.assertNotIn("source_requirement_ledger", encoded)
+        self.assertLessEqual(len(encoded), understanding.MAX_TASK_BRAIN_CHARS)
+        valid = understanding.validate_task_brain(
+            task_brain, [item.get("requirement_id") for item in mini.ledger_requirements(ledger)], recon["evidence"],
+        )
+        self.assertTrue(valid["valid"], valid["errors"])
+        self.assertIn("core", project_brain)
 
     def test_empty_and_explicit_greenfield_workspaces_are_new_projects(self):
         first = mini.classify_project_mode("Create a todo app")

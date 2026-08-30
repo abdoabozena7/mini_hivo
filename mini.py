@@ -1078,6 +1078,13 @@ def new_metrics(mode):
         "repository_files_considered": 0,
         "repository_files_inspected": 0,
         "repository_evidence_records": 0,
+        "repository_evidence_candidates": 0,
+        "repository_evidence_validated": 0,
+        "repository_evidence_deduplicated": 0,
+        "repository_evidence_selected": 0,
+        "repository_evidence_rejected": 0,
+        "repository_evidence_rejected_duplicates": 0,
+        "repository_evidence_truncated_valid": 0,
         "repo_grounded_clarification_questions": 0,
         "task_brains_created": 0,
         "task_brain_creation_failures": 0,
@@ -3661,6 +3668,16 @@ def run_repository_reconnaissance(raw_goal, contract=None, workspace=None, inven
     RUN["repository_evidence_records"] = RUN.get("repository_evidence_records", 0) + len(
         result.get("evidence", [])
     )
+    for metric, result_key in (
+        ("repository_evidence_candidates", "evidence_candidates"),
+        ("repository_evidence_validated", "evidence_validated"),
+        ("repository_evidence_deduplicated", "evidence_deduplicated"),
+        ("repository_evidence_selected", "evidence_selected"),
+        ("repository_evidence_rejected", "evidence_rejected"),
+        ("repository_evidence_rejected_duplicates", "evidence_rejected_duplicates"),
+        ("repository_evidence_truncated_valid", "evidence_truncated_valid"),
+    ):
+        RUN[metric] = RUN.get(metric, 0) + int(result.get(result_key, 0) or 0)
     RUN["repository_reconnaissance"] = result
     RUN["repository_evidence"] = result.get("evidence", [])
     record_run_event(
@@ -11306,21 +11323,41 @@ def run_self_test(install_browser=False):
         (v17_existing_root / "src").mkdir(parents=True)
         (v17_existing_root / "tests").mkdir()
         (v17_existing_root / "src" / "input.js").write_text(
-            "export class InputManager { // owns keyboard state\n"
-            "  handleKeyboard(key) { return key === 'Escape'; }\n}\n", encoding="utf-8",
+            "export class InputManager {\n"
+            "  constructor() { this.keys = new Set(); }\n"
+            "  onKeyDown(event) { if ([\"ArrowUp\", \"w\"].includes(event.key)) this.keys.add(event.key); }\n"
+            "  isPressed(key) { return this.keys.has(key); }\n"
+            "}\n", encoding="utf-8",
         )
         (v17_existing_root / "src" / "game.js").write_text(
-            "export class GameState { constructor() { this.paused = false; } }\n", encoding="utf-8",
+            "export class GameState {\n"
+            "  constructor() { this.paused = false; }\n"
+            "  togglePause() { this.paused = !this.paused; }\n"
+            "}\n", encoding="utf-8",
         )
         (v17_existing_root / "src" / "storage.js").write_text(
-            "export const BEST_SCORE_KEY = 'score'; // unrelated storage implementation\n",
+            "const BEST_SCORE_KEY = 'score';\n"
+            "export function loadBestScore(storage = localStorage) { return Number(storage.getItem(BEST_SCORE_KEY) || 0); }\n"
+            "export function saveBestScore(score, storage = localStorage) { storage.setItem(BEST_SCORE_KEY, String(score)); }\n",
             encoding="utf-8",
         )
         (v17_existing_root / "tests" / "input.test.js").write_text(
-            "describe('pause keyboard', () => it('uses Escape', () => expect(true).toBe(true)));\n",
+            "import { InputManager } from '../src/input.js';\n"
+            "describe('keyboard input', () => it('uses arrows', () => expect(new InputManager().isPressed('ArrowUp')).toBe(false)));\n",
             encoding="utf-8",
         )
-        v17_pause_raw = "Change pause keyboard behavior.\n- Escape toggles pause."
+        (v17_existing_root / "index.html").write_text(
+            "<!doctype html><script type=\"module\" src=\"src/input.js\"></script>\n"
+            "<script type=\"module\" src=\"src/game.js\"></script>\n"
+            "<script type=\"module\" src=\"src/storage.js\"></script>\n",
+            encoding="utf-8",
+        )
+        v17_pause_raw = (
+            "Add Escape-key pause/resume support to the existing game. Reuse the current input and "
+            "pause-state architecture instead of creating duplicate input state or another game-state owner. "
+            "Preserve the current WASD/arrow controls and persistent best-score behavior. "
+            "Update or add the relevant tests."
+        )
         v17_pause_ledger = extract_source_requirement_ledger(v17_pause_raw, use_model=False)
         v17_pause_contract = normalize_goal_contract(
             v17_pause_raw, _deterministic_contract_from_ledger(v17_pause_raw, v17_pause_ledger),
@@ -11347,6 +11384,60 @@ def run_self_test(install_browser=False):
             [item.get("requirement_id") for item in ledger_requirements(v17_pause_ledger)],
             v17_existing_recon.get("evidence", []),
         )
+        v17_existing_evidence = v17_existing_recon.get("evidence", [])
+        v17_existing_categories = {item.get("category") for item in v17_existing_evidence}
+        v17_existing_encoded = json.dumps(v17_existing_task_brain, ensure_ascii=False)
+        v17_existing_evidence_checks = {
+            "input_owner": any(
+                item.get("category") == "CURRENT_OWNER"
+                and item.get("path") == "src/input.js"
+                and item.get("symbol") == "InputManager"
+                for item in v17_existing_evidence
+            ),
+            "input_state": any(
+                item.get("category") == "CURRENT_STATE_OWNER"
+                and item.get("path") == "src/input.js"
+                and item.get("symbol") == "InputManager"
+                for item in v17_existing_evidence
+            ),
+            "game_state": any(
+                item.get("category") == "CURRENT_STATE_OWNER"
+                and item.get("path") == "src/game.js"
+                and item.get("symbol") == "GameState"
+                and "paused" in str(item.get("fact", ""))
+                for item in v17_existing_evidence
+            ),
+            "pause_interface": any(
+                item.get("category") == "CURRENT_INTERFACE"
+                and "togglePause" in str(item.get("symbol", ""))
+                for item in v17_existing_evidence
+            ),
+            "persistence": any(
+                item.get("category") == "CURRENT_PERSISTENCE"
+                and item.get("path") == "src/storage.js"
+                and item.get("symbol") == "BEST_SCORE_KEY"
+                for item in v17_existing_evidence
+            ),
+            "input_test": any(
+                item.get("category") == "CURRENT_TEST"
+                and item.get("path") == "tests/input.test.js"
+                and item.get("symbol") == "InputManager"
+                for item in v17_existing_evidence
+            ),
+            "no_test_local_interface": not any(
+                item.get("category") == "CURRENT_INTERFACE"
+                and item.get("symbol") in {"assert", "input"}
+                for item in v17_existing_evidence
+            ),
+            "all_source_valid": all(
+                stage2.validate_repository_evidence(item, v17_existing_root)
+                for item in v17_existing_evidence
+            ),
+            "no_raw_files": not any(
+                value in v17_existing_encoded
+                for value in ("this.keys = new Set", "this.paused = !this.paused", "localStorage.getItem")
+            ),
+        }
 
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
@@ -11365,7 +11456,6 @@ def run_self_test(install_browser=False):
         v17_auth_questions = stage2.repository_grounded_questions(
             v17_auth_raw, ledger_requirements(v17_auth_ledger), v17_auth_recon.get("evidence", []),
         )
-        v17_existing_encoded = json.dumps(v17_existing_task_brain, ensure_ascii=False)
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -11487,6 +11577,13 @@ def run_self_test(install_browser=False):
                 and bool(v17_existing_task_brain.get("current_owners"))
                 and bool(v17_existing_task_brain.get("relevant_tests"))
             ),
+            "v17 semantic repository evidence": (
+                {"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_INTERFACE", "CURRENT_PERSISTENCE", "CURRENT_TEST"}
+                .issubset(v17_existing_categories)
+                and all(v17_existing_evidence_checks.values())
+                and len(v17_existing_evidence) <= stage2.MAX_TASK_BRAIN_EVIDENCE
+                and v17_existing_recon.get("read_only") is True
+            ),
             "v17 repo conflict": (
                 len(v17_auth_questions) == 1
                 and bool(v17_auth_questions[0].get("affected_requirement_ids"))
@@ -11494,7 +11591,9 @@ def run_self_test(install_browser=False):
             ),
             "v17 context hygiene": (
                 "unrelated storage implementation" not in v17_existing_encoded
-                and "src/storage.js" not in v17_existing_encoded
+                and "src/storage.js" in v17_existing_encoded
+                and "this.keys = new Set" not in v17_existing_encoded
+                and "this.paused = !this.paused" not in v17_existing_encoded
                 and "support" not in json.dumps(
                     v17_existing_task_brain.get("evidence_index", []), ensure_ascii=False,
                 )
