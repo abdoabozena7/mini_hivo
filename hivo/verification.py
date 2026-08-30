@@ -5,6 +5,10 @@ import json
 import re
 
 
+GAME_BRIDGE_NAME = "AGENT_GAME"
+GAME_BRIDGE_EXPRESSION = f"window.{GAME_BRIDGE_NAME}"
+
+
 @dataclass(frozen=True)
 class WebVerificationProfile:
     kind: str
@@ -135,7 +139,7 @@ def evaluate_web_snapshot(snapshot: dict, profile: WebVerificationProfile) -> di
         fail("missing_canvas", "a 3D/game contract requires at least one rendered canvas")
     bridge = runtime.get("gameBridge") or runtime.get("debugState")
     if profile.require_game_bridge and not bridge:
-        fail("missing_game_bridge", "window.__AGENT_GAME__ verification bridge is unavailable")
+        fail("missing_game_bridge", f"{GAME_BRIDGE_EXPRESSION} verification bridge is unavailable")
 
     interactions = {str(item.get("name")): item for item in snapshot.get("interaction_checks") or []}
     for name in profile.required_interactions:

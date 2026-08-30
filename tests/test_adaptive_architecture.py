@@ -498,7 +498,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "summary": "failed deterministic evidence gate after repair limit", "memory": {},
             "failure_evidence": [{
                 "name": "browser_contract", "status": "FAIL",
-                "evidence": "window.__AGENT_GAME__ verification bridge is unavailable",
+                "evidence": "window.AGENT_GAME verification bridge is unavailable",
             }],
             "repair_history": [
                 {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "repair 1 failed"},
