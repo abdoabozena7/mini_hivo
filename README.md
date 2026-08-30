@@ -86,6 +86,19 @@ reusable interfaces, relevant invariants, and deterministic verification
 requirements. The Worker still runs in a fresh context, and parent integration
 continues to consume compact child manifests rather than raw conversations.
 
+The v16 requirement boundary runs before that existing expansion. It creates a
+bounded immutable Source Requirement Ledger with stable `REQ-*` IDs, source
+segments, and `USER_STATED` provenance. Clarification decisions are separate
+`USER_CONFIRMED` records; optional defaults are `DERIVED`; repository and tool
+facts remain `VERIFIED`. A narrow same-model Clarifier asks at most three
+decision-critical questions for the request, never inspects the repository,
+and never writes code. Arrow-key/Enter selection, an `Other...` free-text path,
+and a non-interactive `CLARIFICATION_REQUIRED` terminal state are supported.
+After expansion, deterministic `MAPPED`/`UNMAPPED` coverage accounting keeps
+source requirements visible even when the weak Specifier omits one. The full
+source ledger is retained in the Project Brain, while Worker contexts receive
+only relevant projections.
+
 Every execution receives a fresh, bounded Node Packet containing the compact
 root contract, current node contract, parent summary, verified dependency
 summaries, relevant verified memory, failure evidence when retrying, and bounded

@@ -35,13 +35,16 @@ class SingleModelPolicy:
             "visual": self.model_name,
             "specifier": self.model_name,
             "mission_compiler": self.model_name,
+            "clarifier": self.model_name,
+            "requirement_extractor": self.model_name,
         }
 
     def context_window(self, role: str) -> int:
         """Return conservative local context limits to avoid KV-cache OOMs."""
         role_key = role.strip().lower()
         if role_key in {"visual", "coordinator", "quality", "predictor", "challenger",
-                        "specifier", "missioncompiler", "mission_compiler"}:
+                        "specifier", "missioncompiler", "mission_compiler", "clarifier",
+                        "requirementextractor", "requirement_extractor"}:
             return 4096
         if role_key in {"falsifier", "repairer"}:
             return 8192
