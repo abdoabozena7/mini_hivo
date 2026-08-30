@@ -25,6 +25,7 @@ migrated once into `list/project-1`.
 - `hivo/http_client.py`: dependency-free local Ollama transport using Python's standard library.
 - `hivo/memory.py`: per-project SQLite memory, verified-note retrieval, and a resumable run/task ledger.
 - `hivo/playbooks.py`: deterministic project classification and a legacy stage projection; adaptive execution does not call it.
+- `hivo/project_understanding.py`: deterministic project-mode classification, bounded read-only repository evidence, repository conflicts, and temporary Task Brain validation/projection.
 - `hivo/evidence.py`: latest-evidence semantics; resolved failures do not poison a run.
 - `hivo/verification.py`: contract-aware browser pass/fail rules.
 - `hivo/browser_checks.py`: deterministic profile-specific interactions for timers and other web apps.
@@ -67,12 +68,16 @@ small relevance-ranked excerpt. Only notes created after deterministic evidence
 passes are retrieved as successful facts. Interrupted tasks remain explicitly
 labeled as unfinished and must be re-inspected after restart.
 
-Recursive mode first performs bounded repository reconnaissance, then asks the
+Recursive mode completes Stage 1 request ingestion, classifies the workspace as
+`NEW_PROJECT` or `EXISTING_PROJECT`, and performs targeted repository
+reconnaissance only for existing-project tasks. It then prepares the bounded
+specification, Project Brain, and one temporary Task Brain before asking the
 pinned model whether each node fits one focused Builder execution. A split
 creates 2–4 small sequential child contracts; a child may become a parent and
 split again up to `MAX_DEPTH = 6` and `MAX_TOTAL_TASKS = 64`. A leaf is never
-secretly scheduled into deterministic stages. Baseline mode sends the root
-through the same `execute_leaf` engine without adaptive decomposition.
+secretly scheduled into deterministic stages. Direct baseline mode shares only
+project-mode bookkeeping and sends the root through the same `execute_leaf`
+engine without targeted Stage 2 context or adaptive decomposition.
 
 In recursive mode, the short request is also expanded into a bounded project
 specification before the task tree is planned. Mini Hivo keeps a stable Project
@@ -86,7 +91,7 @@ reusable interfaces, relevant invariants, and deterministic verification
 requirements. The Worker still runs in a fresh context, and parent integration
 continues to consume compact child manifests rather than raw conversations.
 
-The v16 requirement boundary runs before that existing expansion. It creates a
+The v16 requirement boundary runs before that expansion. It creates a
 bounded immutable Source Requirement Ledger with stable `REQ-*` IDs, source
 segments, and `USER_STATED` provenance. Clarification decisions are separate
 `USER_CONFIRMED` records; optional defaults are `DERIVED`; repository and tool
@@ -98,6 +103,27 @@ After expansion, deterministic `MAPPED`/`UNMAPPED` coverage accounting keeps
 source requirements visible even when the weak Specifier omits one. The full
 source ledger is retained in the Project Brain, while Worker contexts receive
 only relevant projections.
+
+For `EXISTING_PROJECT`, Stage 2 inventories metadata, searches task terms and
+named symbols, and only then reads a bounded set of ranked candidates. Direct
+evidence records use stable `REPO-*` IDs, paths, symbols, line locations, file
+hashes, bounded support, and `DIRECT_OBSERVATION`; unsupported model guesses
+cannot enter Verified Project State. A repository-only preserve/remove conflict
+or missing task-named interface may open a second evidence-linked clarification
+round through the existing arrow-key UI. Non-interactive blocking questions end
+as `CLARIFICATION_REQUIRED`, not an implementation or root failure. Empty
+greenfield workspaces skip this reconnaissance entirely.
+
+The temporary Task Brain stores the current task goal, Source Requirement IDs,
+confirmed decisions, relevant Project Brain projection, verified repository
+evidence/owners/interfaces/tests, preservation constraints, derived task
+assumptions, acceptance conditions, and non-goals. Every entry is labeled
+`USER_STATED`, `USER_CONFIRMED`, `PROJECT_BRAIN`, `REPOSITORY_EVIDENCE`, or
+`DERIVED_TASK_ASSUMPTION`. Its evidence, reference counts, open questions, and
+serialized size are deterministically bounded and validated before task-fit or
+decomposition. Run evidence retains it for audit, but it is never promoted into
+Project Brain; Workers receive only a node-relevant slice through the existing
+Mission Compiler.
 
 Every execution receives a fresh, bounded Node Packet containing the compact
 root contract, current node contract, parent summary, verified dependency

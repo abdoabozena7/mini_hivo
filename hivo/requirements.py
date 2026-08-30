@@ -523,7 +523,9 @@ def ledger_requirements(ledger, include_confirmed=False):
     return records
 
 
-def append_confirmed_requirement(ledger, text, question_id=None, category=None):
+def append_confirmed_requirement(ledger, text, question_id=None, category=None,
+                                 affected_requirement_ids=None, repository_evidence_ids=None,
+                                 phase=None):
     """Return a new ledger; the original frozen ledger is never modified."""
     result = thaw(ledger) if ledger else build_source_requirement_ledger([])
     records = list(result.get("confirmed_requirements", []))
@@ -535,6 +537,13 @@ def append_confirmed_requirement(ledger, text, question_id=None, category=None):
         "source_segment": None,
         "source_segments": [],
         "question_id": question_id,
+        "affected_requirement_ids": [
+            str(item) for item in (affected_requirement_ids or []) if item
+        ],
+        "repository_evidence_ids": [
+            str(item) for item in (repository_evidence_ids or []) if item
+        ][:8],
+        "phase": phase or "REQUEST_CLARIFICATION",
         "status": "active",
     }
     if decision["text"]:
@@ -860,6 +869,10 @@ def normalize_question(question, index, ledger=None, interaction_style="LOW_FRIC
         "allow_other": allow_other,
         "blocking": bool(question.get("blocking", False)),
         "category": category,
+        "phase": compact_text(question.get("phase") or "REQUEST_CLARIFICATION", 80),
+        "repository_evidence_ids": [
+            str(item) for item in question.get("repository_evidence_ids", []) if item
+        ][:8],
     }
 
 
