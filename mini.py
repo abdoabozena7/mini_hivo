@@ -1887,10 +1887,9 @@ def deterministic_fit_fallback(task, depth, contract, force_smaller=False):
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard recursion/task budget reached"}
     responsibilities = task.get("done_when") or list(contract.get("requirements", [])) + list(contract.get("success_criteria", []))
-    # An explicit TASK_TOO_BROAD result may force a smaller decomposition.  A
-    # generic implementation failure only gets a split when the remaining
-    # contract/evidence still indicates a broad scope.
-    if (force_smaller and task.get("initial_failure_type") in {"TASK_TOO_BROAD", "INTEGRATION_TOO_BROAD"}) or len(responsibilities) >= 3:
+    # A proven scope assessment may force a smaller decomposition.  A raw
+    # TASK_TOO_BROAD execution marker is not a scope assessment.
+    if (force_smaller and _has_positive_scope_evidence(task, task.get("initial_result"))) or len(responsibilities) >= 3:
         return {"decision": "split", "reason": "deterministic bounded fallback"}
     text = task.get("goal", "")
     separators = len(re.findall(r"\b(?:and|plus|with|then)\b|[,;]", text, re.IGNORECASE))
@@ -2620,6 +2619,7 @@ def _maybe_search_alternate_strategy(task, contract, leaf_result, memory, repo_s
     if (
         not (
             leaf_result.get("failure_type") == "IMPLEMENTATION_ERROR"
+            or leaf_result.get("failure_type") == "TASK_TOO_BROAD"
             or _is_execution_budget_exhausted(leaf_result)
         )
         or diagnosis.get("category") != "implementation_strategy_wrong"
@@ -4324,13 +4324,45 @@ def _looks_like_tiny_scope(task):
 def _fit_assessment(task, result=None):
     """Return the controller's bounded fit evidence without inventing facts."""
     result = result if isinstance(result, dict) else {}
+    resplit = task.get("resplit") if isinstance(task, dict) else None
+    resplit_fit = resplit.get("fit_decision") if isinstance(resplit, dict) else None
     for candidate in (
         result.get("fresh_fit_assessment"), result.get("fit_after_execution"),
-        task.get("fresh_fit_assessment"), task.get("fit_before_execution"),
+        result.get("fit_decision"), task.get("fresh_fit_assessment"),
+        task.get("fit_after_execution"), resplit_fit, task.get("fit_before_execution"),
     ):
         if isinstance(candidate, dict) and str(candidate.get("decision", "")).casefold() in {"execute", "split"}:
             return candidate
     return {}
+
+
+def _provenanced_scope_signal(value):
+    """Accept a TASK_TOO_BROAD marker only when it names a scope assessor."""
+    if not isinstance(value, dict):
+        return False
+    containers = [value]
+    for key in ("scope_provenance", "task_too_broad_provenance", "provenance"):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            containers.append({
+                **nested,
+                "signal": nested.get("signal") or value.get("signal") or value.get("failure_type"),
+                "decision": nested.get("decision") or nested.get("fit_decision") or value.get("decision"),
+            })
+    for container in containers:
+        signal = str(container.get("signal") or container.get("failure_type") or "").casefold()
+        if signal != "task_too_broad":
+            continue
+        source = container.get("source") or container.get("source_kind")
+        decision = container.get("decision") or container.get("fit_decision")
+        source = str(source or "").casefold().replace("-", "_").replace(" ", "_")
+        decision = str(decision or "").casefold()
+        if source in {
+            "task_fit", "fit", "fit_assessment", "fresh_fit", "fresh_fit_reassessment",
+            "scope_assessment", "decomposition", "decomposition_analysis",
+        } and decision == "split":
+            return True
+    return False
 
 
 def _has_positive_scope_evidence(task, result=None):
@@ -4339,11 +4371,19 @@ def _has_positive_scope_evidence(task, result=None):
     fit = _fit_assessment(task, result)
     if str(fit.get("decision", "")).casefold() == "split":
         return True
-    if str(result.get("status", "")).casefold() == "too_broad" or str(
-        result.get("failure_type", "")
-    ).casefold() == "task_too_broad":
-        return True
     for source in (task, result):
+        if _provenanced_scope_signal(source):
+            return True
+        for key in ("scope_assessment", "fit_assessment", "task_fit"):
+            assessment = source.get(key)
+            if (
+                isinstance(assessment, dict)
+                and (
+                    str(assessment.get("decision", "")).casefold() == "split"
+                    or _provenanced_scope_signal(assessment)
+                )
+            ):
+                return True
         for key in ("scope_evidence", "responsibilities", "substantial_responsibilities"):
             values = source.get(key)
             if isinstance(values, (list, tuple)) and len([item for item in values if str(item).strip()]) >= 2:
@@ -4471,11 +4511,14 @@ def _is_bounded_implementation_failure(task, result, evidence):
     if task.get("kind", "implementation") != "implementation":
         return False
     failure_type = str(result.get("failure_type", ""))
-    if failure_type not in {"IMPLEMENTATION_ERROR", EXECUTION_BUDGET_EXHAUSTED}:
+    if failure_type not in {"IMPLEMENTATION_ERROR", "TASK_TOO_BROAD", EXECUTION_BUDGET_EXHAUSTED}:
         return False
-    if str(result.get("status", "")).casefold() == "too_broad":
+    if (
+        str(result.get("status", "")).casefold() == "too_broad"
+        and _has_positive_scope_evidence(task, result)
+    ):
         return False
-    if failure_type == "TASK_TOO_BROAD":
+    if failure_type == "TASK_TOO_BROAD" and _has_positive_scope_evidence(task, result):
         return False
     preflight = _effective_preflight(result.get("integration_preflight"))
     if preflight and preflight.get("passed") is False:
@@ -4550,11 +4593,10 @@ def _capability_floor_recovery_state(task, diagnosis=None, evidence=None, result
         category not in {"scope_too_broad", "dependency_error", "verifier_builder_mismatch"}
         and _is_bounded_implementation_failure(task, result, evidence)
     )
+    positive_scope_evidence = _has_positive_scope_evidence(task, result)
     scope_failure = (
-        category == "scope_too_broad"
-        or str(result.get("status", "")).casefold() == "too_broad"
-        or failure_type in {"TASK_TOO_BROAD", "INTEGRATION_TOO_BROAD", "CHILD_FAILURE"}
-        or bool(task.get("terminal_too_broad"))
+        positive_scope_evidence
+        or failure_type == "INTEGRATION_TOO_BROAD"
     )
 
     if bounded_failure:
@@ -4837,7 +4879,7 @@ def diagnose_failure(task, result, evidence=None):
                 "Decomposition search is exhausted, but the recorded failure does not establish that all applicable "
                 f"recovery mechanisms are exhausted ({capability_floor_state['blocked_by']}).", 900,
             )
-    elif status == "too_broad" or failure_type == "TASK_TOO_BROAD":
+    elif (status == "too_broad" or failure_type == "TASK_TOO_BROAD") and positive_scope_evidence:
         category = "scope_too_broad"
         confidence = "high"
         if at_max_depth and (task.get("terminal_too_broad") or result.get("terminal_too_broad")):
@@ -4847,6 +4889,21 @@ def diagnose_failure(task, result, evidence=None):
             )
         else:
             rationale = "The Builder explicitly reported a capacity/scope overflow."
+    elif status == "too_broad" or failure_type == "TASK_TOO_BROAD":
+        if task.get("kind", "implementation") == "implementation" and implementation_evidence:
+            category = "implementation_strategy_wrong"
+            confidence = "medium"
+            rationale = (
+                "The execution reported TASK_TOO_BROAD without scope-assessment provenance, but concrete executable "
+                "implementation evidence keeps the node on the implementation recovery path."
+            )
+        else:
+            category = "unknown"
+            confidence = "low"
+            rationale = (
+                "The execution reported TASK_TOO_BROAD without task-fit or scope-assessment provenance; do not treat "
+                "the marker itself as positive scope evidence."
+            )
     elif failure_type == "ENVIRONMENT_ERROR":
         category = "environment_failure"
         confidence = "high"
@@ -7516,6 +7573,8 @@ def _record_terminal_too_broad(task, result):
         return False
     if result.get("failure_type") != "TASK_TOO_BROAD" and str(result.get("status", "")).casefold() != "too_broad":
         return False
+    if not _has_positive_scope_evidence(task, result):
+        return False
     if task.get("terminal_too_broad") is None:
         task["terminal_too_broad"] = {
             "status": str(result.get("status", "too_broad")),
@@ -7559,18 +7618,18 @@ def _is_terminal_too_broad_child(child, result):
     diagnosis = result.get("failure_diagnosis")
     if not isinstance(diagnosis, dict):
         diagnosis = child.get("failure_diagnosis")
-    return (
-        int(child.get("depth", 0) or 0) >= MAX_DEPTH
-        and (
-            result.get("failure_type") == "TASK_TOO_BROAD"
-            or str(result.get("status", "")).casefold() == "too_broad"
-            or (
-                _is_execution_budget_exhausted(result)
-                and isinstance(diagnosis, dict)
-                and diagnosis.get("category") == "scope_too_broad"
-            )
-        )
+    if int(child.get("depth", 0) or 0) < MAX_DEPTH:
+        return False
+    too_broad_marker = (
+        result.get("failure_type") == "TASK_TOO_BROAD"
+        or str(result.get("status", "")).casefold() == "too_broad"
     )
+    budget_scope = (
+        _is_execution_budget_exhausted(result)
+        and isinstance(diagnosis, dict)
+        and diagnosis.get("category") == "scope_too_broad"
+    )
+    return (too_broad_marker or budget_scope) and _has_positive_scope_evidence(child, result)
 
 
 def _materialize_alternative_children(task, specs, attempt):
@@ -7744,6 +7803,8 @@ def _resplit_too_broad(task, depth, contract, memory, repo_snapshot, parent_summ
     if not _can_expand(depth):
         return None
     is_integration = task.get("kind") == "integration"
+    if not is_integration and not _has_positive_scope_evidence(task, leaf_result):
+        return None
     RUN["re_splits"] += 1
     evidence = list(leaf_result.get("failure_evidence", []))
     if not evidence:
@@ -7901,12 +7962,14 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         leaf = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     memory = leaf.get("memory", memory)
     is_too_broad = (
-        leaf.get("status") == "too_broad"
-        or leaf.get("failure_type") == "TASK_TOO_BROAD"
-        or (
-            task.get("kind") == "integration"
-            and leaf.get("failure_type") == "INTEGRATION_TOO_BROAD"
+        (
+            leaf.get("status") == "too_broad"
+            or leaf.get("failure_type") == "TASK_TOO_BROAD"
         )
+        and _has_positive_scope_evidence(task, leaf)
+    ) or (
+        task.get("kind") == "integration"
+        and leaf.get("failure_type") == "INTEGRATION_TOO_BROAD"
     )
     if is_too_broad:
         _record_terminal_too_broad(task, leaf)
@@ -7917,7 +7980,11 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         )
         if resplit is not None:
             return resplit
-    elif _is_execution_budget_exhausted(leaf) or leaf.get("failure_type") == "IMPLEMENTATION_ERROR":
+    elif (
+        _is_execution_budget_exhausted(leaf)
+        or leaf.get("status") == "too_broad"
+        or leaf.get("failure_type") in {"IMPLEMENTATION_ERROR", "TASK_TOO_BROAD"}
+    ):
         # The focused loop reports an observation. Record the final evidence
         # and diagnosis first, then let the diagnosis select one existing
         # recovery mechanism regardless of the raw failure origin.

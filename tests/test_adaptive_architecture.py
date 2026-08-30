@@ -244,6 +244,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         diagnosis = mini.diagnose_failure(task, failure)
 
         self.assertEqual(diagnosis["category"], "scope_too_broad")
+        self.assertTrue(diagnosis["diagnosis_evidence"]["positive_scope_evidence"])
 
     def test_new_explicit_scope_evidence_can_overturn_execute_fit(self):
         task = mini.make_task(
@@ -263,6 +264,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         diagnosis = mini.diagnose_failure(task, failure)
 
         self.assertEqual(diagnosis["category"], "scope_too_broad")
+        self.assertTrue(diagnosis["diagnosis_evidence"]["positive_scope_evidence"])
 
     def test_depth_repair_limit_and_syntax_are_not_scope_evidence(self):
         cases = [
@@ -299,6 +301,125 @@ class AdaptiveArchitectureTests(unittest.TestCase):
 
                 self.assertEqual(diagnosis["category"], expected)
                 self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+
+    def test_task_too_broad_requires_scope_assessment_provenance(self):
+        def execute_task(depth=2):
+            task = mini.make_task(
+                "provenance", "Implement one focused behavior", depth, "ROOT",
+                ["behavior is verified"], ["app.js"],
+            )
+            task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+            return task
+
+        cases = [
+            (
+                "builder-self-report",
+                {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": "Builder self-report"},
+            ),
+            (
+                "builder-tagged",
+                {
+                    "status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": "Builder self-report",
+                    "scope_provenance": {"source": "builder", "decision": "SPLIT"},
+                },
+            ),
+            (
+                "budget-marker",
+                {
+                    "status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+                    "execution_outcome": mini.EXECUTION_BUDGET_EXHAUSTED,
+                    "summary": "TASK_TOO_BROAD: maximum focused tool-step budget reached",
+                },
+            ),
+            (
+                "max-depth",
+                {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": "max depth"},
+            ),
+            (
+                "propagated-child",
+                {
+                    "status": "failed", "failure_type": "TASK_TOO_BROAD", "summary": "child failed",
+                    "children": [{"result": {
+                        "status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+                    }}],
+                },
+            ),
+            (
+                "generic-phrase",
+                {"status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "too broad"},
+            ),
+        ]
+        for label, result in cases:
+            with self.subTest(label=label):
+                task = execute_task(mini.MAX_DEPTH if label == "max-depth" else 2)
+                if label == "generic-phrase":
+                    task["initial_failure_type"] = "TASK_TOO_BROAD"
+                    task["initial_result"] = {"failure_type": "TASK_TOO_BROAD", "summary": "another node"}
+                self.assertFalse(mini._has_positive_scope_evidence(task, result))
+                if label == "propagated-child":
+                    diagnosis = mini.diagnose_failure(task, result)
+                    self.assertNotEqual(diagnosis["category"], "scope_too_broad")
+                    self.assertFalse(diagnosis["diagnosis_evidence"]["positive_scope_evidence"])
+
+    def test_provenanced_task_too_broad_marker_counts_as_scope_evidence(self):
+        task = mini.make_task(
+            "provenanced-scope", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        result = {
+            "status": "failed", "failure_type": "TASK_TOO_BROAD", "summary": "scope assessor result",
+            "scope_provenance": {"source": "task_fit", "decision": "SPLIT"},
+        }
+
+        self.assertTrue(mini._has_positive_scope_evidence(task, result))
+        self.assertEqual(mini.diagnose_failure(task, result)["category"], "scope_too_broad")
+
+    def test_fresh_fit_reassessment_is_positive_scope_evidence(self):
+        task = mini.make_task(
+            "fresh-scope", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        task["fit_before_execution"] = {"decision": "EXECUTE", "reason": "focused node"}
+        result = {
+            "status": "failed", "failure_type": "TASK_TOO_BROAD",
+            "fresh_fit_assessment": {
+                "decision": "SPLIT", "reason": "multiple independent responsibilities remain",
+            },
+        }
+
+        self.assertTrue(mini._has_positive_scope_evidence(task, result))
+
+    def test_unproven_builder_task_too_broad_reaches_implementation_strategy_route(self):
+        task = mini.make_task(
+            "builder-too-broad", "Implement one focused behavior", 2, "ROOT",
+            ["behavior is verified"], ["app.js"],
+        )
+        mini.TASKS[task["id"]] = task
+        failure = {
+            "status": "too_broad", "failure_type": "TASK_TOO_BROAD",
+            "summary": "Builder stopped after repeated invalid mutations",
+            "failure_evidence": [{
+                "tool": "edit_file_range", "target": "app.js",
+                "result": "error: JavaScript syntax validation failed: Unexpected token '}'",
+            }],
+        }
+
+        with patch.object(mini, "structured_model_call", return_value={"strategies": self.strategy_pair()}), \
+                patch.object(mini, "execute_leaf", return_value={
+                    "status": "done", "summary": "strategy verified", "memory": {},
+                }) as strategy_leaf:
+            result = mini.solve_task(
+                task, task["depth"], self.contract(), {}, {},
+                fit_decider=lambda *_args: {"decision": "execute", "reason": "focused node"},
+                leaf_executor=Mock(return_value=failure),
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertFalse(task["failure_diagnosis"]["diagnosis_evidence"]["positive_scope_evidence"])
+        self.assertEqual(task["failure_diagnosis"]["category"], "implementation_strategy_wrong")
+        self.assertEqual(mini.RUN["strategy_searches"], 1)
+        strategy_leaf.assert_called_once()
 
     def test_final_implementation_diagnosis_routes_after_repair_limit_without_budget_exhaustion(self):
         task = mini.make_task(
@@ -989,7 +1110,13 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         def leaf(task, _contract, memory, _repo, _parent, _deps):
             leaf_calls.append(task["id"])
             if task["id"] == "ROOT":
-                return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": "step budget", "memory": memory}
+                return {
+                    "status": "too_broad", "failure_type": "TASK_TOO_BROAD", "summary": "step budget",
+                    "memory": memory,
+                    "fresh_fit_assessment": {
+                        "decision": "SPLIT", "reason": "fresh scope reassessment",
+                    },
+                }
             return {"status": "done", "summary": "small verified", "memory": memory}
 
         def aggregate(_task, _contract, _children, memory, _repo, root=False):
@@ -1282,6 +1409,9 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "3.1.3.1.1", "Implement the combat behavior", 5, "3.1.3.1",
             ["combat behavior is verified"], ["src/game.js"],
         )
+        parent["fit_before_execution"] = {
+            "decision": "SPLIT", "reason": "multiple independent responsibilities",
+        }
         terminal = mini.make_task(
             "3.1.3.1.1.1", "Finish combat behavior", 6, parent["id"],
             ["combat behavior is verified"], ["src/game.js"],
@@ -1303,7 +1433,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         def leaf(task, _contract, memory, _repo, _parent, _deps):
             if task["id"] == terminal["id"]:
                 return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD",
-                        "summary": "terminal branch still exceeds capacity", "memory": memory}
+                        "summary": "terminal branch still exceeds capacity", "memory": memory,
+                        "fresh_fit_assessment": {
+                            "decision": "SPLIT", "reason": "fresh scope reassessment",
+                        }}
             return {"status": "done", "summary": f"verified {task['id']}", "memory": memory}
 
         def aggregate(_task, _contract, children, memory, _repo, root=False):
@@ -1336,6 +1469,9 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             "3.1.3.1.1", "Implement the combat behavior", 5, "3.1.3.1",
             ["combat behavior is verified"], ["src/game.js"],
         )
+        parent["fit_before_execution"] = {
+            "decision": "SPLIT", "reason": "multiple independent responsibilities",
+        }
         terminal = mini.make_task(
             "3.1.3.1.1.1", "Finish combat behavior", 6, parent["id"],
             ["combat behavior is verified"], ["src/game.js"],
@@ -1358,7 +1494,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
 
         def leaf(_task, _contract, memory, _repo, _parent, _deps):
             return {"status": "too_broad", "failure_type": "TASK_TOO_BROAD",
-                    "summary": "terminal branch still exceeds capacity", "memory": memory}
+                    "summary": "terminal branch still exceeds capacity", "memory": memory,
+                    "fresh_fit_assessment": {
+                        "decision": "SPLIT", "reason": "fresh scope reassessment",
+                    }}
 
         aggregator = Mock()
         with patch.object(mini, "decompose_alternative_task", side_effect=alternatives):
@@ -1459,6 +1598,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
                     "status": "failed", "failure_type": failure_type, "summary": summary,
                     "failure_evidence": [{"name": "deterministic-check", "status": "FAIL"}],
                 }
+                if expected == "scope_too_broad":
+                    failure["fresh_fit_assessment"] = {
+                        "decision": "SPLIT", "reason": "explicit scope reassessment",
+                    }
                 if expected == "model_capability_floor":
                     failed_attempts = [
                         {"status": "FAIL", "name": "state_transition"},
