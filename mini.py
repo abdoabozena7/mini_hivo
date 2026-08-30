@@ -26,6 +26,7 @@ from hivo.evidence import result_failed as evidence_result_failed
 from hivo.evidence import result_not_applicable
 from hivo.evidence import result_is_tool_rejection
 from hivo.evidence import unresolved_tool_failures
+from hivo.host_preflight import failed_host_preflight_result, format_host_preflight_report, run_host_preflight
 from hivo.http_client import HttpTransportError, get_json as http_get_json, post_json as http_post_json
 from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
@@ -127,6 +128,7 @@ ACTIVE_TOOL_CONTRACT = None
 MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
 PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
+HOST_PREFLIGHT_RESULT = None
 
 
 class ProviderError(RuntimeError):
@@ -961,10 +963,16 @@ def record_run_event(kind, **payload):
 
 
 def new_metrics(mode):
+    host_preflight = HOST_PREFLIGHT_RESULT if isinstance(HOST_PREFLIGHT_RESULT, dict) else {}
+    host_preflight_report = host_preflight.get("report") if isinstance(host_preflight.get("report"), dict) else {}
     return {
         "run_id": RUN_ID, "source_sha256": _source_hash(), "mode": mode, "model": MODEL,
         "model_capabilities": sorted(MODEL_CAPABILITIES),
         "role_models": {role: MODEL for role in MODEL_POLICY.role_models()},
+        "host_preflight_status": host_preflight.get("status"),
+        "host_preflight_id": host_preflight.get("preflight_id"),
+        "host_preflight_duration_seconds": host_preflight_report.get("duration_seconds"),
+        "host_preflight_report_path": host_preflight.get("marker_path"),
         "clarification_questions": 0,
         "tasks_created": 0, "leaf_tasks": 0, "splits": 0, "re_splits": 0, "max_depth": 0,
         # ``re_splits`` is the number of controller events.  These fields are
@@ -1065,7 +1073,11 @@ def reset_run(mode):
     RUN_STARTED = time.time()
     VISION_ENABLED_FOR_RUN = ENABLE_VISION and bool(VISION_MODEL)
     VISION_ERROR = None
-    record_run_event("run_started", mode=mode, model=MODEL, source_sha256=RUN["source_sha256"])
+    record_run_event(
+        "run_started", mode=mode, model=MODEL, source_sha256=RUN["source_sha256"],
+        host_preflight_status=RUN.get("host_preflight_status"),
+        host_preflight_id=RUN.get("host_preflight_id"),
+    )
 
 
 def compact_task_tree():
@@ -8422,6 +8434,28 @@ def run_self_test(install_browser=False):
             result = solve_task(root, 0, contract, memory, repo, fit_decider=fit, leaf_executor=leaf, aggregator=aggregate)
         finally:
             globals()["decompose_task"] = original_decompose
+        # Host qualification is tested with injected deterministic probes so
+        # the architecture self-test never contacts Ollama or requires GPU
+        # hardware.  This remains outside the HIVO task metrics.
+        preflight_workspace = Path(tmp) / "host_preflight"
+        preflight_workspace.mkdir()
+        preflight_calls = []
+        mocked_resources = {
+            "total_system_ram_bytes": 16 * 1024 ** 3,
+            "available_system_ram_bytes": 8 * 1024 ** 3,
+            "gpu": {"status": "UNKNOWN", "reason": "self-test"},
+        }
+        preflight_result = run_host_preflight(
+            preflight_workspace, "gemma4:e4b", "http://127.0.0.1:11434",
+            model_catalog_loader=lambda _base_url: [{"name": "gemma4:e4b"}],
+            canary_call=lambda model, prompt, timeout, base_url: (
+                preflight_calls.append((model, prompt, timeout, base_url))
+                or {"status_code": 200, "body": {"message": {"content": "HIVO_PREFLIGHT_OK"}}}
+            ),
+            resource_sampler=lambda: dict(mocked_resources),
+            sleep=lambda _seconds: None,
+            preflight_id="self-test-preflight",
+        )
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -8433,6 +8467,13 @@ def run_self_test(install_browser=False):
                 len(str(item.get("summary", ""))) <= MAX_NODE_SUMMARY_CHARS for item in compact_task_tree()
             ),
             "falsifier read only": "write_file" not in {t["function"]["name"] for t in tools_for_role("Falsifier")},
+            "host preflight mocked": preflight_result["passed"] and len(preflight_calls) == 3,
+            "host preflight marker": (
+                json.loads((preflight_workspace / ".agent_host_preflight.json").read_text(encoding="utf-8"))["status"] == "PASS"
+            ),
+            "host preflight no app files": not any(
+                (preflight_workspace / name).exists() for name in ("index.html", "style.css", "game.js")
+            ),
         }
         for name, ok in checks.items():
             print(f"{name:<24} {'PASS' if ok else 'FAIL'}")
@@ -8505,7 +8546,7 @@ def ollama_reachable():
 
 
 def main():
-    global WORKSPACE
+    global WORKSPACE, HOST_PREFLIGHT_RESULT
     configure_console_streams()
     args = parse_args()
     # The architecture self-test is deterministic and must remain runnable on
@@ -8517,9 +8558,32 @@ def main():
     if not ensure_dependencies(auto_install=not args.no_bootstrap):
         raise SystemExit(2)
     try:
-        select_local_ollama_model(args.model)
+        selected_model = MODEL_POLICY.validate(args.model)
+    except ValueError as exc:
+        print(f"[SETUP_ERROR] {exc}")
+        raise SystemExit(2)
+    try:
         WORKSPACE = get_workspace(args.workspace)
     except RuntimeError as exc:
+        if args.workspace:
+            HOST_PREFLIGHT_RESULT = failed_host_preflight_result(
+                args.workspace, selected_model, reason="WORKSPACE_UNUSABLE", stage="workspace", summary=exc,
+            )
+            print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+            print("terminal: HOST_PREFLIGHT_FAILED")
+        else:
+            print(f"[SETUP_ERROR] {exc}")
+        raise SystemExit(2)
+    HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
+    print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+    if not HOST_PREFLIGHT_RESULT["passed"]:
+        print("terminal: HOST_PREFLIGHT_FAILED")
+        raise SystemExit(2)
+    # Preserve the established model configuration path after qualification;
+    # the preflight itself never mutates HIVO task state or metrics.
+    try:
+        select_local_ollama_model(selected_model)
+    except (RuntimeError, ValueError) as exc:
         print(f"[SETUP_ERROR] {exc}")
         raise SystemExit(2)
     memory = load_memory()
