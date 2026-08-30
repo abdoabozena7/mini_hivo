@@ -37,6 +37,8 @@ class SingleModelPolicy:
             "mission_compiler": self.model_name,
             "clarifier": self.model_name,
             "requirement_extractor": self.model_name,
+            "recon_agent": self.model_name,
+            "task_brain_compiler": self.model_name,
         }
 
     def context_window(self, role: str) -> int:
@@ -44,7 +46,8 @@ class SingleModelPolicy:
         role_key = role.strip().lower()
         if role_key in {"visual", "coordinator", "quality", "predictor", "challenger",
                         "specifier", "missioncompiler", "mission_compiler", "clarifier",
-                        "requirementextractor", "requirement_extractor"}:
+                        "requirementextractor", "requirement_extractor", "reconagent",
+                        "recon_agent", "taskbraincompiler", "task_brain_compiler"}:
             return 4096
         if role_key in {"falsifier", "repairer"}:
             return 8192

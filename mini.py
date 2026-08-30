@@ -32,6 +32,7 @@ from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
+from hivo import project_understanding as stage2
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -103,6 +104,29 @@ MAX_PROVIDER_RETRIES = 2
 MAX_RECON_FILES = 120
 MAX_RECON_DEPTH = 3
 MAX_RECON_CHARS = 6000
+# Stage 2 targeted reconnaissance has separate read/model bounds.  The legacy
+# shallow snapshot above remains a metadata inventory for older callers.
+MAX_RECON_SEARCHES = stage2.MAX_RECON_SEARCHES
+MAX_TARGETED_RECON_FILES = stage2.MAX_RECON_FILES
+MAX_RECON_SNIPPETS = stage2.MAX_RECON_SNIPPETS
+MAX_TARGETED_RECON_CHARS = stage2.MAX_RECON_CHARS
+MAX_RECON_MODEL_CALLS = stage2.MAX_RECON_MODEL_CALLS
+MAX_TASK_BRAIN_CHARS = stage2.MAX_TASK_BRAIN_CHARS
+MAX_TASK_BRAIN_EVIDENCE = stage2.MAX_TASK_BRAIN_EVIDENCE
+MAX_TASK_BRAIN_TESTS = stage2.MAX_TASK_BRAIN_TESTS
+MAX_TASK_BRAIN_INTERFACES = stage2.MAX_TASK_BRAIN_INTERFACES
+MAX_TASK_BRAIN_ASSUMPTIONS = stage2.MAX_TASK_BRAIN_ASSUMPTIONS
+MAX_TASK_BRAIN_OPEN_QUESTIONS = stage2.MAX_TASK_BRAIN_OPEN_QUESTIONS
+MAX_TASK_BRAIN_PROJECTION_CHARS = stage2.MAX_TASK_BRAIN_PROJECTION_CHARS
+NEW_PROJECT = stage2.NEW_PROJECT
+EXISTING_PROJECT = stage2.EXISTING_PROJECT
+REPOSITORY_EMPTY = stage2.REPOSITORY_EMPTY
+REPOSITORY_EVIDENCE_UNAVAILABLE = stage2.REPOSITORY_EVIDENCE_UNAVAILABLE
+REPOSITORY_RECONNAISSANCE_FAILED = stage2.REPOSITORY_RECONNAISSANCE_FAILED
+REPOSITORY_RECONNAISSANCE_COMPLETE = stage2.REPOSITORY_RECONNAISSANCE_COMPLETE
+PROJECT_BRAIN = stage2.PROJECT_BRAIN
+REPOSITORY_EVIDENCE = stage2.REPOSITORY_EVIDENCE
+DERIVED_TASK_ASSUMPTION = stage2.DERIVED_TASK_ASSUMPTION
 MAX_NODE_SUMMARY_CHARS = 700
 MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
@@ -181,6 +205,10 @@ class StructuredOutputError(RuntimeError):
 
 class MissionCompilationError(RuntimeError):
     """A bounded worker mission could not be compiled from verified context."""
+
+
+class TaskBrainValidationError(RuntimeError):
+    """The temporary task context failed its deterministic Stage 2 gate."""
 
 
 # ---------------------------------------------------------------------------
@@ -1040,6 +1068,21 @@ def new_metrics(mode):
         "requirement_extractor_calls": 0,
         "clarifier_calls": 0,
         "clarification_terminal_state": None,
+        # v17 project-understanding and temporary Task Brain accounting.
+        "project_mode_new": 0,
+        "project_mode_existing": 0,
+        "repository_reconnaissance_runs": 0,
+        "repository_reconnaissance_skipped": 0,
+        "repository_searches": 0,
+        "repository_files_considered": 0,
+        "repository_files_inspected": 0,
+        "repository_evidence_records": 0,
+        "repo_grounded_clarification_questions": 0,
+        "task_brains_created": 0,
+        "task_brain_creation_failures": 0,
+        "recon_agent_calls": 0,
+        "task_brain_compiler_calls": 0,
+        "control_flow": [],
         "specification_expansions": 0,
         "specification_expansion_failures": 0,
         "brain_projections_created": 0,
@@ -1605,7 +1648,8 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
             "num_predict": {"Builder": 4096, "Repairer": 3072, "Falsifier": 1536,
                             "Coordinator": 1536, "Quality": 1536, "Specifier": 1536,
                             "MissionCompiler": 1536, "Clarifier": 1536,
-                            "RequirementExtractor": 1536}.get(role, 2048),
+                            "RequirementExtractor": 1536, "ReconAgent": 1024,
+                            "TaskBrainCompiler": 1024}.get(role, 2048),
             "temperature": MODEL_POLICY.temperature(role) if temperature is None else temperature,
             "seed": 0,
         },
@@ -2246,6 +2290,8 @@ def _clarification_answer_record(question, answer, selected_option):
         "answer": compact_text(answer, 700),
         "selected_option": compact_text(selected_option, 300),
         "affected_requirement_ids": list(question.get("affected_requirement_ids", [])),
+        "repository_evidence_ids": list(question.get("repository_evidence_ids", []))[:8],
+        "phase": compact_text(question.get("phase") or "REQUEST_CLARIFICATION", 80),
         "provenance": USER_CONFIRMED,
     }
 
@@ -2318,6 +2364,11 @@ def resolve_clarification_questions(clarification, interactive=True, terminal_av
         record_run_event(
             "clarification_required",
             question_ids=[item.get("question_id") for item in unanswered], blocking=True,
+            phases=[item.get("phase", "REQUEST_CLARIFICATION") for item in unanswered],
+            repository_evidence_ids=[
+                evidence_id for item in unanswered
+                for evidence_id in item.get("repository_evidence_ids", [])
+            ],
         )
         return {"status": "clarification_required", "answers": answers, "derived": derived,
                 "unanswered": unanswered}
@@ -2361,6 +2412,9 @@ def _ledger_with_confirmed_answers(ledger, answers):
             continue
         result = append_confirmed_requirement(
             result, answer.get("answer"), question_id=answer.get("question_id"),
+            affected_requirement_ids=answer.get("affected_requirement_ids", []),
+            repository_evidence_ids=answer.get("repository_evidence_ids", []),
+            phase=answer.get("phase"),
         )
     return result
 
@@ -2368,7 +2422,9 @@ def _ledger_with_confirmed_answers(ledger, answers):
 def get_goal_contract(raw_goal, interactive=True, structured_call=None, clarifier_call=None,
                       terminal_available=None, selector=None, answer_reader=None):
     """Build the source contract, run one critical round, then return ready."""
+    RUN.setdefault("control_flow", []).append("SOURCE_REQUIREMENT_INGESTION")
     ledger = extract_source_requirement_ledger(raw_goal, structured_call=structured_call)
+    RUN.setdefault("control_flow", []).append("REQUEST_CLARIFICATION")
     clarification = clarify_request(raw_goal, ledger, structured_call=clarifier_call)
     resolution = resolve_clarification_questions(
         clarification, interactive=interactive, terminal_available=terminal_available,
@@ -2461,6 +2517,8 @@ def _compact_brain_record(value, max_chars=MAX_INTEGRATION_FACT_CHARS):
         return compact_text(value, max_chars)
     preferred = (
         "kind", "owner", "symbol", "selector", "fact", "source", "rule", "file", "path",
+        "evidence_id", "category", "evidence_type", "source_kind", "line_start", "line_end",
+        "file_sha256", "support",
         "requirement_id", "decision_id", "text", "category", "provenance", "source_segment",
         "source_segments", "source_variants", "question_id", "answer", "selected_option",
         "affected_requirement_ids",
@@ -2657,7 +2715,7 @@ def specification_from_goal_contract(contract):
     )
 
 
-def expand_project_specification(raw_goal, contract, structured_call=None):
+def expand_project_specification(raw_goal, contract, structured_call=None, repository_summary=None):
     """Expand a short request into a bounded project specification, never code."""
     RUN["specification_expansions"] = RUN.get("specification_expansions", 0) + 1
     schema = _project_specification_schema()
@@ -2666,6 +2724,8 @@ Translate one user request into a compact implementation-relevant project specif
 Do not write code, decompose tasks, choose worker-level edits, or invent features merely to make the output longer.
 Preserve every explicit requirement and constraint. Use empty arrays when a category is not applicable or is not
 supported by the request. Put genuinely unresolved blocking ambiguities in unresolved_critical_ambiguities.
+For an existing project, CURRENT OBSERVED REPOSITORY FACTS are authoritative only about current state. Keep them
+epistemically separate from PROPOSED / DERIVED architecture; do not rewrite observations as user requirements.
 Return only the bounded structured specification requested by the schema.
 
 RAW USER REQUEST:
@@ -2681,7 +2741,10 @@ USER-CONFIRMED CLARIFICATION DECISIONS:
 {json.dumps(contract.get('user_confirmed_requirements', []), ensure_ascii=False, default=str)[:2200] or '(none)'}
 
 DERIVED OPTIONAL DEFAULTS (not user-confirmed):
-{json.dumps(contract.get('derived_assumptions', []), ensure_ascii=False, default=str)[:1800] or '(none)'}"""
+{json.dumps(contract.get('derived_assumptions', []), ensure_ascii=False, default=str)[:1800] or '(none)'}
+
+CURRENT OBSERVED REPOSITORY FACTS (not user truth; not proposed architecture):
+{compact_text(repository_summary or '(none / NEW_PROJECT)', 4200)}"""
     try:
         if structured_call is None:
             data = structured_model_call(
@@ -2713,7 +2776,7 @@ def _verified_manifests_from_tasks():
     return manifests[-MAX_BRAIN_ITEMS:]
 
 
-def _initial_verified_project_state(repo_snapshot):
+def _initial_verified_project_state(repo_snapshot, repository_evidence=None):
     snapshot = repo_snapshot if isinstance(repo_snapshot, dict) else {}
     try:
         invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
@@ -2727,6 +2790,52 @@ def _initial_verified_project_state(repo_snapshot):
         components.extend(manifest.get("introduced_symbols", []))
         interfaces.extend(manifest.get("interfaces", []))
         integration_facts.extend(manifest.get("invariants", []))
+    def accepted_repository_evidence(item):
+        if stage2.validate_repository_evidence(item):
+            return True
+        # A Project Brain refresh may receive its own compact locator record.
+        # It was admitted only after full direct-evidence validation; retain it
+        # when path, hash, category, location, and provenance remain intact.
+        return bool(
+            isinstance(item, dict)
+            and re.fullmatch(r"REPO-\d{3,}", str(item.get("evidence_id", "")))
+            and item.get("category") in stage2.REPOSITORY_EVIDENCE_CATEGORIES
+            and item.get("evidence_type") == stage2.DIRECT_OBSERVATION
+            and item.get("provenance") == REPOSITORY_EVIDENCE
+            and str(item.get("path", "")).strip()
+            and str(item.get("fact", "")).strip()
+            and str(item.get("file_sha256", "")).strip()
+            and int(item.get("line_start", 0) or 0) >= 1
+        )
+
+    direct_evidence = [
+        copy.deepcopy(item) for item in (repository_evidence or [])
+        if accepted_repository_evidence(item)
+    ][:MAX_TASK_BRAIN_EVIDENCE]
+
+    def compact_repository_evidence(item):
+        return {
+            "evidence_id": item.get("evidence_id"),
+            "fact": compact_text(item.get("fact", ""), 140),
+            "category": item.get("category"),
+            "path": compact_text(item.get("path", ""), 140),
+            "symbol": compact_text(item.get("symbol", ""), 80) or None,
+            "source_kind": item.get("source_kind"),
+            "evidence_type": item.get("evidence_type"),
+            "provenance": item.get("provenance"),
+            "line_start": item.get("line_start"),
+            "line_end": item.get("line_end"),
+            "file_sha256": item.get("file_sha256"),
+            "support": compact_text(item.get("support", "source-located observation"), 100),
+        }
+    components.extend(
+        item.get("symbol") or item.get("path") for item in direct_evidence
+        if item.get("category") in {"CURRENT_OWNER", "CURRENT_STATE_OWNER"}
+    )
+    interfaces.extend(
+        item.get("symbol") or item.get("fact") for item in direct_evidence
+        if item.get("category") == "CURRENT_INTERFACE"
+    )
     return {
         "source": "deterministic_reconnaissance_and_verified_manifests",
         "provenance": VERIFIED,
@@ -2738,6 +2847,7 @@ def _initial_verified_project_state(repo_snapshot):
         "project_invariants": _bounded_brain_records(invariants, 12, MAX_INTEGRATION_FACT_CHARS),
         "verified_child_manifests": manifests,
         "integration_facts": _bounded_brain_strings(integration_facts, MAX_BRAIN_ITEMS, 260),
+        "repository_evidence": [compact_repository_evidence(item) for item in direct_evidence],
         "blocking_failures": _bounded_brain_strings(
             RUN.get("project_brain_blocking_failures", []), MAX_BRAIN_ITEMS, 260,
         ),
@@ -2786,7 +2896,7 @@ def _source_contract_for_brain(contract, ledger):
     return freeze(source_contract)
 
 
-def build_project_brain(contract, specification, repo_snapshot=None):
+def build_project_brain(contract, specification, repo_snapshot=None, repository_evidence=None):
     """Create one bounded core plus a separate deterministic verified-state view."""
     contract = contract if isinstance(contract, dict) else {}
     source_ledger = _source_ledger_for_contract(contract)
@@ -2871,7 +2981,7 @@ def build_project_brain(contract, specification, repo_snapshot=None):
             contract.get("user_confirmed_requirements", []), MAX_BRAIN_ITEMS, 360,
         ),
     }
-    verified_state = _initial_verified_project_state(repo_snapshot)
+    verified_state = _initial_verified_project_state(repo_snapshot, repository_evidence)
     source_contract = _source_contract_for_brain(contract, source_ledger)
     RUN["source_requirement_ledger"] = source_ledger
     RUN["source_contract"] = source_contract
@@ -2919,6 +3029,7 @@ def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
         (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
         (state, "languages"), (state, "dependency_manifests"), (state, "verified_components"),
         (state, "verified_interfaces"), (state, "integration_facts"), (state, "blocking_failures"),
+        (state, "repository_evidence"),
         (core, "user_confirmed_requirements"),
     ]
     encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
@@ -3004,15 +3115,23 @@ def refresh_project_brain_verified_state(repo_snapshot=None):
             snapshot = inspect_repository()
         except Exception:
             snapshot = {}
-    brain["verified_state"] = _initial_verified_project_state(snapshot)
+    previous = brain.get("verified_state") if isinstance(brain.get("verified_state"), dict) else {}
+    repository_evidence = RUN.get("repository_evidence")
+    if not isinstance(repository_evidence, list):
+        repository_evidence = previous.get("repository_evidence", [])
+    brain["verified_state"] = _initial_verified_project_state(
+        snapshot, repository_evidence,
+    )
     return brain["verified_state"]
 
 
-def prepare_project_brain(raw_goal, contract, repo_snapshot, specification=None):
+def prepare_project_brain(raw_goal, contract, repo_snapshot, specification=None, repository_evidence=None):
     """Prepare the recursive shared alignment anchor before decomposition."""
     if specification is None:
         specification = expand_project_specification(raw_goal, contract)
-    brain = build_project_brain(contract, specification, repo_snapshot)
+    brain = build_project_brain(
+        contract, specification, repo_snapshot, repository_evidence=repository_evidence,
+    )
     RUN["project_brain"] = brain
     record_run_event(
         "project_brain_created",
@@ -3060,6 +3179,7 @@ def _compact_brain_projection(projection, max_chars=MAX_BRAIN_PROJECTION_CHARS):
         ("verified_state", "project_invariants"),
         ("verified_state", "blocking_failures"),
         ("verified_state", "integration_facts"),
+        ("verified_state", "repository_evidence"),
         ("verified_state", "files"),
         ("relevant_core.product_contract", "requirements"),
         ("relevant_core", "source_requirements"),
@@ -3243,6 +3363,9 @@ def build_brain_projection(brain, task, dependency_summaries=None, repo_snapshot
             "integration_facts": _select_relevant_brain_items(
                 state.get("integration_facts", []), query, 8,
             ),
+            "repository_evidence": _select_relevant_brain_items(
+                state.get("repository_evidence", []), query, 8,
+            ),
             "blocking_failures": _bounded_brain_strings(
                 state.get("blocking_failures", []), 8, 260,
             ),
@@ -3296,7 +3419,7 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
                   "non_goals", "explicit_assumptions", "derived_assumptions", "open_ambiguities"):
         if isinstance(core.get(field), list):
             core[field] = _bounded_brain_strings(core[field], MAX_BRAIN_ITEMS, 300)
-    for field in ("files", "project_invariants", "verified_child_manifests"):
+    for field in ("files", "project_invariants", "verified_child_manifests", "repository_evidence"):
         if isinstance(state.get(field), list):
             state[field] = _bounded_brain_records(state[field], 12, 240)
 
@@ -3337,7 +3460,8 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
             } for item in source_coverage if isinstance(item, dict)]
             encoded = encode_packet()
     trim_order = [
-        (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
+        (state, "verified_child_manifests"), (state, "project_invariants"),
+        (state, "repository_evidence"), (state, "files"),
         (core, "explicit_assumptions"), (core, "derived_assumptions"),
         (core, "open_ambiguities"), (core, "non_goals"),
         (core, "interaction_contracts"), (core, "edge_cases"),
@@ -3392,6 +3516,48 @@ def project_brain_task_planning_packet(task, dependency_summaries=None, repo_sna
         return "(project brain not prepared)"
     task = task if isinstance(task, dict) else {}
     is_root = str(task.get("id", "")) == "ROOT" or int(task.get("depth", 0) or 0) == 0
+    task_brain = RUN.get("task_brain")
+    if isinstance(task_brain, dict):
+        project_budget = max(600, int(max_chars * 0.52))
+        task_budget = max(500, max_chars - project_budget - 500)
+        projection = build_brain_projection(
+            brain, task, dependency_summaries, repo_snapshot, record=False,
+        )
+        envelope = {
+            "root_goal_anchor": compact_text(brain.get("core", {}).get("root_goal", ""), 800),
+            "relevant_source_requirements": projection.get("relevant_core", {}).get(
+                "source_requirements", []
+            ),
+            "project_brain_projection": _compact_brain_projection(
+                projection, max_chars=project_budget,
+            ),
+            "task_brain_slice": stage2.task_brain_projection(
+                task_brain, task, max_chars=task_budget,
+            ),
+            "verified_dependencies": [
+                _compact_brain_record(item, 360) for item in list(dependency_summaries or [])[-3:]
+                if isinstance(item, dict)
+                and str(item.get("status", "")).casefold() in {"done", "verified", "passed"}
+            ],
+        }
+        encoded = json.dumps(envelope, ensure_ascii=False, default=str)
+        if len(encoded) > max_chars:
+            envelope["verified_dependencies"] = []
+            envelope["task_brain_slice"] = stage2.task_brain_projection(
+                task_brain, task, max_chars=max(400, task_budget // 2),
+            )
+            envelope["project_brain_projection"] = _compact_brain_projection(
+                projection, max_chars=max(500, project_budget // 2),
+            )
+            encoded = json.dumps(envelope, ensure_ascii=False, default=str)
+        return encoded if len(encoded) <= max_chars else json.dumps({
+            "root_goal_anchor": envelope["root_goal_anchor"],
+            "task_brain_slice": {
+                "task_id": task_brain.get("task_id"),
+                "project_mode": task_brain.get("project_mode"),
+                "source_requirement_ids": task_brain.get("source_requirement_ids", []),
+            },
+        }, ensure_ascii=False, default=str)[:max_chars]
     if is_root:
         return compact_project_brain(brain, max_chars=max_chars)
     projection = build_brain_projection(
@@ -3401,6 +3567,373 @@ def project_brain_task_planning_packet(task, dependency_summaries=None, repo_sna
         _compact_brain_projection(projection, max_chars=max_chars),
         ensure_ascii=False, default=str,
     )
+
+
+def classify_project_mode(raw_goal, workspace=None, repo_snapshot=None):
+    """Public deterministic Stage 2 project/workspace classification."""
+    selected_workspace = workspace if workspace is not None else WORKSPACE
+    inventory = stage2.inventory_repository(selected_workspace) if selected_workspace is not None else {
+        "status": REPOSITORY_EVIDENCE_UNAVAILABLE, "files": [], "meaningful_files": [],
+    }
+    classification_source = inventory
+    if inventory.get("status") == REPOSITORY_EVIDENCE_UNAVAILABLE and isinstance(repo_snapshot, dict):
+        classification_source = repo_snapshot
+    result = stage2.classify_project_mode(raw_goal, classification_source)
+    result["inventory"] = inventory
+    return result
+
+
+def _repository_scout_schema():
+    return {
+        "type": "object", "properties": {
+            "paths": {
+                "type": "array", "items": {"type": "string"},
+                "maxItems": MAX_TARGETED_RECON_FILES,
+            },
+        }, "required": ["paths"], "additionalProperties": False,
+    }
+
+
+def _repository_scout_validator(data):
+    return bool(
+        isinstance(data, dict) and isinstance(data.get("paths"), list)
+        and len(data.get("paths", [])) <= MAX_TARGETED_RECON_FILES
+        and all(isinstance(item, str) and item.strip() for item in data.get("paths", []))
+    )
+
+
+def _repository_scout_prompt(context):
+    return f"""You are RECON AGENT, a narrow read-only repository evidence selector.
+Given the current task, Source Requirement terms, a bounded metadata inventory, and deterministic search results,
+select only paths that should be inspected to understand current owners, interfaces, state, constraints, or tests.
+Do not write code, plan implementation, decide the final change surface, create Worker missions, or invent files.
+Return at most {MAX_TARGETED_RECON_FILES} paths that are present in the supplied inventory.
+
+BOUNDED RECONNAISSANCE CONTEXT:
+{compact_text(json.dumps(context, ensure_ascii=False, default=str), 5200)}"""
+
+
+def run_repository_reconnaissance(raw_goal, contract=None, workspace=None, inventory=None,
+                                  structured_call=None, use_model_scout=True):
+    """Run and account for bounded read-only Stage 2 reconnaissance."""
+    selected_workspace = workspace if workspace is not None else WORKSPACE
+    contract = contract if isinstance(contract, dict) else {}
+    source_records = ledger_requirements(contract.get("source_requirement_ledger"))
+
+    def scout_selector(context):
+        if not use_model_scout or RUN.get("recon_agent_calls", 0) >= MAX_RECON_MODEL_CALLS:
+            return []
+        RUN["recon_agent_calls"] = RUN.get("recon_agent_calls", 0) + 1
+        try:
+            if structured_call is None:
+                data = structured_model_call(
+                    _repository_scout_prompt(context), _repository_scout_validator,
+                    "repository-scout", _repository_scout_schema(), retries=1, role="ReconAgent",
+                )
+            else:
+                data = structured_call(
+                    _repository_scout_prompt(context), _repository_scout_validator,
+                    "repository-scout", _repository_scout_schema(),
+                )
+            if not _repository_scout_validator(data):
+                raise StructuredOutputError("ReconAgent returned an invalid path selection")
+            allowed = {
+                str(item.get("path")) for item in context.get("inventory", []) if isinstance(item, dict)
+            }
+            return [path for path in data.get("paths", []) if path in allowed]
+        except (ProviderError, StructuredOutputError, KeyError, TypeError, ValueError) as exc:
+            record_run_event("recon_agent_unavailable", error=str(exc))
+            return []
+
+    RUN["repository_reconnaissance_runs"] = RUN.get("repository_reconnaissance_runs", 0) + 1
+    result = stage2.run_repository_reconnaissance(
+        selected_workspace, raw_goal, source_requirements=source_records,
+        inventory=inventory, scout_selector=scout_selector if use_model_scout else None,
+    )
+    RUN["repository_searches"] = RUN.get("repository_searches", 0) + int(result.get("searches", 0) or 0)
+    RUN["repository_files_considered"] = RUN.get("repository_files_considered", 0) + int(
+        result.get("files_considered", len((result.get("inventory") or {}).get("files", []))) or 0
+    )
+    RUN["repository_files_inspected"] = RUN.get("repository_files_inspected", 0) + int(
+        result.get("files_inspected", 0) or 0
+    )
+    RUN["repository_evidence_records"] = RUN.get("repository_evidence_records", 0) + len(
+        result.get("evidence", [])
+    )
+    RUN["repository_reconnaissance"] = result
+    RUN["repository_evidence"] = result.get("evidence", [])
+    record_run_event(
+        "repository_reconnaissance",
+        status=result.get("status"), searches=result.get("searches", 0),
+        files_considered=result.get("files_considered", 0),
+        files_inspected=result.get("files_inspected", 0),
+        evidence_count=len(result.get("evidence", [])), read_only=result.get("read_only"),
+        operations=result.get("operations", []),
+    )
+    return result
+
+
+repository_reconnaissance = run_repository_reconnaissance
+
+
+def repository_grounded_clarification(raw_goal, contract, reconnaissance):
+    """Return only valid evidence-linked Stage 2 questions."""
+    contract = contract if isinstance(contract, dict) else {}
+    source_records = ledger_requirements(contract.get("source_requirement_ledger"))
+    evidence = list((reconnaissance or {}).get("evidence", []) or [])
+    valid_requirement_ids = {str(item.get("requirement_id")) for item in source_records}
+    valid_evidence_ids = {str(item.get("evidence_id")) for item in evidence}
+    questions = []
+    for raw_question in stage2.repository_grounded_questions(raw_goal, source_records, evidence):
+        if not stage2.validate_repository_question(
+            raw_question, valid_requirement_ids, valid_evidence_ids,
+        ):
+            continue
+        normalized = normalize_question(
+            raw_question, len(questions) + 1, contract.get("source_requirement_ledger"),
+            "PRECISION_SENSITIVE", [],
+        )
+        if not normalized:
+            continue
+        normalized["question_id"] = raw_question.get("question_id", normalized.get("question_id"))
+        normalized["phase"] = "REPOSITORY_GROUNDED_CLARIFICATION"
+        normalized["repository_evidence_ids"] = list(raw_question.get("repository_evidence_ids", []))[:8]
+        if stage2.validate_repository_question(
+            normalized, valid_requirement_ids, valid_evidence_ids,
+        ):
+            questions.append(normalized)
+    questions = questions[:MAX_CLARIFICATION_QUESTIONS]
+    if questions:
+        RUN["repo_grounded_clarification_questions"] = RUN.get(
+            "repo_grounded_clarification_questions", 0,
+        ) + len(questions)
+        RUN["user_clarification_rounds"] = RUN.get("user_clarification_rounds", 0) + 1
+        RUN["user_clarification_questions"] = RUN.get("user_clarification_questions", 0) + len(questions)
+        RUN["clarification_questions"] = RUN.get("clarification_questions", 0) + len(questions)
+    envelope = {
+        "questions": questions, "conflicts": [],
+        "interaction_style": "PRECISION_SENSITIVE",
+        "phase": "REPOSITORY_GROUNDED_CLARIFICATION",
+    }
+    RUN["pending_repository_clarification"] = envelope
+    record_run_event(
+        "repository_clarification_gate_evaluated",
+        question_ids=[item.get("question_id") for item in questions],
+        repository_evidence_ids=[
+            evidence_id for item in questions
+            for evidence_id in item.get("repository_evidence_ids", [])
+        ],
+    )
+    return envelope
+
+
+def _contract_with_repository_decisions(raw_goal, contract, clarification, resolution):
+    updated = copy.deepcopy(contract if isinstance(contract, dict) else {})
+    previous_answers = list(updated.get("user_confirmed_requirements", []) or [])
+    repo_answers = list(resolution.get("answers", []) or [])
+    answers = previous_answers + repo_answers
+    ledger = _ledger_with_confirmed_answers(updated.get("source_requirement_ledger"), repo_answers)
+    derived = list(updated.get("derived_assumptions", []) or []) + list(resolution.get("derived", []) or [])
+    questions = list(updated.get("clarification_questions", []) or []) + list(
+        clarification.get("questions", []) or []
+    )
+    clarification_answers = list(updated.get("clarification_answers", []) or []) + repo_answers
+    updated["source_requirement_ledger"] = ledger
+    updated["source_requirements"] = ledger_requirements(ledger)
+    updated["user_stated_requirements"] = ledger_requirements(ledger)
+    updated["user_confirmed_requirements"] = answers
+    updated["derived_assumptions"] = derived
+    updated["clarification_questions"] = questions
+    updated["clarification_answers"] = clarification_answers
+    updated["repository_clarification_answers"] = repo_answers
+    updated["requirements"] = list(updated.get("requirements", []) or [])
+    for answer in repo_answers:
+        value = str(answer.get("answer", "")).strip()
+        if value and value not in updated["requirements"]:
+            updated["requirements"].append(value)
+    updated["source_contract"] = source_contract_from_ledger(
+        raw_goal, ledger, confirmed=answers, derived=derived,
+        questions=questions, answers=clarification_answers,
+        interaction_style=updated.get("interaction_style"),
+    )
+    RUN["source_requirement_ledger"] = ledger
+    RUN["source_contract"] = updated["source_contract"]
+    RUN["clarification_answers"] = clarification_answers
+    return updated
+
+
+def create_task_brain(task_id, raw_goal, contract, project_brain, project_mode,
+                      repository_evidence=None, open_questions=None):
+    """Create, validate, and persist exactly one top-level Task Brain."""
+    source_contract = contract.get("source_contract") if isinstance(contract, dict) else {}
+    task_goal = (
+        source_contract.get("root_goal") if isinstance(source_contract, dict) else None
+    ) or next((line.strip() for line in str(raw_goal or "").splitlines() if line.strip()), raw_goal)
+    projection_task = root_task_from_contract(contract)
+    project_projection = build_brain_projection(
+        project_brain, projection_task, repo_snapshot={}, record=False,
+    )
+    brain = stage2.build_task_brain(
+        task_id, task_goal, project_mode, contract,
+        project_brain_projection=project_projection,
+        repository_evidence=repository_evidence,
+        open_questions=open_questions,
+    )
+    valid_requirement_ids = [
+        item.get("requirement_id")
+        for item in ledger_requirements(contract.get("source_requirement_ledger"), include_confirmed=True)
+    ]
+    validation = stage2.validate_task_brain(
+        brain, valid_requirement_ids=valid_requirement_ids,
+        repository_evidence=repository_evidence,
+    )
+    RUN["task_brain_validation"] = validation
+    if not validation.get("valid"):
+        RUN["task_brain_creation_failures"] = RUN.get("task_brain_creation_failures", 0) + 1
+        record_run_event("task_brain_creation_failure", errors=validation.get("errors", []))
+        raise TaskBrainValidationError("; ".join(validation.get("errors", [])))
+    RUN["task_brain"] = brain
+    RUN["task_brains_created"] = RUN.get("task_brains_created", 0) + 1
+    record_run_event(
+        "task_brain_created", task_id=task_id, project_mode=project_mode,
+        serialized_chars=validation.get("serialized_chars"), task_brain=brain,
+    )
+    return brain
+
+
+build_task_brain = create_task_brain
+validate_task_brain = stage2.validate_task_brain
+task_brain_projection = stage2.task_brain_projection
+
+
+def _record_project_mode(classification):
+    mode = classification.get("project_mode")
+    if RUN.get("project_mode") != mode:
+        if mode == NEW_PROJECT:
+            RUN["project_mode_new"] = RUN.get("project_mode_new", 0) + 1
+        elif mode == EXISTING_PROJECT:
+            RUN["project_mode_existing"] = RUN.get("project_mode_existing", 0) + 1
+    RUN["project_mode"] = mode
+    RUN["project_mode_classification"] = {
+        key: value for key, value in classification.items() if key != "inventory"
+    }
+
+
+def prepare_stage2_context(raw_goal, contract, repo_snapshot=None, interactive=True,
+                           supplied_contract=False, specification_override=None,
+                           recon_structured_call=None, terminal_available=None,
+                           selector=None, answer_reader=None):
+    """Prepare verified current-state evidence and one Task Brain before planning."""
+    RUN.setdefault("control_flow", []).append("PROJECT_MODE_CLASSIFICATION")
+    classification = classify_project_mode(raw_goal, repo_snapshot=repo_snapshot)
+    _record_project_mode(classification)
+    mode = classification.get("project_mode")
+    inventory = classification.get("inventory") or {}
+    if mode == EXISTING_PROJECT:
+        RUN.setdefault("control_flow", []).append("REPOSITORY_RECONNAISSANCE")
+        reconnaissance = run_repository_reconnaissance(
+            raw_goal, contract, inventory=inventory,
+            structured_call=recon_structured_call, use_model_scout=True,
+        )
+        if reconnaissance.get("status") != REPOSITORY_RECONNAISSANCE_COMPLETE:
+            return {
+                "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
+                "orchestration_failure": reconnaissance.get("status"),
+                "summary": reconnaissance.get("error") or (
+                    "required existing-project repository evidence is unavailable"
+                ),
+                "project_mode": mode, "classification": classification,
+                "reconnaissance": reconnaissance,
+            }
+        if reconnaissance.get("read_only") is not True:
+            return {
+                "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
+                "orchestration_failure": REPOSITORY_RECONNAISSANCE_FAILED,
+                "summary": "repository state changed during read-only reconnaissance",
+                "project_mode": mode, "classification": classification,
+                "reconnaissance": reconnaissance,
+            }
+        RUN.setdefault("control_flow", []).append("REPOSITORY_GROUNDED_CLARIFICATION")
+        clarification = repository_grounded_clarification(raw_goal, contract, reconnaissance)
+        resolution = resolve_clarification_questions(
+            clarification, interactive=interactive, terminal_available=terminal_available,
+            selector=selector, answer_reader=answer_reader,
+        )
+        if resolution.get("status") == "clarification_required":
+            RUN["repository_clarification_required"] = {
+                "phase": "REPOSITORY_GROUNDED_CLARIFICATION",
+                "questions": clarification.get("questions", []),
+                "requirement_ids": [
+                    requirement_id for item in clarification.get("questions", [])
+                    for requirement_id in item.get("affected_requirement_ids", [])
+                ],
+                "repository_evidence_ids": [
+                    evidence_id for item in clarification.get("questions", [])
+                    for evidence_id in item.get("repository_evidence_ids", [])
+                ],
+            }
+            return {
+                "status": "clarification_required", "terminal_state": "CLARIFICATION_REQUIRED",
+                "phase": "REPOSITORY_GROUNDED_CLARIFICATION",
+                "summary": clarification.get("questions", [{}])[0].get(
+                    "question", "repository-grounded clarification required",
+                ),
+                "clarification_questions": clarification.get("questions", []),
+                "project_mode": mode, "classification": classification,
+                "reconnaissance": reconnaissance, "contract": contract,
+            }
+        contract = _contract_with_repository_decisions(raw_goal, contract, clarification, resolution)
+    else:
+        RUN.setdefault("control_flow", []).append("REPOSITORY_RECONNAISSANCE_SKIPPED")
+        RUN["repository_reconnaissance_skipped"] = RUN.get("repository_reconnaissance_skipped", 0) + 1
+        reconnaissance = {
+            "status": REPOSITORY_EMPTY, "inventory": inventory, "evidence": [],
+            "operations": [{"operation": "INVENTORY", "result": REPOSITORY_EMPTY}],
+            "read_only": True,
+        }
+        RUN["repository_reconnaissance"] = reconnaissance
+        RUN["repository_evidence"] = []
+        clarification = {
+            "questions": [], "phase": "REPOSITORY_GROUNDED_CLARIFICATION",
+            "interaction_style": "LOW_FRICTION",
+        }
+    repository_summary = stage2.bounded_repository_summary(reconnaissance, mode)
+    RUN.setdefault("control_flow", []).append("SPECIFICATION_EXPANSION")
+    if specification_override is not None:
+        specification = specification_override
+    elif supplied_contract:
+        specification = specification_from_goal_contract(contract)
+    elif mode == EXISTING_PROJECT:
+        specification = expand_project_specification(
+            raw_goal, contract, repository_summary=repository_summary,
+        )
+    else:
+        specification = expand_project_specification(raw_goal, contract)
+    RUN.setdefault("control_flow", []).append("PROJECT_BRAIN")
+    project_brain = prepare_project_brain(
+        raw_goal, contract, repo_snapshot or {}, specification=specification,
+        repository_evidence=reconnaissance.get("evidence", []),
+    )
+    RUN.setdefault("control_flow", []).append("TASK_BRAIN")
+    try:
+        task_brain = create_task_brain(
+            "ROOT", raw_goal, contract, project_brain, mode,
+            repository_evidence=reconnaissance.get("evidence", []),
+            open_questions=clarification.get("questions", []),
+        )
+    except TaskBrainValidationError as exc:
+        return {
+            "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
+            "orchestration_failure": "TASK_BRAIN_VALIDATION_FAILURE",
+            "summary": str(exc), "project_mode": mode,
+            "classification": classification, "reconnaissance": reconnaissance,
+        }
+    return {
+        "status": "ready", "project_mode": mode, "classification": classification,
+        "reconnaissance": reconnaissance, "repository_summary": repository_summary,
+        "contract": contract, "specification": specification,
+        "project_brain": project_brain, "task_brain": task_brain,
+    }
 
 
 _WORKER_MISSION_FIELDS = (
@@ -3829,6 +4362,8 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
     elif isinstance(repo_snapshot, list) and dependency_summaries is None and not parent_summary:
         dependency_summaries, repo_snapshot = repo_snapshot, inspect_repository()
     dependency_summaries = dependency_summaries or []
+    if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
+        RUN["control_flow"].append("TASK_FIT")
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard budget reached"}
@@ -3913,6 +4448,8 @@ def fallback_child_contracts(task):
 
 
 def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None, force_smaller=False):
+    if str(task.get("id", "")) == "ROOT" and "DECOMPOSITION" not in RUN.setdefault("control_flow", []):
+        RUN["control_flow"].append("DECOMPOSITION")
     if task.get("kind") == "integration":
         return decompose_integration_task(
             task, contract, repo_snapshot, parent_summary, dependency_summaries, force_smaller,
@@ -7796,6 +8333,10 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
     projection = build_brain_projection(
         brain, task, dependency_summaries, repo_snapshot, record=True,
     )
+    if task_context is None and isinstance(RUN.get("task_brain"), dict):
+        task_context = stage2.task_brain_projection(
+            RUN["task_brain"], task, max_chars=MAX_TASK_BRAIN_PROJECTION_CHARS,
+        )
     mission = compile_worker_mission(
         task, projection, dependency_summaries, repo_snapshot,
         strategy_context=strategy_context, task_context=task_context,
@@ -10185,6 +10726,8 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     repo_snapshot = repo_snapshot or inspect_repository()
     task["status"] = "running"
     RUN["max_depth"] = max(RUN.get("max_depth", 0), depth)
+    if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
+        RUN["control_flow"].append("TASK_FIT")
     update_task_ledger(task)
     label = task["id"]
     if label == "ROOT":
@@ -10343,6 +10886,11 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
             finish_metrics(result_status)
         return result, memory
     repo_snapshot = repo_snapshot or inspect_repository()
+    # Baseline keeps the pre-Stage-2 coding condition. Only cheap project-mode
+    # bookkeeping is shared; no Task Brain reaches its Worker execution.
+    classification = classify_project_mode(user_text, repo_snapshot=repo_snapshot)
+    _record_project_mode(classification)
+    RUN["baseline_stage2_scope"] = "PROJECT_MODE_BOOKKEEPING_ONLY"
     begin_durable_run(contract)
     root = root_task_from_contract(contract)
     TASKS["ROOT"] = root
@@ -10359,7 +10907,8 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
 
 def run_recursive_request(user_text, memory, interactive=True, contract_override=None, repo_snapshot=None,
                           fit_decider=None, leaf_executor=None, aggregator=None, reset=True, finish=True,
-                          initial_decision=None, specification_override=None):
+                          initial_decision=None, specification_override=None,
+                          understanding_override=None):
     if reset:
         reset_run("recursive")
     elif RUN.get("mode") != "auto":
@@ -10384,23 +10933,26 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             "clarification_questions": contract.get("questions", []), "memory": memory,
         }, memory
     repo_snapshot = repo_snapshot or inspect_repository()
-    # Recursive mode expands the short request before root fit/decomposition.
-    # Tests and callers that already provide an authoritative contract use a
-    # deterministic contract projection and do not spend a second model call.
-    specification = specification_override
+    # Stage 2 is a deterministic gate before root fit or decomposition.
     try:
-        if specification is None:
-            specification = (
-                specification_from_goal_contract(contract)
-                if supplied_contract else expand_project_specification(user_text, contract)
-            )
-        prepare_project_brain(user_text, contract, repo_snapshot, specification=specification)
+        understanding = understanding_override or prepare_stage2_context(
+            user_text, contract, repo_snapshot=repo_snapshot, interactive=interactive,
+            supplied_contract=supplied_contract,
+            specification_override=specification_override,
+        )
     except ProviderError as exc:
         event(f"[ERROR] {exc}", role="Specifier", task="ROOT", action="specification provider failure")
         result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
         if finish:
             finish_metrics("failed")
         return result, memory
+    if understanding.get("status") != "ready":
+        result = dict(understanding)
+        result["memory"] = memory
+        if finish:
+            finish_metrics(result.get("status", "failed"))
+        return result, memory
+    contract = understanding.get("contract", contract)
     begin_durable_run(contract)
     root = root_task_from_contract(contract)
     TASKS["ROOT"] = root
@@ -10439,9 +10991,26 @@ def run_auto_request(user_text, memory, interactive=True):
             "clarification_questions": contract.get("questions", []),
         }, memory
     repo_snapshot = inspect_repository()
-    print(f"[RECON] files={len(repo_snapshot['files'])} languages={','.join(repo_snapshot['languages']) or 'unknown'} truncated={repo_snapshot['truncated']}")
+    try:
+        understanding = prepare_stage2_context(
+            user_text, contract, repo_snapshot=repo_snapshot, interactive=interactive,
+            supplied_contract=False,
+        )
+    except ProviderError as exc:
+        event(f"[ERROR] {exc}", role="Coordinator", task="ROOT", action="Stage 2 provider failure")
+        finish_metrics("failed")
+        return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc)}, memory
+    if understanding.get("status") != "ready":
+        finish_metrics(understanding.get("status", "failed"))
+        return understanding, memory
+    contract = understanding.get("contract", contract)
+    recon = understanding.get("reconnaissance", {})
+    print(
+        f"[PROJECT MODE] {understanding.get('project_mode')} | "
+        f"recon={recon.get('status')} evidence={len(recon.get('evidence', []))}"
+    )
     root = root_task_from_contract(contract)
-    # Auto is explicitly decided AFTER Goal Contract + bounded reconnaissance.
+    # Auto is explicitly decided after Stage 2 Task Brain preparation.
     try:
         decision = decide_task_fit(root, 0, contract, repo_snapshot)
     except ProviderError as exc:
@@ -10456,16 +11025,11 @@ def run_auto_request(user_text, memory, interactive=True):
                                               repo_snapshot=repo_snapshot, reset=False, finish=False,
                                               interactive=False)
     else:
-        try:
-            specification = expand_project_specification(user_text, contract)
-        except ProviderError as exc:
-            event(f"[ERROR] {exc}", role="Coordinator", task="ROOT", action="specification provider failure")
-            finish_metrics("failed")
-            return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc)}, memory
         result, memory = run_recursive_request(user_text, memory, interactive=False, contract_override=contract,
                                                repo_snapshot=repo_snapshot, reset=False, finish=False,
                                                initial_decision=decision,
-                                               specification_override=specification)
+                                               specification_override=understanding.get("specification"),
+                                               understanding_override=understanding)
     finish_metrics("done" if result.get("status") == "done" else result.get("status", "failed"))
     return result, memory
 
@@ -10692,6 +11256,91 @@ def run_self_test(install_browser=False):
         v16_brain = build_project_brain(
             v16_brain_contract, specification_from_goal_contract(v16_brain_contract), {"files": []},
         )
+        # v17 architecture checks remain pure/deterministic. They create tiny
+        # fixture repositories, never call Ollama, and never execute Workers.
+        v17_root = Path(tmp) / "v17_fixtures"
+        v17_new_root = v17_root / "new"
+        v17_new_root.mkdir(parents=True)
+        v17_new_inventory = stage2.inventory_repository(v17_new_root)
+        v17_new_mode = stage2.classify_project_mode("Build a game from scratch", v17_new_inventory)
+        v17_new_recon = stage2.run_repository_reconnaissance(
+            v17_new_root, "Build a game from scratch", [], inventory=v17_new_inventory,
+        )
+        v17_new_task_brain = stage2.build_task_brain(
+            "ROOT", "Build a game from scratch", NEW_PROJECT, v16_brain_contract, {}, [], [],
+        )
+        v17_new_validation = stage2.validate_task_brain(
+            v17_new_task_brain,
+            [item.get("requirement_id") for item in ledger_requirements(
+                v16_brain_contract.get("source_requirement_ledger"), include_confirmed=True,
+            )],
+            [],
+        )
+
+        v17_existing_root = v17_root / "existing"
+        (v17_existing_root / "src").mkdir(parents=True)
+        (v17_existing_root / "tests").mkdir()
+        (v17_existing_root / "src" / "input.js").write_text(
+            "export class InputManager { // owns keyboard state\n"
+            "  handleKeyboard(key) { return key === 'Escape'; }\n}\n", encoding="utf-8",
+        )
+        (v17_existing_root / "src" / "game.js").write_text(
+            "export class GameState { constructor() { this.paused = false; } }\n", encoding="utf-8",
+        )
+        (v17_existing_root / "src" / "storage.js").write_text(
+            "export const BEST_SCORE_KEY = 'score'; // unrelated storage implementation\n",
+            encoding="utf-8",
+        )
+        (v17_existing_root / "tests" / "input.test.js").write_text(
+            "describe('pause keyboard', () => it('uses Escape', () => expect(true).toBe(true)));\n",
+            encoding="utf-8",
+        )
+        v17_pause_raw = "Change pause keyboard behavior.\n- Escape toggles pause."
+        v17_pause_ledger = extract_source_requirement_ledger(v17_pause_raw, use_model=False)
+        v17_pause_contract = normalize_goal_contract(
+            v17_pause_raw, _deterministic_contract_from_ledger(v17_pause_raw, v17_pause_ledger),
+            source_ledger=v17_pause_ledger, confirmed=[], derived=[],
+        )
+        v17_existing_inventory = stage2.inventory_repository(v17_existing_root)
+        v17_existing_mode = stage2.classify_project_mode(v17_pause_raw, v17_existing_inventory)
+        v17_existing_recon = stage2.run_repository_reconnaissance(
+            v17_existing_root, v17_pause_raw, ledger_requirements(v17_pause_ledger),
+            inventory=v17_existing_inventory,
+        )
+        v17_pause_projection = {
+            "relevant_core": {
+                "architecture_invariants": ["preserve one keyboard owner"],
+                "product_contract": {"acceptance_criteria": ["Escape toggles pause"]},
+            },
+        }
+        v17_existing_task_brain = stage2.build_task_brain(
+            "ROOT", v17_pause_raw, EXISTING_PROJECT, v17_pause_contract,
+            v17_pause_projection, v17_existing_recon.get("evidence", []), [],
+        )
+        v17_existing_validation = stage2.validate_task_brain(
+            v17_existing_task_brain,
+            [item.get("requirement_id") for item in ledger_requirements(v17_pause_ledger)],
+            v17_existing_recon.get("evidence", []),
+        )
+
+        v17_auth_root = v17_root / "repo_conflict"
+        (v17_auth_root / "src").mkdir(parents=True)
+        (v17_auth_root / "src" / "legacy-auth.js").write_text(
+            "export function legacyAuthCallback(request) {\n"
+            "  // Legacy auth owns SSO callback handling.\n"
+            "  return completeSsoCallback(request);\n}\n", encoding="utf-8",
+        )
+        v17_auth_raw = "Remove legacy auth while preserving SSO."
+        v17_auth_ledger = extract_source_requirement_ledger(v17_auth_raw, use_model=False)
+        v17_auth_inventory = stage2.inventory_repository(v17_auth_root)
+        v17_auth_recon = stage2.run_repository_reconnaissance(
+            v17_auth_root, v17_auth_raw, ledger_requirements(v17_auth_ledger),
+            inventory=v17_auth_inventory,
+        )
+        v17_auth_questions = stage2.repository_grounded_questions(
+            v17_auth_raw, ledger_requirements(v17_auth_ledger), v17_auth_recon.get("evidence", []),
+        )
+        v17_existing_encoded = json.dumps(v17_existing_task_brain, ensure_ascii=False)
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -10793,6 +11442,31 @@ def run_self_test(install_browser=False):
             "lossless brain handoff": (
                 len(ledger_requirements(v16_brain["source_requirement_ledger"])) == 2
                 and len(v16_brain["source_requirement_coverage"]) == 2
+            ),
+            "v17 new project": (
+                v17_new_mode.get("project_mode") == NEW_PROJECT
+                and v17_new_recon.get("status") == REPOSITORY_EMPTY
+                and v17_new_validation.get("valid")
+            ),
+            "v17 existing project": (
+                v17_existing_mode.get("project_mode") == EXISTING_PROJECT
+                and v17_existing_recon.get("status") == REPOSITORY_RECONNAISSANCE_COMPLETE
+                and v17_existing_recon.get("read_only") is True
+                and v17_existing_validation.get("valid")
+                and bool(v17_existing_task_brain.get("current_owners"))
+                and bool(v17_existing_task_brain.get("relevant_tests"))
+            ),
+            "v17 repo conflict": (
+                len(v17_auth_questions) == 1
+                and bool(v17_auth_questions[0].get("affected_requirement_ids"))
+                and bool(v17_auth_questions[0].get("repository_evidence_ids"))
+            ),
+            "v17 context hygiene": (
+                "unrelated storage implementation" not in v17_existing_encoded
+                and "src/storage.js" not in v17_existing_encoded
+                and "support" not in json.dumps(
+                    v17_existing_task_brain.get("evidence_index", []), ensure_ascii=False,
+                )
             ),
         }
         for name, ok in checks.items():
