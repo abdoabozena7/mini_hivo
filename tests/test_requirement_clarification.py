@@ -181,6 +181,106 @@ forceWin()"""
         self.assertEqual(records[0]["text"], "Build a polished, responsive, maintainable interface.")
         self.assertNotIn("explicit_items", records[0])
 
+    def test_compound_stage2_task_preserves_all_eight_explicit_semantics(self):
+        raw = (
+            "Add Escape-key pause/resume support to the existing game. "
+            "Reuse the current input and pause-state architecture instead of creating duplicate input state "
+            "or another game-state owner. "
+            "Preserve the current WASD/arrow controls and persistent best-score behavior. "
+            "Update or add the relevant tests."
+        )
+        ledger, records = self.source_records(raw)
+        self.assertEqual(
+            [item["requirement_id"] for item in records],
+            [f"REQ-{index:03d}" for index in range(1, len(records) + 1)],
+        )
+        self.assertTrue(all(item["provenance"] == mini.USER_STATED for item in records))
+        self.assertTrue(all(item["source_segments"] == [1] for item in records))
+        text = " ".join(item["text"] for item in records)
+        reuse = next(item["text"] for item in records if item["text"].startswith("Reuse "))
+        coverage = (
+            "Add Escape-key pause/resume support" in text,
+            reuse.startswith("Reuse ") and "current input" in reuse,
+            reuse.startswith("Reuse ") and "pause-state architecture" in reuse,
+            "duplicate input state" in reuse and "instead of" in reuse,
+            "another game-state owner" in reuse and "instead of" in reuse,
+            "Preserve the current WASD/arrow controls" in text,
+            "persistent best-score behavior" in text,
+            "Update or add the relevant tests" in text,
+        )
+        self.assertEqual(sum(coverage), 8)
+        self.assertEqual(
+            reuse,
+            "Reuse the current input and pause-state architecture instead of creating duplicate input state or another game-state owner.",
+        )
+        self.assertTrue(ledger["immutable"])
+
+    def test_reuse_instead_of_and_duplicate_owner_constraints_are_lossless(self):
+        cases = (
+            "Reuse the current authentication service instead of creating another token owner.",
+            "Keep the current router and extend it rather than adding a second routing system.",
+            "Use the existing cache implementation and do not introduce another cache owner.",
+        )
+        for raw in cases:
+            _ledger, records = self.source_records(raw)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["provenance"], mini.USER_STATED)
+            self.assertEqual(records[0]["category"], "constraint")
+            self.assertEqual(records[0]["text"], raw)
+        self.assertIn("instead of creating another token owner", self.source_records(cases[0])[1][0]["text"])
+        self.assertIn("rather than adding a second routing system", self.source_records(cases[1])[1][0]["text"])
+        self.assertIn("do not introduce another cache owner", self.source_records(cases[2])[1][0]["text"])
+
+    def test_preserve_replace_and_negative_constraints_survive_normalization(self):
+        cases = (
+            "Replace the storage layer while preserving the existing API contract.",
+            "Do   not   create   another   game loop.",
+            "Avoid duplicate state and retain the current ownership boundary.",
+        )
+        for raw in cases:
+            _ledger, records = self.source_records(raw)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["provenance"], mini.USER_STATED)
+        _ledger, records = self.source_records(cases[0])
+        self.assertIn("preserving the existing API contract", records[0]["text"])
+        _ledger, records = self.source_records(cases[1])
+        self.assertEqual(records[0]["text"], "Do not create another game loop.")
+        _ledger, records = self.source_records(cases[2])
+        self.assertIn("duplicate state", records[0]["text"])
+        self.assertIn("ownership boundary", records[0]["text"])
+
+    def test_observations_are_not_user_requirements_without_instruction(self):
+        for raw in (
+            "This makes the UI easier to understand.",
+            "The project currently uses React.",
+            "Repository currently uses React.",
+            "The repository preserves the existing API.",
+            "The code avoids duplicate state.",
+        ):
+            _ledger, records = self.source_records(raw)
+            self.assertEqual(records, [], raw)
+        _ledger, records = self.source_records("The repository must preserve the existing API.")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["provenance"], mini.USER_STATED)
+
+    def test_compound_source_ids_and_provenance_are_deterministic(self):
+        raw = "Reuse the current auth service instead of creating another token owner."
+        _first_ledger, first = self.source_records(raw)
+        _second_ledger, second = self.source_records(raw)
+        self.assertEqual(first, second)
+        self.assertEqual([item["requirement_id"] for item in first], ["REQ-001"])
+        self.assertEqual(first[0]["source_segment"], 1)
+        self.assertEqual(first[0]["source_segments"], [1])
+        self.assertNotIn(mini.DERIVED, {item["provenance"] for item in first})
+        self.assertNotIn("repository_evidence_ids", first[0])
+
+    def test_forty_seven_explicit_requirements_remain_separate_and_bounded(self):
+        raw = "\n".join(f"- requirement {index}" for index in range(1, 48))
+        _ledger, records = self.source_records(raw)
+        self.assertEqual(len(records), 47)
+        self.assertEqual(records[-1]["requirement_id"], "REQ-047")
+        self.assertTrue(all(item["provenance"] == mini.USER_STATED for item in records))
+
     def test_requirement_bound_remains_enforced_and_overflow_is_observable(self):
         raw = "\n".join(f"- explicit requirement {index}" for index in range(1, mini.MAX_SOURCE_REQUIREMENTS + 8))
         ledger, records = self.source_records(raw)
