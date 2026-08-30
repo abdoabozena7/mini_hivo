@@ -41,6 +41,11 @@ Requirements:
         ])
 
     @staticmethod
+    def source_records(raw):
+        ledger = mini.extract_source_requirement_ledger(raw, use_model=False)
+        return ledger, mini.ledger_requirements(ledger)
+
+    @staticmethod
     def optional_question(requirement_id="REQ-001"):
         return {
             "question": "Should this saved setting survive a reload?",
@@ -80,6 +85,137 @@ Requirements:
         self.assertTrue(all(len(item["text"]) <= mini.MAX_SOURCE_SEGMENT_CHARS for item in segments))
         ledger = mini.extract_source_requirement_ledger(raw, use_model=False)
         self.assertTrue(all(item["source_segment"] for item in mini.ledger_requirements(ledger)))
+
+    def test_inline_debug_bridge_enumeration_preserves_every_method_and_identifier(self):
+        raw = """- Expose a small deterministic debug/testing bridge on window.AGENT_GAME that allows verification of:
+  getState()
+  start()
+  restart()
+  move(direction)
+  forceCollision()
+  forceCollect()
+  forceWin()"""
+        ledger, records = self.source_records(raw)
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        expected = [
+            "window.AGENT_GAME", "getState()", "start()", "restart()",
+            "move(direction)", "forceCollision()", "forceCollect()", "forceWin()",
+        ]
+        self.assertEqual(record["explicit_items"], expected)
+        self.assertTrue(all(item in record["text"] for item in expected))
+        self.assertEqual(record["source_segments"], [1])
+        self.assertEqual(record["provenance"], mini.USER_STATED)
+        self.assertIsNone(ledger.get("overflow"))
+
+    def test_unbulleted_colon_introduced_identifier_list_is_preserved(self):
+        raw = """Expose a testing bridge on window.AGENT_GAME that supports:
+getState()
+start()
+restart()
+move()
+forceCollision()
+forceCollect()
+forceWin()"""
+        _ledger, records = self.source_records(raw)
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0]["text"].endswith("forceWin()"))
+        self.assertEqual(records[0]["explicit_item_count"], 8)
+
+    def test_inline_comma_conjunction_and_parenthetical_lists_are_lossless(self):
+        raw = (
+            "Expose an API with create(), read(), update(), delete(), and list().\n"
+            "Use formats (json, yaml, and toml), or xml."
+        )
+        _ledger, records = self.source_records(raw)
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(
+            item in records[0]["explicit_items"]
+            for item in ("create()", "read()", "update()", "delete()", "list()")
+        ))
+        self.assertTrue(all(item in records[1]["text"] for item in ("json", "yaml", "toml", "xml")))
+
+    def test_bullet_and_numbered_lists_remain_separate_user_stated_records(self):
+        raw = """Features:
+- alpha behavior
+- beta behavior
+1. gamma behavior
+2. delta behavior"""
+        _ledger, records = self.source_records(raw)
+        self.assertEqual([item["text"] for item in records], [
+            "Features:", "alpha behavior", "beta behavior", "gamma behavior", "delta behavior",
+        ])
+        self.assertTrue(all(item["provenance"] == mini.USER_STATED for item in records))
+
+    def test_cli_flags_and_identifier_shapes_are_preserved_exactly(self):
+        raw = (
+            "The CLI supports --force, --dry-run, --verbose, and --json. "
+            "Preserve `window.__TEST_BRIDGE__`, forceCollision(), get_state(), foo.bar, and camelCase."
+        )
+        _ledger, records = self.source_records(raw)
+        text = " ".join(item["text"] for item in records)
+        for identifier in (
+            "--force", "--dry-run", "--verbose", "--json", "window.__TEST_BRIDGE__",
+            "forceCollision()", "get_state()", "foo.bar", "camelCase",
+        ):
+            self.assertIn(identifier, text)
+        items = [item for record in records for item in record.get("explicit_items", [])]
+        self.assertIn("window.__TEST_BRIDGE__", items)
+        self.assertIn("forceCollision()", items)
+        self.assertIn("foo.bar", items)
+
+    def test_identifier_list_source_provenance_and_stable_ids_are_deterministic(self):
+        raw = "Methods: create(), read(), update().\n\n- validate()"
+        first_ledger, first = self.source_records(raw)
+        second_ledger, second = self.source_records(raw)
+        self.assertEqual(first, second)
+        self.assertEqual(first_ledger["requirements"], second_ledger["requirements"])
+        self.assertEqual(first[0]["source_segments"], [1])
+        self.assertEqual(first[1]["source_segments"], [2])
+        self.assertTrue(all(item["provenance"] == mini.USER_STATED for item in first))
+        self.assertFalse(any(item["provenance"] == mini.DERIVED for item in first))
+
+    def test_descriptive_comma_prose_is_not_aggressively_exploded(self):
+        _ledger, records = self.source_records("Build a polished, responsive, maintainable interface.")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["text"], "Build a polished, responsive, maintainable interface.")
+        self.assertNotIn("explicit_items", records[0])
+
+    def test_requirement_bound_remains_enforced_and_overflow_is_observable(self):
+        raw = "\n".join(f"- explicit requirement {index}" for index in range(1, mini.MAX_SOURCE_REQUIREMENTS + 8))
+        ledger, records = self.source_records(raw)
+        self.assertEqual(len(records), mini.MAX_SOURCE_REQUIREMENTS)
+        self.assertEqual([item["requirement_id"] for item in records[:3]], ["REQ-001", "REQ-002", "REQ-003"])
+        self.assertGreater(ledger["overflow"]["requirements_truncated"], 0)
+
+    def test_explicit_item_bound_and_text_bound_report_truncation_without_silent_tail_loss(self):
+        raw = "Expose methods: " + ", ".join(f"operation_{index:02d}()" for index in range(1, 81))
+        ledger, records = self.source_records(raw)
+        record = records[0]
+        self.assertEqual(record["explicit_item_count"], 80)
+        self.assertEqual(len(record["explicit_items"]), mini.MAX_SOURCE_EXPLICIT_ITEMS)
+        self.assertTrue(record["explicit_items_truncated"])
+        self.assertEqual(ledger["overflow"]["explicit_items_truncated"], 16)
+        self.assertIn("operation_64()", record["explicit_items"])
+
+        long_items = [f"operation_{index:02d}_{'x' * 25}()" for index in range(1, 31)]
+        long_ledger, long_records = self.source_records("Expose methods: " + ", ".join(long_items))
+        long_record = long_records[0]
+        self.assertTrue(long_record["text_truncated"])
+        self.assertFalse(long_record.get("explicit_items_truncated", False))
+        self.assertEqual(long_record["explicit_item_count"], len(long_items))
+        self.assertIn(long_items[-1], long_record["explicit_items"])
+        self.assertEqual(long_ledger["overflow"]["text_truncated"], 1)
+
+    def test_explicit_list_items_are_not_derived_and_headings_remain_non_semantic_noise(self):
+        raw = """Requirements:
+Methods: create(), read(), update().
+Example upgrades:
+- attack speed"""
+        _ledger, records = self.source_records(raw)
+        self.assertTrue(all(item["provenance"] == mini.USER_STATED for item in records))
+        self.assertTrue(any("create()" in item["text"] for item in records))
+        self.assertTrue(any(item["text"] == "Example upgrades:" for item in records))
 
     def test_extraction_failure_is_distinct_from_later_specification_omission(self):
         ledger = mini.extract_source_requirement_ledger(

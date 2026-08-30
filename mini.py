@@ -41,6 +41,7 @@ from hivo.requirements import MAX_CLARIFICATION_OPTIONS as REQUIREMENT_MAX_CLARI
 from hivo.requirements import MAX_CLARIFICATION_QUESTIONS as REQUIREMENT_MAX_CLARIFICATION_QUESTIONS
 from hivo.requirements import MAX_SOURCE_REQUIREMENT_CHARS
 from hivo.requirements import MAX_SOURCE_REQUIREMENTS
+from hivo.requirements import MAX_SOURCE_EXPLICIT_ITEMS
 from hivo.requirements import MAX_SOURCE_SEGMENTS
 from hivo.requirements import MAX_SOURCE_SEGMENT_CHARS
 from hivo.requirements import append_confirmed_requirement
@@ -1289,6 +1290,7 @@ def new_metrics(mode):
         "source_requirement_retention_rate_numerator": 0,
         "source_requirement_retention_rate_denominator": 0,
         "source_requirement_retention_rate": 1.0,
+        "source_requirement_items_truncated": 0,
         "user_clarification_rounds": 0,
         "user_clarification_questions": 0,
         "user_clarification_answers": 0,
@@ -2060,6 +2062,7 @@ SOURCE SEGMENT {segment.get('segment')}:
 
 def _record_source_ledger_metrics(ledger):
     records = ledger_requirements(ledger)
+    overflow = ledger.get("overflow", {}) if isinstance(ledger, dict) else {}
     RUN["source_requirement_ledger"] = ledger
     RUN["source_requirements_extracted"] = len(records)
     RUN["source_requirements_retained"] = len(records)
@@ -2068,11 +2071,13 @@ def _record_source_ledger_metrics(ledger):
     RUN["source_requirement_retention_rate_numerator"] = len(records)
     RUN["source_requirement_retention_rate_denominator"] = len(records)
     RUN["source_requirement_retention_rate"] = 1.0
+    RUN["source_requirement_items_truncated"] = int(overflow.get("explicit_items_truncated", 0) or 0)
     record_run_event(
         "source_requirement_ledger_created",
         requirement_ids=[item.get("requirement_id") for item in records],
         requirement_count=len(records),
         segment_count=len({segment for item in records for segment in item.get("source_segments", [])}),
+        source_requirement_items_truncated=RUN["source_requirement_items_truncated"],
     )
     return ledger
 
@@ -10903,6 +10908,20 @@ def run_self_test(install_browser=False):
         v16_specialization = clarify_request(
             v16_specialization_raw, v16_specialization_ledger,
         )
+        v16_inline_raw = """- Expose a deterministic bridge on window.AGENT_GAME that allows:
+  getState()
+  start()
+  restart()
+  move(direction)
+  forceCollision()
+  forceCollect()
+  forceWin()"""
+        v16_inline_ledger = extract_source_requirement_ledger(v16_inline_raw, use_model=False)
+        v16_inline_records = ledger_requirements(v16_inline_ledger)
+        v16_inline_expected = [
+            "window.AGENT_GAME", "getState()", "start()", "restart()",
+            "move(direction)", "forceCollision()", "forceCollect()", "forceWin()",
+        ]
         v16_conflict_raw = "Build a timer.\n- restart resets everything\n- persist the best score"
         v16_conflict_ledger = extract_source_requirement_ledger(v16_conflict_raw, use_model=False)
         v16_blocking_questions = clarify_request(v16_conflict_raw, v16_conflict_ledger)
@@ -10991,6 +11010,16 @@ def run_self_test(install_browser=False):
             ),
             "clarifier specialization pair": (
                 not v16_specialization["conflicts"] and not v16_specialization["questions"]
+            ),
+            "inline enumeration retention": (
+                len(v16_inline_records) == 1
+                and all(item in v16_inline_records[0].get("text", "") for item in v16_inline_expected)
+                and v16_inline_records[0].get("explicit_items") == v16_inline_expected
+                and v16_inline_records[0].get("provenance") == USER_STATED
+            ),
+            "exact identifier preservation": (
+                "window.AGENT_GAME" in v16_inline_records[0].get("explicit_items", [])
+                and "forceCollision()" in v16_inline_records[0].get("explicit_items", [])
             ),
             "clarifier true contradiction": (
                 len(v16_blocking_questions["conflicts"]) == 1

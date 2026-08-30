@@ -24,6 +24,7 @@ MAX_SOURCE_SEGMENTS = 32
 MAX_SOURCE_SEGMENT_CHARS = 2200
 MAX_SOURCE_REQUIREMENT_CHARS = 1200
 MAX_SOURCE_VARIANTS = 4
+MAX_SOURCE_EXPLICIT_ITEMS = 64
 MAX_CLARIFICATION_QUESTIONS = 3
 MAX_CLARIFICATION_OPTIONS = 3
 
@@ -95,9 +96,17 @@ def compact_text(value, limit=240):
     return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
 
 
+def _normalize_requirement_text_with_status(value):
+    text = " ".join(str(value or "").split())
+    limit = max(1, int(MAX_SOURCE_REQUIREMENT_CHARS))
+    if len(text) <= limit:
+        return text, False
+    return text[: max(0, limit - 3)] + "...", True
+
+
 def normalize_requirement_text(value):
     """Normalize only formatting; do not perform broad semantic merging."""
-    return compact_text(value, MAX_SOURCE_REQUIREMENT_CHARS)
+    return _normalize_requirement_text_with_status(value)[0]
 
 
 def _requirement_key(value):
@@ -199,65 +208,194 @@ _BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)]|[a-zA-Z][.)])\s+(.+)$")
 _EXPLICIT_MARKER_RE = re.compile(
     r"\b(?:must|should|shall|need(?:s)? to|support(?:s)?|persist(?:s)?|preserve(?:s)?|keep(?:s)?|"
     r"allow(?:s)?|include(?:s)?|provide(?:s)?|handle(?:s)?|ensure(?:s)?|implement|add|create|build|"
-    r"replace|remove|reset|restart|acceptance|success criteria)\b",
+    r"replace|remove|reset|restart|expose(?:s|d|ing)?|use(?:s|d|ing)?|acceptance|success criteria|"
+    r"including|feature(?:s)?|option(?:s)?|method(?:s)?|mode(?:s)?|example(?:s)?|valid|available|"
+    r"following)\b",
+    re.IGNORECASE,
+)
+_SOURCE_LIST_MARKER_RE = re.compile(
+    r"\b(?:must|should|shall|need(?:s)? to|support(?:s)?|persist(?:s)?|preserve(?:s)?|keep(?:s)?|"
+    r"allow(?:s)?|include(?:s)?|ensure(?:s)?|restart|expose(?:s|d|ing)?|use(?:s|d|ing)?|"
+    r"acceptance|success criteria|including|feature(?:s)?|option(?:s)?|method(?:s)?|mode(?:s)?|"
+    r"example(?:s)?|valid|available|following)\b",
     re.IGNORECASE,
 )
 _HEADING_RE = re.compile(r"^(?:[A-Z][A-Z0-9 _/-]{2,}|(?:requirements?|constraints?|acceptance criteria|notes?))\s*:?$")
+_LIST_INTRO_RE = re.compile(
+    r"(?:\b(?:requirements?|constraints?|methods?|options?|features?|examples?|modes?|"
+    r"including|following|available|valid|expose(?:s|d|ing)?|allow(?:s)?|"
+    r"provide(?:s)?|include(?:s)?)\b|\b(?:supports?|must\s+expose)\b)"
+    r"[^\n:]{0,160}:\s*$",
+    re.IGNORECASE,
+)
+_CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+_IDENTIFIER_TOKEN_RE = re.compile(
+    r"(?<![\w$])(?:--[A-Za-z][A-Za-z0-9_-]*|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)"
+    r"(?:\([^()\n]*\))?"
+)
 
 
 def _sentences(text):
     return [part.strip(" \t\n-*") for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
 
 
+def _looks_like_identifier(value):
+    value = str(value or "").strip()
+    if not value:
+        return False
+    if value.startswith("--") or ("(" in value and value.endswith(")")):
+        return True
+    if "." in value or "_" in value:
+        return True
+    return any(character.isupper() for character in value[1:])
+
+
+def _single_identifier_line(value):
+    """Recognize one structured identifier without splitting ordinary prose."""
+    candidate = str(value or "").strip()
+    candidate = re.sub(r"^(?:and|or)\s+", "", candidate, flags=re.IGNORECASE)
+    candidate = candidate.rstrip(",;.").strip()
+    if not candidate:
+        return None
+    matches = list(_IDENTIFIER_TOKEN_RE.finditer(candidate))
+    if len(matches) != 1 or matches[0].group(0) != candidate:
+        return None
+    return candidate if _looks_like_identifier(candidate) else None
+
+
+def _explicit_identifier_items(value):
+    """Return bounded, source-spelled identifiers from explicit requirement text."""
+    text = str(value or "")
+    items = []
+
+    def add(item):
+        item = " ".join(str(item or "").split()).strip()
+        if item and item not in items:
+            items.append(item)
+
+    for match in _CODE_SPAN_RE.finditer(text):
+        add(match.group(1))
+    for match in _IDENTIFIER_TOKEN_RE.finditer(text):
+        item = match.group(0)
+        if _looks_like_identifier(item):
+            add(item)
+    return items[:MAX_SOURCE_EXPLICIT_ITEMS], len(items)
+
+
+def _prepare_requirement_candidate(candidate):
+    """Normalize a candidate while retaining explicit structured identifiers."""
+    prepared = dict(candidate or {})
+    raw_text = prepared.pop("_raw_text", prepared.get("text", ""))
+    text, text_truncated = _normalize_requirement_text_with_status(raw_text)
+    extracted_items, extracted_count = _explicit_identifier_items(raw_text)
+    supplied_items = []
+    for item in prepared.get("explicit_items", []) or []:
+        item = " ".join(str(item or "").split()).strip()
+        if item and item not in supplied_items:
+            supplied_items.append(item)
+    all_items = []
+    for item in supplied_items + extracted_items:
+        if item not in all_items:
+            all_items.append(item)
+    provided_count = prepared.get("explicit_item_count", 0)
+    try:
+        provided_count = max(0, int(provided_count))
+    except (TypeError, ValueError):
+        provided_count = 0
+    item_count = max(provided_count, extracted_count, len(all_items))
+    bounded_items = all_items[:MAX_SOURCE_EXPLICIT_ITEMS]
+    omitted_items = max(0, item_count - len(bounded_items))
+    prepared["text"] = text
+    if text_truncated or prepared.get("text_truncated"):
+        prepared["text_truncated"] = True
+    else:
+        prepared.pop("text_truncated", None)
+    if bounded_items:
+        prepared["explicit_items"] = bounded_items
+        prepared["explicit_item_count"] = item_count
+    else:
+        prepared.pop("explicit_items", None)
+        prepared.pop("explicit_item_count", None)
+    if omitted_items or prepared.get("explicit_items_truncated"):
+        prepared["explicit_items_truncated"] = True
+    else:
+        prepared.pop("explicit_items_truncated", None)
+    prepared["_explicit_items_omitted"] = omitted_items
+    return prepared
+
+
+def _append_candidate_text(candidate, text):
+    current = candidate.get("_raw_text", candidate.get("text", ""))
+    candidate["_raw_text"] = f"{current} {text}".strip()
+
+
 def deterministic_requirement_candidates(segment_text, source_segment):
     """Extract obvious explicit statements without pretending to understand everything."""
-    lines = [line.strip() for line in str(segment_text or "").splitlines() if line.strip()]
-    has_bullets = any(_BULLET_RE.match(line) for line in lines)
+    raw_lines = [line for line in str(segment_text or "").splitlines() if line.strip()]
+    lines = [(line.strip(), len(line) - len(line.lstrip())) for line in raw_lines]
+    has_bullets = any(_BULLET_RE.match(line) for line, _indent in lines)
     candidates = []
-    active_bullet = None
-    for line in lines:
+    active_index = None
+    active_indent = 0
+    active_list_intro = False
+    for line, indent in lines:
         match = _BULLET_RE.match(line)
         if match:
-            active_bullet = match.group(1).strip()
-            candidates.append({"text": active_bullet, "category": _category_for(active_bullet),
+            bullet = match.group(1).strip()
+            candidates.append({"_raw_text": bullet, "category": _category_for(bullet),
                                "source_segment": source_segment})
+            active_index = len(candidates) - 1
+            active_indent = indent
+            active_list_intro = bool(_LIST_INTRO_RE.search(bullet))
             continue
-        if active_bullet and not _HEADING_RE.match(line) and not _EXPLICIT_MARKER_RE.search(line):
+        if active_index is not None and indent > active_indent:
+            _append_candidate_text(candidates[active_index], line)
+            continue
+        if active_index is not None and active_list_intro and _single_identifier_line(line):
+            _append_candidate_text(candidates[active_index], line)
+            continue
+        if active_index is not None and not _HEADING_RE.match(line) and not _EXPLICIT_MARKER_RE.search(line):
             # A short continuation line belongs to the preceding bullet.
-            candidates[-1]["text"] = normalize_requirement_text(f"{candidates[-1]['text']} {line}")
+            _append_candidate_text(candidates[active_index], line)
             continue
-        active_bullet = None
+        active_index = None
+        active_list_intro = False
         if _HEADING_RE.match(line):
             continue
-        if has_bullets and not re.search(
-                r"\b(?:must|should|shall|need(?:s)? to|must not|do not|don't|preserve|persist|"
-                r"keep|allow|include|ensure|acceptance|success criteria)\b", line, re.IGNORECASE):
+        if has_bullets and not _SOURCE_LIST_MARKER_RE.search(line):
             # The introductory project sentence is the root goal, not an
             # additional bullet requirement when a requirements list follows.
             continue
         for sentence in _sentences(line):
             if len(sentence) >= 3 and _EXPLICIT_MARKER_RE.search(sentence):
-                candidates.append({"text": sentence, "category": _category_for(sentence),
+                candidates.append({"_raw_text": sentence, "category": _category_for(sentence),
                                    "source_segment": source_segment})
+                if _LIST_INTRO_RE.search(sentence):
+                    active_index = len(candidates) - 1
+                    active_indent = indent
+                    active_list_intro = True
 
     if not candidates:
         # Retaining a vague request as one source statement prevents the
         # source contract from becoming empty.  It does not force questions.
-        fallback = compact_text(segment_text, MAX_SOURCE_REQUIREMENT_CHARS)
+        fallback = str(segment_text or "")
         if fallback:
-            candidates.append({"text": fallback, "category": _category_for(fallback),
+            candidates.append({"_raw_text": fallback, "category": _category_for(fallback),
                                "source_segment": source_segment})
 
     unique = []
     for candidate in candidates:
-        text = normalize_requirement_text(candidate.get("text", ""))
+        candidate = _prepare_requirement_candidate(candidate)
+        text = candidate.get("text", "")
         if not text:
             continue
-        candidate = dict(candidate)
-        candidate["text"] = text
         if not any(_can_merge(text, item["text"]) for item in unique):
+            candidate.pop("_explicit_items_omitted", None)
             unique.append(candidate)
-    return unique[:MAX_SOURCE_REQUIREMENTS]
+    # The ledger builder, not this segment-local helper, owns the global
+    # requirement bound so it can expose any discarded candidates.
+    return unique
 
 
 def _next_numeric_id(records, prefix):
@@ -271,7 +409,8 @@ def _next_numeric_id(records, prefix):
 
 def _merge_record(existing, candidate):
     record = thaw(existing)
-    text = normalize_requirement_text(candidate.get("text", ""))
+    candidate = _prepare_requirement_candidate(candidate)
+    text = candidate.get("text", "")
     variants = list(record.get("source_variants", []))
     if text and text not in variants and len(variants) < MAX_SOURCE_VARIANTS:
         variants.append(text)
@@ -283,6 +422,25 @@ def _merge_record(existing, candidate):
     # every merged location even when only a few wording variants are kept.
     record["source_segments"] = segments[:MAX_SOURCE_SEGMENTS]
     record["source_variants"] = variants[:MAX_SOURCE_VARIANTS]
+    existing_items = list(record.get("explicit_items", []))
+    candidate_items = list(candidate.get("explicit_items", []))
+    explicit_items = []
+    for item in existing_items + candidate_items:
+        if item not in explicit_items:
+            explicit_items.append(item)
+    item_count = max(
+        int(record.get("explicit_item_count", 0) or 0),
+        int(candidate.get("explicit_item_count", 0) or 0),
+        len(explicit_items),
+    )
+    if explicit_items:
+        record["explicit_items"] = explicit_items[:MAX_SOURCE_EXPLICIT_ITEMS]
+        record["explicit_item_count"] = item_count
+    if record.get("text_truncated") or candidate.get("text_truncated"):
+        record["text_truncated"] = True
+    if (record.get("explicit_items_truncated") or candidate.get("explicit_items_truncated") or
+            item_count > len(record.get("explicit_items", []))):
+        record["explicit_items_truncated"] = True
     return record
 
 
@@ -294,20 +452,27 @@ def build_source_requirement_ledger(candidates, existing_ledger=None, max_requir
     max_requirements = min(MAX_SOURCE_REQUIREMENTS, max(1, int(max_requirements)))
     next_number = _next_numeric_id(records + confirmed, "REQ")
     used_ids = {str(item.get("requirement_id")) for item in records + confirmed}
+    requirements_truncated = 0
+    explicit_items_truncated = 0
+    text_truncated = 0
     for candidate in list(candidates or []):
         if isinstance(candidate, str):
             candidate = {"text": candidate}
         if not isinstance(candidate, dict):
             continue
-        text = normalize_requirement_text(candidate.get("text", ""))
+        candidate = _prepare_requirement_candidate(candidate)
+        text = candidate.get("text", "")
         if not text:
             continue
+        explicit_items_truncated += int(candidate.get("_explicit_items_omitted", 0) or 0)
+        text_truncated += int(bool(candidate.get("text_truncated")))
         match = next((index for index, item in enumerate(records) if _can_merge(item.get("text"), text)), None)
         if match is not None:
-            records[match] = _merge_record(records[match], {**candidate, "text": text})
+            records[match] = _merge_record(records[match], candidate)
             continue
         if len(records) >= max_requirements:
-            break
+            requirements_truncated += 1
+            continue
         requested_id = str(candidate.get("requirement_id", ""))
         if not re.match(r"^REQ-\d+$", requested_id) or requested_id in used_ids:
             requested_id = f"REQ-{next_number:03d}"
@@ -321,6 +486,9 @@ def build_source_requirement_ledger(candidates, existing_ledger=None, max_requir
             "source_variants": [text],
             "status": str(candidate.get("status") or "active"),
         }
+        for field in ("explicit_items", "explicit_item_count", "explicit_items_truncated", "text_truncated"):
+            if field in candidate:
+                record[field] = candidate[field]
         records.append(record)
         used_ids.add(requested_id)
         requested_number = int(requested_id.split("-", 1)[1])
@@ -333,8 +501,16 @@ def build_source_requirement_ledger(candidates, existing_ledger=None, max_requir
         "limits": {
             "max_requirements": max_requirements,
             "max_segment_chars": MAX_SOURCE_SEGMENT_CHARS,
+            "max_explicit_items": MAX_SOURCE_EXPLICIT_ITEMS,
         },
     }
+    overflow = {
+        "requirements_truncated": requirements_truncated,
+        "explicit_items_truncated": explicit_items_truncated,
+        "text_truncated": text_truncated,
+    }
+    if any(overflow.values()):
+        ledger["overflow"] = overflow
     return freeze(ledger)
 
 
