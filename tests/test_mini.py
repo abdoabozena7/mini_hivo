@@ -323,6 +323,161 @@ Requirements:
         self.assertEqual(result["mutation_failures"][0]["category"], "INVALID_MUTATION")
         self.assertEqual(result["mutation_failures"][0]["count"], 1)
 
+    def test_stale_edit_returns_bounded_current_state_and_allows_normal_corrected_retry(self):
+        target = mini.WORKSPACE / "app.js"
+        target.write_text("const value = 1;\nconsole.log(value);\n", encoding="utf-8")
+        stale_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.js", "old": "const missing = true;", "new": "const value = 2;",
+                }},
+            }],
+        }
+        corrected_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.js", "old": "const value = 1;", "new": "const value = 2;",
+                }},
+            }],
+        }
+        terminal = {"role": "assistant", "content": "finished", "tool_calls": []}
+        with patch.object(mini, "ask_ollama", side_effect=[stale_edit, corrected_edit, terminal]) as ask:
+            result = mini.execute_agent_task(
+                "correct the focused behavior", mini.load_memory(), role="Builder", task_id="stale", max_steps=3,
+            )
+
+        next_messages = ask.call_args_list[1].args[0]
+        recovery_message = next(message for message in next_messages if message.get("role") == "tool")
+        recovery = json.loads(
+            recovery_message["content"].split("MUTATION_RECOVERY: ", 1)[1]
+        )["mutation_recovery"]
+        self.assertEqual(recovery["category"], "STALE_TARGET")
+        self.assertEqual(recovery["target"], "app.js")
+        self.assertTrue(recovery["current_file_exists"])
+        self.assertTrue(recovery["current_file_hash"].startswith("sha256:"))
+        self.assertIn("const value = 1;", recovery["fresh_context"])
+        self.assertEqual(recovery["current_matching_replacements"], 0)
+        self.assertLessEqual(len(recovery["fresh_context"]), mini.MAX_MUTATION_RECOVERY_CONTEXT_CHARS)
+        self.assertFalse(recovery["mutation_applied"])
+        self.assertFalse(recovery["filesystem_changed"])
+        self.assertTrue(recovery["retry_allowed"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "const value = 2;\nconsole.log(value);\n")
+        self.assertEqual(result["mutation_failures"][0]["category"], "STALE_TARGET")
+        self.assertEqual(result["tool_steps_used"], 2)
+        self.assertEqual(mini.RUN["tool_calls"], 2)
+        self.assertEqual(mini.RUN["mutation_recovery_packets_emitted"], 1)
+
+    def test_missing_target_recovery_identifies_absent_file_without_creating_it(self):
+        missing_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "missing.js", "old": "x", "new": "y",
+                }},
+            }],
+        }
+        terminal = {"role": "assistant", "content": "stop", "tool_calls": []}
+        with patch.object(mini, "ask_ollama", side_effect=[missing_edit, terminal]) as ask:
+            result = mini.execute_agent_task(
+                "inspect the focused behavior", mini.load_memory(), role="Builder", task_id="missing", max_steps=2,
+            )
+
+        recovery_message = next(message for message in ask.call_args_list[1].args[0] if message.get("role") == "tool")
+        recovery = json.loads(
+            recovery_message["content"].split("MUTATION_RECOVERY: ", 1)[1]
+        )["mutation_recovery"]
+        self.assertEqual(recovery["category"], "MISSING_TARGET")
+        self.assertEqual(recovery["target"], "missing.js")
+        self.assertFalse(recovery["current_file_exists"])
+        self.assertIsNone(recovery["current_file_hash"])
+        self.assertIn("No current regular file exists", recovery["fresh_context"])
+        self.assertFalse((mini.WORKSPACE / "missing.js").exists())
+        self.assertEqual(result["mutation_failures"][0]["category"], "MISSING_TARGET")
+
+    def test_syntax_invalid_mutation_reports_candidate_and_current_workspace_separately(self):
+        target = mini.WORKSPACE / "app.py"
+        original = "value = 1\n"
+        target.write_text(original, encoding="utf-8")
+        invalid_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file_range", "arguments": {
+                    "path": "app.py", "start_line": 1, "end_line": 1, "new": "def broken(\n",
+                }},
+            }],
+        }
+        terminal = {"role": "assistant", "content": "stop", "tool_calls": []}
+        with patch.object(mini, "ask_ollama", side_effect=[invalid_edit, terminal]) as ask:
+            result = mini.execute_agent_task(
+                "repair the focused Python behavior", mini.load_memory(), role="Builder", task_id="syntax", max_steps=2,
+            )
+
+        recovery_message = next(message for message in ask.call_args_list[1].args[0] if message.get("role") == "tool")
+        recovery = json.loads(
+            recovery_message["content"].split("MUTATION_RECOVERY: ", 1)[1]
+        )["mutation_recovery"]
+        self.assertEqual(recovery["category"], "SYNTAX_INVALID_MUTATION")
+        self.assertIn("Python syntax validation failed", recovery["syntax_error"])
+        self.assertFalse(recovery["candidate_applied"])
+        self.assertEqual(recovery["current_workspace_syntax_state"], "PASS")
+        self.assertIn("value = 1", recovery["fresh_context"])
+        self.assertEqual(target.read_text(encoding="utf-8"), original)
+        self.assertEqual(result["mutation_failures"][0]["category"], "SYNTAX_INVALID_MUTATION")
+
+    def test_malformed_mutation_arguments_get_contract_feedback_without_autofill(self):
+        error = mini.tool_argument_error(
+            "edit_file", {"path": "app.js", "old": "x", "new": "y", "expected_replacements": "one"},
+        )
+        self.assertIn("invalid edit_file tool arguments", error)
+        self.assertIn("expected_replacements must be integer", error)
+        self.assertIn("Expected contract", error)
+        self.assertIn("No file was changed", error)
+        missing = mini.tool_argument_error("edit_file", {"new": "replacement"})
+        self.assertIn("missing: path, old", missing)
+        self.assertIn("Expected contract", missing)
+        self.assertEqual(mini.list_files(), "(workspace is empty)")
+
+    def test_safety_and_environment_mutation_failures_do_not_get_recovery_hints(self):
+        safety = mini.mutation_failure_record(
+            "edit_file", "../app.js", "error: '../app.js' is outside the workspace", role="Builder",
+        )
+        environment = mini.mutation_failure_record(
+            "edit_file", "app.js", "error writing file: permission denied", role="Builder",
+        )
+        safety_result, safety_packet = mini._enrich_mutation_result(
+            "edit_file", {"path": "../app.js", "old": "x", "new": "y"}, safety,
+            "error: '../app.js' is outside the workspace",
+        )
+        environment_result, environment_packet = mini._enrich_mutation_result(
+            "edit_file", {"path": "app.js", "old": "x", "new": "y"}, environment,
+            "error writing file: permission denied",
+        )
+        self.assertIsNone(safety_packet)
+        self.assertIsNone(environment_packet)
+        self.assertNotIn("MUTATION_RECOVERY", safety_result)
+        self.assertNotIn("MUTATION_RECOVERY", environment_result)
+
+    def test_recovery_feedback_is_shared_by_builder_and_repairer_tool_loops(self):
+        for role in ("Builder", "Repairer"):
+            mini.reset_run("recursive")
+            target = mini.WORKSPACE / f"{role.lower()}.js"
+            target.write_text("const value = 1;\n", encoding="utf-8")
+            stale_edit = {
+                "role": "assistant", "content": "", "tool_calls": [{
+                    "function": {"name": "edit_file", "arguments": {
+                        "path": target.name, "old": "const missing = true;", "new": "const value = 2;",
+                    }},
+                }],
+            }
+            terminal = {"role": "assistant", "content": "stop", "tool_calls": []}
+            with patch.object(mini, "ask_ollama", side_effect=[stale_edit, terminal]) as ask:
+                result = mini.execute_agent_task(
+                    "repair one focused behavior", mini.load_memory(), role=role,
+                    task_id=role.lower(), max_steps=2,
+                )
+            recovery_message = next(message for message in ask.call_args_list[1].args[0] if message.get("role") == "tool")
+            self.assertIn("MUTATION_RECOVERY", recovery_message["content"])
+            self.assertEqual(result["mutation_failures"][0]["category"], "STALE_TARGET")
+            self.assertEqual(mini.RUN["mutation_recovery_packets_emitted"], 1)
+
     def test_repairer_mutation_failures_use_the_same_structured_evidence(self):
         invalid_edit = {
             "role": "assistant", "content": "", "tool_calls": [{

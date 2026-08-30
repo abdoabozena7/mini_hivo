@@ -1842,6 +1842,55 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         for marker in ("FAILED APPROACH SUMMARY", "CURRENT DETERMINISTIC FAILURE", "CURRENT ALTERNATIVE STRATEGY"):
             self.assertIn(marker, packet)
 
+    def test_strategy_a_and_b_receive_the_shared_mutation_recovery_packet(self):
+        target = mini.WORKSPACE / "app.py"
+        target.write_text("print('ok')\n", encoding="utf-8")
+        task = mini.make_task(
+            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["app.py"],
+        )
+        failure = {
+            "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
+            "failure_evidence": [{"name": "check", "status": "FAIL"}],
+        }
+        stale_edit = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.py", "old": "print('missing')", "new": "print('ok')",
+                }},
+            }],
+        }
+        executable_check = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "run_command", "arguments": {"command": "python app.py"}},
+            }],
+        }
+        terminal = {"role": "assistant", "content": "verified", "tool_calls": []}
+        with patch.object(
+            mini, "ask_ollama",
+            side_effect=[stale_edit, executable_check, terminal, stale_edit, executable_check, terminal],
+        ) as ask, patch.object(
+            mini, "falsify_task",
+            return_value={"status": "skipped", "summary": "deterministic test", "memory": {}},
+        ), patch.object(mini, "optional_browser_check", return_value=None):
+            result_a = mini.execute_strategy_attempt(
+                task, self.contract(), self.strategy_pair()[0], failure, {}, {}, attempt_index=0,
+            )
+            result_b = mini.execute_strategy_attempt(
+                task, self.contract(), self.strategy_pair()[1], failure, {}, {}, attempt_index=1,
+            )
+
+        for call_index in (1, 4):
+            tool_message = next(
+                message for message in ask.call_args_list[call_index].args[0]
+                if message.get("role") == "tool"
+            )
+            self.assertIn("MUTATION_RECOVERY", tool_message["content"])
+        self.assertEqual(result_a["status"], "done")
+        self.assertEqual(result_b["status"], "done")
+        self.assertEqual(mini.RUN["mutation_failures_recorded"], 2)
+        self.assertEqual(mini.RUN["mutation_recovery_packets_emitted"], 2)
+        self.assertEqual(target.read_text(encoding="utf-8"), "print('ok')\n")
+
     def test_strategy_a_failure_rolls_back_before_b_and_preserves_verified_dependencies(self):
         target = mini.WORKSPACE / "app.js"
         target.write_text("base\n", encoding="utf-8")

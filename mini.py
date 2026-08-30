@@ -21,6 +21,7 @@ from pathlib import Path
 from hivo.browser_checks import run_profile_interactions
 from hivo.context import compact_messages
 from hivo.evidence import evidence_for_review
+from hivo.evidence import MUTATION_TOOLS
 from hivo.evidence import mutation_failure_record
 from hivo.evidence import result_failed as evidence_result_failed
 from hivo.evidence import result_not_applicable
@@ -81,6 +82,8 @@ MAX_ROOT_PACKET_CHARS = 2400
 MAX_MEMORY_CONTEXT_CHARS = 1800
 MAX_FALSIFIER_STEPS = 8
 MAX_MUTATION_FAILURE_RECORDS = 6
+MAX_MUTATION_RECOVERY_CONTEXT_LINES = 12
+MAX_MUTATION_RECOVERY_CONTEXT_CHARS = 1400
 MAX_INTEGRATION_MANIFEST_ITEMS = 8
 MAX_INTEGRATION_FACT_CHARS = 280
 MAX_INTEGRATION_CONFLICTS = 24
@@ -404,15 +407,74 @@ def tool_argument_error(name, args):
     if definition is None:
         return None
     if not isinstance(args, dict):
+        if name in MUTATION_TOOLS:
+            return (
+                f"error: malformed {name} tool arguments; expected one JSON object with "
+                f"{_mutation_contract_text(definition)}. No file was changed."
+            )
         return f"error: {name} arguments must be one JSON object"
     required = definition.get("parameters", {}).get("required", [])
     missing = [key for key in required if key not in args or args.get(key) is None]
-    if not missing:
+    if missing:
+        contract = (
+            f" Expected contract: {_mutation_contract_text(definition)}."
+            if name in MUTATION_TOOLS else ""
+        )
+        return (
+            f"error: incomplete or truncated {name} tool call; missing: {', '.join(missing)}. "
+            f"Retry with every required field and smaller content/edit fragments.{contract} No file was changed."
+        )
+    if name not in MUTATION_TOOLS:
         return None
+
+    properties = definition.get("parameters", {}).get("properties", {})
+    unexpected = sorted(str(key) for key in args if key not in properties)
+    invalid = []
+    for key, value in args.items():
+        spec = properties.get(key)
+        if spec is None:
+            continue
+        expected_type = spec.get("type")
+        valid_type = (
+            expected_type == "string" and isinstance(value, str)
+        ) or (
+            expected_type == "integer" and isinstance(value, int) and not isinstance(value, bool)
+        )
+        if not valid_type:
+            invalid.append(f"{key} must be {expected_type}")
+            continue
+        if expected_type == "integer":
+            minimum = spec.get("minimum")
+            maximum = spec.get("maximum")
+            if minimum is not None and value < minimum:
+                invalid.append(f"{key} must be >= {minimum}")
+            if maximum is not None and value > maximum:
+                invalid.append(f"{key} must be <= {maximum}")
+    if not unexpected and not invalid:
+        return None
+    details = []
+    if unexpected:
+        details.append(f"unexpected field(s): {', '.join(unexpected)}")
+    if invalid:
+        details.append("; ".join(invalid))
     return (
-        f"error: incomplete or truncated {name} tool call; missing: {', '.join(missing)}. "
-        "Retry with every required field and smaller content/edit fragments. No file was changed."
+        f"error: invalid {name} tool arguments; {'; '.join(details)}. "
+        f"Expected contract: {_mutation_contract_text(definition)}. No file was changed."
     )
+
+
+def _mutation_contract_text(definition):
+    parameters = definition.get("parameters", {}) if isinstance(definition, dict) else {}
+    required = set(parameters.get("required", []))
+    fields = []
+    for key, spec in (parameters.get("properties", {}) or {}).items():
+        field = f"{key}:{spec.get('type', 'value')}"
+        if key not in required:
+            field += " (optional)"
+        if spec.get("minimum") is not None or spec.get("maximum") is not None:
+            field += f" [{spec.get('minimum', '')}..{spec.get('maximum', '')}]"
+        fields.append(field)
+    return ", ".join(fields) or "no fields"
 
 
 def begin_transaction(task_id):
@@ -517,6 +579,205 @@ def source_validation_error(target, content):
     if checked.returncode != 0:
         return f"JavaScript syntax validation failed: {compact_text(checked.stderr or checked.stdout, 500)}"
     return None
+
+
+def _mutation_recovery_target(raw_path):
+    """Return a safe target and workspace-relative identity for recovery feedback."""
+    if WORKSPACE is None:
+        return None, None
+    target = safe_path(raw_path)
+    if target is None:
+        return None, None
+    try:
+        relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
+    except (ValueError, OSError):
+        return None, None
+    return target, relative
+
+
+def _mutation_recovery_file_state(target):
+    """Read only the current file bytes needed for a bounded deterministic packet."""
+    try:
+        if not target.exists() or not target.is_file():
+            return False, None, None, None
+        raw = target.read_bytes()
+        return True, f"sha256:{hashlib.sha256(raw).hexdigest()}", raw.decode("utf-8", "replace"), None
+    except OSError as exc:
+        return True, None, None, f"current file could not be read: {exc}"
+
+
+def _recovery_context_window(lines, focus_start=None, focus_end=None):
+    """Choose a small numbered source window without fuzzy-editing the file."""
+    line_count = len(lines)
+    if not line_count:
+        return [], 0, 0, False
+    max_lines = MAX_MUTATION_RECOVERY_CONTEXT_LINES
+    if focus_start is not None:
+        raw_start = int(focus_start)
+        if focus_end is None:
+            start = max(1, min(line_count, raw_start))
+            start = max(1, start - max_lines // 2)
+            end = min(line_count, start + max_lines - 1)
+            start = max(1, end - max_lines + 1)
+            return list(range(start, end + 1)), start, end, False
+        raw_end = int(focus_end)
+        if raw_end < raw_start or raw_start < 1 or raw_end > line_count:
+            focus = max(1, min(line_count, raw_start))
+            start = max(1, focus - max_lines // 2)
+            end = min(line_count, start + max_lines - 1)
+            start = max(1, end - max_lines + 1)
+            return list(range(start, end + 1)), start, end, True
+        start = raw_start
+        end = raw_end
+        if end < start:
+            end = start
+        span = end - start + 1
+        if span <= max_lines:
+            numbers = list(range(start, end + 1))
+            return numbers, start, end, False
+        head_count = max_lines // 2
+        tail_count = max_lines - head_count
+        numbers = list(range(start, start + head_count)) + list(range(end - tail_count + 1, end + 1))
+        return numbers, start, end, True
+    if line_count <= max_lines:
+        return list(range(1, line_count + 1)), 1, line_count, False
+    head_count = max_lines // 2
+    tail_count = max_lines - head_count
+    return list(range(1, head_count)) + list(range(line_count - tail_count + 1, line_count + 1)), 1, line_count, True
+
+
+def _mutation_recovery_context(text, old=None, focus_start=None, focus_end=None):
+    """Produce bounded current source context and its deterministic selection reason."""
+    if text is None:
+        return "No current source context is available; perform a normal bounded read before retrying.", "normal_read_required", None
+    lines = text.splitlines()
+    line_count = len(lines)
+    if focus_start is not None:
+        context_source = "requested_range"
+        focus = focus_start
+    else:
+        focus = None
+        context_source = "bounded_file_state"
+        if isinstance(old, str) and old:
+            exact_matches = text.count(old)
+            if exact_matches == 1:
+                anchor_offset = text.find(old)
+                focus = text.count("\n", 0, anchor_offset) + 1
+                context_source = "exact_text_anchor"
+            elif exact_matches == 0:
+                anchor = next((line.strip() for line in old.splitlines() if line.strip()), "")
+                if anchor:
+                    matching_lines = [index for index, line in enumerate(lines, start=1) if anchor in line]
+                    if len(matching_lines) == 1:
+                        focus = matching_lines[0]
+                        context_source = "text_anchor"
+        if focus is None and line_count:
+            context_source = "bounded_file_state"
+
+    numbers, first, last, omitted = _recovery_context_window(lines, focus, focus_end)
+    if not numbers:
+        return "[current file is empty; 0 lines]", context_source, line_count
+    rendered = []
+    for number in numbers:
+        line = lines[number - 1]
+        if len(line) > 240:
+            line = line[:237] + "..."
+        rendered.append(f"{number}: {line}")
+    if omitted:
+        if focus_start is not None:
+            header = f"[current bounded lines around requested range; file has {line_count} lines]"
+        else:
+            header = f"[current file beginning/end; file has {line_count} lines]"
+    else:
+        header = f"[current lines {first}-{last} of {line_count}]"
+    context = header + "\n" + "\n".join(rendered)
+    if context_source == "bounded_file_state" and focus_start is None:
+        context += "\nNo unique deterministic anchor was found; perform a normal bounded read before retrying."
+    if len(context) > MAX_MUTATION_RECOVERY_CONTEXT_CHARS:
+        suffix = "\n...[bounded recovery context truncated]"
+        context = context[:MAX_MUTATION_RECOVERY_CONTEXT_CHARS - len(suffix)] + suffix
+    return context, context_source, line_count
+
+
+def _mutation_recovery_syntax_state(target, exists, text):
+    if not exists:
+        return "ABSENT", None
+    if text is None:
+        return "UNKNOWN", "current source could not be read"
+    if target.suffix.casefold() not in {".py", ".json", ".js", ".mjs", ".cjs", ".html", ".htm"}:
+        return "NOT_APPLICABLE", None
+    validation = source_validation_error(target, text)
+    return ("FAIL", validation) if validation else ("PASS", None)
+
+
+def _mutation_recovery_packet(name, args, mutation_record, result):
+    """Build feedback for recoverable mutation failures; never apply a retry."""
+    category = str((mutation_record or {}).get("category", ""))
+    if category not in {"STALE_TARGET", "MISSING_TARGET", "SYNTAX_INVALID_MUTATION"}:
+        return None
+    target, relative = _mutation_recovery_target((args or {}).get("path"))
+    if target is None or relative is None:
+        return None
+    exists, file_hash, text, read_error = _mutation_recovery_file_state(target)
+    if category == "MISSING_TARGET":
+        context = (
+            "No current regular file exists at this workspace path; perform a normal bounded read or list operation "
+            "before choosing the next mutation."
+        )
+        context_source = "file_absent"
+        line_count = None
+    elif name == "edit_file_range":
+        start_line = (args or {}).get("start_line")
+        end_line = (args or {}).get("end_line")
+        context, context_source, line_count = _mutation_recovery_context(
+            text, focus_start=start_line, focus_end=end_line,
+        )
+    else:
+        context, context_source, line_count = _mutation_recovery_context(
+            text, old=(args or {}).get("old"),
+        )
+    if read_error:
+        context = f"{context}\n{read_error}; perform a normal bounded read before retrying."
+        context = context[:MAX_MUTATION_RECOVERY_CONTEXT_CHARS]
+
+    packet = {
+        "category": category,
+        "target": relative,
+        "mutation_applied": False,
+        "candidate_applied": False,
+        "filesystem_changed": False,
+        "current_file_exists": bool(exists),
+        "current_file_hash": file_hash,
+        "current_file_line_count": line_count,
+        "fresh_context": context,
+        "context_source": context_source,
+        "retry_allowed": True,
+    }
+    if category == "SYNTAX_INVALID_MUTATION":
+        syntax_state, syntax_error = _mutation_recovery_syntax_state(target, exists, text)
+        packet["syntax_error"] = compact_text(result, 700)
+        packet["current_workspace_syntax_state"] = syntax_state
+        if syntax_error:
+            packet["current_workspace_syntax_error"] = compact_text(syntax_error, 500)
+    if name == "edit_file" and isinstance(text, str) and isinstance((args or {}).get("old"), str):
+        packet["current_matching_replacements"] = text.count((args or {}).get("old"))
+        expected = (args or {}).get("expected_replacements", 1)
+        if isinstance(expected, int) and not isinstance(expected, bool):
+            packet["requested_expected_replacements"] = expected
+    if name == "edit_file_range":
+        packet["requested_range"] = {
+            "start_line": (args or {}).get("start_line"),
+            "end_line": (args or {}).get("end_line"),
+        }
+    return packet
+
+
+def _enrich_mutation_result(name, args, mutation_record, result):
+    packet = _mutation_recovery_packet(name, args, mutation_record, result)
+    if packet is None:
+        return result, None
+    encoded = json.dumps({"mutation_recovery": packet}, ensure_ascii=False, separators=(",", ":"))
+    return f"{result}\nMUTATION_RECOVERY: {encoded}", packet
 
 
 def write_file(path, content, role="System"):
@@ -1040,7 +1301,7 @@ def new_metrics(mode):
         "browser_entrypoint_resolution_failures": 0,
         "browser_checks_skipped_for_syntax_failure": 0,
         "verification_failures": 0, "task_too_broad_count": 0,
-        "mutation_failures_recorded": 0,
+        "mutation_failures_recorded": 0, "mutation_recovery_packets_emitted": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
         "ollama_http_200": 0, "ollama_tool_call_responses": 0,
         "ollama_thinking_responses": 0, "ollama_terminal_empty_responses": 0,
@@ -3110,8 +3371,6 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 else:
                     result = run_tool(name, args, role=role)
             _update_verification_cycle(verification_cycle, name, args, result)
-            projected = str(result)[:1600]
-            evidence.append({"tool": name, "target": target, "result": projected})
             mutation_record = mutation_failure_record(name, target, result, role=role)
             if mutation_record is not None:
                 RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
@@ -3124,6 +3383,20 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 mutation_failure_records = _merge_mutation_failure_records(
                     mutation_failure_records, [mutation_record],
                 )
+                result, recovery_packet = _enrich_mutation_result(name, args, mutation_record, result)
+                if recovery_packet is not None:
+                    RUN["mutation_recovery_packets_emitted"] = RUN.get(
+                        "mutation_recovery_packets_emitted", 0,
+                    ) + 1
+                    record_run_event(
+                        "mutation_recovery_packet_emitted", role=role, task_id=task_id,
+                        tool=name, target=recovery_packet.get("target"),
+                        category=recovery_packet.get("category"),
+                        context_source=recovery_packet.get("context_source"),
+                        current_file_exists=recovery_packet.get("current_file_exists"),
+                    )
+            projected = str(result)[:1600]
+            evidence.append({"tool": name, "target": target, "result": projected})
             memory = update_memory(memory, name, args, result, role=role, task_id=task_id)
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
@@ -5739,6 +6012,7 @@ def print_search_metrics():
         "execution_budget_exhaustions", "budget_exhaustion_routed_to_scope",
         "budget_exhaustion_routed_to_strategy", "budget_exhaustion_routed_to_dependency",
         "budget_exhaustion_routed_to_other", "mutation_failures_recorded",
+        "mutation_recovery_packets_emitted",
     ):
         print(f"{key}: {RUN.get(key)}")
     backtrack_rate = RUN.get("decomposition_backtrack_rescue_rate")
