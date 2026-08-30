@@ -389,46 +389,201 @@ def _overlap_tokens(first, second):
     return a, b
 
 
+_CONFLICT_HEADING_RE = re.compile(
+    r"^(?:requirements?|constraints?|acceptance criteria|notes?|"
+    r"multiple enemy types must behave differently|example upgrades?)\s*:?[ \t]*$",
+    re.IGNORECASE,
+)
+_CONFLICT_POSITIVE_RE = re.compile(
+    r"\b(?:preserve|preserves|preserving|keep|keeps|keeping|retain|retains|retaining|"
+    r"persist|persists|persistent|survive|survives|surviving|remain|remains|remaining|"
+    r"unchanged|include|includes|including|support|supports|allow|allows|enable|enables|"
+    r"maintain|maintains|maintaining|use|uses|using|required|requires|have|has)\b",
+    re.IGNORECASE,
+)
+_CONFLICT_NEGATIVE_RE = re.compile(
+    r"\b(?:must\s+not|do\s+not|does\s+not|did\s+not|don['’]t|not|never|without|"
+    r"disable|disables|disabling|disallow|disallows|exclude|excludes|excluding|"
+    r"remove|removes|removing|delete|deletes|deleting|discard|discards|discarding|"
+    r"replace|replaces|replacing|no)\b",
+    re.IGNORECASE,
+)
+_CONFLICT_TARGET_STOP = frozenset({
+    "the", "and", "or", "for", "with", "from", "that", "this", "these", "those",
+    "should", "must", "shall", "need", "needs", "have", "has", "be", "is", "are",
+    "was", "were", "been", "being", "to", "of", "as", "at", "by", "on", "in",
+    "into", "across", "after", "before", "during", "through", "all", "every", "each",
+    "any", "only", "just", "fully", "completely", "entirely", "current", "same",
+    "use", "uses", "using", "preserve", "preserves", "preserving", "keep", "keeps",
+    "keeping", "retain", "retains", "retaining", "persist", "persists", "persistent",
+    "survive", "survives", "surviving", "remain", "remains", "remaining", "unchanged",
+    "include", "includes", "including", "support", "supports", "allow", "allows",
+    "enable", "enables", "maintain", "maintains", "maintaining", "require", "requires",
+    "required", "remove", "removes", "removing", "delete", "deletes", "deleting", "discard",
+    "discards", "discarding", "erase", "erases", "erasing", "clear", "clears", "clearing",
+    "reset", "resets", "resetting", "replace", "replaces", "replacing", "disable", "disables",
+    "disabling", "disallow", "disallows", "exclude", "excludes", "excluding", "without",
+    "never", "not", "no", "static", "genuinely", "polished", "final", "result", "behavior",
+    "implementation", "application", "browser", "project", "requirement", "requirements", "controls", "movement",
+})
+_CONFLICT_CLAUSE_BREAK_RE = re.compile(
+    r"[.!?;,\n]|\b(?:but|while|unless|instead|rather\s+than)\b",
+    re.IGNORECASE,
+)
+_RESET_SCOPE_RE = re.compile(
+    r"\b(?:erase|erases|erasing|clear|clears|clearing|reset|resets|resetting|"
+    r"delete|deletes|deleting|remove|removes|removing)\b"
+    r"[^.!?;\n]{0,100}\b(?:all|every|everything|persisted|persistent|saved|stored|data)\b",
+    re.IGNORECASE,
+)
+_RESET_FULL_SCOPE_RE = re.compile(
+    r"(?:\b(?:fully|completely|entirely)\b[^.!?;\n]{0,60}\b(?:erase|erases|erasing|"
+    r"clear|clears|clearing|reset|resets|resetting|delete|deletes|deleting|remove|removes|removing)\b|"
+    r"\b(?:erase|erases|erasing|clear|clears|clearing|reset|resets|resetting|delete|deletes|deleting|"
+    r"remove|removes|removing)\b[^.!?;\n]{0,60}\b(?:fully|completely|entirely)\b)",
+    re.IGNORECASE,
+)
+_PERSISTENCE_RE = re.compile(
+    r"\b(?:persist|persists|persistent|preserve|preserves|preserving|keep|keeps|keeping|"
+    r"retain|retains|retaining|survive|survives|surviving)\b",
+    re.IGNORECASE,
+)
+_OFFLINE_RE = re.compile(
+    r"\b(?:only\s+offline|entirely\s+offline|fully\s+offline|offline[- ]only|"
+    r"local\s+only|without\s+(?:a\s+)?network|no\s+network)\b",
+    re.IGNORECASE,
+)
+_REMOTE_RE = re.compile(
+    r"\b(?:live\s+remote|remote\s+(?:service|server|api|source)|fetched\s+live|"
+    r"retrieve\w*[^.!?;\n]{0,60}\blive\b|always\s+(?:retrieve|fetch|load|read)|online\s+only)\b",
+    re.IGNORECASE,
+)
+_RESOURCE_RE = re.compile(
+    r"\b(?:data|state|response|responses|service|server|api|source|content|record|records|"
+    r"information|request|requests|storage|values?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_conflict_heading(text):
+    """Ignore heading-like ledger records as conflict evidence only."""
+    value = compact_text(text, 240)
+    if not value:
+        return True
+    return bool(_CONFLICT_HEADING_RE.match(value) or value.rstrip().endswith(":"))
+
+
+def _conflict_target_tokens(text):
+    return {
+        token for token in re.findall(r"[a-z0-9]{3,}", str(text or "").casefold())
+        if token not in _CONFLICT_TARGET_STOP
+    }
+
+
+def _negative_target_tokens(text):
+    """Return only the object of each explicit negative/action phrase."""
+    value = str(text or "").casefold()
+    targets = set()
+    for match in _CONFLICT_NEGATIVE_RE.finditer(value):
+        clause = _CONFLICT_CLAUSE_BREAK_RE.split(value[match.end():], maxsplit=1)[0]
+        targets.update(_conflict_target_tokens(clause))
+    return targets
+
+
+def _positive_target_tokens(text):
+    """Return subjects of affirmative requirements, never treating negation as affirmation."""
+    value = str(text or "").casefold()
+    if _CONFLICT_POSITIVE_RE.search(value) or not _CONFLICT_NEGATIVE_RE.search(value):
+        return _conflict_target_tokens(value)
+    return set()
+
+
+def _lifecycle_kinds(text):
+    value = str(text or "").casefold()
+    kinds = set()
+    if re.search(r"\brestart\w*\b", value):
+        kinds.add("restart")
+    if re.search(r"\breload\w*\b", value):
+        kinds.add("reload")
+    return kinds
+
+
+def _conflict_evidence(left, right, left_text, right_text):
+    """Return bounded positive contradiction evidence, or None when uncertain."""
+    if _is_conflict_heading(left_text) or _is_conflict_heading(right_text):
+        return None
+
+    left_positive = _positive_target_tokens(left_text)
+    right_positive = _positive_target_tokens(right_text)
+    left_negative = _negative_target_tokens(left_text)
+    right_negative = _negative_target_tokens(right_text)
+
+    if left_positive & right_negative or right_positive & left_negative:
+        left_effect = compact_text(left_text, 260)
+        right_effect = compact_text(right_text, 260)
+        return {
+            "relationship": "CONFLICT",
+            "type": "opposite_polarity",
+            "incompatibility": "The requirements explicitly prescribe opposite behavior for the same target.",
+            "choice_a_effect": left_effect,
+            "choice_b_effect": right_effect,
+            "can_satisfy_both": False,
+        }
+
+    left_global_reset = bool(_RESET_SCOPE_RE.search(left_text))
+    right_global_reset = bool(_RESET_SCOPE_RE.search(right_text))
+    left_full_reset = bool(_RESET_FULL_SCOPE_RE.search(left_text))
+    right_full_reset = bool(_RESET_FULL_SCOPE_RE.search(right_text))
+    left_persistence = bool(_PERSISTENCE_RE.search(left_text))
+    right_persistence = bool(_PERSISTENCE_RE.search(right_text))
+    same_lifecycle = bool(_lifecycle_kinds(left_text) & _lifecycle_kinds(right_text))
+    if ((left_global_reset and right_persistence) or
+            (right_global_reset and left_persistence) or
+            (left_full_reset and right_persistence and same_lifecycle) or
+            (right_full_reset and left_persistence and same_lifecycle)):
+        if (left_global_reset or left_full_reset) and right_persistence:
+            reset_text, persistence_text = left_text, right_text
+        else:
+            reset_text, persistence_text = right_text, left_text
+        return {
+            "relationship": "CONFLICT",
+            "type": "reset_vs_persistence",
+            "incompatibility": "One requirement erases broad restart state while the other explicitly preserves persisted state.",
+            "choice_a_effect": compact_text(reset_text, 260),
+            "choice_b_effect": compact_text(persistence_text, 260),
+            "can_satisfy_both": False,
+        }
+
+    if (_OFFLINE_RE.search(left_text) and _REMOTE_RE.search(right_text) or
+            _OFFLINE_RE.search(right_text) and _REMOTE_RE.search(left_text)):
+        if _RESOURCE_RE.search(left_text) and _RESOURCE_RE.search(right_text):
+            return {
+                "relationship": "CONFLICT",
+                "type": "offline_vs_remote",
+                "incompatibility": "The requirements explicitly mandate local-only data and live remote retrieval for required state.",
+                "choice_a_effect": compact_text(left_text, 260),
+                "choice_b_effect": compact_text(right_text, 260),
+                "can_satisfy_both": False,
+            }
+
+    return None
+
+
 def detect_explicit_conflicts(ledger):
-    """Find only visible source conflicts; no repository or architecture inspection is used."""
+    """Find only visible source conflicts with positive incompatibility evidence."""
     records = ledger_requirements(ledger)
     conflicts = []
     for left_index, left in enumerate(records):
         left_text = str(left.get("text", ""))
-        left_lower = left_text.casefold()
         for right in records[left_index + 1:]:
             right_text = str(right.get("text", ""))
-            right_lower = right_text.casefold()
-            first_tokens, second_tokens = _overlap_tokens(left_text, right_text)
-            shared_subject = bool(first_tokens & second_tokens)
-            conflict_type = None
-            if shared_subject and (_has_negation(left_text) != _has_negation(right_text)):
-                conflict_type = "opposite_polarity"
-            if ((any(phrase in left_lower for phrase in
-                     ("reset all", "reset everything", "resets all", "resets everything", "restart", "restarts", "reset the"))) and
-                    any(word in right_lower for word in ("persist", "keep", "survive"))):
-                conflict_type = "reset_vs_persistence"
-            if ((any(phrase in right_lower for phrase in
-                     ("reset all", "reset everything", "resets all", "resets everything", "restart", "restarts", "reset the"))) and
-                    any(word in left_lower for word in ("persist", "keep", "survive"))):
-                conflict_type = "reset_vs_persistence"
-            verb_pairs = (
-                (("preserve", "keep", "retain"), ("remove", "delete", "discard")),
-                (("include", "support", "allow", "enable"), ("exclude", "disable", "disallow")),
-                (("online", "cloud"), ("offline", "local only")),
-                (("replace", "remove"), ("preserve", "keep", "maintain")),
-            )
-            if shared_subject:
-                for positive, negative in verb_pairs:
-                    if (any(word in left_lower for word in positive) and any(word in right_lower for word in negative)) or \
-                            (any(word in right_lower for word in positive) and any(word in left_lower for word in negative)):
-                        conflict_type = conflict_type or "opposing_behavior"
-            if conflict_type:
+            evidence = _conflict_evidence(left, right, left_text, right_text)
+            if evidence and evidence.get("can_satisfy_both") is False:
                 conflicts.append({
                     "conflict_id": f"CONFLICT-{len(conflicts) + 1:03d}",
                     "requirement_ids": [left.get("requirement_id"), right.get("requirement_id")],
-                    "type": conflict_type,
-                    "summary": "Two explicit source requirements may require different behavior.",
+                    **evidence,
+                    "summary": "Two explicit source requirements require mutually incompatible behavior.",
                 })
     return conflicts[:MAX_CLARIFICATION_QUESTIONS]
 
@@ -549,29 +704,38 @@ def question_priority(question):
     return 4
 
 
+def _has_complete_conflict_evidence(conflict):
+    if not isinstance(conflict, dict) or conflict.get("relationship") != "CONFLICT":
+        return False
+    if conflict.get("can_satisfy_both") is not False:
+        return False
+    effects = [compact_text(conflict.get(key), 260) for key in ("choice_a_effect", "choice_b_effect")]
+    return bool(str(conflict.get("incompatibility", "")).strip() and
+                effects[0] and effects[1] and effects[0] != effects[1])
+
+
 def conflict_questions(ledger, conflicts=None):
-    """Produce neutral, source-linked questions for explicit contradictions."""
+    """Produce questions only when a conflict has a complete decision record."""
     questions = []
     records = {str(item.get("requirement_id")): item for item in ledger_requirements(ledger)}
     for conflict in conflicts or detect_explicit_conflicts(ledger):
+        if not _has_complete_conflict_evidence(conflict):
+            # A question without two explicit incompatible outcomes is not a
+            # decision the user needs to make.  Keep the conservative default.
+            continue
         ids = [str(item) for item in conflict.get("requirement_ids", [])]
         first = records.get(ids[0], {}).get("text", "the first requirement") if ids else "the first requirement"
         second = records.get(ids[1], {}).get("text", "the second requirement") if len(ids) > 1 else "the second requirement"
-        if conflict.get("type") == "reset_vs_persistence":
-            options = [
-                "Keep persistent values, reset only the current run",
-                "Reset all state, including persistent values",
-                "Keep all current run state",
-            ]
-            recommended = options[0]
-        else:
-            options = [compact_text(first, 240), compact_text(second, 240), "Apply a clarified combination of both"]
-            recommended = ""
+        options = [
+            compact_text(conflict.get("choice_a_effect") or first, 260),
+            compact_text(conflict.get("choice_b_effect") or second, 260),
+        ]
+        recommended = options[1] if conflict.get("type") == "reset_vs_persistence" else ""
         question = {
-            "question": "Which behavior should take precedence for these conflicting requirements?",
-            "reason": "The request contains two explicit requirements with opposing behavior.",
+            "question": f"Which behavior should apply: {options[0]} or {options[1]}?",
+            "reason": conflict.get("incompatibility"),
             "affected_requirement_ids": ids,
-            "impact_if_unknown": "Planning could implement the wrong visible behavior or persistence rule.",
+            "impact_if_unknown": "Proceeding without this decision would violate one explicit requirement.",
             "options": options,
             "recommended_option": recommended,
             "allow_other": True,

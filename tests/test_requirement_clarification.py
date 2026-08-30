@@ -34,6 +34,13 @@ Requirements:
         return result
 
     @staticmethod
+    def ledger_for(*texts):
+        return mini.build_source_requirement_ledger([
+            {"text": text, "source_segment": index}
+            for index, text in enumerate(texts, 1)
+        ])
+
+    @staticmethod
     def optional_question(requirement_id="REQ-001"):
         return {
             "question": "Should this saved setting survive a reload?",
@@ -199,6 +206,157 @@ Requirements:
         result = mini.clarify_request("Build a fun survival game.", ledger)
         self.assertEqual(result["questions"], [])
         self.assertEqual(result["interaction_style"], "LOW_FRICTION")
+
+    def test_frozen_v16_false_conflicts_are_compatible(self):
+        pairs = (
+            (
+                "Build a polished self-contained browser game.",
+                "The final result must be a genuinely playable game, not a static mockup.",
+            ),
+            (
+                "The game is a top-down arena survival game.",
+                "The final result must be a genuinely playable game, not a static mockup.",
+            ),
+            (
+                "Full-screen responsive canvas game.",
+                "Responsive layout must not overflow at 390px-wide viewport.",
+            ),
+        )
+        for first, second in pairs:
+            ledger = self.ledger_for(first, second)
+            self.assertEqual(mini.detect_explicit_conflicts(ledger), [])
+            result = mini.clarify_request(
+                first + "\n" + second,
+                ledger,
+                structured_call=lambda *_args: {"questions": []},
+            )
+            self.assertEqual(result["conflicts"], [])
+            self.assertEqual(result["questions"], [])
+
+    def test_compatible_relationships_do_not_create_conflicts(self):
+        pairs = (
+            # SPECIALIZATION
+            ("responsive UI", "The UI must fit a 390px viewport."),
+            # QUALITY_CONSTRAINT and COMPOSITION
+            ("Use vanilla JavaScript.", "The result must be a playable game."),
+            ("Maintainable code.", "Automatic attack toward the nearest enemy."),
+            # ADDITIVE
+            ("Keyboard controls.", "Touch controls."),
+            ("Fullscreen.", "Responsive layout."),
+            ("Canvas rendering.", "A 390px viewport constraint."),
+            ("Pause and resume.", "Restart the game."),
+            ("Local best score.", "Game-over displays the score."),
+            ("Restart must completely reset game state.",
+             "Store best score locally and preserve it after reload."),
+            ("Player has smooth acceleration and friction, not grid movement.",
+             "Movement speed is adjustable."),
+            # DEPENDENT
+            ("Enemies have health.", "Enemies can die."),
+            ("The game is playable.", "Enemies have health."),
+            # Shared vocabulary and category difference alone
+            ("A game artifact.", "The game is playable."),
+            ("Keyboard controls.", "Enemy health."),
+        )
+        for first, second in pairs:
+            self.assertEqual(
+                mini.detect_explicit_conflicts(self.ledger_for(first, second)),
+                [],
+                msg=f"unexpected conflict for {first!r} / {second!r}",
+            )
+
+    def test_heading_like_requirements_are_not_conflict_evidence(self):
+        ledger = self.ledger_for(
+            "Requirements:",
+            "Multiple enemy types must behave differently:",
+            "Example upgrades:",
+            "Support keyboard controls.",
+        )
+        self.assertEqual(mini.detect_explicit_conflicts(ledger), [])
+
+    def test_true_conflicts_have_structured_evidence_and_blocking_questions(self):
+        cases = (
+            (
+                "Restart must erase all persisted data.",
+                "Best score must persist across restart.",
+                "reset_vs_persistence",
+            ),
+            (
+                "Remove keyboard controls.",
+                "Keyboard controls must remain unchanged.",
+                "opposite_polarity",
+            ),
+            (
+                "Use only offline local data.",
+                "Always retrieve required state from the live remote service.",
+                "offline_vs_remote",
+            ),
+        )
+        for first, second, conflict_type in cases:
+            ledger = self.ledger_for(first, second)
+            conflicts = mini.detect_explicit_conflicts(ledger)
+            self.assertEqual(len(conflicts), 1)
+            conflict = conflicts[0]
+            self.assertEqual(conflict["type"], conflict_type)
+            self.assertEqual(conflict["relationship"], "CONFLICT")
+            self.assertFalse(conflict["can_satisfy_both"])
+            for field in ("incompatibility", "choice_a_effect", "choice_b_effect"):
+                self.assertTrue(conflict[field])
+            result = mini.clarify_request(first + "\n" + second, ledger)
+            self.assertEqual(len(result["questions"]), 1)
+            self.assertTrue(result["questions"][0]["blocking"])
+            self.assertIn("or", result["questions"][0]["question"])
+
+    def test_question_without_two_incompatible_outcomes_is_rejected(self):
+        ledger = self.ledger_for("Build a game.")
+        incomplete = {
+            "conflict_id": "CONFLICT-001",
+            "requirement_ids": ["REQ-001", "REQ-002"],
+            "relationship": "CONFLICT",
+            "incompatibility": "",
+            "choice_a_effect": "Keep A",
+            "choice_b_effect": "Keep B",
+            "can_satisfy_both": None,
+        }
+        self.assertEqual(mini.conflict_questions(ledger, [incomplete]), [])
+
+    def test_frozen_benchmark_fixture_has_no_false_conflict_questions(self):
+        raw = """Build a polished self-contained browser game.
+The game is a top-down arena survival game.
+Requirements:
+- Full-screen responsive canvas game.
+- Responsive layout must not overflow at a 390px-wide viewport.
+- Support keyboard and touch controls.
+- The final result must be a genuinely playable game, not a static mockup.
+- Use vanilla HTML, CSS, and JavaScript.
+- Enemies have health and can die.
+- Kills increase score and provide XP.
+- XP causes level-ups.
+- Pause and restart are available.
+"""
+        ledger = mini.extract_source_requirement_ledger(raw, use_model=False)
+        result = mini.clarify_request(
+            raw,
+            ledger,
+            structured_call=lambda *_args: {"questions": []},
+        )
+        self.assertEqual(result["conflicts"], [])
+        self.assertEqual(result["questions"], [])
+
+    def test_noninteractive_compatible_request_proceeds(self):
+        raw = "Build a game.\n- Fullscreen responsive canvas.\n- Fit a 390px viewport."
+        contract = mini.get_goal_contract(raw, interactive=False)
+        self.assertEqual(contract["status"], "ready")
+
+    def test_conflict_detection_does_not_mutate_source_ledger(self):
+        ledger = self.ledger_for(
+            "Support keyboard controls.",
+            "Remove keyboard controls.",
+        )
+        before = json.dumps(ledger, sort_keys=True)
+        mini.detect_explicit_conflicts(ledger)
+        mini.conflict_questions(ledger)
+        after = json.dumps(ledger, sort_keys=True)
+        self.assertEqual(before, after)
 
     def test_explicit_conflict_produces_one_blocking_source_linked_question(self):
         raw = """Build a game.

@@ -10894,6 +10894,15 @@ def run_self_test(install_browser=False):
         v16_raw = "Build a timer.\n- persist the best score\n- support WASD"
         v16_ledger = extract_source_requirement_ledger(v16_raw, use_model=False)
         v16_no_questions = clarify_request(v16_raw, v16_ledger)
+        v16_specialization_raw = (
+            "Build a responsive UI.\n- The UI must fit a 390px-wide viewport."
+        )
+        v16_specialization_ledger = extract_source_requirement_ledger(
+            v16_specialization_raw, use_model=False,
+        )
+        v16_specialization = clarify_request(
+            v16_specialization_raw, v16_specialization_ledger,
+        )
         v16_conflict_raw = "Build a timer.\n- restart resets everything\n- persist the best score"
         v16_conflict_ledger = extract_source_requirement_ledger(v16_conflict_raw, use_model=False)
         v16_blocking_questions = clarify_request(v16_conflict_raw, v16_conflict_ledger)
@@ -10977,7 +10986,17 @@ def run_self_test(install_browser=False):
                 all(item.get("provenance") == USER_STATED for item in ledger_requirements(v16_ledger))
                 and v16_other["answers"][0].get("provenance") == USER_CONFIRMED
             ),
-            "clarifier no-question path": not v16_no_questions["questions"],
+            "clarifier compatible pair": (
+                not v16_no_questions["conflicts"] and not v16_no_questions["questions"]
+            ),
+            "clarifier specialization pair": (
+                not v16_specialization["conflicts"] and not v16_specialization["questions"]
+            ),
+            "clarifier true contradiction": (
+                len(v16_blocking_questions["conflicts"]) == 1
+                and v16_blocking_questions["conflicts"][0].get("relationship") == "CONFLICT"
+                and v16_blocking_questions["conflicts"][0].get("can_satisfy_both") is False
+            ),
             "clarifier blocking path": (
                 v16_blocking["status"] == "clarification_required"
                 and v16_blocking["unanswered"][0].get("blocking") is True
