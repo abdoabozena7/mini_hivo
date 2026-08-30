@@ -32,6 +32,32 @@ from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
+from hivo.requirements import DERIVED
+from hivo.requirements import USER_CONFIRMED
+from hivo.requirements import USER_STATED
+from hivo.requirements import VERIFIED
+from hivo.requirements import MAX_CLARIFICATION_OPTIONS as REQUIREMENT_MAX_CLARIFICATION_OPTIONS
+from hivo.requirements import MAX_CLARIFICATION_QUESTIONS as REQUIREMENT_MAX_CLARIFICATION_QUESTIONS
+from hivo.requirements import MAX_SOURCE_REQUIREMENT_CHARS
+from hivo.requirements import MAX_SOURCE_REQUIREMENTS
+from hivo.requirements import MAX_SOURCE_SEGMENTS
+from hivo.requirements import MAX_SOURCE_SEGMENT_CHARS
+from hivo.requirements import append_confirmed_requirement
+from hivo.requirements import bounded_source_segments
+from hivo.requirements import build_source_requirement_ledger
+from hivo.requirements import classify_interaction_style
+from hivo.requirements import conflict_questions
+from hivo.requirements import detect_explicit_conflicts
+from hivo.requirements import deterministic_requirement_candidates
+from hivo.requirements import freeze
+from hivo.requirements import ledger_requirements
+from hivo.requirements import normalize_question
+from hivo.requirements import question_is_eligible
+from hivo.requirements import question_priority
+from hivo.requirements import retention_summary
+from hivo.requirements import source_contract_from_ledger
+from hivo.requirements import specification_coverage
+from hivo.requirements import thaw
 from hivo.verification import evaluate_web_snapshot, infer_web_profile
 
 # ---------------------------------------------------------------------------
@@ -68,7 +94,7 @@ VERIFICATION_TARGET_UNRESOLVED = "VERIFICATION_TARGET_UNRESOLVED"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
 MAX_ALTERNATE_STRATEGIES = MAX_STRATEGY_ALTERNATIVES
-MAX_CLARIFICATION_QUESTIONS = 5
+MAX_CLARIFICATION_QUESTIONS = REQUIREMENT_MAX_CLARIFICATION_QUESTIONS
 MAX_REPAIRS_PER_LEAF = 2
 MAX_STRUCTURED_RETRIES = 5
 MAX_PROVIDER_RETRIES = 2
@@ -93,6 +119,9 @@ MAX_BRAIN_PROJECTION_CHARS = 3600
 MAX_WORKER_MISSION_CHARS = 4200
 MAX_MISSION_COMPILER_CONTEXT_CHARS = 5200
 MAX_BRAIN_ITEMS = 8
+MAX_SOURCE_LEDGER_CHARS = 26000
+MAX_SOURCE_EXTRACTION_MODEL_CALLS = 8
+MAX_CLARIFIER_INPUT_CHARS = 9000
 OLLAMA_TIMEOUT_SECONDS = 120
 CONTEXT_LIMIT_TOKENS = MODEL_POLICY.context_window("builder")
 MODEL_TASK_CAPACITY = 2  # heuristic prior only: parameter size is not a measured capability score
@@ -986,7 +1015,28 @@ def new_metrics(mode):
         "host_preflight_id": host_preflight.get("preflight_id"),
         "host_preflight_duration_seconds": host_preflight_report.get("duration_seconds"),
         "host_preflight_report_path": host_preflight.get("marker_path"),
+        # v16 requirement/clarification accounting is kept separate from
+        # Builder, Repairer, and Falsifier work.  ``clarification_questions``
+        # remains as a compatibility alias for older run consumers.
         "clarification_questions": 0,
+        "source_requirements_extracted": 0,
+        "source_requirements_retained": 0,
+        "source_requirements_mapped": 0,
+        "source_requirements_unmapped": 0,
+        "source_requirement_retention_numerator": 0,
+        "source_requirement_retention_denominator": 0,
+        "source_requirement_retention_rate_numerator": 0,
+        "source_requirement_retention_rate_denominator": 0,
+        "source_requirement_retention_rate": 1.0,
+        "user_clarification_rounds": 0,
+        "user_clarification_questions": 0,
+        "user_clarification_answers": 0,
+        "user_confirmed_requirements": 0,
+        "optional_clarifications_skipped": 0,
+        "blocking_clarifications_required": 0,
+        "requirement_extractor_calls": 0,
+        "clarifier_calls": 0,
+        "clarification_terminal_state": None,
         "specification_expansions": 0,
         "specification_expansion_failures": 0,
         "brain_projections_created": 0,
@@ -1551,7 +1601,8 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
             "num_ctx": context_window,
             "num_predict": {"Builder": 4096, "Repairer": 3072, "Falsifier": 1536,
                             "Coordinator": 1536, "Quality": 1536, "Specifier": 1536,
-                            "MissionCompiler": 1536}.get(role, 2048),
+                            "MissionCompiler": 1536, "Clarifier": 1536,
+                            "RequirementExtractor": 1536}.get(role, 2048),
             "temperature": MODEL_POLICY.temperature(role) if temperature is None else temperature,
             "seed": 0,
         },
@@ -1699,6 +1750,7 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
 # ---------------------------------------------------------------------------
 
 def extract_explicit_requirements(raw_goal):
+    """Legacy bullet extractor retained for v3-v15 callers and tests."""
     requirements = []
     for raw_line in str(raw_goal).splitlines():
         line = raw_line.strip()
@@ -1708,16 +1760,202 @@ def extract_explicit_requirements(raw_goal):
     return requirements
 
 
-def normalize_goal_contract(raw_goal, contract):
+def source_requirement_ledger_schema():
+    """Describe the compact source record for deterministic/model tests."""
+    return {
+        "type": "object", "properties": {
+            "requirements": {
+                "type": "array", "maxItems": MAX_SOURCE_REQUIREMENTS,
+                "items": {"type": "object", "properties": {
+                    "text": {"type": "string"}, "category": {"type": "string"},
+                    "source_segment": {"type": ["integer", "null"]},
+                }, "required": ["text"], "additionalProperties": False},
+            },
+        }, "required": ["requirements"], "additionalProperties": False,
+    }
+
+
+def _source_requirement_extraction_validator(data):
+    if not isinstance(data, dict):
+        return False
+    values = data.get("requirements")
+    return isinstance(values, list) and len(values) <= MAX_SOURCE_REQUIREMENTS and all(
+        (isinstance(item, str) and item.strip())
+        or (isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip())
+        for item in values
+    )
+
+
+def _source_requirement_prompt(segment):
+    return f"""You are the REQUIREMENT EXTRACTOR in a weak-model coding orchestrator.
+Extract only facts or requirements explicitly stated by the user in this segment.
+Do not infer architecture, implementation details, defaults, or hidden intent.
+Return a small JSON list. Preserve the user's wording compactly and use an empty list when this segment has no
+explicit requirement. This is source bookkeeping, not planning and not code generation.
+
+SOURCE SEGMENT {segment.get('segment')}:
+{compact_text(segment.get('text', ''), MAX_SOURCE_SEGMENT_CHARS)}"""
+
+
+def _record_source_ledger_metrics(ledger):
+    records = ledger_requirements(ledger)
+    RUN["source_requirement_ledger"] = ledger
+    RUN["source_requirements_extracted"] = len(records)
+    RUN["source_requirements_retained"] = len(records)
+    RUN["source_requirement_retention_numerator"] = len(records)
+    RUN["source_requirement_retention_denominator"] = len(records)
+    RUN["source_requirement_retention_rate_numerator"] = len(records)
+    RUN["source_requirement_retention_rate_denominator"] = len(records)
+    RUN["source_requirement_retention_rate"] = 1.0
+    record_run_event(
+        "source_requirement_ledger_created",
+        requirement_ids=[item.get("requirement_id") for item in records],
+        requirement_count=len(records),
+        segment_count=len({segment for item in records for segment in item.get("source_segments", [])}),
+    )
+    return ledger
+
+
+def extract_source_requirement_ledger(raw_goal, structured_call=None, max_segments=MAX_SOURCE_SEGMENTS,
+                                      use_model=None, existing_ledger=None):
+    """Extract a stable, bounded source ledger before any spec expansion."""
+    raw_text = str(raw_goal or "").strip()
+    segments = bounded_source_segments(raw_text, max_segments=max_segments)
+    candidates = []
+    extraction_failures = []
+    for segment in segments:
+        candidates.extend(deterministic_requirement_candidates(segment["text"], segment["segment"]))
+
+    # The deterministic path protects explicit bullets.  Long prose is sent
+    # in bounded segments to the same weak model only when useful; tests may
+    # inject a structured callable without contacting Ollama.
+    if use_model is None:
+        use_model = bool(structured_call is not None or len(raw_text) > MAX_SOURCE_SEGMENT_CHARS * 2)
+    if use_model:
+        schema = source_requirement_ledger_schema()
+        for segment in segments[:MAX_SOURCE_EXTRACTION_MODEL_CALLS]:
+            try:
+                RUN["requirement_extractor_calls"] = RUN.get("requirement_extractor_calls", 0) + 1
+                if structured_call is None:
+                    data = structured_model_call(
+                        _source_requirement_prompt(segment),
+                        _source_requirement_extraction_validator,
+                        "source-requirement-extraction", schema,
+                        role="RequirementExtractor",
+                    )
+                else:
+                    data = structured_call(
+                        _source_requirement_prompt(segment),
+                        _source_requirement_extraction_validator,
+                        "source-requirement-extraction", schema,
+                    )
+                if not _source_requirement_extraction_validator(data):
+                    raise StructuredOutputError("source requirement extraction failed semantic validation")
+                for item in data.get("requirements", []):
+                    candidate = {"text": item} if isinstance(item, str) else dict(item)
+                    candidate["source_segment"] = segment["segment"]
+                    candidate["provenance"] = USER_STATED
+                    candidates.append(candidate)
+            except StructuredOutputError as exc:
+                extraction_failures.append({"segment": segment["segment"], "kind": "structured", "error": compact_text(exc, 260)})
+                record_run_event(
+                    "source_requirement_extraction_fallback",
+                    segment=segment["segment"], error=str(exc),
+                )
+            except ProviderError:
+                # Do not lose deterministic source candidates because a local
+                # model is temporarily unavailable.
+                extraction_failures.append({"segment": segment["segment"], "kind": "provider"})
+                record_run_event(
+                    "source_requirement_extraction_provider_unavailable",
+                    segment=segment["segment"],
+                )
+                break
+    ledger = build_source_requirement_ledger(candidates, existing_ledger=existing_ledger)
+    if not ledger_requirements(ledger) and raw_text:
+        ledger = build_source_requirement_ledger([{
+            "text": raw_text, "category": "functional", "source_segment": 1,
+            "provenance": USER_STATED,
+        }])
+    ledger_data = thaw(ledger)
+    ledger_data["extraction"] = {
+        "mode": "model_plus_deterministic" if use_model else "deterministic",
+        "status": "complete" if not extraction_failures else "partial_fallback",
+        "segments": len(segments), "failures": extraction_failures[:MAX_CLARIFICATION_QUESTIONS],
+        "failure_count": len(extraction_failures),
+    }
+    ledger = freeze(ledger_data)
+    return _record_source_ledger_metrics(ledger)
+
+
+def source_requirement_ledger(raw_goal, structured_call=None, **kwargs):
+    """Public spelling used by callers that treat the ledger as a boundary."""
+    return extract_source_requirement_ledger(raw_goal, structured_call=structured_call, **kwargs)
+
+
+# Clear aliases keep the v16 boundary discoverable to deterministic callers
+# without introducing another memory or orchestration framework.
+extract_source_requirements = extract_source_requirement_ledger
+build_source_ledger = extract_source_requirement_ledger
+
+
+def _deterministic_contract_from_ledger(raw_goal, ledger, derived=None):
+    records = ledger_requirements(ledger)
+    requirements = [item.get("text", "") for item in records if item.get("text")]
+    first_line = next((line.strip() for line in str(raw_goal or "").splitlines() if line.strip()), "coding task")
+    return {
+        "status": "ready", "question": "", "goal": compact_text(first_line, 1200),
+        "requirements": requirements or [compact_text(raw_goal, MAX_SOURCE_REQUIREMENT_CHARS)],
+        "constraints": [item["text"] for item in records if item.get("category") == "constraint"][:12],
+        "success_criteria": ["every explicit requirement is implemented and verified"],
+        "original_goal": str(raw_goal), "derived_assumptions": list(derived or []),
+    }
+
+
+def normalize_goal_contract(raw_goal, contract, source_ledger=None, confirmed=None, derived=None,
+                            clarification_questions=None, clarification_answers=None,
+                            interaction_style=None):
     """Preserve explicit user bullets when a weak model summarizes lossy."""
     normalized = dict(contract or {})
-    explicit = extract_explicit_requirements(raw_goal)
-    if len(explicit) >= 2:
-        normalized["requirements"] = explicit
+    if source_ledger is not None:
+        records = ledger_requirements(source_ledger)
+        if records:
+            normalized["requirements"] = [item.get("text", "") for item in records if item.get("text")]
+            source_constraints = [
+                item.get("text", "") for item in records if item.get("category") == "constraint"
+            ]
+            if source_constraints:
+                normalized["constraints"] = list(dict.fromkeys(
+                    source_constraints + list(normalized.get("constraints", []))
+                ))[:MAX_SOURCE_REQUIREMENTS]
+    else:
+        explicit = extract_explicit_requirements(raw_goal)
+        if len(explicit) >= 2:
+            normalized["requirements"] = explicit
     normalized.setdefault("status", "ready")
     normalized.setdefault("constraints", [])
     normalized.setdefault("success_criteria", ["every explicit requirement is implemented and verified"])
     normalized["original_goal"] = str(raw_goal)
+    if source_ledger is not None:
+        normalized["source_requirement_ledger"] = source_ledger
+        normalized["source_requirements"] = ledger_requirements(source_ledger)
+        normalized["user_stated_requirements"] = ledger_requirements(source_ledger)
+    normalized["user_confirmed_requirements"] = list(
+        confirmed if confirmed is not None else normalized.get("user_confirmed_requirements", [])
+    )
+    normalized["derived_assumptions"] = list(
+        derived if derived is not None else normalized.get("derived_assumptions", [])
+    )
+    normalized["clarification_questions"] = list(
+        clarification_questions if clarification_questions is not None
+        else normalized.get("clarification_questions", [])
+    )
+    normalized["clarification_answers"] = list(
+        clarification_answers if clarification_answers is not None
+        else normalized.get("clarification_answers", [])
+    )
+    if interaction_style:
+        normalized["interaction_style"] = interaction_style
     return normalized
 
 
@@ -1759,31 +1997,427 @@ RAW REQUEST:\n{raw_goal}\nPRIOR CLARIFICATIONS:\n{prior_answers or '(none)'}"""
         return fallback
 
 
-def get_goal_contract(raw_goal, interactive=True):
-    explicit = extract_explicit_requirements(raw_goal)
-    if len(explicit) >= 2:
-        contract = {
-            "status": "ready", "question": "", "goal": compact_text(raw_goal.splitlines()[0], 1200),
-            "requirements": explicit, "constraints": [],
-            "success_criteria": ["every explicit requirement is implemented and verified"],
-            "original_goal": raw_goal, "clarifications": [],
-        }
-        return contract
-    answers = []
-    for attempt in range(MAX_CLARIFICATION_QUESTIONS + 1):
-        result = understand_goal(raw_goal, "\n".join(answers))
-        if result["status"] == "ready":
-            result = normalize_goal_contract(raw_goal, result)
-            result["clarifications"] = list(answers)
-            return result
-        if attempt >= MAX_CLARIFICATION_QUESTIONS or not interactive:
-            return {"status": "question", "question": result.get("question", "clarification required"),
-                    "original_goal": raw_goal, "clarifications": list(answers)}
-        RUN["clarification_questions"] = RUN.get("clarification_questions", 0) + 1
-        print(f"[CLARIFY] {result['question']}")
-        answer = read_user_prompt()
-        answers.append(f"Q: {result['question']}\nA: {answer}")
-    return {"status": "question", "question": "clarification limit reached", "original_goal": raw_goal}
+def clarification_schema():
+    option_schema = {
+        "type": "array", "items": {"type": "string"},
+        "maxItems": REQUIREMENT_MAX_CLARIFICATION_OPTIONS,
+    }
+    question_schema = {
+        "type": "object", "properties": {
+            "question_id": {"type": "string"}, "question": {"type": "string"},
+            "reason": {"type": "string"},
+            "affected_requirement_ids": {"type": "array", "items": {"type": "string"}},
+            "impact_if_unknown": {"type": "string"}, "recommended_option": {"type": "string"},
+            "options": option_schema, "allow_other": {"type": "boolean"},
+            "blocking": {"type": "boolean"}, "category": {"type": "string"},
+        },
+        "required": ["question", "reason", "affected_requirement_ids", "impact_if_unknown",
+                     "recommended_option", "options", "allow_other", "blocking"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object", "properties": {
+            "questions": {
+                "type": "array", "items": question_schema,
+                "maxItems": MAX_CLARIFICATION_QUESTIONS,
+            },
+        }, "required": ["questions"], "additionalProperties": False,
+    }
+
+
+def _clarification_validator(data):
+    if not isinstance(data, dict) or not isinstance(data.get("questions"), list):
+        return False
+    return len(data["questions"]) <= MAX_CLARIFICATION_QUESTIONS and all(
+        isinstance(item, dict) and isinstance(item.get("question"), str)
+        and isinstance(item.get("options"), list) for item in data["questions"]
+    )
+
+
+def _compact_source_contract_for_clarifier(ledger, max_chars=MAX_CLARIFIER_INPUT_CHARS):
+    records = []
+    for item in ledger_requirements(ledger):
+        records.append({
+            "requirement_id": item.get("requirement_id"),
+            "text": compact_text(item.get("text", ""), 420),
+            "category": item.get("category"), "source_segment": item.get("source_segment"),
+        })
+    encoded = json.dumps(records, ensure_ascii=False)
+    return encoded if len(encoded) <= max_chars else encoded[:max_chars - 3] + "..."
+
+
+def _clarifier_prompt(raw_goal, ledger, conflicts, interaction_style):
+    return f"""You are the REQUIREMENT CLARIFIER in a weak-model coding orchestrator.
+You do not write code, inspect a repository, decompose tasks, choose file layouts, or solve architecture.
+Decide whether the user must answer anything before planning. Ask only questions where a wrong assumption would
+materially change visible behavior or architecture, resolve an explicit conflict, affect compatibility or destructive
+behavior, or make acceptance impossible to judge. Do not ask implementation trivia.
+Low-friction requests should usually return zero questions. Return at most {MAX_CLARIFICATION_QUESTIONS} concise questions.
+For each question, options are user-facing choices; put a defensible recommendation first and leave the recommendation
+empty when there is no defensible preference. Set blocking true only when planning must stop without the answer.
+Do not include chain-of-thought.
+
+INTERACTION STYLE (request only, never a person): {interaction_style}
+RAW USER REQUEST:
+{compact_text(raw_goal, 3600)}
+SOURCE REQUIREMENT LEDGER:
+{_compact_source_contract_for_clarifier(ledger)}
+VISIBLE SOURCE CONFLICTS:
+{json.dumps(conflicts, ensure_ascii=False)[:2200] if conflicts else '(none)'}"""
+
+
+def clarify_request(raw_goal, ledger, structured_call=None):
+    """Run one bounded Clarifier pass and return only eligible questions."""
+    conflicts = detect_explicit_conflicts(ledger)
+    interaction_style = classify_interaction_style(raw_goal, ledger)
+    questions = conflict_questions(ledger, conflicts)
+    # Explicit conflicts already have a deterministic source-linked question.
+    # Precision-sensitive prose receives one weak-model pass for other
+    # material choices. Tests may inject a call to exercise the full schema.
+    # A visible conflict already has a deterministic question. Avoid spending
+    # an extra provider call merely to rediscover it; precision-sensitive
+    # non-conflict prose is the bounded Clarifier use case.
+    needs_model = bool(structured_call is not None or (not conflicts and interaction_style == "PRECISION_SENSITIVE"))
+    if needs_model:
+        schema = clarification_schema()
+        try:
+            RUN["clarifier_calls"] = RUN.get("clarifier_calls", 0) + 1
+            if structured_call is None:
+                data = structured_model_call(
+                    _clarifier_prompt(raw_goal, ledger, conflicts, interaction_style),
+                    _clarification_validator, "clarification-gate", schema,
+                    role="Clarifier",
+                )
+            else:
+                data = structured_call(
+                    _clarifier_prompt(raw_goal, ledger, conflicts, interaction_style),
+                    _clarification_validator, "clarification-gate", schema,
+                )
+            if not _clarification_validator(data):
+                raise StructuredOutputError("clarifier returned an invalid question envelope")
+            for item in data.get("questions", []):
+                normalized = normalize_question(
+                    item, len(questions) + 1, ledger, interaction_style, conflicts,
+                )
+                if not normalized:
+                    continue
+                same_affected = set(normalized.get("affected_requirement_ids", []))
+                duplicate = any(
+                    same_affected and same_affected == set(existing.get("affected_requirement_ids", []))
+                    for existing in questions
+                )
+                if not duplicate and len(questions) < MAX_CLARIFICATION_QUESTIONS:
+                    questions.append(normalized)
+        except StructuredOutputError as exc:
+            record_run_event("clarifier_fallback", error=str(exc))
+        except ProviderError:
+            # Deterministic conflict questions remain actionable when the weak
+            # provider is unavailable. Other questions are not invented.
+            record_run_event("clarifier_provider_unavailable")
+    normalized_questions = []
+    ordered_questions = sorted(
+        questions, key=lambda item: question_priority(item) if isinstance(item, dict) else 4,
+    )
+    for index, question in enumerate(ordered_questions[:MAX_CLARIFICATION_QUESTIONS], 1):
+        item = normalize_question(question, index, ledger, interaction_style, conflicts)
+        if item:
+            normalized_questions.append(item)
+    RUN["pending_clarification_questions"] = normalized_questions
+    if normalized_questions:
+        RUN["user_clarification_rounds"] = RUN.get("user_clarification_rounds", 0) + 1
+        RUN["user_clarification_questions"] = RUN.get("user_clarification_questions", 0) + len(normalized_questions)
+        RUN["clarification_questions"] = RUN.get("clarification_questions", 0) + len(normalized_questions)
+    record_run_event(
+        "clarification_gate_evaluated",
+        interaction_style=interaction_style,
+        question_ids=[item.get("question_id") for item in normalized_questions],
+        conflict_count=len(conflicts),
+    )
+    return {
+        "questions": normalized_questions, "conflicts": conflicts,
+        "interaction_style": interaction_style,
+    }
+
+
+clarification_gate = clarify_request
+
+
+def clarification_option_labels(question):
+    """Return display labels with no numeric option IDs."""
+    question = question if isinstance(question, dict) else {}
+    options = list(question.get("options", []) or [])[:REQUIREMENT_MAX_CLARIFICATION_OPTIONS]
+    recommended = str(question.get("recommended_option", "") or "")
+    labels = []
+    for option in options:
+        label = str(option)
+        if recommended and label.casefold() == recommended.casefold() and not labels:
+            label += "     Recommended"
+        labels.append(label)
+    if question.get("allow_other", True):
+        labels.append("Other...")
+    return labels
+
+
+def navigate_clarification_options(options, key_sequence, initial_index=0):
+    """Deterministically map arrow keys and Enter to an option index."""
+    options = list(options or [])
+    if not options:
+        return None
+    index = min(max(int(initial_index), 0), len(options) - 1)
+    for key in list(key_sequence or []):
+        value = str(key).casefold()
+        if value in {"up", "arrowup", "k", "\x1b[a"}:
+            index = max(0, index - 1)
+        elif value in {"down", "arrowdown", "j", "\x1b[b"}:
+            index = min(len(options) - 1, index + 1)
+        elif value in {"escape", "esc", "cancel"}:
+            return None
+        elif value in {"enter", "return", "\r", "\n"}:
+            return index
+    return index
+
+
+def select_clarification_option(question, key_sequence=None, output_fn=print, terminal_available=None):
+    """Show one compact arrow-key question and return the selected index."""
+    question = question if isinstance(question, dict) else {}
+    labels = clarification_option_labels(question)
+    if key_sequence is not None:
+        return navigate_clarification_options(labels, key_sequence)
+    if terminal_available is None:
+        terminal_available = bool(sys.stdin.isatty() and sys.stdout.isatty())
+    if not terminal_available:
+        return None
+    output_fn("\nHIVO needs one decision before planning.\n")
+    output_fn(compact_text(question.get("question", "Choose an option."), 420))
+    output_fn(f"Reason: {compact_text(question.get('reason', ''), 260)}")
+    if PROMPT_TOOLKIT_AVAILABLE:
+        try:
+            from prompt_toolkit.shortcuts import radiolist_dialog
+            values = [(index, label) for index, label in enumerate(labels)]
+            selected = radiolist_dialog(
+                title="HIVO clarification", text="Use Up/Down and Enter to select.",
+                values=values, ok_text="Select", cancel_text="Skip / use default",
+            ).run()
+            return int(selected) if selected is not None else None
+        except (ImportError, EOFError, KeyboardInterrupt, TypeError, ValueError):
+            return None
+    # Dependency-free Windows fallback for a real terminal. POSIX users get a
+    # concise instruction instead of a numeric option interface.
+    if os.name == "nt":
+        try:
+            import msvcrt
+            index = 0
+            while True:
+                key = msvcrt.getwch()
+                if key in {"\r", "\n"}:
+                    return index
+                if key == "\x1b":
+                    return None
+                if key in {"\x00", "\xe0"}:
+                    arrow = msvcrt.getwch()
+                    if arrow == "H":
+                        index = max(0, index - 1)
+                    elif arrow == "P":
+                        index = min(len(labels) - 1, index + 1)
+        except (ImportError, EOFError, KeyboardInterrupt):
+            return None
+    output_fn("Use arrow keys and Enter; Esc skips optional clarification.")
+    return None
+
+
+def _clarification_answer_record(question, answer, selected_option):
+    existing = RUN.get("clarification_answers", [])
+    numbers = []
+    for item in existing:
+        if not isinstance(item, dict):
+            continue
+        match = re.match(r"^DEC-(\d+)$", str(item.get("decision_id", "")))
+        if match:
+            numbers.append(int(match.group(1)))
+    return {
+        "decision_id": f"DEC-{max(numbers, default=0) + 1:03d}",
+        "question_id": question.get("question_id"),
+        "answer": compact_text(answer, 700),
+        "selected_option": compact_text(selected_option, 300),
+        "affected_requirement_ids": list(question.get("affected_requirement_ids", [])),
+        "provenance": USER_CONFIRMED,
+    }
+
+
+def resolve_clarification_questions(clarification, interactive=True, terminal_available=None,
+                                    selector=None, answer_reader=None):
+    """Resolve one bounded round or return a clean CLARIFICATION_REQUIRED state."""
+    clarification = clarification if isinstance(clarification, dict) else {}
+    questions = list(clarification.get("questions", []) or [])[:MAX_CLARIFICATION_QUESTIONS]
+    if not questions:
+        return {"status": "ready", "answers": [], "derived": [], "unanswered": []}
+    if terminal_available is None:
+        terminal_available = bool(sys.stdin.isatty() and sys.stdout.isatty())
+    can_interact = bool(interactive and terminal_available)
+    answers, derived, unanswered = [], [], []
+    for question in questions:
+        blocking = bool(question.get("blocking"))
+        selected = None
+        if can_interact:
+            choose = selector or select_clarification_option
+            try:
+                selected = choose(question, terminal_available=terminal_available)
+            except TypeError:
+                selected = choose(question)
+        if selected is None:
+            if blocking:
+                unanswered.append(question)
+                continue
+            option = question.get("recommended_option") or (question.get("options") or ["use the default behavior"])[0]
+            derived.append({
+                "question_id": question.get("question_id"), "text": compact_text(option, 700),
+                "answer": compact_text(option, 700), "provenance": DERIVED,
+                "source": "recommended/default used without interactive confirmation",
+            })
+            RUN["optional_clarifications_skipped"] = RUN.get("optional_clarifications_skipped", 0) + 1
+            continue
+        labels = clarification_option_labels(question)
+        selected = min(max(int(selected), 0), len(labels) - 1)
+        raw_options = [
+            str(item) for item in list(question.get("options", []) or [])[:REQUIREMENT_MAX_CLARIFICATION_OPTIONS]
+        ]
+        if selected < len(raw_options):
+            # The visible label may include the UI-only "Recommended" marker;
+            # persist the actual choice, not presentation text.
+            selected_option = raw_options[selected]
+        else:
+            selected_option = "Other..."
+        answer = selected_option
+        if selected_option == "Other...":
+            reader = answer_reader or read_user_prompt
+            try:
+                answer = reader("Other> ")
+            except TypeError:
+                answer = reader()
+            if not str(answer or "").strip():
+                if blocking:
+                    unanswered.append(question)
+                    continue
+                answer = question.get("recommended_option") or (question.get("options") or ["use the default behavior"])[0]
+        record = _clarification_answer_record(question, answer, selected_option)
+        answers.append(record)
+        RUN["user_clarification_answers"] = RUN.get("user_clarification_answers", 0) + 1
+        RUN["user_confirmed_requirements"] = RUN.get("user_confirmed_requirements", 0) + 1
+    if unanswered:
+        RUN["blocking_clarifications_required"] = RUN.get("blocking_clarifications_required", 0) + len(unanswered)
+        RUN["clarification_terminal_state"] = "CLARIFICATION_REQUIRED"
+        RUN["unanswered_clarification_questions"] = unanswered
+        RUN["clarification_answers"] = answers
+        RUN["clarification_derived_assumptions"] = derived
+        record_run_event(
+            "clarification_required",
+            question_ids=[item.get("question_id") for item in unanswered], blocking=True,
+        )
+        return {"status": "clarification_required", "answers": answers, "derived": derived,
+                "unanswered": unanswered}
+    RUN["clarification_answers"] = answers
+    RUN["clarification_derived_assumptions"] = derived
+    return {"status": "ready", "answers": answers, "derived": derived, "unanswered": []}
+
+
+def _contract_needs_clarification(contract):
+    return str((contract or {}).get("status", "")).casefold() in {
+        "question", "clarification_required", "needs_clarification",
+    }
+
+
+def _clarification_required_contract(raw_goal, ledger, clarification, resolution):
+    questions = list(clarification.get("questions", []) or [])
+    source_contract = source_contract_from_ledger(
+        raw_goal, ledger, questions=questions, answers=resolution.get("answers", []),
+        interaction_style=clarification.get("interaction_style"),
+    )
+    return {
+        "status": "clarification_required", "terminal_state": "CLARIFICATION_REQUIRED",
+        "question": questions[0].get("question", "clarification required") if questions else "clarification required",
+        "questions": questions, "unanswered_questions": resolution.get("unanswered", []),
+        "original_goal": str(raw_goal), "source_requirement_ledger": ledger,
+        "source_requirements": ledger_requirements(ledger),
+        "user_stated_requirements": ledger_requirements(ledger),
+        "user_confirmed_requirements": resolution.get("answers", []),
+        "derived_assumptions": resolution.get("derived", []),
+        "clarification_answers": resolution.get("answers", []),
+        "source_contract": source_contract,
+        "interaction_style": clarification.get("interaction_style", "LOW_FRICTION"),
+    }
+
+
+def _ledger_with_confirmed_answers(ledger, answers):
+    """Append confirmed decisions as new records without changing stated REQs."""
+    result = ledger
+    for answer in answers or []:
+        if not isinstance(answer, dict) or not str(answer.get("answer", "")).strip():
+            continue
+        result = append_confirmed_requirement(
+            result, answer.get("answer"), question_id=answer.get("question_id"),
+        )
+    return result
+
+
+def get_goal_contract(raw_goal, interactive=True, structured_call=None, clarifier_call=None,
+                      terminal_available=None, selector=None, answer_reader=None):
+    """Build the source contract, run one critical round, then return ready."""
+    ledger = extract_source_requirement_ledger(raw_goal, structured_call=structured_call)
+    clarification = clarify_request(raw_goal, ledger, structured_call=clarifier_call)
+    resolution = resolve_clarification_questions(
+        clarification, interactive=interactive, terminal_available=terminal_available,
+        selector=selector, answer_reader=answer_reader,
+    )
+    ledger = _ledger_with_confirmed_answers(ledger, resolution.get("answers", []))
+    RUN["source_requirement_ledger"] = ledger
+    if resolution["status"] == "clarification_required":
+        return _clarification_required_contract(raw_goal, ledger, clarification, resolution)
+
+    contract = _deterministic_contract_from_ledger(
+        raw_goal, ledger, derived=resolution.get("derived", []),
+    )
+    records = ledger_requirements(ledger)
+    # Keep the established Goal Contract model useful for short prose, but do
+    # not allow its old question path to create a second clarification loop.
+    if len(records) < 2 and not extract_explicit_requirements(raw_goal):
+        prior_answers = "\n".join(
+            f"Q: {item.get('question_id')}\nA: {item.get('answer')}"
+            for item in resolution.get("answers", [])
+        )
+        try:
+            model_contract = understand_goal(raw_goal, prior_answers)
+            if model_contract.get("status") == "ready":
+                contract = normalize_goal_contract(raw_goal, model_contract)
+        except ProviderError:
+            # Source extraction remains the authoritative fallback for a
+            # temporary weak-provider failure.
+            pass
+    contract = normalize_goal_contract(
+        raw_goal, contract, source_ledger=ledger,
+        confirmed=resolution.get("answers", []), derived=resolution.get("derived", []),
+        clarification_questions=clarification.get("questions", []),
+        clarification_answers=resolution.get("answers", []),
+        interaction_style=clarification.get("interaction_style"),
+    )
+    contract["clarifications"] = [
+        f"Q: {item.get('question_id')}\nA: {item.get('answer')}"
+        for item in resolution.get("answers", [])
+    ]
+    contract["source_contract"] = source_contract_from_ledger(
+        raw_goal, ledger, confirmed=resolution.get("answers", []),
+        derived=resolution.get("derived", []),
+        questions=clarification.get("questions", []), answers=resolution.get("answers", []),
+        interaction_style=clarification.get("interaction_style"),
+    )
+    RUN["source_contract"] = contract["source_contract"]
+    RUN["clarification_answers"] = resolution.get("answers", [])
+    RUN["clarification_derived_assumptions"] = resolution.get("derived", [])
+    record_run_event(
+        "source_contract_ready",
+        requirement_count=len(records), confirmed_count=len(resolution.get("answers", [])),
+        derived_count=len(resolution.get("derived", [])),
+    )
+    return contract
 
 
 _PROJECT_SPECIFICATION_FIELDS = (
@@ -1821,6 +2455,9 @@ def _compact_brain_record(value, max_chars=MAX_INTEGRATION_FACT_CHARS):
         return compact_text(value, max_chars)
     preferred = (
         "kind", "owner", "symbol", "selector", "fact", "source", "rule", "file", "path",
+        "requirement_id", "decision_id", "text", "category", "provenance", "source_segment",
+        "source_segments", "source_variants", "question_id", "answer", "selected_option",
+        "affected_requirement_ids",
         "task_id", "goal", "summary", "evidence", "status", "changed_files",
         "introduced_symbols", "modified_symbols", "interfaces", "invariants", "verification",
     )
@@ -1885,30 +2522,68 @@ def _project_specification_validator(data):
     )
 
 
+def _compact_source_ledger_for_prompt(ledger, max_chars=MAX_SOURCE_LEDGER_CHARS):
+    """Serialize source requirements for Specifier/Clarifier prompts only."""
+    records = []
+    for item in ledger_requirements(ledger):
+        records.append({
+            "requirement_id": item.get("requirement_id"),
+            "text": item.get("text", ""),
+            "category": item.get("category"),
+            "provenance": item.get("provenance", USER_STATED),
+            "source_segments": item.get("source_segments", [item.get("source_segment")]),
+            "status": item.get("status", "active"),
+        })
+    encoded = json.dumps(records, ensure_ascii=False, default=str)
+    if len(encoded) <= max_chars:
+        return encoded or "(none)"
+    # Preserve every record boundary and ID while progressively shortening
+    # only the prompt copy. The full immutable ledger remains lossless in the
+    # contract/Brain object.
+    for text_limit in (420, 300, 220, 160, 120, 80):
+        compacted = [{
+            "requirement_id": item.get("requirement_id"),
+            "text": compact_text(item.get("text", ""), text_limit),
+            "source_segment": item.get("source_segment"),
+        } for item in records]
+        encoded = json.dumps(compacted, ensure_ascii=False, default=str)
+        if len(encoded) <= max_chars:
+            return encoded
+    # A caller may deliberately request a smaller cap than the bounded
+    # ledger can fit. Keep the start/end IDs visible and state that the prompt
+    # copy is compacted; no record is removed from the stored ledger.
+    ids = [item.get("requirement_id") for item in records]
+    return json.dumps({"requirement_ids": ids, "ledger_prompt_compacted": True}, ensure_ascii=False)
+
+
 def normalize_project_specification(raw_goal, contract, specification):
     """Return the bounded expansion while preserving the authoritative contract."""
     contract = contract if isinstance(contract, dict) else {}
     specification = specification if isinstance(specification, dict) else {}
+    has_source_ledger = bool(contract.get("source_requirement_ledger"))
     normalized = {"root_goal": compact_text(
         contract.get("goal") or specification.get("root_goal") or raw_goal, 1100,
     )}
     for field in _PROJECT_SPECIFICATION_FIELDS:
         normalized[field] = _bounded_brain_strings(specification.get(field), MAX_BRAIN_ITEMS, 360)
 
-    # Explicit user contract facts are authoritative and cannot be discarded
-    # by a lossy weak-model expansion.
-    normalized["major_functional_areas"] = _bounded_brain_strings(
-        list(contract.get("requirements", [])) + normalized["major_functional_areas"],
-        MAX_BRAIN_ITEMS, 360,
-    )
-    normalized["acceptance_criteria"] = _bounded_brain_strings(
-        list(contract.get("success_criteria", [])) + normalized["acceptance_criteria"],
-        MAX_BRAIN_ITEMS, 360,
-    )
-    normalized["quality_constraints"] = _bounded_brain_strings(
-        list(contract.get("constraints", [])) + normalized["quality_constraints"],
-        MAX_BRAIN_ITEMS, 360,
-    )
+    # Legacy contracts still receive the v15 authoritative projection.  A v16
+    # source ledger is retained separately, so an omitted source item remains
+    # visibly UNMAPPED instead of being silently injected into the derived
+    # specification and masking the omission.
+    if not has_source_ledger:
+        normalized["major_functional_areas"] = _bounded_brain_strings(
+            list(contract.get("requirements", [])) + normalized["major_functional_areas"],
+            MAX_BRAIN_ITEMS, 360,
+        )
+        normalized["acceptance_criteria"] = _bounded_brain_strings(
+            list(contract.get("success_criteria", [])) + normalized["acceptance_criteria"],
+            MAX_BRAIN_ITEMS, 360,
+        )
+        normalized["quality_constraints"] = _bounded_brain_strings(
+            list(contract.get("constraints", [])) + normalized["quality_constraints"],
+            MAX_BRAIN_ITEMS, 360,
+        )
 
     trim_order = (
         "unresolved_critical_ambiguities", "explicit_assumptions", "important_edge_cases",
@@ -1991,7 +2666,16 @@ RAW USER REQUEST:
 {compact_text(raw_goal, 3600)}
 
 AUTHORITATIVE GOAL CONTRACT:
-{compact_contract(contract, max_chars=1800)}"""
+{compact_contract(contract, max_chars=1800)}
+
+IMMUTABLE SOURCE REQUIREMENT LEDGER:
+{_compact_source_ledger_for_prompt(contract.get('source_requirement_ledger'), max_chars=MAX_SOURCE_LEDGER_CHARS)}
+
+USER-CONFIRMED CLARIFICATION DECISIONS:
+{json.dumps(contract.get('user_confirmed_requirements', []), ensure_ascii=False, default=str)[:2200] or '(none)'}
+
+DERIVED OPTIONAL DEFAULTS (not user-confirmed):
+{json.dumps(contract.get('derived_assumptions', []), ensure_ascii=False, default=str)[:1800] or '(none)'}"""
     try:
         if structured_call is None:
             data = structured_model_call(
@@ -2039,6 +2723,7 @@ def _initial_verified_project_state(repo_snapshot):
         integration_facts.extend(manifest.get("invariants", []))
     return {
         "source": "deterministic_reconnaissance_and_verified_manifests",
+        "provenance": VERIFIED,
         "files": _bounded_brain_records(snapshot.get("files", []), 24, 180),
         "languages": _bounded_brain_strings(snapshot.get("languages", []), 12, 80),
         "dependency_manifests": _bounded_brain_strings(snapshot.get("configs", []), 12, 180),
@@ -2053,13 +2738,68 @@ def _initial_verified_project_state(repo_snapshot):
     }
 
 
+def _source_ledger_for_contract(contract):
+    """Return a frozen ledger, adapting old v15 contracts without changing them."""
+    contract = contract if isinstance(contract, dict) else {}
+    supplied = contract.get("source_requirement_ledger")
+    if isinstance(supplied, dict) and ledger_requirements(supplied):
+        return freeze(thaw(supplied))
+    candidates = []
+    values = contract.get("source_requirements") or contract.get("requirements") or []
+    for index, value in enumerate(values, 1):
+        if isinstance(value, dict):
+            candidate = dict(value)
+            candidate.setdefault("source_segment", None)
+        else:
+            candidate = {"text": value, "source_segment": None}
+        candidate.setdefault("provenance", USER_STATED)
+        candidates.append(candidate)
+    return build_source_requirement_ledger(candidates)
+
+
+def _source_contract_for_brain(contract, ledger):
+    supplied = contract.get("source_contract") if isinstance(contract, dict) else None
+    source_contract = thaw(supplied) if isinstance(supplied, dict) else source_contract_from_ledger(
+        contract.get("original_goal", contract.get("goal", "coding task")), ledger,
+        confirmed=contract.get("user_confirmed_requirements", []),
+        derived=contract.get("derived_assumptions", []),
+        questions=contract.get("clarification_questions", []),
+        answers=contract.get("clarification_answers", []),
+        interaction_style=contract.get("interaction_style"),
+    )
+    source_contract["user_stated_requirements"] = ledger_requirements(ledger)
+    source_contract.setdefault("user_confirmed_requirements", list(contract.get("user_confirmed_requirements", [])))
+    source_contract.setdefault("derived_assumptions", list(contract.get("derived_assumptions", [])))
+    source_contract["source_requirement_ledger"] = ledger
+    source_contract["provenance_policy"] = {
+        "USER_STATED": "explicitly present in the user request",
+        "USER_CONFIRMED": "selected or written by the user in clarification",
+        "DERIVED": "created by HIVO from an unanswered optional choice or planning inference",
+        "VERIFIED": "proven by repository/tool/verification evidence",
+    }
+    return freeze(source_contract)
+
+
 def build_project_brain(contract, specification, repo_snapshot=None):
     """Create one bounded core plus a separate deterministic verified-state view."""
     contract = contract if isinstance(contract, dict) else {}
+    source_ledger = _source_ledger_for_contract(contract)
     specification = normalize_project_specification(
         contract.get("original_goal", contract.get("goal", "coding task")), contract,
         specification or specification_from_goal_contract(contract),
     )
+    coverage = specification_coverage(source_ledger, specification)
+    retention = retention_summary(source_ledger, ledger_requirements(source_ledger), coverage)
+    for key, value in retention.items():
+        if key in RUN or key.startswith("source_") or key.startswith("retention_"):
+            if key == "retention_numerator":
+                RUN["source_requirement_retention_numerator"] = value
+                RUN["source_requirement_retention_rate_numerator"] = value
+            elif key == "retention_denominator":
+                RUN["source_requirement_retention_denominator"] = value
+                RUN["source_requirement_retention_rate_denominator"] = value
+            else:
+                RUN[key] = value
     quality_rules = _bounded_brain_strings(
         list(specification.get("quality_constraints", []))
         + list(specification.get("project_specific_coding_constraints", [])),
@@ -2070,6 +2810,9 @@ def build_project_brain(contract, specification, repo_snapshot=None):
         "product_contract": {
             "goal": compact_text(contract.get("goal") or specification["root_goal"], 900),
             "requirements": _bounded_brain_strings(contract.get("requirements", []), MAX_BRAIN_ITEMS, 320),
+            "source_requirement_ids": [
+                item.get("requirement_id") for item in ledger_requirements(source_ledger)
+            ],
             "constraints": _bounded_brain_strings(contract.get("constraints", []), MAX_BRAIN_ITEMS, 300),
             "user_visible_behavior": _bounded_brain_strings(
                 specification.get("user_visible_behavior", []), MAX_BRAIN_ITEMS, 320,
@@ -2112,16 +2855,48 @@ def build_project_brain(contract, specification, repo_snapshot=None):
         "explicit_assumptions": _bounded_brain_strings(
             specification.get("explicit_assumptions", []), MAX_BRAIN_ITEMS, 300,
         ),
+        "derived_assumptions": _bounded_brain_records(
+            contract.get("derived_assumptions", []), MAX_BRAIN_ITEMS, 360,
+        ),
         "open_ambiguities": _bounded_brain_strings(
             specification.get("unresolved_critical_ambiguities", []), MAX_BRAIN_ITEMS, 300,
         ),
+        "user_confirmed_requirements": _bounded_brain_records(
+            contract.get("user_confirmed_requirements", []), MAX_BRAIN_ITEMS, 360,
+        ),
     }
-    return _bound_project_brain({"core": core, "verified_state": _initial_verified_project_state(repo_snapshot)})
+    verified_state = _initial_verified_project_state(repo_snapshot)
+    source_contract = _source_contract_for_brain(contract, source_ledger)
+    RUN["source_requirement_ledger"] = source_ledger
+    RUN["source_contract"] = source_contract
+    brain = {
+        "source_contract": source_contract,
+        "source_requirement_ledger": source_ledger,
+        "source_requirement_coverage": coverage,
+        "derived_project_specification": copy.deepcopy(specification),
+        "core": core,
+        "verified_state": verified_state,
+    }
+    bounded = _bound_project_brain(brain)
+    # The source contract is the immutable side of the Brain. Dynamic
+    # verified-state facts remain mutable and are refreshed independently.
+    bounded["source_contract"] = freeze(thaw(bounded.get("source_contract", {})))
+    bounded["source_requirement_ledger"] = bounded["source_contract"].get(
+        "source_requirement_ledger", source_ledger,
+    )
+    return bounded
 
 
 def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
     """Keep the structured Brain itself bounded, including nested contract lists."""
     brain = copy.deepcopy(brain if isinstance(brain, dict) else {})
+    source_contract = brain.get("source_contract") if isinstance(brain.get("source_contract"), dict) else {}
+    source_ledger = brain.get("source_requirement_ledger")
+    if not isinstance(source_ledger, dict):
+        source_ledger = source_contract.get("source_requirement_ledger", {})
+    coverage = brain.get("source_requirement_coverage") if isinstance(
+        brain.get("source_requirement_coverage"), list
+    ) else []
     core = brain.get("core") if isinstance(brain.get("core"), dict) else {}
     state = brain.get("verified_state") if isinstance(brain.get("verified_state"), dict) else {}
     list_paths = [
@@ -2130,13 +2905,15 @@ def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
         (core.get("product_contract", {}), "user_visible_behavior"),
         (core.get("product_contract", {}), "acceptance_criteria"),
         (core.get("product_contract", {}), "success_criteria"),
-        (core, "explicit_assumptions"), (core, "open_ambiguities"), (core, "non_goals"),
+        (core, "explicit_assumptions"), (core, "derived_assumptions"),
+        (core, "open_ambiguities"), (core, "non_goals"),
         (core, "edge_cases"), (core, "interaction_contracts"),
         (core, "project_specific_quality_rules"), (core, "interface_contracts"),
         (core, "state_ownership"), (core, "architecture_invariants"), (core, "major_components"),
         (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
         (state, "languages"), (state, "dependency_manifests"), (state, "verified_components"),
         (state, "verified_interfaces"), (state, "integration_facts"), (state, "blocking_failures"),
+        (core, "user_confirmed_requirements"),
     ]
     encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
     while len(encoded) > max_chars:
@@ -2188,6 +2965,10 @@ def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
         encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
         if len(encoded) > max_chars:
             brain = {
+                "source_contract": source_contract,
+                "source_requirement_ledger": source_ledger,
+                "source_requirement_coverage": coverage,
+                "derived_project_specification": brain.get("derived_project_specification", {}),
                 "core": {"root_goal": core.get("root_goal", "coding task")},
                 "verified_state": {"source": "deterministic_reconnaissance_and_verified_manifests"},
             }
@@ -2196,6 +2977,13 @@ def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
         break
     brain["core"] = core
     brain["verified_state"] = state
+    # These side channels are bounded at extraction/normalization time and are
+    # deliberately kept outside the derived core's lossy item caps.
+    brain["source_contract"] = source_contract
+    brain["source_requirement_ledger"] = source_ledger
+    brain["source_requirement_coverage"] = coverage[:MAX_SOURCE_REQUIREMENTS]
+    if not isinstance(brain.get("derived_project_specification"), dict):
+        brain["derived_project_specification"] = {}
     return brain
 
 
@@ -2268,6 +3056,7 @@ def _compact_brain_projection(projection, max_chars=MAX_BRAIN_PROJECTION_CHARS):
         ("verified_state", "integration_facts"),
         ("verified_state", "files"),
         ("relevant_core.product_contract", "requirements"),
+        ("relevant_core", "source_requirements"),
         ("relevant_core.product_contract", "user_visible_behavior"),
         ("relevant_core.product_contract", "acceptance_criteria"),
         ("relevant_core", "acceptance_criteria"),
@@ -2276,6 +3065,7 @@ def _compact_brain_projection(projection, max_chars=MAX_BRAIN_PROJECTION_CHARS):
         ("relevant_core", "project_specific_quality_rules"),
         ("relevant_core", "interface_contracts"),
         ("relevant_core", "architecture_invariants"),
+        ("relevant_core", "derived_assumptions"),
         ("relevant_core", "open_ambiguities"),
     ]
     while len(encoded) > max_chars:
@@ -2372,12 +3162,33 @@ def build_brain_projection(brain, task, dependency_summaries=None, repo_snapshot
         "explicit_assumptions": _select_relevant_brain_items(
             core.get("explicit_assumptions", []), query if not is_root else "", MAX_BRAIN_ITEMS,
         ),
+        "derived_assumptions": _select_relevant_brain_items(
+            core.get("derived_assumptions", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
         "open_ambiguities": _select_relevant_brain_items(
             core.get("open_ambiguities", []), query if not is_root else "", MAX_BRAIN_ITEMS,
         ),
     }
     product = core.get("product_contract") if isinstance(core.get("product_contract"), dict) else {}
     selection_query = query if not is_root else ""
+    source_records = ledger_requirements(
+        brain.get("source_requirement_ledger")
+        or (brain.get("source_contract") or {}).get("source_requirement_ledger")
+    )
+    coverage_by_id = {
+        str(item.get("requirement_id")): item for item in brain.get("source_requirement_coverage", [])
+        if isinstance(item, dict)
+    }
+    relevant_source_records = _select_relevant_brain_items(
+        source_records, selection_query, 4,
+    )
+    relevant_source = [{
+        "requirement_id": item.get("requirement_id"),
+        "text": compact_text(item.get("text", ""), 360),
+        "provenance": item.get("provenance", USER_STATED),
+        "source_segments": item.get("source_segments", [item.get("source_segment")]),
+        "coverage": coverage_by_id.get(str(item.get("requirement_id")), {}).get("status", "UNKNOWN"),
+    } for item in relevant_source_records]
     product_projection = {
         "requirements": _select_relevant_brain_items(
             product.get("requirements", []), selection_query, MAX_BRAIN_ITEMS,
@@ -2406,7 +3217,11 @@ def build_brain_projection(brain, task, dependency_summaries=None, repo_snapshot
             "done_when": _bounded_brain_strings(task.get("done_when", []), 6, 260),
             "scope_hint": _bounded_brain_strings(task.get("scope_hint", []), 5, 180),
         },
-        "relevant_core": {"product_contract": product_projection, **core_projection},
+        "relevant_core": {
+            "product_contract": product_projection,
+            "source_requirements": relevant_source,
+            **core_projection,
+        },
         "verified_state": {
             "files": _select_relevant_brain_items(state_files, query, 12),
             "dependency_manifests": _bounded_brain_strings(state.get("dependency_manifests", []), 8, 180),
@@ -2448,24 +3263,82 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
     if not isinstance(brain, dict):
         return "(project brain not prepared)"
     bounded_brain = _bound_project_brain(brain, max_chars=max_chars)
+    raw_source_contract = copy.deepcopy(bounded_brain.get("source_contract", {}))
+    if isinstance(raw_source_contract, dict):
+        # The nested ledger is retained in the Brain object. The root planner
+        # receives all source IDs/text with only the provenance needed to
+        # audit them, without repeating variants and status fields.
+        source_contract = {
+            "root_goal": raw_source_contract.get("root_goal", "coding task"),
+            "user_stated_requirements": [
+                {"requirement_id": item.get("requirement_id"), "text": item.get("text", ""),
+                 "category": item.get("category"), "provenance": item.get("provenance", USER_STATED),
+                 "source_segment": item.get("source_segment")}
+                for item in raw_source_contract.get("user_stated_requirements", [])
+                if isinstance(item, dict)
+            ],
+            "user_confirmed_requirements": raw_source_contract.get("user_confirmed_requirements", []),
+            "derived_assumptions": raw_source_contract.get("derived_assumptions", []),
+        }
+    else:
+        source_contract = {}
+    source_coverage = copy.deepcopy(bounded_brain.get("source_requirement_coverage", []))
     core = copy.deepcopy(bounded_brain.get("core", {}))
     state = copy.deepcopy(bounded_brain.get("verified_state", {}))
     for field in ("major_components", "architecture_invariants", "state_ownership", "interface_contracts",
                   "project_specific_quality_rules", "interaction_contracts", "edge_cases", "acceptance_criteria",
-                  "non_goals", "explicit_assumptions", "open_ambiguities"):
+                  "non_goals", "explicit_assumptions", "derived_assumptions", "open_ambiguities"):
         if isinstance(core.get(field), list):
             core[field] = _bounded_brain_strings(core[field], MAX_BRAIN_ITEMS, 300)
     for field in ("files", "project_invariants", "verified_child_manifests"):
         if isinstance(state.get(field), list):
             state[field] = _bounded_brain_records(state[field], 12, 240)
-    encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+
+    def encode_packet():
+        return json.dumps({
+            "source_contract": source_contract,
+            "source_requirement_coverage": source_coverage,
+            "core": core, "verified_state": state,
+        }, ensure_ascii=False, default=str)
+
+    encoded = encode_packet()
+    if len(encoded) > max_chars and isinstance(source_contract, dict):
+        # Keep every source ID in the root packet while compacting only the
+        # prompt copy. The immutable Brain still retains full source text,
+        # variants, provenance, and locations.
+        original_source_records = list(source_contract.get("user_stated_requirements", []))
+        for text_limit in (300, 180, 100, 60, 30, 0):
+            compacted_source = []
+            for item in original_source_records:
+                if not isinstance(item, dict):
+                    continue
+                compacted = {"requirement_id": item.get("requirement_id")}
+                if text_limit:
+                    compacted.update({
+                        "text": compact_text(item.get("text", ""), text_limit),
+                        "provenance": item.get("provenance", USER_STATED),
+                        "source_segment": item.get("source_segment"),
+                    })
+                compacted_source.append(compacted)
+            source_contract["user_stated_requirements"] = compacted_source
+            encoded = encode_packet()
+            if len(encoded) <= max_chars:
+                break
+        if len(encoded) > max_chars:
+            source_coverage = [{
+                "requirement_id": item.get("requirement_id"),
+                "status": item.get("status", "UNKNOWN"),
+            } for item in source_coverage if isinstance(item, dict)]
+            encoded = encode_packet()
     trim_order = [
         (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
-        (core, "explicit_assumptions"), (core, "open_ambiguities"), (core, "non_goals"),
+        (core, "explicit_assumptions"), (core, "derived_assumptions"),
+        (core, "open_ambiguities"), (core, "non_goals"),
         (core, "interaction_contracts"), (core, "edge_cases"),
         (core, "project_specific_quality_rules"),
         (core, "interface_contracts"), (core, "state_ownership"), (core, "architecture_invariants"),
-        (core, "major_components"),
+        (core, "major_components"), (source_contract, "clarification_questions"),
+        (source_contract, "clarification_answers"), (source_contract, "derived_assumptions"),
     ]
     while len(encoded) > max_chars:
         removed = False
@@ -2476,11 +3349,25 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
                 removed = True
                 break
         if removed:
-            encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+            encoded = encode_packet()
             continue
         break
     if len(encoded) > max_chars:
+        compact_source = [
+            {"requirement_id": item.get("requirement_id")}
+            for item in source_contract.get("user_stated_requirements", [])
+            if isinstance(item, dict)
+        ] if isinstance(source_contract, dict) else []
         encoded = json.dumps({
+            "source_contract": {
+                "root_goal": source_contract.get("root_goal", "coding task"),
+                "user_stated_requirements": compact_source,
+                "user_confirmed_requirements": source_contract.get("user_confirmed_requirements", []),
+            },
+            "source_requirement_coverage": [
+                {"requirement_id": item.get("requirement_id"), "status": item.get("status", "UNKNOWN")}
+                for item in source_coverage if isinstance(item, dict)
+            ],
             "core": {"root_goal": compact_text(core.get("root_goal", "coding task"), max(40, max_chars // 4))},
             "verified_state": {"source": state.get("source", "deterministic_reconnaissance_and_verified_manifests")},
         }, ensure_ascii=False, default=str)
@@ -2768,13 +3655,41 @@ def decide_execution_mode(raw_goal, contract, repo_snapshot=None):
     return normalize_execution_choice(decide_task_fit(task, 0, contract, repo_snapshot), contract)
 
 
-def compact_contract(contract, max_chars=8000):
+def compact_contract(contract, max_chars=8000, include_source_ledger=False):
+    contract = contract if isinstance(contract, dict) else {}
+    source_ledger = contract.get("source_requirement_ledger")
+    source_records = ledger_requirements(source_ledger)
     projection = {
         "goal": compact_text(contract.get("goal", ""), 900),
-        "requirements": bounded_list(contract.get("requirements", []), 20, 320),
+        # Workers receive the current node and relevant Brain projection, not
+        # the complete immutable source ledger. Root planning gets the full
+        # ledger through compact_project_brain instead.
+        "requirements": bounded_list(
+            contract.get("requirements", []), 8 if source_records else 20, 320,
+        ),
         "constraints": bounded_list(contract.get("constraints", []), 12, 260),
         "success_criteria": bounded_list(contract.get("success_criteria", []), 12, 260),
     }
+    if source_records:
+        projection["source_requirement_count"] = len(source_records)
+        projection["source_requirement_ids"] = [
+            item.get("requirement_id") for item in source_records[:12]
+        ]
+        projection["source_requirement_ids_truncated"] = len(source_records) > 12
+        projection["user_confirmed_requirements"] = bounded_list(
+            [json.dumps(item, ensure_ascii=False, default=str)
+             for item in contract.get("user_confirmed_requirements", [])], 4, 300,
+        )
+        projection["derived_assumptions"] = bounded_list(
+            [json.dumps(item, ensure_ascii=False, default=str)
+             for item in contract.get("derived_assumptions", [])], 4, 300,
+        )
+        if include_source_ledger:
+            projection["source_requirements"] = [
+                {"requirement_id": item.get("requirement_id"), "text": item.get("text", ""),
+                 "source_segments": item.get("source_segments", [])}
+                for item in source_records
+            ]
     max_chars = max(256, int(max_chars))
 
     def size():
@@ -9411,10 +10326,15 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
         if finish:
             finish_metrics("failed")
         return result, memory
-    if contract.get("status") == "question":
-        result = {"status": "needs_clarification", "summary": contract.get("question", ""), "memory": memory}
+    if _contract_needs_clarification(contract):
+        result_status = "clarification_required" if contract.get("terminal_state") == "CLARIFICATION_REQUIRED" else "needs_clarification"
+        result = {
+            "status": result_status, "terminal_state": contract.get("terminal_state"),
+            "summary": contract.get("question", ""),
+            "clarification_questions": contract.get("questions", []), "memory": memory,
+        }
         if finish:
-            finish_metrics("needs_clarification")
+            finish_metrics(result_status)
         return result, memory
     repo_snapshot = repo_snapshot or inspect_repository()
     begin_durable_run(contract)
@@ -9448,10 +10368,15 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         if finish:
             finish_metrics("failed")
         return result, memory
-    if contract.get("status") == "question":
+    if _contract_needs_clarification(contract):
+        result_status = "clarification_required" if contract.get("terminal_state") == "CLARIFICATION_REQUIRED" else "needs_clarification"
         if finish:
-            finish_metrics("needs_clarification")
-        return {"status": "needs_clarification", "summary": contract.get("question", ""), "memory": memory}, memory
+            finish_metrics(result_status)
+        return {
+            "status": result_status, "terminal_state": contract.get("terminal_state"),
+            "summary": contract.get("question", ""),
+            "clarification_questions": contract.get("questions", []), "memory": memory,
+        }, memory
     repo_snapshot = repo_snapshot or inspect_repository()
     # Recursive mode expands the short request before root fit/decomposition.
     # Tests and callers that already provide an authoritative contract use a
@@ -9499,9 +10424,14 @@ def run_auto_request(user_text, memory, interactive=True):
         event(f"[ERROR] {exc}", role="Coordinator", task="ROOT", action="goal provider failure")
         finish_metrics("failed")
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc)}, memory
-    if contract.get("status") == "question":
-        finish_metrics("needs_clarification")
-        return {"status": "needs_clarification", "summary": contract.get("question", "")}, memory
+    if _contract_needs_clarification(contract):
+        result_status = "clarification_required" if contract.get("terminal_state") == "CLARIFICATION_REQUIRED" else "needs_clarification"
+        finish_metrics(result_status)
+        return {
+            "status": result_status, "terminal_state": contract.get("terminal_state"),
+            "summary": contract.get("question", ""),
+            "clarification_questions": contract.get("questions", []),
+        }, memory
     repo_snapshot = inspect_repository()
     print(f"[RECON] files={len(repo_snapshot['files'])} languages={','.join(repo_snapshot['languages']) or 'unknown'} truncated={repo_snapshot['truncated']}")
     root = root_task_from_contract(contract)
@@ -9685,6 +10615,41 @@ def run_self_test(install_browser=False):
             sleep=lambda _seconds: None,
             preflight_id="self-test-preflight",
         )
+        # v16 requirement/clarification checks use deterministic inputs and
+        # injected selectors only. They never invoke Ollama or a real TTY.
+        v16_raw = "Build a timer.\n- persist the best score\n- support WASD"
+        v16_ledger = extract_source_requirement_ledger(v16_raw, use_model=False)
+        v16_no_questions = clarify_request(v16_raw, v16_ledger)
+        v16_conflict_raw = "Build a timer.\n- restart resets everything\n- persist the best score"
+        v16_conflict_ledger = extract_source_requirement_ledger(v16_conflict_raw, use_model=False)
+        v16_blocking_questions = clarify_request(v16_conflict_raw, v16_conflict_ledger)
+        v16_blocking = resolve_clarification_questions(
+            v16_blocking_questions, interactive=False, terminal_available=False,
+        )
+        v16_optional_question = normalize_question(
+            {
+                "question": "Which persistence behavior should be used?",
+                "reason": "This changes persistence behavior.",
+                "affected_requirement_ids": ["REQ-001"],
+                "impact_if_unknown": "The acceptance behavior changes.",
+                "recommended_option": "Keep it", "options": ["Keep it", "Reset it"],
+                "allow_other": True, "blocking": False,
+            }, 1, extract_source_requirement_ledger("- save settings", use_model=False),
+            "LOW_FRICTION", [],
+        )
+        v16_optional = resolve_clarification_questions(
+            {"questions": [v16_optional_question]}, interactive=True, terminal_available=False,
+        )
+        v16_other = resolve_clarification_questions(
+            {"questions": [dict(v16_optional_question, blocking=True)]},
+            interactive=True, terminal_available=True,
+            selector=lambda _question, **_kwargs: 2,
+            answer_reader=lambda *_args: "localStorage",
+        )
+        v16_brain_contract = get_goal_contract(v16_raw, interactive=False)
+        v16_brain = build_project_brain(
+            v16_brain_contract, specification_from_goal_contract(v16_brain_contract), {"files": []},
+        )
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -9729,6 +10694,32 @@ def run_self_test(install_browser=False):
             "host preflight no app files": not any(
                 (preflight_workspace / name).exists() for name in ("index.html", "style.css", "game.js")
             ),
+            "source ledger stable and immutable": (
+                [item.get("requirement_id") for item in ledger_requirements(v16_ledger)] == ["REQ-001", "REQ-002"]
+                and v16_ledger.get("immutable") is True
+                and isinstance(v16_ledger.get("requirements"), list)
+            ),
+            "source provenance separated": (
+                all(item.get("provenance") == USER_STATED for item in ledger_requirements(v16_ledger))
+                and v16_other["answers"][0].get("provenance") == USER_CONFIRMED
+            ),
+            "clarifier no-question path": not v16_no_questions["questions"],
+            "clarifier blocking path": (
+                v16_blocking["status"] == "clarification_required"
+                and v16_blocking["unanswered"][0].get("blocking") is True
+            ),
+            "recommended terminal option": (
+                clarification_option_labels(v16_optional_question)[0].endswith("Recommended")
+            ),
+            "other free-text path": v16_other["answers"][0].get("answer") == "localStorage",
+            "noninteractive optional behavior": (
+                v16_optional["status"] == "ready"
+                and v16_optional["derived"][0].get("provenance") == DERIVED
+            ),
+            "lossless brain handoff": (
+                len(ledger_requirements(v16_brain["source_requirement_ledger"])) == 2
+                and len(v16_brain["source_requirement_coverage"]) == 2
+            ),
         }
         for name, ok in checks.items():
             print(f"{name:<24} {'PASS' if ok else 'FAIL'}")
@@ -9767,7 +10758,7 @@ def get_workspace(explicit=None, projects_root=None):
         print(f"error: folder does not exist: {path}")
 
 
-def read_user_prompt():
+def read_user_prompt(prompt_label="You> "):
     if PROMPT_TOOLKIT_AVAILABLE and sys.stdin.isatty():
         bindings = KeyBindings()
         @bindings.add("enter")
@@ -9776,8 +10767,8 @@ def read_user_prompt():
         @bindings.add("escape", "enter")
         def _newline(event_obj):
             event_obj.current_buffer.insert_text("\n")
-        return prompt("You> ", multiline=True, key_bindings=bindings).strip()
-    return input("You> ").strip()
+        return prompt(prompt_label, multiline=True, key_bindings=bindings).strip()
+    return input(prompt_label).strip()
 
 
 def parse_args():
