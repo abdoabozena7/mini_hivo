@@ -74,6 +74,18 @@ split again up to `MAX_DEPTH = 6` and `MAX_TOTAL_TASKS = 64`. A leaf is never
 secretly scheduled into deterministic stages. Baseline mode sends the root
 through the same `execute_leaf` engine without adaptive decomposition.
 
+In recursive mode, the short request is also expanded into a bounded project
+specification before the task tree is planned. Mini Hivo keeps a stable Project
+Brain Core for the root contract and a separate verified project-state view for
+reconnaissance facts and verified child manifests. Root planning receives the
+expanded Brain; child planning and implementation receive deterministic
+task-relevant projections. Before each recursive implementation leaf, the
+pinned model performs one bounded Mission Compiler call for that node. The
+result is a compact Worker mission containing the target, implementation plan,
+reusable interfaces, relevant invariants, and deterministic verification
+requirements. The Worker still runs in a fresh context, and parent integration
+continues to consume compact child manifests rather than raw conversations.
+
 Every execution receives a fresh, bounded Node Packet containing the compact
 root contract, current node contract, parent summary, verified dependency
 summaries, relevant verified memory, failure evidence when retrying, and bounded
