@@ -9,6 +9,12 @@ from contextlib import redirect_stdout
 import mini
 
 
+def expanded_specification(goal="Build a focused browser application"):
+    specification = {field: [] for field in mini._PROJECT_SPECIFICATION_FIELDS}
+    specification["root_goal"] = goal
+    return specification
+
+
 class AdaptiveArchitectureTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -919,6 +925,263 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertIn("parent verified summary", packet)
         self.assertIn("verified interface", packet)
         self.assertNotIn("SECRET SIBLING CHAT HISTORY", packet)
+
+    def test_short_prompt_expansion_is_bounded_and_non_mutating(self):
+        contract = self.contract(["timer controls", "persist settings"])
+        response = expanded_specification(contract["goal"])
+        response.update({
+            "root_goal": "model must not replace the authoritative goal",
+            "user_visible_behavior": ["the timer starts and pauses visibly"],
+            "major_functional_areas": ["timer controls", "settings persistence"],
+            "architecture_invariants": ["one authoritative timer state owner"],
+            "acceptance_criteria": ["a deterministic timer check passes"],
+        })
+        calls = []
+
+        def structured(prompt_text, _validator, label, schema):
+            calls.append((prompt_text, label, schema))
+            return response
+
+        before = sorted(path.relative_to(mini.WORKSPACE).as_posix()
+                        for path in mini.WORKSPACE.rglob("*"))
+        specification = mini.expand_project_specification(
+            "Build a timer", contract, structured_call=structured,
+        )
+        after = sorted(path.relative_to(mini.WORKSPACE).as_posix()
+                       for path in mini.WORKSPACE.rglob("*"))
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1], "specification-expansion")
+        self.assertIn("Do not write code", calls[0][0])
+        self.assertLessEqual(len(json.dumps(specification)), mini.MAX_PROJECT_SPECIFICATION_CHARS)
+        self.assertIn("timer controls", specification["major_functional_areas"])
+        self.assertEqual(specification["root_goal"], contract["goal"])
+        self.assertEqual(before, after)
+
+    def test_project_brain_core_and_verified_state_are_separate(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        specification.update({
+            "major_functional_areas": ["HUD rendering"],
+            "major_system_components": ["HUD renderer"],
+            "state_ownership": ["the HUD reads the authoritative game state"],
+            "architecture_invariants": ["preserve one authoritative render loop"],
+            "interface_contracts": ["HUD renderer reads gameState.score"],
+            "project_specific_coding_constraints": ["keep update and render responsibilities separate"],
+        })
+        brain = mini.build_project_brain(contract, specification, {
+            "files": [{"path": "game.js", "size": 10}], "languages": ["javascript"],
+            "configs": [], "tests": [], "entrypoints": ["index.html"], "truncated": False,
+        })
+
+        self.assertEqual(brain["core"]["root_goal"], contract["goal"])
+        for field in ("product_contract", "major_components", "architecture_invariants",
+                      "state_ownership", "interface_contracts", "project_specific_quality_rules",
+                      "interaction_contracts", "acceptance_criteria", "non_goals",
+                      "explicit_assumptions"):
+            self.assertIn(field, brain["core"])
+        self.assertNotIn("verified_state", brain["core"])
+        self.assertIsInstance(brain["verified_state"]["files"], list)
+        self.assertIsNot(brain["core"], brain["verified_state"])
+
+    def test_brain_projection_selects_relevant_invariants_and_excludes_unrelated_sections(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        specification.update({
+            "major_functional_areas": ["HUD rendering", "enemy AI"],
+            "major_system_components": ["HUD renderer", "enemy controller"],
+            "architecture_invariants": ["preserve one authoritative HUD render loop",
+                                          "enemy AI owns enemy pursuit state"],
+            "project_specific_coding_constraints": ["reuse the existing HUD state projection",
+                                                     "do not duplicate enemy AI state"],
+        })
+        brain = mini.build_project_brain(contract, specification, {"files": []})
+        task = mini.make_task("hud", "Implement responsive HUD rendering", 1, "ROOT",
+                              ["HUD rendering is verified"], ["style.css"])
+        projection = mini.build_brain_projection(brain, task, repo_snapshot={})
+        encoded = json.dumps(projection, ensure_ascii=False)
+
+        self.assertIn("HUD", encoded)
+        self.assertNotIn("enemy AI", encoded)
+        self.assertEqual(projection["root_goal_anchor"], contract["goal"])
+        self.assertLessEqual(len(json.dumps(projection)), mini.MAX_BRAIN_PROJECTION_CHARS)
+
+    def test_child_planning_packet_uses_task_projection_not_full_brain(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        specification.update({
+            "major_functional_areas": ["HUD rendering", "enemy AI"],
+            "major_system_components": ["HUD renderer", "enemy controller"],
+            "architecture_invariants": ["preserve one authoritative HUD render loop",
+                                          "enemy AI owns enemy pursuit state"],
+        })
+        mini.RUN["project_brain"] = mini.build_project_brain(contract, specification, {"files": []})
+        task = mini.make_task("hud", "Implement responsive HUD rendering", 1, "ROOT",
+                              ["HUD rendering is verified"], ["style.css"])
+        packet = mini.project_brain_task_planning_packet(task, repo_snapshot={}, max_chars=3000)
+
+        self.assertIn("HUD", packet)
+        self.assertNotIn("enemy AI", packet)
+        self.assertLessEqual(len(packet), 3000)
+
+    def test_root_decomposition_prompt_consumes_expanded_project_brain(self):
+        contract = self.contract(["render the HUD", "persist settings"])
+        specification = expanded_specification(contract["goal"])
+        specification["major_functional_areas"] = ["HUD rendering"]
+        specification["major_system_components"] = ["HUD renderer"]
+        brain = mini.build_project_brain(contract, specification, {"files": []})
+        mini.RUN["project_brain"] = brain
+        task = mini.root_task_from_contract(contract)
+        mini.TASKS["ROOT"] = task
+        mini.RUN["tasks_created"] = 1
+        response = {"children": [
+            {"goal": "render HUD", "done_when": ["HUD is verified"], "scope_hint": ["style.css"]},
+            {"goal": "persist settings", "done_when": ["settings reload is verified"], "scope_hint": ["storage.js"]},
+        ]}
+        with patch.object(mini, "structured_model_call", return_value=response) as structured:
+            children = mini.decompose_task(task, contract, {"files": []})
+
+        prompt = structured.call_args.args[0]
+        self.assertEqual(len(children), 2)
+        self.assertIn("PROJECT BRAIN (expanded specification + verified state)", prompt)
+        self.assertIn("HUD renderer", prompt)
+
+    def test_recursive_request_expands_raw_prompt_before_tree_execution(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        with patch.object(mini, "get_goal_contract", return_value=contract), \
+                patch.object(mini, "expand_project_specification", return_value=specification) as expand, \
+                patch.object(mini, "solve_task", return_value={"status": "done", "summary": "verified", "memory": {}}):
+            result, _memory = mini.run_recursive_request(
+                "Build a short HUD request", {}, repo_snapshot={}, reset=True, finish=False,
+            )
+
+        self.assertEqual(result["status"], "done")
+        expand.assert_called_once_with("Build a short HUD request", contract)
+        self.assertEqual(mini.RUN["project_brain"]["core"]["root_goal"], contract["goal"])
+
+    def test_mission_compiler_receives_one_bounded_node_and_verified_dependencies(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        specification.update({
+            "major_functional_areas": ["HUD rendering"],
+            "major_system_components": ["HUD renderer"],
+            "architecture_invariants": ["preserve one authoritative render loop"],
+            "project_specific_coding_constraints": ["keep update and render separate"],
+        })
+        brain = mini.build_project_brain(contract, specification, {"files": []})
+        task = mini.make_task("hud", "Implement responsive HUD rendering", 1, "ROOT",
+                              ["HUD rendering is verified"], ["style.css"])
+        projection = mini.build_brain_projection(brain, task, repo_snapshot={})
+        prompts = []
+
+        def structured(prompt_text, _validator, label, _schema):
+            prompts.append((prompt_text, label))
+            return {
+                "goal_anchor": "wrong anchor is normalized",
+                "task": "wrong task is normalized",
+                "expected_outcome": "HUD is verified",
+                "targets": ["style.css"],
+                "existing_facts": ["reuse HUD renderer"],
+                "implementation_plan": ["extend the existing HUD owner"],
+                "interfaces_to_reuse": ["gameState.score"],
+                "invariants": ["preserve one authoritative render loop"],
+                "project_specific_quality_rules": ["keep update and render separate"],
+                "do_not": ["create a second render loop"],
+                "verification_plan": ["run the deterministic HUD check"],
+                "done_when": ["HUD rendering is verified"],
+            }
+
+        mission = mini.compile_worker_mission(
+            task, projection,
+            dependency_summaries=[{
+                "task_id": "state", "goal": "verified state", "status": "done",
+                "summary": "score interface verified", "changed_files": ["game.js"],
+                "conversation": "SECRET SIBLING HISTORY MUST NOT LEAK",
+            }],
+            repo_snapshot={"files": [{"path": "style.css", "size": 10}]},
+            structured_call=structured,
+        )
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0][1], "mission-compilation")
+        self.assertIn('"id": "hud"', prompts[0][0])
+        self.assertIn("score interface verified", prompts[0][0])
+        self.assertNotIn("SECRET SIBLING HISTORY", prompts[0][0])
+        self.assertEqual(mission["task"], task["goal"])
+        self.assertEqual(mission["goal_anchor"], brain["core"]["root_goal"])
+        self.assertIn("keep update and render separate", mission["project_specific_quality_rules"])
+        compiler_context = prompts[0][0].split("BOUNDED COMPILER CONTEXT:\n", 1)[1]
+        self.assertLessEqual(len(compiler_context), mini.MAX_MISSION_COMPILER_CONTEXT_CHARS)
+        self.assertIsInstance(json.loads(compiler_context), dict)
+        self.assertLessEqual(len(json.dumps(mission)), mini.MAX_WORKER_MISSION_CHARS)
+
+    def test_recursive_leaf_compiles_and_injects_structured_mission(self):
+        contract = self.contract(["render the HUD"])
+        specification = expanded_specification(contract["goal"])
+        specification["major_functional_areas"] = ["HUD rendering"]
+        brain = mini.build_project_brain(contract, specification, {"files": []})
+        mini.RUN["project_brain"] = brain
+        task = mini.make_task("hud", "Implement HUD rendering", 1, "ROOT", ["HUD is verified"], ["game.js"])
+        mission = {
+            "goal_anchor": contract["goal"], "task": task["goal"],
+            "expected_outcome": "HUD is verified", "targets": ["game.js"],
+            "existing_facts": [], "implementation_plan": ["extend HUD"],
+            "interfaces_to_reuse": [], "invariants": [],
+            "project_specific_quality_rules": ["preserve HUD owner"], "do_not": [],
+            "verification_plan": ["run deterministic verification"],
+            "done_when": task["done_when"],
+        }
+        builder = {
+            "status": "done", "summary": "HUD verified", "memory": {},
+            "tool_evidence": [{"tool": "run_command", "result": "[exit_code=0]"}],
+        }
+        with patch.object(mini, "compile_worker_mission", return_value=mission) as compile, \
+                patch.object(mini, "execute_agent_task", return_value=builder) as worker, \
+                patch.object(mini, "falsify_task", return_value={"status": "done", "memory": {},
+                                                                    "tool_evidence": []}), \
+                patch.object(mini, "optional_browser_check", return_value=None), \
+                patch.object(mini, "evidence_gate", return_value={"passed": True,
+                                                                     "deterministic_failures": []}):
+            result = mini.execute_leaf(task, contract, {}, {"files": []})
+
+        self.assertEqual(result["status"], "done")
+        compile.assert_called_once()
+        self.assertIn("WORKER MISSION", worker.call_args.kwargs["extra_context"])
+        self.assertIn("preserve HUD owner", worker.call_args.kwargs["extra_context"])
+
+    def test_mission_compilation_failure_is_orchestration_failure_before_worker(self):
+        contract = self.contract(["render the HUD"])
+        brain = mini.build_project_brain(contract, expanded_specification(contract["goal"]), {"files": []})
+        mini.RUN["project_brain"] = brain
+        task = mini.make_task("hud", "Implement HUD rendering", 1, "ROOT", ["HUD is verified"], ["game.js"])
+        with patch.object(mini, "compile_worker_mission",
+                          side_effect=mini.MissionCompilationError("invalid mission")), \
+                patch.object(mini, "execute_agent_task") as worker:
+            result = mini.execute_leaf(task, contract, {}, {"files": []})
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "ORCHESTRATION_FAILURE")
+        self.assertEqual(result["orchestration_failure"], "MISSION_COMPILATION_FAILURE")
+        worker.assert_not_called()
+        self.assertEqual(mini.diagnose_failure(task, result)["category"], "orchestration_failure")
+
+    def test_verified_manifests_update_only_brain_verified_state(self):
+        contract = self.contract(["render the HUD"])
+        brain = mini.build_project_brain(contract, expanded_specification(contract["goal"]), {"files": []})
+        mini.RUN["project_brain"] = brain
+        core_before = json.dumps(brain["core"], sort_keys=True)
+        child = mini.make_task("state", "verified state", 1, "ROOT", ["state verified"], [])
+        result = {
+            "status": "done", "summary": "state verified", "memory": {}, "changed_files": [],
+            "integration_manifest": {
+                "interfaces": ["gameState.score"], "invariants": ["one state owner"],
+                "verification": ["deterministic check passed"],
+            },
+        }
+        mini._mark_task_result(child, result)
+
+        self.assertEqual(json.dumps(brain["core"], sort_keys=True), core_before)
+        self.assertIn("gameState.score", json.dumps(brain["verified_state"], ensure_ascii=False))
 
     def test_verified_child_exposes_bounded_integration_manifest_to_parent(self):
         child = mini.make_task("1", "own persistence", 1, "ROOT", ["persistence verified"], ["storage.js"])

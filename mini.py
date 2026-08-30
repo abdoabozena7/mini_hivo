@@ -84,6 +84,15 @@ MAX_MUTATION_FAILURE_RECORDS = 6
 MAX_INTEGRATION_MANIFEST_ITEMS = 8
 MAX_INTEGRATION_FACT_CHARS = 280
 MAX_INTEGRATION_CONFLICTS = 24
+# Recursive prompt compilation has its own small context caps.  These are
+# prompt-size limits only; they do not change any execution, repair, depth, or
+# strategy budget.
+MAX_PROJECT_SPECIFICATION_CHARS = 5200
+MAX_PROJECT_BRAIN_CHARS = 7600
+MAX_BRAIN_PROJECTION_CHARS = 3600
+MAX_WORKER_MISSION_CHARS = 4200
+MAX_MISSION_COMPILER_CONTEXT_CHARS = 5200
+MAX_BRAIN_ITEMS = 8
 OLLAMA_TIMEOUT_SECONDS = 120
 CONTEXT_LIMIT_TOKENS = MODEL_POLICY.context_window("builder")
 MODEL_TASK_CAPACITY = 2  # heuristic prior only: parameter size is not a measured capability score
@@ -137,6 +146,10 @@ class ProviderError(RuntimeError):
 
 class StructuredOutputError(RuntimeError):
     """The provider replied, but a tiny structured orchestration contract was invalid."""
+
+
+class MissionCompilationError(RuntimeError):
+    """A bounded worker mission could not be compiled from verified context."""
 
 
 # ---------------------------------------------------------------------------
@@ -974,6 +987,12 @@ def new_metrics(mode):
         "host_preflight_duration_seconds": host_preflight_report.get("duration_seconds"),
         "host_preflight_report_path": host_preflight.get("marker_path"),
         "clarification_questions": 0,
+        "specification_expansions": 0,
+        "specification_expansion_failures": 0,
+        "brain_projections_created": 0,
+        "mission_compilations": 0,
+        "mission_compilation_failures": 0,
+        "worker_missions_executed": 0,
         "tasks_created": 0, "leaf_tasks": 0, "splits": 0, "re_splits": 0, "max_depth": 0,
         # ``re_splits`` is the number of controller events.  These fields are
         # outcome metrics over distinct failed nodes, so a partial child
@@ -1531,7 +1550,8 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
         "options": {
             "num_ctx": context_window,
             "num_predict": {"Builder": 4096, "Repairer": 3072, "Falsifier": 1536,
-                            "Coordinator": 1536, "Quality": 1536}.get(role, 2048),
+                            "Coordinator": 1536, "Quality": 1536, "Specifier": 1536,
+                            "MissionCompiler": 1536}.get(role, 2048),
             "temperature": MODEL_POLICY.temperature(role) if temperature is None else temperature,
             "seed": 0,
         },
@@ -1640,7 +1660,8 @@ def _parse_json_content(content):
         raise
 
 
-def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STRUCTURED_RETRIES):
+def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STRUCTURED_RETRIES,
+                         role="Coordinator"):
     schema_text = json.dumps(schema, ensure_ascii=False)
     messages = [
         {"role": "system", "content": "Return ONLY one JSON object matching the supplied schema. No markdown."},
@@ -1651,7 +1672,8 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
     for attempt in range(max(1, int(retries))):
         try:
             message = ask_ollama(messages, tools=None, response_format=schema, temperature=0,
-                                 think=False, provider_retries=0, role="Coordinator" if label != "quality-review" else "Quality")
+                                 think=False, provider_retries=0,
+                                 role=("Quality" if label == "quality-review" else role))
             last_content = message.get("content", "")
             data = _parse_json_content(last_content)
             if validator(data):
@@ -1762,6 +1784,970 @@ def get_goal_contract(raw_goal, interactive=True):
         answer = read_user_prompt()
         answers.append(f"Q: {result['question']}\nA: {answer}")
     return {"status": "question", "question": "clarification limit reached", "original_goal": raw_goal}
+
+
+_PROJECT_SPECIFICATION_FIELDS = (
+    "user_visible_behavior", "major_functional_areas", "major_system_components",
+    "state_ownership", "interaction_model", "ui_ux_expectations",
+    "persistence_requirements", "important_edge_cases", "architecture_invariants",
+    "interface_contracts", "quality_constraints", "project_specific_coding_constraints", "acceptance_criteria",
+    "explicit_assumptions", "unresolved_critical_ambiguities", "non_goals",
+)
+
+
+def _bounded_brain_strings(values, max_items=MAX_BRAIN_ITEMS, item_chars=360):
+    """Normalize a small list of model/project facts without preserving prose."""
+    if values is None:
+        values = []
+    elif isinstance(values, (str, bytes)):
+        values = [values]
+    elif not isinstance(values, (list, tuple, set)):
+        values = [values]
+    result = []
+    for value in values:
+        if isinstance(value, (dict, list, tuple)):
+            value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        value = compact_text(value, item_chars)
+        if value and value not in result:
+            result.append(value)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _compact_brain_record(value, max_chars=MAX_INTEGRATION_FACT_CHARS):
+    """Keep deterministic verified records structured and bounded."""
+    if not isinstance(value, dict):
+        return compact_text(value, max_chars)
+    preferred = (
+        "kind", "owner", "symbol", "selector", "fact", "source", "rule", "file", "path",
+        "task_id", "goal", "summary", "evidence", "status", "changed_files",
+        "introduced_symbols", "modified_symbols", "interfaces", "invariants", "verification",
+    )
+    keys = [key for key in preferred if key in value]
+    record = {}
+    for key in keys[:12]:
+        item = value.get(key)
+        if isinstance(item, (list, tuple, set)):
+            record[str(key)] = _bounded_brain_strings(item, 8, 220)
+        elif isinstance(item, dict):
+            record[str(key)] = compact_text(json.dumps(item, ensure_ascii=False, default=str), 260)
+        else:
+            record[str(key)] = compact_text(item, 260)
+    encoded = json.dumps(record, ensure_ascii=False, default=str)
+    if len(encoded) <= max_chars:
+        return record
+    # Drop less important trailing fields before falling back to a compact
+    # string.  The state remains evidence-shaped rather than becoming an
+    # unbounded record.
+    while len(encoded) > max_chars and len(record) > 1:
+        record.pop(next(reversed(record)))
+        encoded = json.dumps(record, ensure_ascii=False, default=str)
+    return record if len(encoded) <= max_chars else compact_text(encoded, max_chars)
+
+
+def _bounded_brain_records(values, max_items=MAX_BRAIN_ITEMS, item_chars=MAX_INTEGRATION_FACT_CHARS):
+    if values is None:
+        return []
+    if isinstance(values, (str, bytes, dict)):
+        values = [values]
+    result = []
+    seen = set()
+    for value in values:
+        compacted = _compact_brain_record(value, item_chars)
+        key = json.dumps(compacted, ensure_ascii=False, sort_keys=True, default=str)
+        if key not in seen:
+            result.append(compacted)
+            seen.add(key)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _project_specification_schema():
+    array_schema = {"type": "array", "items": {"type": "string"}, "maxItems": MAX_BRAIN_ITEMS}
+    properties = {"root_goal": {"type": "string"}}
+    properties.update({field: array_schema for field in _PROJECT_SPECIFICATION_FIELDS})
+    return {
+        "type": "object", "properties": properties,
+        "required": ["root_goal", *_PROJECT_SPECIFICATION_FIELDS],
+        "additionalProperties": False,
+    }
+
+
+def _project_specification_validator(data):
+    if not isinstance(data, dict) or not str(data.get("root_goal", "")).strip():
+        return False
+    return all(
+        isinstance(data.get(field), list)
+        and all(isinstance(item, str) and item.strip() for item in data.get(field, []))
+        for field in _PROJECT_SPECIFICATION_FIELDS
+    )
+
+
+def normalize_project_specification(raw_goal, contract, specification):
+    """Return the bounded expansion while preserving the authoritative contract."""
+    contract = contract if isinstance(contract, dict) else {}
+    specification = specification if isinstance(specification, dict) else {}
+    normalized = {"root_goal": compact_text(
+        contract.get("goal") or specification.get("root_goal") or raw_goal, 1100,
+    )}
+    for field in _PROJECT_SPECIFICATION_FIELDS:
+        normalized[field] = _bounded_brain_strings(specification.get(field), MAX_BRAIN_ITEMS, 360)
+
+    # Explicit user contract facts are authoritative and cannot be discarded
+    # by a lossy weak-model expansion.
+    normalized["major_functional_areas"] = _bounded_brain_strings(
+        list(contract.get("requirements", [])) + normalized["major_functional_areas"],
+        MAX_BRAIN_ITEMS, 360,
+    )
+    normalized["acceptance_criteria"] = _bounded_brain_strings(
+        list(contract.get("success_criteria", [])) + normalized["acceptance_criteria"],
+        MAX_BRAIN_ITEMS, 360,
+    )
+    normalized["quality_constraints"] = _bounded_brain_strings(
+        list(contract.get("constraints", [])) + normalized["quality_constraints"],
+        MAX_BRAIN_ITEMS, 360,
+    )
+
+    trim_order = (
+        "unresolved_critical_ambiguities", "explicit_assumptions", "important_edge_cases",
+        "ui_ux_expectations", "persistence_requirements", "interaction_model",
+        "project_specific_coding_constraints", "quality_constraints", "interface_contracts", "non_goals",
+        "architecture_invariants", "state_ownership", "acceptance_criteria",
+        "major_system_components", "major_functional_areas", "user_visible_behavior",
+    )
+    encoded = json.dumps(normalized, ensure_ascii=False)
+    while len(encoded) > MAX_PROJECT_SPECIFICATION_CHARS:
+        removed = False
+        for field in trim_order:
+            if len(normalized[field]) > 1:
+                normalized[field].pop()
+                removed = True
+                break
+        if removed:
+            encoded = json.dumps(normalized, ensure_ascii=False)
+            continue
+        if len(normalized["root_goal"]) > 180:
+            normalized["root_goal"] = compact_text(normalized["root_goal"], len(normalized["root_goal"]) - 120)
+            encoded = json.dumps(normalized, ensure_ascii=False)
+            continue
+        changed = False
+        for field in trim_order:
+            values = normalized[field]
+            if not values:
+                continue
+            item_chars = max(24, max(len(item) for item in values) // 2)
+            shortened = _bounded_brain_strings(values, len(values), item_chars)
+            if shortened != values:
+                normalized[field] = shortened
+                changed = True
+                break
+        if changed:
+            encoded = json.dumps(normalized, ensure_ascii=False)
+            continue
+        normalized["root_goal"] = compact_text(normalized["root_goal"], max(40, MAX_PROJECT_SPECIFICATION_CHARS // 4))
+        encoded = json.dumps(normalized, ensure_ascii=False)
+        if len(encoded) > MAX_PROJECT_SPECIFICATION_CHARS:
+            # All structured fields are already at their smallest useful
+            # deterministic representation. Preserve the goal and contract
+            # shape rather than returning an over-sized expansion.
+            for field in trim_order:
+                normalized[field] = []
+                encoded = json.dumps(normalized, ensure_ascii=False)
+                if len(encoded) <= MAX_PROJECT_SPECIFICATION_CHARS:
+                    break
+        break
+    return normalized
+
+
+def specification_from_goal_contract(contract):
+    """Build a deterministic expansion when a caller already supplied a contract."""
+    contract = contract if isinstance(contract, dict) else {}
+    return normalize_project_specification(
+        contract.get("original_goal", contract.get("goal", "coding task")),
+        contract,
+        {
+            "root_goal": contract.get("goal", "coding task"),
+            "major_functional_areas": list(contract.get("requirements", [])),
+            "quality_constraints": list(contract.get("constraints", [])),
+            "acceptance_criteria": list(contract.get("success_criteria", [])),
+        },
+    )
+
+
+def expand_project_specification(raw_goal, contract, structured_call=None):
+    """Expand a short request into a bounded project specification, never code."""
+    RUN["specification_expansions"] = RUN.get("specification_expansions", 0) + 1
+    schema = _project_specification_schema()
+    prompt_text = f"""You are the SPECIFICATION EXPANDER in a weak-model coding orchestrator.
+Translate one user request into a compact implementation-relevant project specification.
+Do not write code, decompose tasks, choose worker-level edits, or invent features merely to make the output longer.
+Preserve every explicit requirement and constraint. Use empty arrays when a category is not applicable or is not
+supported by the request. Put genuinely unresolved blocking ambiguities in unresolved_critical_ambiguities.
+Return only the bounded structured specification requested by the schema.
+
+RAW USER REQUEST:
+{compact_text(raw_goal, 3600)}
+
+AUTHORITATIVE GOAL CONTRACT:
+{compact_contract(contract, max_chars=1800)}"""
+    try:
+        if structured_call is None:
+            data = structured_model_call(
+                prompt_text, _project_specification_validator, "specification-expansion", schema,
+                role="Specifier",
+            )
+        else:
+            data = structured_call(prompt_text, _project_specification_validator, "specification-expansion", schema)
+        if not _project_specification_validator(data):
+            raise StructuredOutputError("specification expansion failed semantic validation")
+        return normalize_project_specification(raw_goal, contract, data)
+    except StructuredOutputError as exc:
+        RUN["specification_expansion_failures"] = RUN.get("specification_expansion_failures", 0) + 1
+        fallback = specification_from_goal_contract(contract)
+        record_run_event(
+            "specification_expansion_fallback", label="specification-expansion", error=str(exc),
+        )
+        return fallback
+
+
+def _verified_manifests_from_tasks():
+    manifests = []
+    for task in TASKS.values():
+        if not isinstance(task, dict) or task.get("status") != "done":
+            continue
+        manifest = task.get("integration_manifest")
+        if isinstance(manifest, dict):
+            manifests.append(compact_manifest(manifest))
+    return manifests[-MAX_BRAIN_ITEMS:]
+
+
+def _initial_verified_project_state(repo_snapshot):
+    snapshot = repo_snapshot if isinstance(repo_snapshot, dict) else {}
+    try:
+        invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
+    except Exception:
+        invariants = RUN.get("project_invariants", [])
+    manifests = _verified_manifests_from_tasks()
+    interfaces = []
+    components = []
+    integration_facts = []
+    for manifest in manifests:
+        components.extend(manifest.get("introduced_symbols", []))
+        interfaces.extend(manifest.get("interfaces", []))
+        integration_facts.extend(manifest.get("invariants", []))
+    return {
+        "source": "deterministic_reconnaissance_and_verified_manifests",
+        "files": _bounded_brain_records(snapshot.get("files", []), 24, 180),
+        "languages": _bounded_brain_strings(snapshot.get("languages", []), 12, 80),
+        "dependency_manifests": _bounded_brain_strings(snapshot.get("configs", []), 12, 180),
+        "verified_components": _bounded_brain_strings(components, MAX_BRAIN_ITEMS, 220),
+        "verified_interfaces": _bounded_brain_strings(interfaces, MAX_BRAIN_ITEMS, 260),
+        "project_invariants": _bounded_brain_records(invariants, 12, MAX_INTEGRATION_FACT_CHARS),
+        "verified_child_manifests": manifests,
+        "integration_facts": _bounded_brain_strings(integration_facts, MAX_BRAIN_ITEMS, 260),
+        "blocking_failures": _bounded_brain_strings(
+            RUN.get("project_brain_blocking_failures", []), MAX_BRAIN_ITEMS, 260,
+        ),
+    }
+
+
+def build_project_brain(contract, specification, repo_snapshot=None):
+    """Create one bounded core plus a separate deterministic verified-state view."""
+    contract = contract if isinstance(contract, dict) else {}
+    specification = normalize_project_specification(
+        contract.get("original_goal", contract.get("goal", "coding task")), contract,
+        specification or specification_from_goal_contract(contract),
+    )
+    quality_rules = _bounded_brain_strings(
+        list(specification.get("quality_constraints", []))
+        + list(specification.get("project_specific_coding_constraints", [])),
+        MAX_BRAIN_ITEMS, 360,
+    )
+    core = {
+        "root_goal": specification["root_goal"],
+        "product_contract": {
+            "goal": compact_text(contract.get("goal") or specification["root_goal"], 900),
+            "requirements": _bounded_brain_strings(contract.get("requirements", []), MAX_BRAIN_ITEMS, 320),
+            "constraints": _bounded_brain_strings(contract.get("constraints", []), MAX_BRAIN_ITEMS, 300),
+            "user_visible_behavior": _bounded_brain_strings(
+                specification.get("user_visible_behavior", []), MAX_BRAIN_ITEMS, 320,
+            ),
+            "acceptance_criteria": _bounded_brain_strings(
+                specification.get("acceptance_criteria", []), MAX_BRAIN_ITEMS, 320,
+            ),
+            "success_criteria": _bounded_brain_strings(
+                contract.get("success_criteria", []), MAX_BRAIN_ITEMS, 320,
+            ),
+        },
+        "major_components": _bounded_brain_strings(
+            list(specification.get("major_functional_areas", []))
+            + list(specification.get("major_system_components", [])), MAX_BRAIN_ITEMS, 320,
+        ),
+        "architecture_invariants": _bounded_brain_strings(
+            specification.get("architecture_invariants", []), MAX_BRAIN_ITEMS, 360,
+        ),
+        "state_ownership": _bounded_brain_strings(
+            specification.get("state_ownership", []), MAX_BRAIN_ITEMS, 360,
+        ),
+        "interface_contracts": _bounded_brain_strings(
+            specification.get("interface_contracts", []), MAX_BRAIN_ITEMS, 360,
+        ),
+        "project_specific_quality_rules": quality_rules,
+        "interaction_contracts": _bounded_brain_strings(
+            list(specification.get("interaction_model", []))
+            + list(specification.get("ui_ux_expectations", []))
+            + list(specification.get("persistence_requirements", [])),
+            MAX_BRAIN_ITEMS, 360,
+        ),
+        "edge_cases": _bounded_brain_strings(
+            specification.get("important_edge_cases", []), MAX_BRAIN_ITEMS, 320,
+        ),
+        "acceptance_criteria": _bounded_brain_strings(
+            list(contract.get("success_criteria", []))
+            + list(specification.get("acceptance_criteria", [])), MAX_BRAIN_ITEMS, 360,
+        ),
+        "non_goals": _bounded_brain_strings(specification.get("non_goals", []), MAX_BRAIN_ITEMS, 300),
+        "explicit_assumptions": _bounded_brain_strings(
+            specification.get("explicit_assumptions", []), MAX_BRAIN_ITEMS, 300,
+        ),
+        "open_ambiguities": _bounded_brain_strings(
+            specification.get("unresolved_critical_ambiguities", []), MAX_BRAIN_ITEMS, 300,
+        ),
+    }
+    return _bound_project_brain({"core": core, "verified_state": _initial_verified_project_state(repo_snapshot)})
+
+
+def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
+    """Keep the structured Brain itself bounded, including nested contract lists."""
+    brain = copy.deepcopy(brain if isinstance(brain, dict) else {})
+    core = brain.get("core") if isinstance(brain.get("core"), dict) else {}
+    state = brain.get("verified_state") if isinstance(brain.get("verified_state"), dict) else {}
+    list_paths = [
+        (core.get("product_contract", {}), "requirements"),
+        (core.get("product_contract", {}), "constraints"),
+        (core.get("product_contract", {}), "user_visible_behavior"),
+        (core.get("product_contract", {}), "acceptance_criteria"),
+        (core.get("product_contract", {}), "success_criteria"),
+        (core, "explicit_assumptions"), (core, "open_ambiguities"), (core, "non_goals"),
+        (core, "edge_cases"), (core, "interaction_contracts"),
+        (core, "project_specific_quality_rules"), (core, "interface_contracts"),
+        (core, "state_ownership"), (core, "architecture_invariants"), (core, "major_components"),
+        (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
+        (state, "languages"), (state, "dependency_manifests"), (state, "verified_components"),
+        (state, "verified_interfaces"), (state, "integration_facts"), (state, "blocking_failures"),
+    ]
+    encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+    while len(encoded) > max_chars:
+        removed = False
+        for section, field in list_paths:
+            values = section.get(field) if isinstance(section, dict) else None
+            if isinstance(values, list) and len(values) > 1:
+                values.pop()
+                removed = True
+                break
+        if removed:
+            encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+            continue
+        # The item count caps normally make this branch unreachable, but keep
+        # the root anchor and first fact deterministic if a caller supplies an
+        # unusually large custom record.
+        changed = False
+        for section, field in list_paths:
+            values = section.get(field) if isinstance(section, dict) else None
+            if isinstance(values, list) and values:
+                shorter = _bounded_brain_strings(values, len(values), 180)
+                if shorter != values:
+                    section[field] = shorter
+                    changed = True
+                    break
+        if changed:
+            encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+            continue
+        for section, field in list_paths:
+            values = section.get(field) if isinstance(section, dict) else None
+            if not isinstance(values, list) or not values:
+                continue
+            item_chars = max(24, max(len(str(item)) for item in values) // 2)
+            if section is state and field in {"files", "project_invariants", "verified_child_manifests"}:
+                shortened = _bounded_brain_records(values, len(values), item_chars)
+            else:
+                shortened = _bounded_brain_strings(values, len(values), item_chars)
+            if shortened != values:
+                section[field] = shortened
+                changed = True
+                break
+        if changed:
+            encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+            continue
+        core["root_goal"] = compact_text(core.get("root_goal", "coding task"), max(40, max_chars // 4))
+        product = core.get("product_contract")
+        if isinstance(product, dict):
+            product["goal"] = compact_text(product.get("goal", ""), max(40, max_chars // 5))
+        encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+        if len(encoded) > max_chars:
+            brain = {
+                "core": {"root_goal": core.get("root_goal", "coding task")},
+                "verified_state": {"source": "deterministic_reconnaissance_and_verified_manifests"},
+            }
+            core = brain["core"]
+            state = brain["verified_state"]
+        break
+    brain["core"] = core
+    brain["verified_state"] = state
+    return brain
+
+
+def refresh_project_brain_verified_state(repo_snapshot=None):
+    """Refresh only the dynamic verified view; never amend the stable core."""
+    brain = RUN.get("project_brain")
+    if not isinstance(brain, dict) or not isinstance(brain.get("core"), dict):
+        return None
+    snapshot = repo_snapshot
+    if snapshot is None:
+        try:
+            snapshot = inspect_repository()
+        except Exception:
+            snapshot = {}
+    brain["verified_state"] = _initial_verified_project_state(snapshot)
+    return brain["verified_state"]
+
+
+def prepare_project_brain(raw_goal, contract, repo_snapshot, specification=None):
+    """Prepare the recursive shared alignment anchor before decomposition."""
+    if specification is None:
+        specification = expand_project_specification(raw_goal, contract)
+    brain = build_project_brain(contract, specification, repo_snapshot)
+    RUN["project_brain"] = brain
+    record_run_event(
+        "project_brain_created",
+        root_goal=compact_text(brain.get("core", {}).get("root_goal", ""), 500),
+        verified_file_count=len(brain.get("verified_state", {}).get("files", [])),
+    )
+    return brain
+
+
+def _brain_terms(value):
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value or "")).casefold()
+    return {
+        token for token in re.findall(r"[a-z0-9_$.-]{3,}", normalized)
+        if token not in {"the", "and", "for", "with", "from", "use", "using", "current", "task", "one"}
+    }
+
+
+def _select_relevant_brain_items(values, query, max_items=MAX_BRAIN_ITEMS):
+    values = list(values or [])
+    query_terms = _brain_terms(query)
+    if not query_terms:
+        return values[:max_items]
+    scored = []
+    for index, item in enumerate(values):
+        item_terms = _brain_terms(json.dumps(item, ensure_ascii=False, default=str))
+        overlap = len(query_terms & item_terms)
+        if overlap:
+            scored.append((overlap, -index, item))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    selected = [item for _score, _index, item in scored[:max_items]]
+    # Preserve source order after deterministic scoring so the projection is
+    # stable and easy for a weak Worker to scan.
+    selected_keys = {json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in selected}
+    return [
+        item for item in values
+        if json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) in selected_keys
+    ][:max_items]
+
+
+def _compact_brain_projection(projection, max_chars=MAX_BRAIN_PROJECTION_CHARS):
+    projection = copy.deepcopy(projection if isinstance(projection, dict) else {})
+    encoded = json.dumps(projection, ensure_ascii=False, default=str)
+    trim_sections = [
+        ("verified_state", "verified_child_manifests"),
+        ("verified_state", "project_invariants"),
+        ("verified_state", "blocking_failures"),
+        ("verified_state", "integration_facts"),
+        ("verified_state", "files"),
+        ("relevant_core.product_contract", "requirements"),
+        ("relevant_core.product_contract", "user_visible_behavior"),
+        ("relevant_core.product_contract", "acceptance_criteria"),
+        ("relevant_core", "acceptance_criteria"),
+        ("relevant_core", "major_components"),
+        ("relevant_core", "interaction_contracts"),
+        ("relevant_core", "project_specific_quality_rules"),
+        ("relevant_core", "interface_contracts"),
+        ("relevant_core", "architecture_invariants"),
+        ("relevant_core", "open_ambiguities"),
+    ]
+    while len(encoded) > max_chars:
+        removed = False
+        for section, field in trim_sections:
+            section_value = projection
+            for part in section.split("."):
+                section_value = section_value.get(part, {}) if isinstance(section_value, dict) else {}
+            values = section_value.get(field) if isinstance(section_value, dict) else None
+            if isinstance(values, list) and len(values) > 1:
+                values.pop()
+                removed = True
+                break
+        if removed:
+            encoded = json.dumps(projection, ensure_ascii=False, default=str)
+            continue
+        break
+    if len(encoded) > max_chars:
+        # A custom caller may provide one very large item per section, leaving
+        # no list with length > 1 to trim.  Drop optional facts first and keep
+        # the root/task anchors intact.
+        for section, field in trim_sections:
+            section_value = projection
+            for part in section.split("."):
+                section_value = section_value.get(part, {}) if isinstance(section_value, dict) else {}
+            values = section_value.get(field) if isinstance(section_value, dict) else None
+            if isinstance(values, list) and values:
+                values.clear()
+                encoded = json.dumps(projection, ensure_ascii=False, default=str)
+                if len(encoded) <= max_chars:
+                    break
+        if len(encoded) > max_chars:
+            current = projection.get("current_task", {})
+            if isinstance(current, dict):
+                current["goal"] = compact_text(current.get("goal", ""), 260)
+                current["done_when"] = _bounded_brain_strings(current.get("done_when", []), 2, 120)
+                current["scope_hint"] = _bounded_brain_strings(current.get("scope_hint", []), 2, 100)
+            projection["root_goal_anchor"] = compact_text(projection.get("root_goal_anchor", ""), 420)
+            encoded = json.dumps(projection, ensure_ascii=False, default=str)
+    if len(encoded) > max_chars:
+        projection = {
+            "root_goal_anchor": compact_text(projection.get("root_goal_anchor", "coding task"), max(40, max_chars // 4)),
+            "current_task": {
+                "id": compact_text((projection.get("current_task") or {}).get("id", ""), 80),
+                "goal": compact_text((projection.get("current_task") or {}).get("goal", ""), max(40, max_chars // 5)),
+            },
+            "relevant_core": {},
+            "verified_state": {},
+        }
+    return projection
+
+
+def build_brain_projection(brain, task, dependency_summaries=None, repo_snapshot=None, record=True):
+    """Select only task-relevant core and verified-state facts deterministically."""
+    if not isinstance(brain, dict):
+        return {}
+    core = brain.get("core") if isinstance(brain.get("core"), dict) else {}
+    state = brain.get("verified_state") if isinstance(brain.get("verified_state"), dict) else {}
+    task = task if isinstance(task, dict) else {}
+    query = " ".join([
+        str(task.get("goal", "")),
+        " ".join(str(item) for item in task.get("done_when", []) or []),
+        " ".join(str(item) for item in task.get("scope_hint", []) or []),
+    ])
+    is_root = str(task.get("id", "")) == "ROOT" or int(task.get("depth", 0) or 0) == 0
+    core_projection = {
+        "architecture_invariants": _select_relevant_brain_items(
+            core.get("architecture_invariants", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "state_ownership": _select_relevant_brain_items(
+            core.get("state_ownership", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "interface_contracts": _select_relevant_brain_items(
+            core.get("interface_contracts", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "project_specific_quality_rules": _select_relevant_brain_items(
+            core.get("project_specific_quality_rules", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "interaction_contracts": _select_relevant_brain_items(
+            core.get("interaction_contracts", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "edge_cases": _select_relevant_brain_items(
+            core.get("edge_cases", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "major_components": _select_relevant_brain_items(
+            core.get("major_components", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "acceptance_criteria": _select_relevant_brain_items(
+            core.get("acceptance_criteria", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "non_goals": _select_relevant_brain_items(
+            core.get("non_goals", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "explicit_assumptions": _select_relevant_brain_items(
+            core.get("explicit_assumptions", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+        "open_ambiguities": _select_relevant_brain_items(
+            core.get("open_ambiguities", []), query if not is_root else "", MAX_BRAIN_ITEMS,
+        ),
+    }
+    product = core.get("product_contract") if isinstance(core.get("product_contract"), dict) else {}
+    selection_query = query if not is_root else ""
+    product_projection = {
+        "requirements": _select_relevant_brain_items(
+            product.get("requirements", []), selection_query, MAX_BRAIN_ITEMS,
+        ),
+        "user_visible_behavior": _select_relevant_brain_items(
+            product.get("user_visible_behavior", []), selection_query, MAX_BRAIN_ITEMS,
+        ),
+        "acceptance_criteria": _select_relevant_brain_items(
+            product.get("acceptance_criteria", []), selection_query, MAX_BRAIN_ITEMS,
+        ),
+    }
+    snapshot = repo_snapshot if isinstance(repo_snapshot, dict) else {}
+    state_files = state.get("files", [])
+    if not state_files and snapshot:
+        state_files = snapshot.get("files", [])
+    dependencies = []
+    for item in list(dependency_summaries or [])[-MAX_INTEGRATION_MANIFEST_ITEMS:]:
+        if isinstance(item, dict) and str(item.get("status", "")).casefold() in {"done", "verified", "passed"}:
+            if is_root or _select_relevant_brain_items([item], query, 1):
+                dependencies.append(_compact_brain_record(item, 700))
+    projection = {
+        "root_goal_anchor": compact_text(core.get("root_goal", ""), 1000),
+        "current_task": {
+            "id": str(task.get("id", ""))[:80],
+            "goal": compact_text(task.get("goal", ""), 1100),
+            "done_when": _bounded_brain_strings(task.get("done_when", []), 6, 260),
+            "scope_hint": _bounded_brain_strings(task.get("scope_hint", []), 5, 180),
+        },
+        "relevant_core": {"product_contract": product_projection, **core_projection},
+        "verified_state": {
+            "files": _select_relevant_brain_items(state_files, query, 12),
+            "dependency_manifests": _bounded_brain_strings(state.get("dependency_manifests", []), 8, 180),
+            "project_invariants": _select_relevant_brain_items(
+                state.get("project_invariants", []), query, 8,
+            ),
+            "verified_components": _select_relevant_brain_items(
+                state.get("verified_components", []), query, 8,
+            ),
+            "verified_interfaces": _select_relevant_brain_items(
+                state.get("verified_interfaces", []), query, 8,
+            ),
+            "integration_facts": _select_relevant_brain_items(
+                state.get("integration_facts", []), query, 8,
+            ),
+            "blocking_failures": _bounded_brain_strings(
+                state.get("blocking_failures", []), 8, 260,
+            ),
+            "verified_child_manifests": _select_relevant_brain_items(
+                state.get("verified_child_manifests", []), query, 4,
+            ),
+            "dependencies": dependencies,
+        },
+    }
+    projection = _compact_brain_projection(projection)
+    if record:
+        RUN["brain_projections_created"] = RUN.get("brain_projections_created", 0) + 1
+    return projection
+
+
+# Clear public aliases make the architecture explicit to deterministic tests
+# and callers without introducing another state or memory system.
+project_brain_projection = build_brain_projection
+
+
+def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
+    """Serialize the bounded brain for planning prompts, never raw history."""
+    brain = brain if isinstance(brain, dict) else RUN.get("project_brain")
+    if not isinstance(brain, dict):
+        return "(project brain not prepared)"
+    bounded_brain = _bound_project_brain(brain, max_chars=max_chars)
+    core = copy.deepcopy(bounded_brain.get("core", {}))
+    state = copy.deepcopy(bounded_brain.get("verified_state", {}))
+    for field in ("major_components", "architecture_invariants", "state_ownership", "interface_contracts",
+                  "project_specific_quality_rules", "interaction_contracts", "edge_cases", "acceptance_criteria",
+                  "non_goals", "explicit_assumptions", "open_ambiguities"):
+        if isinstance(core.get(field), list):
+            core[field] = _bounded_brain_strings(core[field], MAX_BRAIN_ITEMS, 300)
+    for field in ("files", "project_invariants", "verified_child_manifests"):
+        if isinstance(state.get(field), list):
+            state[field] = _bounded_brain_records(state[field], 12, 240)
+    encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+    trim_order = [
+        (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
+        (core, "explicit_assumptions"), (core, "open_ambiguities"), (core, "non_goals"),
+        (core, "interaction_contracts"), (core, "edge_cases"),
+        (core, "project_specific_quality_rules"),
+        (core, "interface_contracts"), (core, "state_ownership"), (core, "architecture_invariants"),
+        (core, "major_components"),
+    ]
+    while len(encoded) > max_chars:
+        removed = False
+        for section, field in trim_order:
+            values = section.get(field)
+            if isinstance(values, list) and len(values) > 1:
+                values.pop()
+                removed = True
+                break
+        if removed:
+            encoded = json.dumps({"core": core, "verified_state": state}, ensure_ascii=False, default=str)
+            continue
+        break
+    if len(encoded) > max_chars:
+        encoded = json.dumps({
+            "core": {"root_goal": compact_text(core.get("root_goal", "coding task"), max(40, max_chars // 4))},
+            "verified_state": {"source": state.get("source", "deterministic_reconnaissance_and_verified_manifests")},
+        }, ensure_ascii=False, default=str)
+    return encoded
+
+
+def project_brain_planning_packet(max_chars=MAX_PROJECT_BRAIN_CHARS):
+    return compact_project_brain(RUN.get("project_brain"), max_chars=max_chars)
+
+
+def project_brain_task_planning_packet(task, dependency_summaries=None, repo_snapshot=None,
+                                      max_chars=MAX_PROJECT_BRAIN_CHARS):
+    """Give root planning the full Brain and child planning a task projection."""
+    brain = RUN.get("project_brain")
+    if not isinstance(brain, dict):
+        return "(project brain not prepared)"
+    task = task if isinstance(task, dict) else {}
+    is_root = str(task.get("id", "")) == "ROOT" or int(task.get("depth", 0) or 0) == 0
+    if is_root:
+        return compact_project_brain(brain, max_chars=max_chars)
+    projection = build_brain_projection(
+        brain, task, dependency_summaries, repo_snapshot, record=False,
+    )
+    return json.dumps(
+        _compact_brain_projection(projection, max_chars=max_chars),
+        ensure_ascii=False, default=str,
+    )
+
+
+_WORKER_MISSION_FIELDS = (
+    "goal_anchor", "task", "expected_outcome", "targets", "existing_facts", "implementation_plan",
+    "interfaces_to_reuse", "invariants", "project_specific_quality_rules", "do_not",
+    "verification_plan", "done_when",
+)
+
+
+def worker_mission_schema():
+    array_schema = {"type": "array", "items": {"type": "string"}, "maxItems": 6}
+    properties = {field: (array_schema if field not in {"goal_anchor", "task", "expected_outcome"}
+                          else {"type": "string"}) for field in _WORKER_MISSION_FIELDS}
+    for field in ("targets", "implementation_plan", "verification_plan", "done_when"):
+        properties[field]["minItems"] = 1
+    return {
+        "type": "object", "properties": properties,
+        "required": list(_WORKER_MISSION_FIELDS), "additionalProperties": False,
+    }
+
+
+def _worker_mission_validator(data):
+    if not isinstance(data, dict):
+        return False
+    for field in ("goal_anchor", "task", "expected_outcome"):
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            return False
+    for field in _WORKER_MISSION_FIELDS[3:]:
+        if not isinstance(data.get(field), list) or not all(
+            isinstance(item, str) and item.strip() for item in data.get(field, [])
+        ):
+            return False
+    if any(not data.get(field) for field in ("targets", "implementation_plan", "verification_plan", "done_when")):
+        return False
+    return True
+
+
+def normalize_worker_mission(task, brain_projection, mission):
+    task = task if isinstance(task, dict) else {}
+    mission = mission if isinstance(mission, dict) else {}
+    normalized = {
+        "goal_anchor": compact_text(
+            (brain_projection or {}).get("root_goal_anchor") or mission.get("goal_anchor", ""), 900,
+        ),
+        "task": compact_text(task.get("goal") or mission.get("task", ""), 1000),
+        "expected_outcome": compact_text(mission.get("expected_outcome") or "the current node is verified", 900),
+    }
+    for field in _WORKER_MISSION_FIELDS[3:]:
+        normalized[field] = _bounded_brain_strings(mission.get(field), 6, 360)
+    normalized["done_when"] = _bounded_brain_strings(
+        task.get("done_when", []) or normalized["done_when"], 6, 300,
+    )
+    return _bound_worker_mission(normalized)
+
+
+def _bound_worker_mission(mission, max_chars=MAX_WORKER_MISSION_CHARS):
+    """Keep the Worker contract compact without returning invalid JSON text."""
+    mission = copy.deepcopy(mission if isinstance(mission, dict) else {})
+    encoded = json.dumps(mission, ensure_ascii=False, default=str)
+    trim_order = (
+        "do_not", "existing_facts", "interfaces_to_reuse", "invariants",
+        "project_specific_quality_rules", "targets", "implementation_plan",
+        "verification_plan", "done_when",
+    )
+    while len(encoded) > max_chars:
+        removed = False
+        for field in trim_order:
+            values = mission.get(field)
+            if isinstance(values, list) and len(values) > 1:
+                values.pop()
+                removed = True
+                break
+        if removed:
+            encoded = json.dumps(mission, ensure_ascii=False, default=str)
+            continue
+        changed = False
+        for field in trim_order:
+            values = mission.get(field)
+            if not isinstance(values, list) or not values:
+                continue
+            item_chars = max(24, max(len(str(item)) for item in values) // 2)
+            shortened = _bounded_brain_strings(values, len(values), item_chars)
+            if shortened != values:
+                mission[field] = shortened
+                changed = True
+                break
+        if changed:
+            encoded = json.dumps(mission, ensure_ascii=False, default=str)
+            continue
+        for field, limit in (("goal_anchor", 420), ("task", 480), ("expected_outcome", 420)):
+            if isinstance(mission.get(field), str) and len(mission[field]) > limit:
+                mission[field] = compact_text(mission[field], limit)
+                changed = True
+        if changed:
+            encoded = json.dumps(mission, ensure_ascii=False, default=str)
+            continue
+        break
+    if len(encoded) > max_chars:
+        mission = {
+            "goal_anchor": compact_text(mission.get("goal_anchor", "coding task"), 240),
+            "task": compact_text(mission.get("task", "complete the current node"), 280),
+            "expected_outcome": compact_text(mission.get("expected_outcome", "the current node is verified"), 240),
+            "targets": _bounded_brain_strings(mission.get("targets"), 1, 180) or ["the current node scope"],
+            "existing_facts": [],
+            "implementation_plan": _bounded_brain_strings(mission.get("implementation_plan"), 1, 220)
+            or ["implement the stated bounded task"],
+            "interfaces_to_reuse": [], "invariants": [],
+            "project_specific_quality_rules": [], "do_not": [],
+            "verification_plan": _bounded_brain_strings(mission.get("verification_plan"), 1, 220)
+            or ["run the deterministic verification"],
+            "done_when": _bounded_brain_strings(mission.get("done_when"), 1, 220)
+            or ["the current node is verified"],
+        }
+    return mission
+
+
+def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CONTEXT_CHARS):
+    """Trim compiler input by fields while preserving valid structured context."""
+    context = copy.deepcopy(context if isinstance(context, dict) else {})
+    encoded = json.dumps(context, ensure_ascii=False, default=str)
+    while len(encoded) > max_chars:
+        dependencies = context.get("verified_dependencies")
+        if isinstance(dependencies, list) and len(dependencies) > 1:
+            dependencies.pop()
+        elif isinstance(context.get("relevant_task_context"), str) and context["relevant_task_context"]:
+            current_context = context["relevant_task_context"]
+            next_limit = max(120, len(current_context) // 2)
+            if next_limit >= len(current_context):
+                context.pop("relevant_task_context", None)
+            else:
+                context["relevant_task_context"] = compact_text(current_context, next_limit)
+        elif isinstance(context.get("repository_hints"), str) and context["repository_hints"]:
+            current_hints = context["repository_hints"]
+            next_limit = max(240, len(current_hints) // 2)
+            if next_limit >= len(current_hints):
+                context.pop("repository_hints", None)
+            else:
+                context["repository_hints"] = compact_text(current_hints, next_limit)
+        elif isinstance(context.get("project_brain_projection"), dict):
+            projection = context["project_brain_projection"]
+            current_size = len(json.dumps(projection, ensure_ascii=False, default=str))
+            next_limit = max(600, current_size // 2)
+            if next_limit >= current_size:
+                context.pop("project_brain_projection", None)
+            else:
+                context["project_brain_projection"] = _compact_brain_projection(
+                    projection, max_chars=next_limit,
+                )
+        elif isinstance(context.get("bounded_strategy"), dict):
+            context.pop("bounded_strategy", None)
+        else:
+            current = context.get("current_node") if isinstance(context.get("current_node"), dict) else {}
+            projection = context.get("project_brain_projection")
+            context = {
+                "current_node": {
+                    "id": compact_text(current.get("id", ""), 80),
+                    "goal": compact_text(current.get("goal", ""), 500),
+                    "done_when": _bounded_brain_strings(current.get("done_when", []), 2, 160),
+                },
+                "project_brain_projection": _compact_brain_projection(
+                    projection if isinstance(projection, dict) else {}, max_chars=max(1200, max_chars // 2),
+                ),
+            }
+        updated = json.dumps(context, ensure_ascii=False, default=str)
+        if updated == encoded:
+            break
+        encoded = updated
+    return encoded
+
+
+def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
+                           strategy_context=None, task_context=None, structured_call=None):
+    """Compile one node into a small mission before any Worker tool call."""
+    RUN["mission_compilations"] = RUN.get("mission_compilations", 0) + 1
+    task = task if isinstance(task, dict) else {}
+    projection = brain_projection if isinstance(brain_projection, dict) else {}
+    dependencies = [
+        _compact_brain_record(item, 420) for item in list(dependency_summaries or [])[-3:]
+        if isinstance(item, dict) and str(item.get("status", "")).casefold() in {"done", "verified", "passed"}
+    ]
+    strategy = {}
+    if isinstance(strategy_context, dict):
+        strategy = {
+            "name": compact_text(strategy_context.get("strategy", {}).get("name", ""), 100),
+            "approach": compact_text(strategy_context.get("strategy", {}).get("approach", ""), 700),
+            "scope": _bounded_brain_strings(strategy_context.get("strategy", {}).get("scope", []), 4, 220),
+        }
+    context = {
+        "current_node": {
+            "id": str(task.get("id", ""))[:80],
+            "goal": compact_text(task.get("goal", ""), 1100),
+            "done_when": _bounded_brain_strings(task.get("done_when", []), 6, 300),
+            "scope_hint": _bounded_brain_strings(task.get("scope_hint", []), 5, 180),
+        },
+        "project_brain_projection": _compact_brain_projection(projection, max_chars=2600),
+        "verified_dependencies": dependencies,
+        "repository_hints": repository_hints(repo_snapshot or {}, task.get("scope_hint"), max_chars=900),
+    }
+    if strategy:
+        context["bounded_strategy"] = strategy
+    if isinstance(task_context, dict):
+        context["relevant_task_context"] = compact_text(
+            json.dumps(task_context, ensure_ascii=False, default=str), 1600,
+        )
+    prompt_text = f"""You are the MISSION COMPILER for exactly one bounded node in a weak-model coding orchestrator.
+Use only the current node, its relevant Project Brain projection, verified dependencies, repository hints, and any
+bounded strategy/task context below. Do not mutate files, call tools, decompose siblings, or return conversation.
+Prepare the Worker so it can execute the stated plan without rediscovering the whole project architecture.
+State what to implement, where it belongs, which verified interfaces/facts to reuse, concrete project-specific rules,
+mistakes to avoid, and how deterministic verification will establish completion. Do not invent unsupported features.
+The goal anchor must remain compatible with the root project goal. Return only the compact structured mission.
+
+BOUNDED COMPILER CONTEXT:
+{_compact_mission_compiler_context(context)}"""
+    schema = worker_mission_schema()
+    try:
+        if structured_call is None:
+            data = structured_model_call(
+                prompt_text, _worker_mission_validator, "mission-compilation", schema,
+                role="MissionCompiler",
+            )
+        else:
+            data = structured_call(prompt_text, _worker_mission_validator, "mission-compilation", schema)
+        if not _worker_mission_validator(data):
+            raise StructuredOutputError("mission compiler returned an invalid mission")
+        mission = normalize_worker_mission(task, projection, data)
+        if not _worker_mission_validator(mission):
+            raise StructuredOutputError("normalized mission is incomplete")
+        return mission
+    except StructuredOutputError as exc:
+        RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
+        record_run_event(
+            "mission_compilation_failure", task_id=task.get("id"), error=str(exc),
+        )
+        raise MissionCompilationError(
+            f"MISSION_COMPILATION_FAILURE for node {task.get('id', '')}: {exc}"
+        ) from exc
+
+
+implementation_mission = compile_worker_mission
 
 
 def normalize_execution_choice(choice, contract):
@@ -1934,6 +2920,7 @@ Sequential milestones MAY edit the same file; cohesive/single-file work is NOT a
 {('The previous focused execution exceeded capacity. SPLIT into materially smaller scope if budget permits.' if force_smaller else '')}
 MODEL={MODEL}; CAPACITY_HINT={MODEL_TASK_CAPACITY}/4 heuristic only; DEPTH={depth}/{MAX_DEPTH}; REMAINING={remaining}
 ROOT CONTRACT: {compact_contract(contract)}
+PROJECT BRAIN (expanded specification + verified state): {project_brain_task_planning_packet(task, dependency_summaries, repo_snapshot, max_chars=4200)}
 CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 900)}
 VERIFIED DEPENDENCIES: {json.dumps(dependency_summaries[-4:], ensure_ascii=False)[:2600]}
@@ -2018,6 +3005,7 @@ Prefer independently verifiable milestones. Sequential children MAY touch the sa
 Do not create arbitrary microtasks like 'write import' or 'create variable' unless previous failure proves larger scope is still too broad.
 {('The failed parent still exceeded capacity: make each child materially smaller in simultaneous reasoning/context.' if force_smaller else '')}
 ROOT CONTRACT: {compact_contract(contract)}
+PROJECT BRAIN (expanded specification + verified state): {project_brain_task_planning_packet(task, dependency_summaries, repo_snapshot, max_chars=5200)}
 PARENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}
 DEPENDENCIES: {json.dumps((dependency_summaries or [])[-4:], ensure_ascii=False)[:2000]}
@@ -2209,6 +3197,7 @@ FAILED DECOMPOSITIONS (a new child is invalid if it merely restates one of these
 TERMINAL FAILURE:
 {json.dumps(terminal_failure, ensure_ascii=False)[:2200] or '(none)'}
 ROOT CONTRACT: {compact_contract(contract)}
+PROJECT BRAIN (expanded specification + verified state): {project_brain_task_planning_packet(task, dependency_summaries, repo_snapshot, max_chars=5200)}
 PARENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}
 DEPENDENCIES: {json.dumps((dependency_summaries or [])[-4:], ensure_ascii=False)[:2000]}
@@ -2806,18 +3795,27 @@ def route_recovery_from_diagnosis(task, contract, leaf_result, diagnosis, memory
 
 
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
-                       dependency_summaries=None, failure_evidence=None, strategy_context=None):
+                       dependency_summaries=None, failure_evidence=None, strategy_context=None,
+                       brain_projection=None, worker_mission=None):
     dependency_summaries = dependency_summaries or []
     failure_evidence = failure_evidence or task.get("failure_evidence", [])
+    if brain_projection is None and isinstance(RUN.get("project_brain"), dict):
+        brain_projection = build_brain_projection(
+            RUN["project_brain"], task, dependency_summaries, repo_snapshot, record=False,
+        )
     if task.get("kind") == "integration":
         return build_integration_node_packet(
             task, root_contract, repo_snapshot, parent_summary,
-            dependency_summaries, failure_evidence,
+            dependency_summaries, failure_evidence, brain_projection=brain_projection,
         )
     try:
         project_invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
     except Exception:
         project_invariants = RUN.get("project_invariants", [])
+    if isinstance(brain_projection, dict):
+        projected_state = brain_projection.get("verified_state")
+        if isinstance(projected_state, dict) and "project_invariants" in projected_state:
+            project_invariants = projected_state.get("project_invariants", [])
     memory_excerpt = ""
     if memory_store:
         try:
@@ -2860,9 +3858,21 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         "result": compact_text(item.get("result", ""), 500),
     } for item in failure_evidence[-4:]]
     failed_decompositions = compact_failed_decompositions(task)
+    brain_section = (
+        f"PROJECT BRAIN PROJECTION (relevant core + verified state):\n"
+        f"{json.dumps(_compact_brain_projection(brain_projection), ensure_ascii=False, default=str)[:MAX_BRAIN_PROJECTION_CHARS]}\n\n"
+        if isinstance(brain_projection, dict) and brain_projection else ""
+    )
+    mission_section = (
+        f"WORKER MISSION (compiled for this node only):\n"
+        f"{json.dumps(worker_mission, ensure_ascii=False, default=str)[:MAX_WORKER_MISSION_CHARS]}\n\n"
+        if isinstance(worker_mission, dict) and worker_mission else ""
+    )
     packet = (
         f"ROOT CONTRACT:\n{compact_contract(root_contract, max_chars=MAX_ROOT_PACKET_CHARS)}\n\n"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
+        f"{brain_section}"
+        f"{mission_section}"
         f"PARENT (goal + short verified summary):\n{compact_text(parent_summary or '(none)', 700)}\n\n"
         f"DEPENDENCIES (verified summaries only):\n{json.dumps(dependencies, ensure_ascii=False)[:1900] or '(none)'}\n\n"
         f"PROJECT INVARIANTS (canonical facts; extend, do not redefine):\n"
@@ -5056,6 +6066,13 @@ def diagnose_failure(task, result, evidence=None):
                 "The execution reported TASK_TOO_BROAD without task-fit or scope-assessment provenance; do not treat "
                 "the marker itself as positive scope evidence."
             )
+    elif failure_type == "ORCHESTRATION_FAILURE" or result.get("orchestration_failure"):
+        category = "orchestration_failure"
+        confidence = "high"
+        rationale = (
+            "A bounded orchestration contract failed before Worker implementation; do not classify this as an "
+            "implementation, scope, strategy, or capability failure."
+        )
     elif _concrete_environment_failure(evidence):
         category = "environment_failure"
         confidence = "high"
@@ -5131,6 +6148,18 @@ def diagnose_failure(task, result, evidence=None):
             confidence = "medium"
             rationale = "The node had executable implementation evidence but did not satisfy verification; try a different implementation strategy."
 
+    # Orchestration failures are never implementation evidence, even if a
+    # caller supplied stale task metadata that would otherwise match a lower
+    # branch above.
+    if failure_type == "ORCHESTRATION_FAILURE" or result.get("orchestration_failure"):
+        category = "orchestration_failure"
+        confidence = "high"
+        rationale = (
+            "A bounded orchestration contract failed before Worker implementation; do not classify this as an "
+            "implementation, scope, strategy, or capability failure."
+        )
+        capability_floor_state = None
+
     actions = {
         "scope_too_broad": (
             "backtrack_decomposition"
@@ -5146,6 +6175,7 @@ def diagnose_failure(task, result, evidence=None):
         "verifier_builder_mismatch": "inspect_verifier_contract",
         "dependency_error": "inspect_dependencies_and_interfaces",
         "decomposition_error": "revisit_decomposition_and_order",
+        "orchestration_failure": "recompile_mission",
         "environment_failure": "environment_retry",
         "unknown": "collect_more_failure_evidence",
     }
@@ -5834,6 +6864,30 @@ def _neutral_budget_result(task, worker_result, memory, dependency_summaries=Non
     return result
 
 
+def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary="",
+                                   dependency_summaries=None, strategy_context=None,
+                                   task_context=None):
+    """Prepare one clean Worker context when recursive Project Brain is active."""
+    brain = RUN.get("project_brain")
+    if not isinstance(brain, dict):
+        return None, None
+    refresh_project_brain_verified_state()
+    projection = build_brain_projection(
+        brain, task, dependency_summaries, repo_snapshot, record=True,
+    )
+    mission = compile_worker_mission(
+        task, projection, dependency_summaries, repo_snapshot,
+        strategy_context=strategy_context, task_context=task_context,
+    )
+    RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
+    record_run_event(
+        "worker_mission_ready", task_id=task.get("id"),
+        goal_anchor=compact_text(mission.get("goal_anchor", ""), 300),
+        target_count=len(mission.get("targets", [])),
+    )
+    return projection, mission
+
+
 def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None,
                  strategy_context=None):
     if task.get("kind") == "integration":
@@ -5842,9 +6896,28 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         )
     dependency_summaries = dependency_summaries or []
     RUN["leaf_tasks"] += 1
+    try:
+        brain_projection, worker_mission = prepare_worker_mission_context(
+            task, contract, repo_snapshot, parent_summary, dependency_summaries,
+            strategy_context=strategy_context,
+        )
+    except MissionCompilationError as exc:
+        if ACTIVE_TRANSACTION is not None:
+            rollback_transaction()
+        return {
+            "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
+            "orchestration_failure": "MISSION_COMPILATION_FAILURE",
+            "summary": str(exc), "memory": memory,
+            "failure_evidence": [{
+                "kind": "orchestration_failure", "status": "FAIL", "source": "mission_compiler",
+                "evidence": compact_text(str(exc), 700),
+            }],
+        }
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
                                       parent_summary, dependency_summaries, task.get("failure_evidence"),
-                                      strategy_context=strategy_context)
+                                      strategy_context=strategy_context,
+                                      brain_projection=brain_projection,
+                                      worker_mission=worker_mission)
     context_tokens = max(1, int(len(node_context) / 4))
     RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
     RUN["_leaf_context_samples"].append(context_tokens)
@@ -6074,9 +7147,30 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     """Execute one bounded integration concern through the normal leaf engine."""
     dependency_summaries = dependency_summaries or []
     RUN["leaf_tasks"] += 1
+    try:
+        brain_projection, worker_mission = prepare_worker_mission_context(
+            task, contract, repo_snapshot, parent_summary, dependency_summaries,
+            task_context={
+                "integration_conflicts": task.get("integration_conflicts", [])[:MAX_INTEGRATION_MANIFEST_ITEMS],
+                "integration_context": task.get("integration_context", {}),
+            },
+        )
+    except MissionCompilationError as exc:
+        if ACTIVE_TRANSACTION is not None:
+            rollback_transaction()
+        return {
+            "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
+            "orchestration_failure": "MISSION_COMPILATION_FAILURE",
+            "summary": str(exc), "memory": memory,
+            "failure_evidence": [{
+                "kind": "orchestration_failure", "status": "FAIL", "source": "mission_compiler",
+                "evidence": compact_text(str(exc), 700),
+            }],
+        }
     node_context = build_node_context(
         task, contract, get_memory_store(), repo_snapshot,
         parent_summary, dependency_summaries, task.get("failure_evidence"),
+        brain_projection=brain_projection, worker_mission=worker_mission,
     )
     context_tokens = max(1, int(len(node_context) / 4))
     RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
@@ -6504,6 +7598,7 @@ def merge_project_invariants(owner, manifest):
                 facts.append(candidate)
                 existing.add(_fact_key(candidate))
     RUN["project_invariants"] = facts[-24:]
+    refresh_project_brain_verified_state()
     return RUN["project_invariants"]
 
 
@@ -7055,7 +8150,8 @@ def _integration_context_for_task(parent_task, child_info, preflight):
 
 
 def build_integration_node_packet(task, root_contract, repo_snapshot, parent_summary="",
-                                  dependency_summaries=None, failure_evidence=None):
+                                  dependency_summaries=None, failure_evidence=None,
+                                  brain_projection=None, worker_mission=None):
     """Build the bounded packet used only by an integration task leaf."""
     context = task.get("integration_context") if isinstance(task.get("integration_context"), dict) else {}
     try:
@@ -7064,6 +8160,10 @@ def build_integration_node_packet(task, root_contract, repo_snapshot, parent_sum
         invariants = []
     if not invariants:
         invariants = context.get("project_invariants") or RUN.get("project_invariants", [])
+    if isinstance(brain_projection, dict):
+        projected_state = brain_projection.get("verified_state")
+        if isinstance(projected_state, dict) and "project_invariants" in projected_state:
+            invariants = projected_state.get("project_invariants", [])
     dependencies = []
     for item in list(dependency_summaries or [])[-MAX_INTEGRATION_MANIFEST_ITEMS:]:
         if not isinstance(item, dict) or str(item.get("status", "")).casefold() not in {"done", "verified", "passed"}:
@@ -7080,6 +8180,8 @@ def build_integration_node_packet(task, root_contract, repo_snapshot, parent_sum
     failure_projection = _compact_failure_evidence(failure_evidence or task.get("failure_evidence", []), max_items=4)
     packet = {
         "ROOT CONTRACT": compact_contract(root_contract, max_chars=MAX_ROOT_PACKET_CHARS),
+        "PROJECT BRAIN PROJECTION": _compact_brain_projection(brain_projection)
+        if isinstance(brain_projection, dict) and brain_projection else {},
         "PARENT GOAL": compact_text(context.get("parent_goal") or parent_summary or "(none)", 1000),
         "CURRENT INTEGRATION TASK": {
             "id": str(task.get("id", "")),
@@ -7099,6 +8201,8 @@ def build_integration_node_packet(task, root_contract, repo_snapshot, parent_sum
             repo_snapshot, task.get("scope_hint"), max_chars=1900,
         ),
     }
+    if isinstance(worker_mission, dict) and worker_mission:
+        packet["WORKER MISSION"] = worker_mission
     encoded = json.dumps(packet, ensure_ascii=False, default=str)
     return "INTEGRATION NODE PACKET:\n" + encoded[:MAX_NODE_PACKET_CHARS - 24]
 
@@ -7209,9 +8313,10 @@ def decompose_integration_task(task, contract, repo_snapshot, parent_summary="",
     return children
 
 
-def build_integration_contract(task, contract, child_info, preflight, root=False, fit=None):
+def build_integration_contract(task, contract, child_info, preflight, root=False, fit=None,
+                               brain_projection=None):
     """Create the parent-facing Hierarchical Integration Contract."""
-    return {
+    integration_contract = {
         "parent_goal": compact_text(task.get("goal", ""), 1000),
         "root": bool(root),
         "current_syntax": preflight.get("current_syntax", "PASS"),
@@ -7237,6 +8342,11 @@ def build_integration_contract(task, contract, child_info, preflight, root=False
         ],
         "root_contract": compact_contract(contract, max_chars=MAX_ROOT_PACKET_CHARS),
     }
+    if isinstance(brain_projection, dict) and brain_projection:
+        integration_contract["project_brain_alignment"] = _compact_brain_projection(
+            brain_projection, max_chars=MAX_BRAIN_PROJECTION_CHARS,
+        )
+    return integration_contract
 
 
 def decide_integration_fit(task, child_info, preflight):
@@ -7548,8 +8658,15 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
 
     preflight_before = run_integration_preflight(task, child_info, contract)
     fit = decide_integration_fit(task, child_info, preflight_before)
+    integration_brain_projection = None
+    if isinstance(RUN.get("project_brain"), dict):
+        refresh_project_brain_verified_state()
+        integration_brain_projection = build_brain_projection(
+            RUN["project_brain"], task, child_info, repo_snapshot, record=False,
+        )
     integration_contract = build_integration_contract(
         task, contract, child_info, preflight_before, root=root, fit=fit,
+        brain_projection=integration_brain_projection,
     )
     task["integration_preflight"] = {
         "before": preflight_before, "fit": fit, "after": None, "milestones": [],
@@ -7612,8 +8729,14 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         child_info = combined_child_info
         preflight_before = preflight_after_children
         fit = {"decision": "execute", "reason": "bounded integration tasks completed before parent verification"}
+        if isinstance(RUN.get("project_brain"), dict):
+            refresh_project_brain_verified_state()
+            integration_brain_projection = build_brain_projection(
+                RUN["project_brain"], task, child_info, repo_snapshot, record=False,
+            )
         integration_contract = build_integration_contract(
             task, contract, child_info, preflight_before, root=root, fit=fit,
+            brain_projection=integration_brain_projection,
         )
         integration_contract["integration_tasks"] = integration_info
 
@@ -7625,6 +8748,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         "task_id": label, "project_invariants": RUN.get("project_invariants", []),
     }
     context = (
+        f"PROJECT BRAIN ALIGNMENT:\n{json.dumps(integration_contract.get('project_brain_alignment', {}), ensure_ascii=False)[:MAX_BRAIN_PROJECTION_CHARS]}\n"
         f"HIERARCHICAL INTEGRATION CONTRACT:\n{json.dumps(integration_contract, ensure_ascii=False)[:9000]}\n"
         f"REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1800)}\n"
         "Inspect the real shared workspace. Use the verified child manifests and canonical project invariants. "
@@ -7697,6 +8821,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         # focused Repairer -> fresh deterministic verification. The Falsifier is not rerun.
         integration_recovery_needed = True
         integration_context = (
+            f"PROJECT BRAIN ALIGNMENT:\n{json.dumps(integration_contract.get('project_brain_alignment', {}), ensure_ascii=False)[:MAX_BRAIN_PROJECTION_CHARS]}\n"
             f"HIERARCHICAL INTEGRATION CONTRACT:\n{json.dumps(integration_contract, ensure_ascii=False)[:9000]}\n"
             f"CURRENT PREFLIGHT:\n{json.dumps(preflight_after, ensure_ascii=False)[:4500]}\n"
             f"VERIFIED CHILD MANIFESTS:\n{json.dumps(child_info, ensure_ascii=False)[:6000]}\n"
@@ -8276,6 +9401,9 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
         reset_run("baseline")
     elif RUN.get("mode") != "auto":
         RUN["mode"] = "baseline"
+    # Baseline remains the pre-v15 comparable path.  A caller reusing a run
+    # object must not accidentally inherit recursive Project Brain state.
+    RUN.pop("project_brain", None)
     try:
         contract = contract_override or get_goal_contract(user_text, interactive=interactive)
     except ProviderError as exc:
@@ -8305,11 +9433,12 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
 
 def run_recursive_request(user_text, memory, interactive=True, contract_override=None, repo_snapshot=None,
                           fit_decider=None, leaf_executor=None, aggregator=None, reset=True, finish=True,
-                          initial_decision=None):
+                          initial_decision=None, specification_override=None):
     if reset:
         reset_run("recursive")
     elif RUN.get("mode") != "auto":
         RUN["mode"] = "recursive"
+    supplied_contract = contract_override is not None
     try:
         contract = contract_override or get_goal_contract(user_text, interactive=interactive)
     except ProviderError as exc:
@@ -8324,6 +9453,23 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             finish_metrics("needs_clarification")
         return {"status": "needs_clarification", "summary": contract.get("question", ""), "memory": memory}, memory
     repo_snapshot = repo_snapshot or inspect_repository()
+    # Recursive mode expands the short request before root fit/decomposition.
+    # Tests and callers that already provide an authoritative contract use a
+    # deterministic contract projection and do not spend a second model call.
+    specification = specification_override
+    try:
+        if specification is None:
+            specification = (
+                specification_from_goal_contract(contract)
+                if supplied_contract else expand_project_specification(user_text, contract)
+            )
+        prepare_project_brain(user_text, contract, repo_snapshot, specification=specification)
+    except ProviderError as exc:
+        event(f"[ERROR] {exc}", role="Specifier", task="ROOT", action="specification provider failure")
+        result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+        if finish:
+            finish_metrics("failed")
+        return result, memory
     begin_durable_run(contract)
     root = root_task_from_contract(contract)
     TASKS["ROOT"] = root
@@ -8374,9 +9520,16 @@ def run_auto_request(user_text, memory, interactive=True):
                                               repo_snapshot=repo_snapshot, reset=False, finish=False,
                                               interactive=False)
     else:
+        try:
+            specification = expand_project_specification(user_text, contract)
+        except ProviderError as exc:
+            event(f"[ERROR] {exc}", role="Coordinator", task="ROOT", action="specification provider failure")
+            finish_metrics("failed")
+            return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc)}, memory
         result, memory = run_recursive_request(user_text, memory, interactive=False, contract_override=contract,
                                                repo_snapshot=repo_snapshot, reset=False, finish=False,
-                                               initial_decision=decision)
+                                               initial_decision=decision,
+                                               specification_override=specification)
     finish_metrics("done" if result.get("status") == "done" else result.get("status", "failed"))
     return result, memory
 
@@ -8399,6 +9552,82 @@ def run_self_test(install_browser=False):
         contract = _mock_contract()
         repo = inspect_repository()
         reset_run("recursive")
+        expanded_specification = normalize_project_specification(
+            contract["original_goal"], contract,
+            {
+                "root_goal": contract["goal"],
+                "user_visible_behavior": ["the mock project exposes verified outcomes"],
+                "major_functional_areas": ["mock loop behavior", "mock persistence behavior"],
+                "major_system_components": ["mock loop owner"],
+                "state_ownership": ["mock state has one authoritative owner"],
+                "interaction_model": ["mock interaction triggers the loop"],
+                "ui_ux_expectations": [], "persistence_requirements": [],
+                "important_edge_cases": ["mock loop does not duplicate itself"],
+                "architecture_invariants": ["preserve one authoritative mock loop"],
+                "interface_contracts": ["mock loop exposes a verified state interface"],
+                "quality_constraints": [],
+                "project_specific_coding_constraints": ["keep mock update and render ownership separate"],
+                "acceptance_criteria": ["mock loop is verified"],
+                "explicit_assumptions": [],
+                "unresolved_critical_ambiguities": [],
+                "non_goals": ["unrelated enemy AI"],
+            },
+        )
+        project_brain = prepare_project_brain(
+            contract["original_goal"], contract, repo, specification=expanded_specification,
+        )
+        mission_task = make_task(
+            "self-test-mission", "Implement the mock loop", 1, "ROOT",
+            ["mock loop is verified"], ["game.js"],
+        )
+        mission_projection = build_brain_projection(
+            project_brain, mission_task, repo_snapshot=repo,
+        )
+        compiler_prompts = []
+
+        def fake_mission_structured(prompt_text, _validator, _label, _schema):
+            compiler_prompts.append(prompt_text)
+            return {
+                "goal_anchor": "ignored model anchor",
+                "task": "ignored model task",
+                "expected_outcome": "the mock loop is verified",
+                "targets": ["game.js"],
+                "existing_facts": ["reuse the verified state owner"],
+                "implementation_plan": ["extend the existing loop owner"],
+                "interfaces_to_reuse": ["mock loop state interface"],
+                "invariants": ["preserve one authoritative mock loop"],
+                "project_specific_quality_rules": ["keep update and render ownership separate"],
+                "do_not": ["create a second loop"],
+                "verification_plan": ["run deterministic mock loop verification"],
+                "done_when": ["model output should not replace the task contract"],
+            }
+
+        compiled_mission = compile_worker_mission(
+            mission_task, mission_projection, repo_snapshot=repo,
+            structured_call=fake_mission_structured,
+        )
+        first_packet = build_node_context(
+            make_task("fresh-a", "Implement the first mock behavior", 1, "ROOT", ["first verified"], []),
+            contract, None, repo, brain_projection=mission_projection,
+            worker_mission=compiled_mission,
+        )
+        second_packet = build_node_context(
+            make_task("fresh-b", "Implement the second mock behavior", 1, "ROOT", ["second verified"], []),
+            contract, None, repo, brain_projection=mission_projection,
+        )
+        captured_worker_messages = []
+        original_ask_ollama = globals()["ask_ollama"]
+
+        def fake_worker_call(messages, **_kwargs):
+            captured_worker_messages.append(copy.deepcopy(messages))
+            return {"role": "assistant", "content": "mocked worker response"}
+
+        globals()["ask_ollama"] = fake_worker_call
+        try:
+            execute_agent_task("first node", {}, task_id="self-test-a", extra_context="FIRST_ONLY", max_steps=1)
+            execute_agent_task("second node", {}, task_id="self-test-b", extra_context="SECOND_ONLY", max_steps=1)
+        finally:
+            globals()["ask_ollama"] = original_ask_ollama
         root = root_task_from_contract(contract); TASKS["ROOT"] = root; RUN["tasks_created"] = 1
 
         def fit(task, depth, contract, repo, parent, deps, force):
@@ -8463,6 +9692,32 @@ def run_self_test(install_browser=False):
             "hard task budget": RUN["tasks_created"] <= MAX_TOTAL_TASKS,
             "recon bounded": len(json.dumps(inspect_repository(max_files=5, max_chars=900))) <= 900,
             "node packet bounded": len(build_node_context(root, contract, None, repo)) <= MAX_NODE_PACKET_CHARS,
+            "project brain core": (
+                project_brain.get("core", {}).get("root_goal") == contract["goal"]
+                and "verified_state" not in project_brain.get("core", {})
+            ),
+            "verified state separate": (
+                isinstance(project_brain.get("verified_state"), dict)
+                and project_brain.get("verified_state") is not project_brain.get("core")
+            ),
+            "brain projection bounded and relevant": (
+                len(json.dumps(mission_projection, ensure_ascii=False)) <= MAX_BRAIN_PROJECTION_CHARS
+                and "unrelated enemy AI" not in json.dumps(mission_projection, ensure_ascii=False)
+                and "mock loop" in json.dumps(mission_projection, ensure_ascii=False)
+            ),
+            "mission compilation mocked": (
+                len(compiler_prompts) == 1
+                and compiled_mission.get("task") == mission_task.get("goal")
+                and compiled_mission.get("goal_anchor") == project_brain["core"]["root_goal"]
+                and "MISSION COMPILER" in compiler_prompts[0]
+            ),
+            "fresh worker context": (
+                len(captured_worker_messages) == 2
+                and "FIRST_ONLY" in json.dumps(captured_worker_messages[0], ensure_ascii=False)
+                and "FIRST_ONLY" not in json.dumps(captured_worker_messages[1], ensure_ascii=False)
+                and "SECOND_ONLY" in json.dumps(captured_worker_messages[1], ensure_ascii=False)
+            ),
+            "goal anchor preserved": compiled_mission.get("goal_anchor") == contract["goal"],
             "summaries bounded": all(
                 len(str(item.get("summary", ""))) <= MAX_NODE_SUMMARY_CHARS for item in compact_task_tree()
             ),
