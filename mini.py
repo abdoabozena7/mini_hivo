@@ -52,6 +52,7 @@ from hivo.requirements import conflict_questions
 from hivo.requirements import detect_explicit_conflicts
 from hivo.requirements import deterministic_requirement_candidates
 from hivo.requirements import freeze
+from hivo.requirements import has_explicit_requirement_signal
 from hivo.requirements import ledger_requirements
 from hivo.requirements import normalize_question
 from hivo.requirements import question_is_eligible
@@ -1922,7 +1923,7 @@ def extract_source_requirement_ledger(raw_goal, structured_call=None, max_segmen
                 )
                 break
     ledger = build_source_requirement_ledger(candidates, existing_ledger=existing_ledger)
-    if not ledger_requirements(ledger) and raw_text:
+    if not ledger_requirements(ledger) and raw_text and has_explicit_requirement_signal(raw_text):
         ledger = build_source_requirement_ledger([{
             "text": raw_text, "category": "functional", "source_segment": 1,
             "provenance": USER_STATED,
@@ -11189,6 +11190,30 @@ def run_self_test(install_browser=False):
         # injected selectors only. They never invoke Ollama or a real TTY.
         v16_raw = "Build a timer.\n- persist the best score\n- support WASD"
         v16_ledger = extract_source_requirement_ledger(v16_raw, use_model=False)
+        v17_compound_raw = (
+            "Add Escape-key pause/resume support to the existing game. "
+            "Reuse the current input and pause-state architecture instead of creating duplicate input state "
+            "or another game-state owner. "
+            "Preserve the current WASD/arrow controls and persistent best-score behavior. "
+            "Update or add the relevant tests."
+        )
+        v17_compound_ledger = extract_source_requirement_ledger(v17_compound_raw, use_model=False)
+        v17_compound_records = ledger_requirements(v17_compound_ledger)
+        v17_compound_text = " ".join(item.get("text", "") for item in v17_compound_records)
+        v17_compound_reuse = next(
+            (item.get("text", "") for item in v17_compound_records if item.get("text", "").startswith("Reuse ")),
+            "",
+        )
+        v17_compound_coverage = (
+            "Add Escape-key pause/resume support" in v17_compound_text,
+            v17_compound_reuse.startswith("Reuse ") and "current input" in v17_compound_reuse,
+            v17_compound_reuse.startswith("Reuse ") and "pause-state architecture" in v17_compound_reuse,
+            "duplicate input state" in v17_compound_reuse and "instead of" in v17_compound_reuse,
+            "another game-state owner" in v17_compound_reuse and "instead of" in v17_compound_reuse,
+            "Preserve the current WASD/arrow controls" in v17_compound_text,
+            "persistent best-score behavior" in v17_compound_text,
+            "Update or add the relevant tests" in v17_compound_text,
+        )
         v16_no_questions = clarify_request(v16_raw, v16_ledger)
         v16_specialization_raw = (
             "Build a responsive UI.\n- The UI must fit a 390px-wide viewport."
@@ -11389,6 +11414,12 @@ def run_self_test(install_browser=False):
                 [item.get("requirement_id") for item in ledger_requirements(v16_ledger)] == ["REQ-001", "REQ-002"]
                 and v16_ledger.get("immutable") is True
                 and isinstance(v16_ledger.get("requirements"), list)
+            ),
+            "compound source extraction": (
+                sum(v17_compound_coverage) == 8
+                and all(item.get("provenance") == USER_STATED for item in v17_compound_records)
+                and all(item.get("source_segments") == [1] for item in v17_compound_records)
+                and v17_compound_ledger.get("immutable") is True
             ),
             "source provenance separated": (
                 all(item.get("provenance") == USER_STATED for item in ledger_requirements(v16_ledger))

@@ -141,7 +141,9 @@ def _can_merge(a, b):
 def _category_for(text):
     value = str(text or "").casefold()
     if any(re.search(rf"\b{re.escape(word)}\b", value) for word in
-           ("must not", "do not", "don't", "only", "constraint", "compatible")):
+           ("must not", "do not", "don't", "never", "only", "constraint", "compatible",
+            "avoid", "instead", "rather", "reuse", "preserve", "keep", "retain",
+            "duplicate", "ownership")):
         return "constraint"
     if any(re.search(rf"\b{re.escape(word)}\b", value) for word in
            ("acceptance", "success", "verify", "test", "when done", "pass")):
@@ -206,18 +208,49 @@ def bounded_source_segments(raw_prompt, max_segments=MAX_SOURCE_SEGMENTS,
 
 _BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)]|[a-zA-Z][.)])\s+(.+)$")
 _EXPLICIT_MARKER_RE = re.compile(
-    r"\b(?:must|should|shall|need(?:s)? to|support(?:s)?|persist(?:s)?|preserve(?:s)?|keep(?:s)?|"
-    r"allow(?:s)?|include(?:s)?|provide(?:s)?|handle(?:s)?|ensure(?:s)?|implement|add|create|build|"
-    r"replace|remove|reset|restart|expose(?:s|d|ing)?|use(?:s|d|ing)?|acceptance|success criteria|"
+    r"\b(?:must|should|shall|need(?:s)? to|required\s+to|support(?:s)?|persist(?:s)?|"
+    r"preserve(?:s|d|ing)?|keep(?:s|ing)?|retain(?:s|ed|ing)?|reuse(?:s|d|ing)?|"
+    r"avoid(?:s|ed|ing)?|extend(?:s|ed|ing)?|maintain(?:s|ed|ing)?|require(?:s|d|ing)?|"
+    r"introduce(?:s|d|ing)?|update(?:s|d|ing)?|allow(?:s)?|include(?:s)?|provide(?:s)?|"
+    r"handle(?:s)?|ensure(?:s)?|implement(?:s|ed|ing)?|add(?:s|ed|ing)?|create(?:s|d|ing)?|build(?:s|ing)?|"
+    r"replace(?:s|d|ing)?|remove(?:s|d|ing)?|reset(?:s|ting)?|restart(?:s|ed|ing)?|"
+    r"expose(?:s|d|ing)?|use(?:s|d|ing)?|instead\s+of|rather\s+than|acceptance|success criteria|"
     r"including|feature(?:s)?|option(?:s)?|method(?:s)?|mode(?:s)?|example(?:s)?|valid|available|"
     r"following)\b",
     re.IGNORECASE,
 )
 _SOURCE_LIST_MARKER_RE = re.compile(
-    r"\b(?:must|should|shall|need(?:s)? to|support(?:s)?|persist(?:s)?|preserve(?:s)?|keep(?:s)?|"
-    r"allow(?:s)?|include(?:s)?|ensure(?:s)?|restart|expose(?:s|d|ing)?|use(?:s|d|ing)?|"
-    r"acceptance|success criteria|including|feature(?:s)?|option(?:s)?|method(?:s)?|mode(?:s)?|"
+    r"\b(?:must|should|shall|need(?:s)? to|required\s+to|support(?:s)?|persist(?:s)?|"
+    r"preserve(?:s|d|ing)?|keep(?:s|ing)?|retain(?:s|ed|ing)?|reuse(?:s|d|ing)?|"
+    r"avoid(?:s|ed|ing)?|extend(?:s|ed|ing)?|maintain(?:s|ed|ing)?|require(?:s|d|ing)?|"
+    r"introduce(?:s|d|ing)?|update(?:s|d|ing)?|allow(?:s)?|include(?:s)?|ensure(?:s)?|restart|"
+    r"expose(?:s|d|ing)?|use(?:s|d|ing)?|instead\s+of|rather\s+than|acceptance|success criteria|including|feature(?:s)?|option(?:s)?|method(?:s)?|mode(?:s)?|"
     r"example(?:s)?|valid|available|following)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_IMPERATIVE_START_RE = re.compile(
+    r"^\s*(?:please\s+|you\s+)?(?:add|allow|avoid|build|change|clean|configure|create|delete|"
+    r"disable|document|enable|ensure|extend|expose|fix|handle|include|implement|introduce|keep|"
+    r"maintain|migrate|modify|preserve|provide|refactor|remove|rename|replace|reset|restart|"
+    r"require|reuse|retain|set|simplify|support|test|update|use|verify)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_NEGATIVE_START_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:(?:do|does|did)\s+not|don['’]t|never)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_MODAL_RE = re.compile(
+    r"\b(?:must|should|shall|need(?:s)?\s+to|required\s+to|do\s+not|don['’]t|never)\b",
+    re.IGNORECASE,
+)
+_OBSERVATIONAL_SENTENCE_RE = re.compile(
+    r"^\s*(?:(?:the|this|that|an?|our|your)\s+)?"
+    r"(?:(?:current|existing|present)\s+)?"
+    r"(?:project|repository|codebase|application|app|system|implementation|workspace|package|module|code)\b"
+    r"[^.!?;\n]{0,120}\b(?:currently\s+)?(?:use(?:s)?|support(?:s)?|contain(?:s)?|"
+    r"include(?:s)?|have|has|is|are|was|were|run(?:s)?|rely|rel(?:y|ies)|"
+    r"preserve(?:s)?|keep(?:s)?|retain(?:s)?|reuse(?:s)?|maintain(?:s)?|extend(?:s)?|"
+    r"avoid(?:s)?|introduce(?:s)?|implement(?:s)?)\b",
     re.IGNORECASE,
 )
 _HEADING_RE = re.compile(r"^(?:[A-Z][A-Z0-9 _/-]{2,}|(?:requirements?|constraints?|acceptance criteria|notes?))\s*:?$")
@@ -238,6 +271,27 @@ _IDENTIFIER_TOKEN_RE = re.compile(
 
 def _sentences(text):
     return [part.strip(" \t\n-*") for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+
+
+def _is_explicit_requirement_sentence(sentence):
+    """Recognize instructional sentences without promoting repository observations."""
+    value = str(sentence or "").strip()
+    if len(value) < 3:
+        return False
+    if _EXPLICIT_IMPERATIVE_START_RE.match(value) or _EXPLICIT_NEGATIVE_START_RE.match(value):
+        return True
+    if _EXPLICIT_MODAL_RE.search(value):
+        return True
+    # Declarative statements about a project/repository are context unless
+    # the sentence is explicitly instructional (handled above).
+    if _OBSERVATIONAL_SENTENCE_RE.match(value):
+        return False
+    return bool(_EXPLICIT_MARKER_RE.search(value))
+
+
+def has_explicit_requirement_signal(value):
+    """Return whether text contains an instructional source-requirement signal."""
+    return any(_is_explicit_requirement_sentence(sentence) for sentence in _sentences(value))
 
 
 def _looks_like_identifier(value):
@@ -368,7 +422,7 @@ def deterministic_requirement_candidates(segment_text, source_segment):
             # additional bullet requirement when a requirements list follows.
             continue
         for sentence in _sentences(line):
-            if len(sentence) >= 3 and _EXPLICIT_MARKER_RE.search(sentence):
+            if len(sentence) >= 3 and _is_explicit_requirement_sentence(sentence):
                 candidates.append({"_raw_text": sentence, "category": _category_for(sentence),
                                    "source_segment": source_segment})
                 if _LIST_INTRO_RE.search(sentence):
@@ -380,7 +434,7 @@ def deterministic_requirement_candidates(segment_text, source_segment):
         # Retaining a vague request as one source statement prevents the
         # source contract from becoming empty.  It does not force questions.
         fallback = str(segment_text or "")
-        if fallback:
+        if fallback and has_explicit_requirement_signal(fallback):
             candidates.append({"_raw_text": fallback, "category": _category_for(fallback),
                                "source_segment": source_segment})
 
