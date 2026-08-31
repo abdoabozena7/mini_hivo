@@ -35,6 +35,7 @@ from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
 from hivo import impact_planning as stage3
+from hivo import execution_contracts as stage4
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -141,6 +142,15 @@ PLAN_APPROVAL_REQUIRED = "PLAN_APPROVAL_REQUIRED"
 PLAN_REJECTED = "PLAN_REJECTED"
 PLAN_INCOMPLETE = "PLAN_INCOMPLETE"
 UNAPPROVED_SCOPE_EXPANSION = "UNAPPROVED_SCOPE_EXPANSION"
+# Stage 4A execution-contract terminal states.  Stage 3 remains the owner of
+# planning and approval; these labels describe only the post-approval handoff.
+APPROVED_PLAN_STALE = stage4.APPROVED_PLAN_STALE
+EXECUTION_CONTRACT_BLOCKED = stage4.EXECUTION_CONTRACT_BLOCKED
+EXECUTION_CONTRACT_TOO_LARGE = stage4.EXECUTION_CONTRACT_TOO_LARGE
+CONTRACT_SCOPE_VIOLATION = stage4.CONTRACT_SCOPE_VIOLATION
+MISSION_CONTRACT_VIOLATION = stage4.MISSION_CONTRACT_VIOLATION
+EXECUTION_GRAPH_INVALID = stage4.EXECUTION_GRAPH_INVALID
+EXECUTION_DEPENDENCY_BLOCKED = stage4.EXECUTION_DEPENDENCY_BLOCKED
 MAX_NODE_SUMMARY_CHARS = 700
 MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
@@ -233,6 +243,10 @@ class ImpactPlanningError(RuntimeError):
 
 class PlanApprovalRequiredError(RuntimeError):
     """An existing-project Worker was reached without a current approval."""
+
+    def __init__(self, message, code=PLAN_APPROVAL_REQUIRED):
+        self.code = str(code or PLAN_APPROVAL_REQUIRED)
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -1175,12 +1189,35 @@ def _stage3_mutation_guard(name, args):
         return None
     plan = RUN.get("approved_change_plan")
     approval = RUN.get("plan_approval")
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    if active.get("execution_contract_id"):
+        effective = _current_execution_contract(active)
+        if not isinstance(effective, dict):
+            RUN["execution_contract_stale_blocks"] = RUN.get(
+                "execution_contract_stale_blocks", 0,
+            ) + 1
+            return f"error: {APPROVED_PLAN_STALE}; active execution contract is stale or unavailable"
+        target = _normalized_workspace_relative_path((args or {}).get("path"))
+        check = stage4.tool_scope(effective, target, mutation=True)
+        if not check.get("allowed"):
+            RUN["execution_contract_scope_violations"] = RUN.get(
+                "execution_contract_scope_violations", 0,
+            ) + 1
+            record_run_event(
+                "execution_contract_scope_violation",
+                execution_contract_id=effective.get("execution_contract_id"),
+                path=target, reason=check.get("reason"),
+            )
+            return (
+                f"error: {CONTRACT_SCOPE_VIOLATION}; '{(args or {}).get('path')}' "
+                "is outside the approved execution-contract mutation scope"
+            )
+        return None
     if not stage3.approval_is_current(plan, approval):
         return (
             f"error: {PLAN_APPROVAL_REQUIRED}; existing-project mutation is read-only "
             "until the current plan hash is approved"
         )
-    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
     if active.get("approved_plan_hash") != plan.get("plan_hash"):
         return f"error: {PLAN_APPROVAL_REQUIRED}; active Worker plan hash is stale"
     target = _normalized_workspace_relative_path((args or {}).get("path"))
@@ -1213,6 +1250,37 @@ def _stage3_mutation_guard(name, args):
     return None
 
 
+def _stage4_inspection_guard(name, args):
+    """Keep Worker reads inside the current contract's inspection surface."""
+    if name not in {"read_file", "read_file_range"}:
+        return None
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    if not active.get("execution_contract_id"):
+        return None
+    effective = _current_execution_contract(active)
+    if not isinstance(effective, dict):
+        RUN["execution_contract_stale_blocks"] = RUN.get(
+            "execution_contract_stale_blocks", 0,
+        ) + 1
+        return f"error: {APPROVED_PLAN_STALE}; active execution contract is stale or unavailable"
+    target = _normalized_workspace_relative_path((args or {}).get("path"))
+    check = stage4.tool_scope(effective, target, mutation=False)
+    if check.get("allowed"):
+        return None
+    RUN["execution_contract_scope_violations"] = RUN.get(
+        "execution_contract_scope_violations", 0,
+    ) + 1
+    record_run_event(
+        "execution_contract_inspection_violation",
+        execution_contract_id=effective.get("execution_contract_id"),
+        path=target, reason=check.get("reason"),
+    )
+    return (
+        f"error: {CONTRACT_SCOPE_VIOLATION}; '{(args or {}).get('path')}' "
+        "is outside the approved execution-contract inspection scope"
+    )
+
+
 def run_tool(name, args, role="System"):
     if role == "Falsifier" and name in {"write_file", "edit_file", "edit_file_range", "backup_file"}:
         return "error: Falsifier is read-only and may not modify files"
@@ -1221,6 +1289,9 @@ def run_tool(name, args, role="System"):
     issue = tool_argument_error(name, args)
     if issue:
         return issue
+    stage4_inspection_issue = _stage4_inspection_guard(name, args)
+    if stage4_inspection_issue:
+        return stage4_inspection_issue
     stage3_issue = _stage3_mutation_guard(name, args)
     if stage3_issue:
         return stage3_issue
@@ -1483,6 +1554,24 @@ def new_metrics(mode):
         "impact_challenger_calls": 0,
         "impact_plan_revision_calls": 0,
         "plan_approval_requests": 0,
+        # v19 Stage 4A approved-plan execution contracts.  These counters are
+        # intentionally separate from Stage 3 planning and Worker/tool work.
+        "approved_plan_snapshots_validated": 0,
+        "approved_plan_snapshot_failures": 0,
+        "execution_contracts_created": 0,
+        "execution_contract_failures": 0,
+        "execution_contract_mutation": 0,
+        "execution_contract_test": 0,
+        "execution_contract_verify_only": 0,
+        "execution_graphs_created": 0,
+        "execution_graph_failures": 0,
+        "execution_contract_scope_violations": 0,
+        "execution_contract_stale_blocks": 0,
+        "execution_dependency_blocks": 0,
+        "contract_decompositions": 0,
+        "contract_child_scope_rejections": 0,
+        "worker_contract_contexts_created": 0,
+        "mission_contract_failures": 0,
         "control_flow": [],
         "specification_expansions": 0,
         "specification_expansion_failures": 0,
@@ -1608,6 +1697,11 @@ def compact_task_tree():
             "children": list(task.get("children", [])),
             "changed_files": bounded_list(task.get("changed_files", []), 12, 140),
         }
+        if task.get("execution_contract_id"):
+            entry["execution_contract_id"] = task.get("execution_contract_id")
+            entry["execution_contract_hash"] = task.get("execution_contract_hash")
+            entry["execution_contract_type"] = task.get("execution_contract_type")
+            entry["plan_node_ids"] = list(task.get("plan_node_ids", []) or [])[:stage4.MAX_PLAN_NODES]
         # Keep the failed attempt and its evidence beside the final status.
         # This is what makes a recovered node auditable instead of making the
         # original failure disappear when the parent eventually passes.
@@ -5300,10 +5394,26 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         return result
     RUN["approved_change_plan"] = plan
     RUN["plan_approval"] = approval.get("approval")
+    RUN["source_contract"] = copy.deepcopy(contract)
+    execution_contracts = compile_approved_plan_execution_contracts(
+        contract=contract, plan=plan, approval=RUN["plan_approval"],
+    )
+    if execution_contracts.get("status") != "ready":
+        result = dict(execution_contracts)
+        result.update({
+            "project_mode": mode, "contract": contract,
+            "impact_map": impact_map, "plan": plan,
+            "plan_gate": gate, "approval": approval.get("approval"),
+            "read_only": fingerprint_before == fingerprint_after,
+        })
+        return result
     return {
         "status": "ready", "project_mode": mode, "contract": contract,
         "impact_map": impact_map, "plan": plan, "plan_gate": gate,
         "approval": approval.get("approval"),
+        "approved_plan_snapshot": execution_contracts.get("snapshot"),
+        "execution_contracts": execution_contracts.get("contracts", []),
+        "plan_execution_graph": execution_contracts.get("graph"),
         "read_only": fingerprint_before == fingerprint_after,
     }
 
@@ -5314,6 +5424,240 @@ def current_approved_change_plan():
     if stage3.approval_is_current(plan, approval):
         return plan
     return None
+
+
+def _stage4_authoritative_goal(contract=None, plan=None):
+    """Return the Stage 1/2 goal that the approved snapshot must preserve."""
+    value = contract if isinstance(contract, dict) else {}
+    goal = _authoritative_stage3_task_goal(value, RUN.get("task_brain"))
+    if goal:
+        return goal
+    value = plan if isinstance(plan, dict) else RUN.get("approved_change_plan")
+    return str((value or {}).get("task_goal") or (value or {}).get("goal") or "").strip()
+
+
+def _stage4_failure_result(code, message, *, phase="execution_contract"):
+    """Record a bounded Stage 4A failure and return its public state."""
+    code = str(code or EXECUTION_CONTRACT_BLOCKED)
+    if phase == "snapshot":
+        RUN["approved_plan_snapshot_failures"] = RUN.get(
+            "approved_plan_snapshot_failures", 0,
+        ) + 1
+    elif phase == "graph":
+        RUN["execution_graph_failures"] = RUN.get("execution_graph_failures", 0) + 1
+    else:
+        RUN["execution_contract_failures"] = RUN.get(
+            "execution_contract_failures", 0,
+        ) + 1
+    RUN["execution_contract_status"] = code
+    RUN["orchestration_failure"] = code
+    record_run_event(
+        "execution_contract_blocked", terminal_state=code,
+        phase=phase, error=compact_text(message, 1200),
+    )
+    return {
+        "status": "blocked", "terminal_state": code,
+        "orchestration_failure": code, "summary": compact_text(message, 1600),
+    }
+
+
+def compile_approved_plan_execution_contracts(contract=None, plan=None, approval=None,
+                                              force=False):
+    """Snapshot the approved Stage 3 plan and compile its deterministic DAG.
+
+    This is the only entry point that creates Stage 4A authority.  It never
+    calls a model and never runs a Worker.  Repeated calls revalidate the
+    immutable snapshot and graph so a plan edit becomes a deterministic stale
+    block instead of an implicit reapproval.
+    """
+    if (
+        plan is None and approval is None
+        and RUN.get("project_mode") != EXISTING_PROJECT
+        and not RUN.get("impact_planning_required")
+    ):
+        return {"status": "not_applicable", "contracts": [], "graph": None}
+    contract = contract if isinstance(contract, dict) else RUN.get("source_contract")
+    plan = plan if isinstance(plan, dict) else RUN.get("approved_change_plan")
+    approval = approval if isinstance(approval, dict) else RUN.get("plan_approval")
+    authoritative_goal = _stage4_authoritative_goal(contract, plan)
+    approval_validation = (
+        stage4.validate_approved_plan(
+            plan, approval, authoritative_goal, current_plan=plan,
+        )
+        if isinstance(plan, dict) else {
+            "valid": False, "code": PLAN_APPROVAL_REQUIRED,
+            "errors": ["current approved plan is missing"],
+        }
+    )
+    if not approval_validation.get("valid"):
+        RUN["plan_approval_required"] = RUN.get("plan_approval_required", 0) + 1
+        if approval_validation.get("code") == APPROVED_PLAN_STALE:
+            RUN["execution_contract_stale_blocks"] = RUN.get(
+                "execution_contract_stale_blocks", 0,
+            ) + 1
+        return _stage4_failure_result(
+            approval_validation.get("code") or PLAN_APPROVAL_REQUIRED,
+            "; ".join(approval_validation.get("errors", []))
+            or "Stage 4A requires APPROVED approval for the current canonical plan hash.",
+            phase="snapshot",
+        )
+    existing = RUN.get("approved_plan_snapshot")
+    if not force and isinstance(existing, dict):
+        if not stage4.snapshot_is_current(existing, plan, approval, authoritative_goal):
+            RUN["execution_contract_stale_blocks"] = RUN.get(
+                "execution_contract_stale_blocks", 0,
+            ) + 1
+            return _stage4_failure_result(
+                APPROVED_PLAN_STALE,
+                "ApprovedPlanSnapshot is stale relative to the current canonical plan or approval.",
+                phase="snapshot",
+            )
+        stored_graph = RUN.get("plan_execution_graph")
+        stored_contracts = RUN.get("execution_contracts", [])
+        if isinstance(stored_graph, dict) and isinstance(stored_contracts, list):
+            graph_check = stage4.validate_execution_graph(
+                existing, stored_graph, stored_contracts,
+            )
+            if graph_check.get("valid"):
+                return {
+                    "status": "ready", "snapshot": existing,
+                    "contracts": stored_contracts, "assignment": RUN.get(
+                        "execution_contract_assignment", {},
+                    ), "graph": stored_graph,
+                    "validation": graph_check,
+                }
+            return _stage4_failure_result(
+                EXECUTION_GRAPH_INVALID,
+                "; ".join(graph_check.get("errors", [])) or "stored execution graph is invalid",
+                phase="graph",
+            )
+    try:
+        snapshot = stage4.create_approved_plan_snapshot(
+            plan, approval, authoritative_task_goal=authoritative_goal,
+            requirements=_active_stage3_requirements(contract),
+            repository_evidence=RUN.get("repository_evidence", []) or [],
+            canonical_surface_registry=RUN.get("canonical_surface_registry"),
+        )
+    except stage4.ExecutionContractError as exc:
+        return _stage4_failure_result(exc.code, str(exc), phase="snapshot")
+    RUN["approved_plan_snapshots_validated"] = RUN.get(
+        "approved_plan_snapshots_validated", 0,
+    ) + 1
+    RUN["approved_plan_snapshot"] = snapshot
+    RUN["approved_plan_snapshot_hash"] = snapshot.get("snapshot_hash")
+    RUN.setdefault("control_flow", []).append("APPROVED_PLAN_SNAPSHOT")
+    record_run_event(
+        "approved_plan_snapshot_validated", plan_id=snapshot.get("plan_id"),
+        plan_hash=snapshot.get("plan_hash"),
+        snapshot_hash=snapshot.get("snapshot_hash"),
+    )
+    try:
+        compiled = stage4.compile_execution_contracts(snapshot)
+        contracts = compiled.get("contracts", [])
+        graph = stage4.build_execution_graph(snapshot, contracts)
+        graph_validation = stage4.validate_execution_graph(snapshot, graph, contracts)
+        if not graph_validation.get("valid"):
+            raise stage4.ExecutionGraphError(
+                EXECUTION_GRAPH_INVALID,
+                "; ".join(graph_validation.get("errors", [])),
+            )
+    except stage4.ExecutionGraphError as exc:
+        return _stage4_failure_result(exc.code, str(exc), phase="graph")
+    except stage4.ExecutionContractError as exc:
+        return _stage4_failure_result(exc.code, str(exc), phase="execution_contract")
+    RUN["execution_contracts"] = contracts
+    RUN["execution_contract_by_id"] = {
+        item.get("execution_contract_id"): item for item in contracts
+    }
+    RUN["execution_contract_assignment"] = compiled.get("assignment", {})
+    RUN["execution_contract_validation"] = compiled.get("validation", {})
+    RUN["plan_execution_graph"] = graph
+    RUN["execution_graph_validation"] = graph_validation
+    for key in (
+        "execution_contracts_created", "execution_contract_mutation",
+        "execution_contract_test", "execution_contract_verify_only",
+    ):
+        RUN[key] = RUN.get(key, 0) + int(compiled.get("metrics", {}).get(key, 0) or 0)
+    RUN["execution_graphs_created"] = RUN.get("execution_graphs_created", 0) + 1
+    RUN["execution_contract_status"] = "ready"
+    RUN.setdefault("control_flow", []).append("EXECUTION_CONTRACT_COMPILATION")
+    RUN.setdefault("control_flow", []).append("PLAN_EXECUTION_GRAPH")
+    record_run_event(
+        "execution_contracts_compiled", plan_id=snapshot.get("plan_id"),
+        plan_hash=snapshot.get("plan_hash"),
+        snapshot_hash=snapshot.get("snapshot_hash"),
+        contract_ids=[item.get("execution_contract_id") for item in contracts],
+        graph_hash=graph.get("graph_hash"),
+    )
+    return {
+        "status": "ready", "snapshot": snapshot, "contracts": contracts,
+        "assignment": compiled.get("assignment", {}), "graph": graph,
+        "validation": graph_validation,
+    }
+
+
+# Public aliases make the Stage 4A handoff directly testable without exposing
+# the model-calling orchestration internals.
+prepare_execution_contracts = compile_approved_plan_execution_contracts
+build_approved_plan_snapshot = stage4.create_approved_plan_snapshot
+validate_approved_plan_snapshot = stage4.validate_snapshot
+compile_execution_contracts = stage4.compile_execution_contracts
+validate_execution_contracts = stage4.validate_contracts
+build_plan_execution_graph = stage4.build_execution_graph
+validate_plan_execution_graph = stage4.validate_execution_graph
+contract_projection = stage4.contract_projection
+build_worker_contract_context = stage4.build_worker_contract_context
+validate_mission_against_contract = stage4.validate_mission_against_contract
+validate_child_contract = stage4.validate_child_contract
+
+
+def _current_execution_contract(task=None):
+    """Return the current contract or ``None`` outside the Stage 4A path."""
+    if RUN.get("project_mode") != EXISTING_PROJECT or not RUN.get("impact_planning_required"):
+        return None
+    state = compile_approved_plan_execution_contracts()
+    if state.get("status") != "ready":
+        return None
+    task = task if isinstance(task, dict) else {}
+    plan = RUN.get("approved_change_plan") or {}
+    if task.get("approved_plan_hash") and task.get("approved_plan_hash") != plan.get("plan_hash"):
+        return None
+    contract_id = task.get("execution_contract_id")
+    if not contract_id and len(task.get("plan_node_ids", []) or []) == 1:
+        assignment = state.get("assignment", {})
+        for node_id in task.get("plan_node_ids", []):
+            if assignment.get(str(node_id)):
+                contract_id = assignment[str(node_id)]
+                break
+    if not contract_id:
+        return None
+    base = (state.get("contracts_by_id") or RUN.get("execution_contract_by_id", {})).get(contract_id)
+    if not isinstance(base, dict):
+        base = next(
+            (item for item in state.get("contracts", [])
+             if item.get("execution_contract_id") == contract_id), None,
+        )
+    if not isinstance(base, dict):
+        return None
+    task_node_ids = {str(item) for item in task.get("plan_node_ids", []) or []}
+    contract_node_ids = {str(item) for item in base.get("plan_node_ids", []) or []}
+    if task_node_ids and not task_node_ids.issubset(contract_node_ids):
+        return None
+    if (
+        task.get("execution_contract_hash")
+        and task.get("execution_contract_hash") != base.get("contract_hash")
+    ):
+        return None
+    child = task.get("execution_contract_child")
+    if isinstance(child, dict):
+        checked = stage4.validate_child_contract(base, child)
+        if not checked.get("valid"):
+            return None
+        return child
+    return base
+
+
+current_execution_contract = _current_execution_contract
 
 
 def approved_plan_node_contract_for_task(task):
@@ -5366,6 +5710,31 @@ def _stage3_execution_gate(task=None):
 
 
 def _active_plan_tool_contract_fields(task):
+    execution_contract = _current_execution_contract(task)
+    if isinstance(execution_contract, dict):
+        mutation_paths = list(execution_contract.get("allowed_mutation_paths", []) or [])
+        inspection_paths = list(execution_contract.get("allowed_inspection_paths", []) or [])
+        inspect_only = [item for item in inspection_paths if item not in mutation_paths]
+        return {
+            "impact_plan_required": True,
+            "approved_plan_id": execution_contract.get("plan_id"),
+            "approved_plan_hash": execution_contract.get("plan_hash"),
+            "execution_contract_id": execution_contract.get("execution_contract_id"),
+            "execution_contract_hash": execution_contract.get("contract_hash"),
+            "execution_contract_type": execution_contract.get("responsibility_type"),
+            "approved_targets": mutation_paths,
+            "allowed_mutation_paths": mutation_paths,
+            "inspect_only_targets": inspect_only,
+            "allowed_inspection_paths": inspection_paths,
+            "allowed_inspection_surface_ids": list(execution_contract.get("allowed_inspection_surface_ids", []) or []),
+            "approved_surface_ids": list(execution_contract.get("allowed_mutation_surface_ids", []) or []),
+            "approved_new_surface_proposal_ids": [],
+            "approved_new_surface_parent_scopes": [],
+            "do_not_touch": list(execution_contract.get("global_do_not_touch", []) or []),
+            "global_do_not_touch": list(execution_contract.get("global_do_not_touch", []) or []),
+            "do_not_touch_surface_ids": list(execution_contract.get("global_do_not_touch_surface_ids", []) or []),
+            "verification_only": not bool(execution_contract.get("worker_required")),
+        }
     gate = _stage3_execution_gate(task)
     if not gate.get("allowed") or not isinstance(gate.get("contract"), dict):
         return {
@@ -5392,9 +5761,24 @@ _WORKER_MISSION_FIELDS = (
 
 
 def worker_mission_schema():
-    array_schema = {"type": "array", "items": {"type": "string"}, "maxItems": 6}
-    properties = {field: (array_schema if field not in {"goal_anchor", "task", "expected_outcome"}
-                          else {"type": "string"}) for field in _WORKER_MISSION_FIELDS}
+    array_limits = {
+        "targets": stage4.MAX_SURFACES_PER_CONTRACT,
+        "existing_facts": stage4.MAX_REPOSITORY_FACTS_PER_CONTRACT,
+        "implementation_plan": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "interfaces_to_reuse": stage4.MAX_INTERFACES_PER_CONTRACT,
+        "invariants": stage4.MAX_PRESERVATION_PER_CONTRACT + stage4.MAX_PROHIBITIONS_PER_CONTRACT,
+        "project_specific_quality_rules": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "do_not": stage4.MAX_SURFACES_PER_CONTRACT + stage4.MAX_PROHIBITIONS_PER_CONTRACT,
+        "verification_plan": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "done_when": stage4.MAX_DONE_WHEN_PER_CONTRACT,
+    }
+    properties = {
+        field: (
+            {"type": "array", "items": {"type": "string"}, "maxItems": array_limits.get(field, 6)}
+            if field not in {"goal_anchor", "task", "expected_outcome"}
+            else {"type": "string"}
+        ) for field in _WORKER_MISSION_FIELDS
+    }
     for field in ("targets", "implementation_plan", "verification_plan", "done_when"):
         properties[field]["minItems"] = 1
     return {
@@ -5435,6 +5819,40 @@ def normalize_worker_mission(task, brain_projection, mission):
         task.get("done_when", []) or normalized["done_when"], 6, 300,
     )
     return _bound_worker_mission(normalized)
+
+
+def _normalize_contract_worker_mission(task, brain_projection, mission):
+    """Normalize model prose while keeping the immutable contract fields intact."""
+    task = task if isinstance(task, dict) else {}
+    projection = brain_projection if isinstance(brain_projection, dict) else {}
+    value = mission if isinstance(mission, dict) else {}
+    normalized = {
+        "goal_anchor": compact_text(
+            projection.get("root_goal_anchor") or value.get("goal_anchor", ""), 900,
+        ),
+        "task": compact_text(task.get("goal") or value.get("task", ""), 1000),
+        "expected_outcome": compact_text(value.get("expected_outcome") or "the current contract is verified", 900),
+    }
+    array_limits = {
+        "targets": stage4.MAX_SURFACES_PER_CONTRACT,
+        "existing_facts": stage4.MAX_REPOSITORY_FACTS_PER_CONTRACT,
+        "implementation_plan": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "interfaces_to_reuse": stage4.MAX_INTERFACES_PER_CONTRACT,
+        "invariants": stage4.MAX_PRESERVATION_PER_CONTRACT + stage4.MAX_PROHIBITIONS_PER_CONTRACT,
+        "project_specific_quality_rules": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "do_not": stage4.MAX_SURFACES_PER_CONTRACT + stage4.MAX_PROHIBITIONS_PER_CONTRACT,
+        "verification_plan": stage4.MAX_TEST_CHECKS_PER_CONTRACT,
+        "done_when": stage4.MAX_DONE_WHEN_PER_CONTRACT,
+    }
+    for field in _WORKER_MISSION_FIELDS[3:]:
+        # The MissionCompiler schema already bounds these arrays to six model
+        # claims.  Do not pass them through the legacy normalizer, which could
+        # truncate the approved task's completion authority before Stage 4A
+        # validates it.
+        normalized[field] = _bounded_brain_strings(
+            value.get(field), array_limits.get(field, 6), 360,
+        )
+    return normalized
 
 
 def _bound_worker_mission(mission, max_chars=MAX_WORKER_MISSION_CHARS):
@@ -5615,6 +6033,20 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
                 )
         elif isinstance(context.get("bounded_strategy"), dict):
             context.pop("bounded_strategy", None)
+        elif isinstance(context.get("execution_contract"), dict):
+            # Stage 4A authority is never trimmed or dropped.  Remove every
+            # optional planning field first; if the contract itself cannot fit
+            # the bounded handoff, surface a deterministic size failure.
+            for field in ("verified_dependencies", "relevant_task_context", "repository_hints",
+                          "project_brain_projection", "bounded_strategy"):
+                if field in context:
+                    context.pop(field, None)
+            encoded = json.dumps(context, ensure_ascii=False, default=str)
+            if len(encoded) > stage4.MAX_CONTEXT_CHARS:
+                raise stage4.ExecutionContractTooLargeError(
+                    EXECUTION_CONTRACT_TOO_LARGE,
+                    "Stage 4A MissionCompiler context exceeds its immutable bound",
+                )
         elif isinstance(context.get("approved_plan_node_contract"), dict):
             # This is the execution authority, so compact it rather than
             # dropping it like optional discovery context.
@@ -5645,7 +6077,7 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
 
 def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
                            strategy_context=None, task_context=None, structured_call=None,
-                           plan_node_contract=None):
+                           plan_node_contract=None, execution_contract=None):
     """Compile one node into a small mission before any Worker tool call."""
     RUN["mission_compilations"] = RUN.get("mission_compilations", 0) + 1
     task = task if isinstance(task, dict) else {}
@@ -5682,9 +6114,32 @@ def compile_worker_mission(task, brain_projection, dependency_summaries=None, re
         context["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
             plan_node_contract,
         )
+    if isinstance(execution_contract, dict):
+        try:
+            context["execution_contract"] = stage4.contract_projection(execution_contract)
+        except stage4.ExecutionContractError as exc:
+            RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
+            RUN["mission_contract_failures"] = RUN.get("mission_contract_failures", 0) + 1
+            raise MissionCompilationError(str(exc)) from exc
+        # A direct caller may still pass a broad Brain projection or strategy
+        # packet. Stage 4A replaces those optional discovery inputs with only
+        # the contract's goal anchor and local preservation marker.
+        context["project_brain_projection"] = {
+            "root_goal_anchor": compact_text(
+                execution_contract.get("goal") or task.get("goal"), 900,
+            ),
+            "verified_state": {
+                "project_invariants": bounded_list(
+                    execution_contract.get("local_preservation_constraints", []), 8, 260,
+                ),
+            },
+        }
+        context.pop("bounded_strategy", None)
+        context.pop("relevant_task_context", None)
+        context["repository_hints"] = "(contract-scoped repository evidence is authoritative above)"
     prompt_text = f"""You are the MISSION COMPILER for exactly one bounded node in a weak-model coding orchestrator.
 Use only the current node, its relevant Project Brain projection, verified dependencies, repository hints, approved
-plan-node execution contract, and any bounded strategy/task context below. Do not mutate files, call tools,
+plan-node or Stage 4A execution contract, and any bounded strategy/task context below. Do not mutate files, call tools,
 decompose siblings, expand approved scope, or return conversation.
 Prepare the Worker so it can execute the stated plan without rediscovering the whole project architecture.
 State what to implement, where it belongs, which verified interfaces/facts to reuse, concrete project-specific rules,
@@ -5704,17 +6159,64 @@ BOUNDED COMPILER CONTEXT:
             data = structured_call(prompt_text, _worker_mission_validator, "mission-compilation", schema)
         if not _worker_mission_validator(data):
             raise StructuredOutputError("mission compiler returned an invalid mission")
-        mission = normalize_worker_mission(task, projection, data)
+        if isinstance(execution_contract, dict):
+            # Validate the model's claims before any deterministic authority
+            # binding.  This keeps an omitted or expanded protection a
+            # controlled MissionCompiler failure instead of allowing the later
+            # normalization pass to conceal the omission.
+            contract_check = stage4.validate_mission_against_contract(
+                data, execution_contract,
+            )
+            if not contract_check.get("valid"):
+                raise StructuredOutputError(
+                    MISSION_CONTRACT_VIOLATION + ": "
+                    + "; ".join(contract_check.get("errors", []))
+                )
+        mission = (
+            _normalize_contract_worker_mission(task, projection, data)
+            if isinstance(execution_contract, dict)
+            else normalize_worker_mission(task, projection, data)
+        )
         if not _worker_mission_validator(mission):
             raise StructuredOutputError("normalized mission is incomplete")
+        if isinstance(execution_contract, dict):
+            # Restoration is deterministic authority binding, not a second
+            # model repair attempt.  Mandatory contract fields are prepended
+            # before the strict identity/protection check below.
+            mission = stage4.normalize_mission_for_contract(
+                mission, execution_contract, task_goal=task.get("goal"),
+            )
+            if len(json.dumps(mission, ensure_ascii=False, default=str)) > MAX_WORKER_MISSION_CHARS:
+                raise StructuredOutputError(
+                    MISSION_CONTRACT_VIOLATION + ": contract-bound mission exceeds the Worker context limit"
+                )
+            contract_check = stage4.validate_mission_against_contract(
+                mission, execution_contract, require_identity=True,
+            )
+            if not contract_check.get("valid"):
+                raise StructuredOutputError(
+                    MISSION_CONTRACT_VIOLATION + ": "
+                    + "; ".join(contract_check.get("errors", []))
+                )
+            mission["execution_contract_id"] = execution_contract.get(
+                "execution_contract_id",
+            )
+            mission["execution_contract_hash"] = execution_contract.get(
+                "contract_hash",
+            )
+            RUN["worker_contract_contexts_created"] = RUN.get(
+                "worker_contract_contexts_created", 0,
+            ) + 1
         if isinstance(plan_node_contract, dict):
             mission["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
                 plan_node_contract,
             )
             mission = _bound_worker_mission(mission)
         return mission
-    except StructuredOutputError as exc:
+    except (StructuredOutputError, stage4.ExecutionContractError) as exc:
         RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
+        if isinstance(execution_contract, dict):
+            RUN["mission_contract_failures"] = RUN.get("mission_contract_failures", 0) + 1
         record_run_event(
             "mission_compilation_failure", task_id=task.get("id"), error=str(exc),
         )
@@ -5820,7 +6322,9 @@ def contract_for_task(task, root_contract):
 # ---------------------------------------------------------------------------
 
 def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=None,
-              kind="implementation", integration_conflicts=None, integration_context=None):
+              kind="implementation", integration_conflicts=None, integration_context=None,
+              execution_contract_id=None, execution_contract=None,
+              execution_contract_child=None):
     return {
         "id": str(task_id), "parent": parent, "depth": int(depth), "goal": compact_text(goal, 1800),
         "done_when": bounded_list(done_when or [], 12, 700), "scope_hint": bounded_list(scope_hint or [], 10, 300),
@@ -5857,6 +6361,12 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "strategy_attempts": [],
         "integration_manifest": None,
         "integration_preflight": None,
+        "execution_contract_id": execution_contract_id,
+        "execution_contract_hash": (execution_contract or {}).get("contract_hash")
+        if isinstance(execution_contract, dict) else None,
+        "execution_contract_type": (execution_contract or {}).get("responsibility_type")
+        if isinstance(execution_contract, dict) else None,
+        "execution_contract_child": execution_contract_child,
     }
 
 
@@ -5887,10 +6397,20 @@ def task_fit_schema():
     }
 
 
-def deterministic_fit_fallback(task, depth, contract, force_smaller=False):
+def deterministic_fit_fallback(task, depth, contract, force_smaller=False,
+                                execution_contract=None):
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard recursion/task budget reached"}
+    if isinstance(execution_contract, dict):
+        if not execution_contract.get("worker_required"):
+            return {"decision": "execute", "reason": "non-worker approved contract"}
+        responsibilities = list(execution_contract.get("done_when", []) or [])
+        if force_smaller and _has_positive_scope_evidence(task, task.get("initial_result")):
+            return {"decision": "split", "reason": "failed approved contract needs smaller child scope"}
+        if len(responsibilities) <= 1:
+            return {"decision": "execute", "reason": "one bounded approved responsibility"}
+        return {"decision": "execute", "reason": "contract-local responsibility remains bounded"}
     plan = current_approved_change_plan()
     planned_nodes = (
         stage3.approved_plan_node_contract(plan, task.get("plan_node_ids") or None).get("nodes", [])
@@ -5909,7 +6429,7 @@ def deterministic_fit_fallback(task, depth, contract, force_smaller=False):
 
 
 def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary="", dependency_summaries=None,
-                    force_smaller=False):
+                    force_smaller=False, execution_contract=None):
     # Keep the public helper convenient for deterministic callers that do not
     # need to prepare reconnaissance themselves.
     if repo_snapshot is None:
@@ -5917,6 +6437,7 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
     elif isinstance(repo_snapshot, list) and dependency_summaries is None and not parent_summary:
         dependency_summaries, repo_snapshot = repo_snapshot, inspect_repository()
     dependency_summaries = dependency_summaries or []
+    execution_contract = execution_contract or _current_execution_contract(task)
     if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("TASK_FIT")
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
@@ -5930,10 +6451,27 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
             "reason": "approved plan contains preservation/verification only",
         }
     approved_plan_packet = (
-        stage3.decomposition_plan_packet(approved_plan)
-        if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
+        "(Stage 4A contract projection is authoritative; full approved plan omitted)"
+        if isinstance(execution_contract, dict) else
+        (stage3.decomposition_plan_packet(approved_plan)
+         if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)")
     )
-    prompt_text = f"""Decide TASK GRANULARITY FIT, not generic complexity.
+    if isinstance(execution_contract, dict):
+        contract_projection = stage4.contract_projection(execution_contract)
+        prompt_text = f"""Decide TASK GRANULARITY FIT for exactly one already-approved Stage 4A execution contract.
+Return only EXECUTE or SPLIT.  The contract is the complete authority for this node; do not add files,
+requirements, interfaces, sibling responsibilities, or verification surfaces.  Split only when the bounded
+contract still exceeds this Worker's reliable one-execution capacity.  Child decomposition must inherit the
+same execution_contract_id, plan identity, protections, and only shrink its surfaces.
+MODEL={MODEL}; CAPACITY_HINT={MODEL_TASK_CAPACITY}/4 heuristic only; DEPTH={depth}/{MAX_DEPTH}; REMAINING={remaining}
+EXECUTION CONTRACT PROJECTION: {json.dumps(contract_projection, ensure_ascii=False, default=str)}
+CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
+PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 900)}
+VERIFIED DEPENDENCIES: {json.dumps(dependency_summaries[-4:], ensure_ascii=False)[:2200]}
+FAILURE EVIDENCE: {json.dumps(failure, ensure_ascii=False)[:1800]}
+{('The previous focused execution exceeded capacity. SPLIT into materially smaller contract-local scope.' if force_smaller else '')}"""
+    else:
+        prompt_text = f"""Decide TASK GRANULARITY FIT, not generic complexity.
 Question: Is CURRENT NODE small and explicit enough that THIS pinned local model is likely to implement AND verify it reliably in ONE focused Builder execution?
 Return only EXECUTE or SPLIT in the schema. Find the coarsest reliable granularity; more splitting is not automatically better.
 Consider responsibilities, likely files/interfaces, context needed, independent verification boundaries, dependency complexity, ambiguity, previous failure evidence, model-capacity heuristic, depth, and remaining task budget.
@@ -5953,14 +6491,20 @@ REPOSITORY SNAPSHOT: {repository_hints(repo_snapshot, task.get('scope_hint'))}""
         decision = str(data["decision"]).lower()
         return {"decision": decision, "reason": "model × task fit"}
     except StructuredOutputError as exc:
-        fallback = deterministic_fit_fallback(task, depth, contract, force_smaller=force_smaller)
+        fallback = deterministic_fit_fallback(
+            task, depth, contract, force_smaller=force_smaller,
+            execution_contract=execution_contract,
+        )
         print(f"[STRUCTURED RETRY] task-fit fallback | {exc}")
         record_run_event("structured_fallback", label="task-fit", error=str(exc), fallback=fallback)
         return fallback
     except (KeyError, TypeError, ValueError) as exc:
         # A malformed orchestration envelope is recoverable planning noise, not
         # a reason to kill the root task or to misclassify it as too broad.
-        fallback = deterministic_fit_fallback(task, depth, contract, force_smaller=force_smaller)
+        fallback = deterministic_fit_fallback(
+            task, depth, contract, force_smaller=force_smaller,
+            execution_contract=execution_contract,
+        )
         print(f"[STRUCTURED RETRY] task-fit fallback | {exc}")
         record_run_event("structured_fallback", label="task-fit", error=str(exc), fallback=fallback)
         return fallback
@@ -5997,6 +6541,17 @@ def children_schema():
 
 def fallback_child_contracts(task):
     items = list(task.get("done_when", []))
+    if task.get("execution_contract_id") and len(items) < 2:
+        # Contract-local fallback children may partition approved completion
+        # obligations, but neither child may invent a new completion claim.
+        return [
+            {"goal": f"Establish the bounded foundation for: {task.get('goal', 'task')}",
+             "done_when": list(items) or [task.get("goal", "the contract is verified")],
+             "scope_hint": list(task.get("scope_hint", []))},
+            {"goal": f"Verify the bounded completion for: {task.get('goal', 'task')}",
+             "done_when": list(items) or [task.get("goal", "the contract is verified")],
+             "scope_hint": list(task.get("scope_hint", []))},
+        ]
     if len(items) >= 2:
         count = min(MAX_CHILDREN, len(items))
         buckets = [[] for _ in range(count)]
@@ -6055,6 +6610,100 @@ def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_
                     child, plan, task.get("plan_node_ids") or None,
                 )
         return integration_children
+    execution_contract = _current_execution_contract(task)
+    if isinstance(execution_contract, dict):
+        remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
+        if remaining < 2 or not execution_contract.get("worker_required"):
+            return []
+        contract_projection = stage4.contract_projection(execution_contract)
+        prompt_text = f"""Split exactly one approved Stage 4A execution contract into 2-4 sequential child missions.
+Children may only shrink the parent contract.  They must inherit the same execution_contract_id, plan_id,
+plan_hash, requirements, done_when obligations, interface reuse, preservation constraints, prohibitions,
+global do_not_touch, and inspection authority.  Do not claim another contract, invent a path, add a requirement,
+or create a pure-interface/storage/game-state Builder.  Return only children with goal, done_when, and scope_hint.
+{('The previous focused execution exceeded capacity; make each child materially smaller.' if force_smaller else '')}
+EXECUTION CONTRACT PROJECTION:
+{json.dumps(contract_projection, ensure_ascii=False, default=str)}
+CURRENT CONTRACT NODE:
+{json.dumps({k: task.get(k) for k in ('id','goal','done_when','scope_hint')}, ensure_ascii=False)}
+VERIFIED DEPENDENCIES:
+{json.dumps((dependency_summaries or [])[-4:], ensure_ascii=False)[:2200]}
+PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}"""
+        try:
+            data = structured_model_call(
+                prompt_text, _children_validator, "decompose-execution-contract",
+                children_schema(),
+            )
+            proposed_specs = data["children"]
+        except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
+            proposed_specs = fallback_child_contracts(task)
+            record_run_event(
+                "structured_fallback", label="decompose-execution-contract",
+                error=str(exc),
+            )
+        other_node_ids = {
+            node_id for item in RUN.get("execution_contracts", []) or []
+            if item.get("execution_contract_id") != execution_contract.get("execution_contract_id")
+            for node_id in item.get("plan_node_ids", []) or []
+        }
+        checked = stage4.validate_child_specs(
+            execution_contract, proposed_specs[:min(MAX_CHILDREN, remaining)],
+            other_contract_ids=other_node_ids,
+        )
+        if not checked.get("valid"):
+            RUN["contract_child_scope_rejections"] = RUN.get(
+                "contract_child_scope_rejections", 0,
+            ) + len(checked.get("rejected", []) or [])
+            record_run_event(
+                "execution_contract_child_scope_rejected", task_id=task.get("id"),
+                execution_contract_id=execution_contract.get("execution_contract_id"),
+                rejected=checked.get("rejected", [])[:4],
+            )
+            fallback = fallback_child_contracts(task)
+            checked = stage4.validate_child_specs(
+                execution_contract, fallback[:min(MAX_CHILDREN, remaining)],
+                other_contract_ids=other_node_ids,
+            )
+        if not checked.get("valid") or len(checked.get("children", [])) < 2:
+            return []
+        specs = checked["children"]
+        RUN["contract_decompositions"] = RUN.get("contract_decompositions", 0) + 1
+        children = []
+        for index, child_contract in enumerate(specs, 1):
+            child_id = str(index) if task.get("id") == "ROOT" else f"{task['id']}.{index}"
+            child = make_task(
+                child_id, child_contract.get("goal") or task.get("goal"),
+                int(task.get("depth", 0)) + 1, task.get("id"),
+                child_contract.get("done_when", []),
+                child_contract.get("allowed_mutation_paths", []),
+                execution_contract_id=execution_contract.get("execution_contract_id"),
+                execution_contract=execution_contract,
+                execution_contract_child=child_contract,
+            )
+            attach_approved_plan_to_task(
+                child, RUN.get("approved_change_plan"),
+                child_contract.get("plan_node_ids"),
+            )
+            child["execution_contract_id"] = execution_contract.get("execution_contract_id")
+            child["execution_contract_hash"] = execution_contract.get("contract_hash")
+            child["execution_contract_type"] = execution_contract.get("responsibility_type")
+            child["plan_node_ids"] = list(child_contract.get("plan_node_ids", []) or [])
+            child["verification_only"] = not bool(execution_contract.get("worker_required"))
+            TASKS[child_id] = child
+            task.setdefault("children", []).append(child_id)
+            RUN["tasks_created"] += 1
+            RUN["max_depth"] = max(RUN.get("max_depth", 0), child["depth"])
+            update_task_ledger(child)
+            children.append(child)
+        _record_decomposition_branch(
+            task, specs, children, kind="resplit" if force_smaller else "initial",
+        )
+        record_run_event(
+            "execution_contract_decomposed", task_id=task.get("id"),
+            execution_contract_id=execution_contract.get("execution_contract_id"),
+            child_ids=[child.get("id") for child in children],
+        )
+        return children
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if remaining < 2:
         return []
@@ -6881,9 +7530,22 @@ def route_recovery_from_diagnosis(task, contract, leaf_result, diagnosis, memory
 
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
                        dependency_summaries=None, failure_evidence=None, strategy_context=None,
-                       brain_projection=None, worker_mission=None):
+                       brain_projection=None, worker_mission=None, execution_contract=None):
     dependency_summaries = dependency_summaries or []
     failure_evidence = failure_evidence or task.get("failure_evidence", [])
+    if isinstance(execution_contract, dict):
+        # A direct caller may provide the old broad projection. The Stage 4A
+        # packet is still fresh and contract-scoped at this boundary.
+        brain_projection = {
+            "root_goal_anchor": compact_text(
+                execution_contract.get("goal") or task.get("goal"), 900,
+            ),
+            "verified_state": {
+                "project_invariants": bounded_list(
+                    execution_contract.get("local_preservation_constraints", []), 8, 260,
+                ),
+            },
+        }
     if brain_projection is None and isinstance(RUN.get("project_brain"), dict):
         brain_projection = build_brain_projection(
             RUN["project_brain"], task, dependency_summaries, repo_snapshot, record=False,
@@ -6902,7 +7564,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         if isinstance(projected_state, dict) and "project_invariants" in projected_state:
             project_invariants = projected_state.get("project_invariants", [])
     memory_excerpt = ""
-    if memory_store:
+    if memory_store and not isinstance(execution_contract, dict):
         try:
             memory_excerpt = memory_store.context_for(
                 f"{task.get('goal','')} {' '.join(task.get('scope_hint', []))}", max_items=5,
@@ -6953,11 +7615,27 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"{json.dumps(worker_mission, ensure_ascii=False, default=str)[:MAX_WORKER_MISSION_CHARS]}\n\n"
         if isinstance(worker_mission, dict) and worker_mission else ""
     )
-    packet = (
+    execution_contract_section = (
+        f"EXECUTION CONTRACT (authoritative Stage 4A projection; do not expand):\n"
+        f"{json.dumps(stage4.contract_projection(execution_contract), ensure_ascii=False, default=str)}\n\n"
+        if isinstance(execution_contract, dict) else ""
+    )
+    root_contract_section = (
+        f"ROOT GOAL ANCHOR:\n{compact_text((execution_contract or {}).get('goal') or task.get('goal'), 900)}\n\n"
+        if isinstance(execution_contract, dict) else
         f"ROOT CONTRACT:\n{compact_contract(root_contract, max_chars=MAX_ROOT_PACKET_CHARS)}\n\n"
+    )
+    repository_section = (
+        "REPOSITORY HINTS:\n(contract-scoped repository evidence is authoritative above)\n\n"
+        if isinstance(execution_contract, dict) else
+        f"REPOSITORY HINTS:\n{repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1900)}\n\n"
+    )
+    packet = (
+        f"{root_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
         f"{brain_section}"
         f"{mission_section}"
+        f"{execution_contract_section}"
         f"PARENT (goal + short verified summary):\n{compact_text(parent_summary or '(none)', 700)}\n\n"
         f"DEPENDENCIES (verified summaries only):\n{json.dumps(dependencies, ensure_ascii=False)[:1900] or '(none)'}\n\n"
         f"PROJECT INVARIANTS (canonical facts; extend, do not redefine):\n"
@@ -6966,7 +7644,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"FAILURE EVIDENCE:\n{json.dumps(failure_projection, ensure_ascii=False)[:1500] if failure_projection else '(none)'}\n\n"
         f"FAILED DECOMPOSITIONS (do not paraphrase these boundaries):\n"
         f"{json.dumps(failed_decompositions, ensure_ascii=False)[:2600] if failed_decompositions else '(none)'}\n\n"
-        f"REPOSITORY HINTS:\n{repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1900)}\n\n"
+        f"{repository_section}"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
     )
     if isinstance(strategy_context, dict):
@@ -9966,20 +10644,65 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
                                    dependency_summaries=None, strategy_context=None,
                                    task_context=None):
     """Prepare one clean Worker context when recursive Project Brain is active."""
-    brain = RUN.get("project_brain")
-    if not isinstance(brain, dict):
-        return None, None
     execution_gate = _stage3_execution_gate(task)
     if not execution_gate.get("allowed"):
         raise PlanApprovalRequiredError(
-            "existing-project mutation cannot begin before approval of the current plan hash"
+            "existing-project mutation cannot begin before approval of the current plan hash",
+            execution_gate.get("terminal_state", PLAN_APPROVAL_REQUIRED),
         )
+    execution_contract = None
+    if task.get("execution_contract_id"):
+        execution_state = compile_approved_plan_execution_contracts()
+        if execution_state.get("status") != "ready":
+            raise PlanApprovalRequiredError(
+                "existing-project Worker is blocked by the current approved execution contract",
+                execution_state.get("terminal_state", EXECUTION_CONTRACT_BLOCKED),
+            )
+        execution_contract = _current_execution_contract(task)
+        if not isinstance(execution_contract, dict):
+            raise PlanApprovalRequiredError(
+                "task execution contract is stale, missing, or outside the approved graph",
+                APPROVED_PLAN_STALE,
+            )
+    brain = RUN.get("project_brain")
+    # Production recursive execution has a Project Brain.  Keeping an empty
+    # bounded projection here also makes the contract handoff deterministic
+    # for direct architecture tests without weakening the contract gate.
+    if not isinstance(brain, dict):
+        if execution_contract is None:
+            return None, None
+        brain = {}
     refresh_project_brain_verified_state()
-    projection = build_brain_projection(
-        brain, task, dependency_summaries, repo_snapshot, record=True,
+    projection = (
+        build_brain_projection(
+            brain, task, dependency_summaries, repo_snapshot, record=True,
+        ) if brain else {}
     )
-    plan_node_contract = execution_gate.get("contract")
-    if task_context is None and isinstance(plan_node_contract, dict):
+    if isinstance(execution_contract, dict):
+        # Stage 4A deliberately replaces the broad planning packet with the
+        # immutable contract projection.  Only the goal anchor and a bounded
+        # verified-invariant marker survive from Project Brain here.
+        projection = {
+            "root_goal_anchor": compact_text(
+                execution_contract.get("goal") or task.get("goal"), 900,
+            ),
+            "verified_state": {
+                "project_invariants": bounded_list(
+                    execution_contract.get("local_preservation_constraints", []),
+                    8, 260,
+                ),
+            },
+        }
+    plan_node_contract = None if execution_contract is not None else execution_gate.get("contract")
+    if task_context is None and isinstance(execution_contract, dict):
+        task_context = {
+            "execution_contract_id": execution_contract.get("execution_contract_id"),
+            "execution_contract_hash": execution_contract.get("contract_hash"),
+            "approved_plan_id": execution_contract.get("plan_id"),
+            "approved_plan_hash": execution_contract.get("plan_hash"),
+            "plan_node_ids": list(execution_contract.get("plan_node_ids", []) or []),
+        }
+    elif task_context is None and isinstance(plan_node_contract, dict):
         # Stage 3 carries the explicit node/test contract.  Do not depend on a
         # relevance-ranked Task Brain tail to preserve that responsibility.
         task_context = {
@@ -9997,12 +10720,14 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
         task, projection, dependency_summaries, repo_snapshot,
         strategy_context=strategy_context, task_context=task_context,
         plan_node_contract=plan_node_contract,
+        execution_contract=execution_contract,
     )
     RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
     record_run_event(
         "worker_mission_ready", task_id=task.get("id"),
         goal_anchor=compact_text(mission.get("goal_anchor", ""), 300),
         target_count=len(mission.get("targets", [])),
+        execution_contract_id=(execution_contract or {}).get("execution_contract_id"),
     )
     return projection, mission
 
@@ -10024,7 +10749,8 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         if ACTIVE_TRANSACTION is not None:
             rollback_transaction()
         orchestration_failure = (
-            PLAN_APPROVAL_REQUIRED if isinstance(exc, PlanApprovalRequiredError)
+            getattr(exc, "code", PLAN_APPROVAL_REQUIRED)
+            if isinstance(exc, PlanApprovalRequiredError)
             else "MISSION_COMPILATION_FAILURE"
         )
         return {
@@ -10040,7 +10766,8 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                                       parent_summary, dependency_summaries, task.get("failure_evidence"),
                                       strategy_context=strategy_context,
                                       brain_projection=brain_projection,
-                                      worker_mission=worker_mission)
+                                      worker_mission=worker_mission,
+                                      execution_contract=_current_execution_contract(task))
     context_tokens = max(1, int(len(node_context) / 4))
     RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
     RUN["_leaf_context_samples"].append(context_tokens)
@@ -10050,6 +10777,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         "goal": task["goal"], "requirements": task.get("done_when", []),
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
         "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
+        "execution_contract_child": task.get("execution_contract_child"),
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context)
@@ -10279,12 +11007,12 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
                 "integration_context": task.get("integration_context", {}),
             },
         )
-    except MissionCompilationError as exc:
+    except (MissionCompilationError, PlanApprovalRequiredError) as exc:
         if ACTIVE_TRANSACTION is not None:
             rollback_transaction()
         return {
             "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
-            "orchestration_failure": "MISSION_COMPILATION_FAILURE",
+            "orchestration_failure": getattr(exc, "code", "MISSION_COMPILATION_FAILURE"),
             "summary": str(exc), "memory": memory,
             "failure_evidence": [{
                 "kind": "orchestration_failure", "status": "FAIL", "source": "mission_compiler",
@@ -10295,6 +11023,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         task, contract, get_memory_store(), repo_snapshot,
         parent_summary, dependency_summaries, task.get("failure_evidence"),
         brain_projection=brain_projection, worker_mission=worker_mission,
+        execution_contract=_current_execution_contract(task),
     )
     context_tokens = max(1, int(len(node_context) / 4))
     RUN["peak_leaf_context_tokens"] = max(RUN["peak_leaf_context_tokens"], context_tokens)
@@ -10305,6 +11034,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         "goal": task["goal"], "requirements": task.get("done_when", []),
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
         "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
+        "execution_contract_child": task.get("execution_contract_child"),
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     builder = execute_agent_task(
@@ -12043,6 +12773,41 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
             "integration_outcome": task.get("integration_outcome")}
 
 
+def aggregate_execution_contract_children(task, contract, child_results, memory,
+                                           repo_snapshot=None, root=False):
+    """Join children inside one approved contract without a broad Builder."""
+    child_info = []
+    for item in child_results or []:
+        child_task = item.get("task", {}) if isinstance(item, dict) else {}
+        child_result = item.get("result", {}) if isinstance(item, dict) else {}
+        child_info.append({
+            "task_id": str(child_task.get("id", "")),
+            "status": str(child_result.get("status", "failed")),
+            "summary": compact_text(child_result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "changed_files": _compact_manifest_values(child_result.get("changed_files", []), 12, 140),
+            "evidence": compact_evidence_summary(child_result),
+        })
+    if any(item["status"] != "done" for item in child_info):
+        return {
+            "status": "failed", "failure_type": "CHILD_FAILURE",
+            "summary": "not all contract children verified", "memory": memory,
+            "children": child_info,
+        }
+    return {
+        "status": "done",
+        "summary": compact_text(
+            f"approved execution contract {task.get('execution_contract_id')} verified",
+            MAX_NODE_SUMMARY_CHARS,
+        ),
+        "memory": memory, "children": child_info,
+        "changed_files": list(dict.fromkeys(
+            str(path) for item in child_results or []
+            for path in (item.get("result", {}).get("changed_files", []) or [])
+        ))[:12],
+        "execution_contract_id": task.get("execution_contract_id"),
+    }
+
+
 def _can_expand(depth):
     return depth < MAX_DEPTH and RUN.get("tasks_created", 0) + 2 <= MAX_TOTAL_TASKS
 
@@ -12271,7 +13036,9 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             return parent_result
 
     aggregate_fn = aggregator or (
-        _aggregate_integration_children if task.get("kind") == "integration" else aggregate_task
+        _aggregate_integration_children if task.get("kind") == "integration" else
+        (aggregate_execution_contract_children
+         if task.get("execution_contract_id") else aggregate_task)
     )
     try:
         aggregate = aggregate_fn(task, contract, completed, memory, repo_snapshot, root=(task["id"] == "ROOT"))
@@ -12407,12 +13174,14 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         event(f"[TASK {label}] {compact_text(task['goal'], 160)}", role="Coordinator", task=label, action="task fit")
 
     can_split = _can_expand(depth)
+    execution_contract = _current_execution_contract(task)
     if can_split:
         try:
             decision = (
                 fit_decider(task, depth, contract, repo_snapshot, parent_summary, dependency_summaries, False)
-                if fit_decider else decide_task_fit(
+            if fit_decider else decide_task_fit(
                     task, depth, contract, repo_snapshot, parent_summary, dependency_summaries,
+                    execution_contract=execution_contract,
                 )
             )
         except ProviderError as exc:
@@ -12420,6 +13189,8 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
             _mark_task_result(task, result)
             event(f"[FAILED {label}] provider/environment error; no decomposition", task=label)
             return result
+
+
     else:
         decision = {"decision": "execute", "reason": "hard recursion/task budget reached"}
     decision_name = str((decision or {}).get("decision", "execute")).lower()
@@ -12522,12 +13293,164 @@ def begin_durable_run(contract):
     global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT
     ACTIVE_CONTRACT = dict(contract)
     ACTIVE_TOOL_CONTRACT = dict(contract)
+    RUN["source_contract"] = copy.deepcopy(contract)
     store = get_memory_store()
     if store and RUN_ID:
         try:
             store.begin_run(RUN_ID, str(contract.get("goal") or "coding task"), contract)
         except Exception:
             pass
+
+
+def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decider=None,
+                                leaf_executor=None, aggregator=None):
+    """Execute the immutable Stage 4A graph one approved contract at a time."""
+    state = compile_approved_plan_execution_contracts(contract=contract)
+    if state.get("status") != "ready":
+        return dict(state), memory
+    snapshot = state.get("snapshot")
+    graph = state.get("graph") or {}
+    contracts = {
+        item.get("execution_contract_id"): item
+        for item in state.get("contracts", []) or []
+    }
+    root = root_task_from_contract(contract)
+    root["execution_graph_hash"] = graph.get("graph_hash")
+    root["approved_plan_snapshot_hash"] = (snapshot or {}).get("snapshot_hash")
+    TASKS["ROOT"] = root
+    RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0))
+    update_task_ledger(root)
+    results = {}
+    compact_results = []
+    for contract_id in graph.get("topological_order", []) or []:
+        execution_contract = contracts.get(contract_id)
+        if not isinstance(execution_contract, dict):
+            blocked = {
+                "status": "blocked", "failure_type": EXECUTION_DEPENDENCY_BLOCKED,
+                "orchestration_failure": EXECUTION_GRAPH_INVALID,
+                "summary": f"execution graph references unknown contract {contract_id}",
+                "memory": memory,
+            }
+            results[contract_id] = blocked
+            continue
+        task = make_task(
+            contract_id, execution_contract.get("goal", "approved responsibility"),
+            depth=1, parent="ROOT",
+            done_when=execution_contract.get("done_when", []),
+            scope_hint=execution_contract.get("allowed_mutation_paths", []),
+            execution_contract_id=contract_id,
+            execution_contract=execution_contract,
+        )
+        task.update({
+            "approved_plan_id": execution_contract.get("plan_id"),
+            "approved_plan_hash": execution_contract.get("plan_hash"),
+            "plan_node_ids": list(execution_contract.get("plan_node_ids", []) or []),
+            "plan_requirement_ids": list(execution_contract.get("requirement_ids", []) or []),
+            "plan_impact_ids": list(execution_contract.get("impact_ids", []) or []),
+            "plan_evidence_ids": list(execution_contract.get("repository_evidence_ids", []) or []),
+            "execution_contract_type": execution_contract.get("responsibility_type"),
+            "verification_only": not bool(execution_contract.get("worker_required")),
+        })
+        TASKS[contract_id] = task
+        root.setdefault("children", []).append(contract_id)
+        RUN["tasks_created"] += 1
+        RUN["max_depth"] = max(RUN.get("max_depth", 0), task["depth"])
+        update_task_ledger(task)
+        dependencies = list(execution_contract.get("dependencies", []) or [])
+        failed_dependencies = [
+            item for item in dependencies
+            if results.get(item, {}).get("status") != "done"
+        ]
+        if failed_dependencies:
+            result = {
+                "status": "blocked", "failure_type": EXECUTION_DEPENDENCY_BLOCKED,
+                "orchestration_failure": EXECUTION_DEPENDENCY_BLOCKED,
+                "summary": (
+                    f"contract {contract_id} blocked by failed dependency: "
+                    + ", ".join(str(item) for item in failed_dependencies)
+                ),
+                "memory": memory,
+            }
+            RUN["execution_dependency_blocks"] = RUN.get(
+                "execution_dependency_blocks", 0,
+            ) + 1
+            _mark_task_result(task, result)
+        elif not execution_contract.get("worker_required"):
+            result = {
+                "status": "done", "summary": (
+                    f"{execution_contract.get('responsibility_type')} responsibility verified"
+                ), "memory": memory,
+                "execution_contract_id": contract_id,
+            }
+            _mark_task_result(task, result)
+        else:
+            event(
+                f"[CONTRACT FIT {contract_id}] evaluate one approved responsibility",
+                role="Coordinator", task=contract_id, action="contract task fit",
+            )
+            dependency_summaries = []
+            for dependency in dependencies:
+                dep_task = TASKS.get(dependency, {})
+                dep_result = results.get(dependency, {})
+                dependency_summaries.append({
+                    "task_id": dependency, "goal": dep_task.get("goal", ""),
+                    "status": dep_result.get("status", "failed"),
+                    "summary": dep_result.get("summary", ""),
+                    "changed_files": dep_result.get("changed_files", []),
+                })
+            worker_contract = copy.deepcopy(contract if isinstance(contract, dict) else {})
+            worker_contract.update(copy.deepcopy(execution_contract))
+            result = solve_task(
+                task, 1, worker_contract, memory, repo_snapshot or inspect_repository(),
+                dependency_summaries=dependency_summaries,
+                fit_decider=fit_decider, leaf_executor=leaf_executor,
+                aggregator=aggregator or aggregate_execution_contract_children,
+            )
+            memory = result.get("memory", memory)
+        results[contract_id] = result
+        compact_results.append({
+            "execution_contract_id": contract_id,
+            "responsibility_type": execution_contract.get("responsibility_type"),
+            "status": result.get("status"),
+            "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "changed_files": bounded_list(result.get("changed_files", []), 12, 140),
+        })
+        record_run_event(
+            "execution_contract_completed", execution_contract_id=contract_id,
+            responsibility_type=execution_contract.get("responsibility_type"),
+            status=result.get("status"),
+        )
+    required = [
+        item for item in state.get("contracts", []) or []
+        if item.get("worker_required")
+    ]
+    passed = all(results.get(item.get("execution_contract_id"), {}).get("status") == "done"
+                 for item in required) and all(
+                     result.get("status") == "done" for result in results.values()
+                 )
+    root_result = {
+        "status": "done" if passed else "failed",
+        "summary": (
+            "approved plan execution graph verified"
+            if passed else "approved plan execution graph has an unresolved contract"
+        ),
+        "memory": memory,
+        "plan_id": (snapshot or {}).get("plan_id"),
+        "plan_hash": (snapshot or {}).get("plan_hash"),
+        "approved_plan_snapshot_hash": (snapshot or {}).get("snapshot_hash"),
+        "execution_graph_hash": graph.get("graph_hash"),
+        "contract_results": compact_results,
+    }
+    _mark_task_result(root, root_result)
+    RUN["execution_graph_execution"] = {
+        "plan_id": (snapshot or {}).get("plan_id"),
+        "plan_hash": (snapshot or {}).get("plan_hash"),
+        "snapshot_hash": (snapshot or {}).get("snapshot_hash"),
+        "graph_hash": graph.get("graph_hash"),
+        "contract_results": compact_results,
+    }
+    RUN["execution_graph_status"] = root_result["status"]
+    return root_result, memory
 
 
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
@@ -12660,8 +13583,29 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             finish_metrics(result.get("status", "failed"))
         return result, memory
     contract = impact_planning.get("contract", contract)
-    root = root_task_from_contract(contract)
     approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict) and leaf_executor is None:
+        # Existing-project execution enters Stage 4A only after the exact plan
+        # approval has been snapshotted and compiled into a deterministic DAG.
+        execution_state = compile_approved_plan_execution_contracts(
+            contract=contract, plan=approved_plan,
+            approval=RUN.get("plan_approval"),
+        )
+        if execution_state.get("status") != "ready":
+            result = dict(execution_state)
+            result["memory"] = memory
+            if finish:
+                finish_metrics(result.get("status", "blocked"))
+            return result, memory
+        result, memory = execute_approved_plan_graph(
+            contract, memory, repo_snapshot=repo_snapshot,
+            fit_decider=fit_decider, aggregator=aggregator,
+        )
+        print(f"[FINAL] {'done' if result.get('status') == 'done' else 'failed'}")
+        if finish:
+            finish_metrics("done" if result.get("status") == "done" else result.get("status", "failed"))
+        return result, result.get("memory", memory)
+    root = root_task_from_contract(contract)
     if isinstance(approved_plan, dict):
         attach_approved_plan_to_task(root, approved_plan)
     TASKS["ROOT"] = root
@@ -12731,8 +13675,23 @@ def run_auto_request(user_text, memory, interactive=True):
         finish_metrics(impact_planning.get("status", "failed"))
         return impact_planning, memory
     contract = impact_planning.get("contract", contract)
-    root = root_task_from_contract(contract)
     approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict):
+        execution_state = compile_approved_plan_execution_contracts(
+            contract=contract, plan=approved_plan,
+            approval=RUN.get("plan_approval"),
+        )
+        if execution_state.get("status") != "ready":
+            result = dict(execution_state)
+            result["memory"] = memory
+            finish_metrics(result.get("status", "blocked"))
+            return result, memory
+        result, memory = execute_approved_plan_graph(
+            contract, memory, repo_snapshot=repo_snapshot,
+        )
+        finish_metrics("done" if result.get("status") == "done" else result.get("status", "failed"))
+        return result, result.get("memory", memory)
+    root = root_task_from_contract(contract)
     if isinstance(approved_plan, dict):
         attach_approved_plan_to_task(root, approved_plan)
     # Auto is explicitly decided after Stage 2 Task Brain preparation.
@@ -13556,6 +14515,50 @@ def run_self_test(install_browser=False):
         v17_auth_questions = stage2.repository_grounded_questions(
             v17_auth_raw, ledger_requirements(v17_auth_ledger), v17_auth_recon.get("evidence", []),
         )
+        # v19 Stage 4A checks use the already-built deterministic v18.4 pause
+        # plan and a mock approval record. They never invoke a model or Worker.
+        v19_approval = {
+            "approval_status": "APPROVED",
+            "plan_id": v184_plan.get("plan_id"),
+            "plan_hash": v184_plan.get("plan_hash"),
+            "approval_source": "SELF_TEST",
+        }
+        v19_snapshot = stage4.create_approved_plan_snapshot(
+            v184_plan, v19_approval, v184_source_goal, v18_requirements,
+            v17_existing_evidence, v18_registry,
+        )
+        v19_compiled = stage4.compile_execution_contracts(v19_snapshot)
+        v19_graph = stage4.build_execution_graph(
+            v19_snapshot, v19_compiled.get("contracts", []),
+        )
+        v19_graph_validation = stage4.validate_execution_graph(
+            v19_snapshot, v19_graph, v19_compiled.get("contracts", []),
+        )
+        v19_mutation_contract = next(
+            item for item in v19_compiled.get("contracts", [])
+            if item.get("responsibility_type") == stage4.MUTATION
+        )
+        v19_worker_context = stage4.build_worker_contract_context(
+            v19_mutation_contract,
+            [{"task_id": "EXEC-PREV", "status": "done", "summary": "verified"}],
+        )
+        v19_bad_child = stage4.validate_child_specs(v19_mutation_contract, [{
+            "goal": "expand into a protected state owner",
+            "done_when": list(v19_mutation_contract.get("done_when", [])),
+            "scope_hint": list(v19_mutation_contract.get("allowed_mutation_paths", [])) + ["src/game.js"],
+        }])
+        v19_unapproved = stage4.validate_approved_plan(
+            v184_plan, dict(v19_approval, approval_status="PENDING"),
+            v184_source_goal, current_plan=v184_plan,
+        )
+        v19_stale_plan = copy.deepcopy(v184_plan)
+        v19_stale_plan["integration_verification"] = list(
+            v19_stale_plan.get("integration_verification", [])
+        ) + ["changed after approval"]
+        v19_stale = stage4.validate_approved_plan(
+            v19_stale_plan, v19_approval, v184_source_goal,
+            current_plan=v19_stale_plan,
+        )
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -13871,6 +14874,54 @@ def run_self_test(install_browser=False):
                     path for node in v184_plan.get("approved_change_nodes", [])
                     for path in node.get("candidate_targets", [])
                 }
+            ),
+            "v19 approved plan snapshot": (
+                stage4.validate_snapshot(
+                    v19_snapshot, v184_plan, v19_approval, v184_source_goal,
+                ).get("valid")
+                and v19_snapshot.get("immutable") is True
+                and len(json.dumps(v19_snapshot, ensure_ascii=False, default=str)) <= stage4.MAX_SNAPSHOT_CHARS
+                and not any(
+                    key in json.dumps(v19_snapshot, ensure_ascii=False, default=str)
+                    for key in ("raw_impact_planner_output", "raw_impact_challenger_output", "planner_transcript")
+                )
+            ),
+            "v19 deterministic minimal contracts": (
+                v19_compiled.get("metrics", {}).get("execution_contract_mutation") == 1
+                and v19_compiled.get("metrics", {}).get("execution_contract_test") == 1
+                and v19_compiled.get("metrics", {}).get("execution_contract_verify_only") == 0
+                and v19_graph_validation.get("valid")
+                and len(v19_graph.get("topological_order", [])) == len(v19_compiled.get("contracts", []))
+                and v19_compiled.get("assignment", {}).get(v184_input_node.get("node_id"))
+            ),
+            "v19 reuse preservation protection": (
+                {"InputManager.isPressed", "GameState.togglePause"}.issubset(
+                    set(v19_mutation_contract.get("interfaces_to_reuse", []))
+                )
+                and all(
+                    term.casefold() in json.dumps(v19_mutation_contract, ensure_ascii=False).casefold()
+                    for term in ("wasd", "arrow", "input ownership", "src/storage.js", "do not violate")
+                )
+                and "src/game.js" in v19_mutation_contract.get("allowed_inspection_paths", [])
+                and "src/game.js" not in v19_mutation_contract.get("allowed_mutation_paths", [])
+            ),
+            "v19 contract scope and child guard": (
+                stage4.tool_scope(v19_mutation_contract, "src/game.js", mutation=False).get("allowed")
+                and not stage4.tool_scope(v19_mutation_contract, "src/game.js", mutation=True).get("allowed")
+                and not v19_bad_child.get("valid")
+            ),
+            "v19 clean bounded context": (
+                "full_project_brain" not in json.dumps(v19_worker_context, ensure_ascii=False, default=str)
+                and "full_task_brain" not in json.dumps(v19_worker_context, ensure_ascii=False, default=str)
+                and "raw_impact_planner_output" not in json.dumps(v19_worker_context, ensure_ascii=False, default=str)
+                and v19_mutation_contract.get("goal") in json.dumps(v19_worker_context, ensure_ascii=False, default=str)
+                and v19_mutation_contract.get("contract_hash") in json.dumps(v19_worker_context, ensure_ascii=False, default=str)
+            ),
+            "v19 approval and staleness gates": (
+                not v19_unapproved.get("valid")
+                and v19_unapproved.get("code") == stage4.PLAN_APPROVAL_REQUIRED
+                and not v19_stale.get("valid")
+                and v19_stale.get("code") == stage4.APPROVED_PLAN_STALE
             ),
         }
         for name, ok in checks.items():

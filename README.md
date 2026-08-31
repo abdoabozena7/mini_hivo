@@ -27,6 +27,7 @@ migrated once into `list/project-1`.
 - `hivo/playbooks.py`: deterministic project classification and a legacy stage projection; adaptive execution does not call it.
 - `hivo/project_understanding.py`: deterministic project-mode classification, bounded read-only repository evidence, repository conflicts, and temporary Task Brain validation/projection.
 - `hivo/impact_planning.py`: bounded Impact Map and challenge schemas, evidence/coverage gates, minimal-effective plan reconciliation, immutable plan IDs, and approved-scope projection.
+- `hivo/execution_contracts.py`: immutable approved-plan snapshots, deterministic zero-model-call execution contracts, DAG validation, bounded projections, mission checks, and contract-local scope rules.
 - `hivo/evidence.py`: latest-evidence semantics; resolved failures do not poison a run.
 - `hivo/verification.py`: contract-aware browser pass/fail rules.
 - `hivo/browser_checks.py`: deterministic profile-specific interactions for timers and other web apps.
@@ -151,20 +152,57 @@ An existing-project run without an interactive terminal stops cleanly as
 a root implementation failure or clarification request, and subject-project
 files remain fingerprint-identical through planning and approval.
 
-After approval, plan nodes become the decomposition and Mission Compiler
-execution contract. Children trace to plan, requirement, impact, and evidence
-IDs; test responsibility is copied into each relevant node rather than relying
-on Task Brain ordering. Mutation tools reject inspect-only, preservation-only,
-stale-plan, and out-of-plan paths as `UNAPPROVED_SCOPE_EXPANSION`. Greenfield
-`NEW_PROJECT` runs skip repository-style Stage 3 approval and continue directly
-from Task Brain to task-fit. Direct frozen-baseline runs remain limited to the
-pre-Stage-2 project-mode bookkeeping path and do not receive recursive Stage 3
-planning.
+Before Stage 4A, an approved existing-project plan was attached to the normal
+recursive task tree; root/task-fit and decomposition could still operate on
+the broad task packet before a Worker received a node mission. Stage 4A begins
+only after an approved existing-project plan and inserts an authoritative
+translation boundary. The exact flow is
+`ApprovedPlanSnapshot` → deterministic execution-contract compilation → DAG
+validation → per-contract task-fit → optional contract-local decomposition →
+the existing Mission Compiler → Worker → the existing verification and
+recovery lifecycle. The snapshot is immutable and contains only the approved
+plan ID/hash, approval record/hash, authoritative goal, canonical plan nodes,
+mutation/test/reuse surfaces, preservation-only surfaces, global
+`do_not_touch`, structured prohibitions, integration checks, requirement IDs,
+and relevant repository evidence. Raw Planner, Challenger, Source Ledger,
+Project Brain, and Task Brain transcripts are excluded.
 
-Every execution receives a fresh, bounded Node Packet containing the compact
-root contract, current node contract, parent summary, verified dependency
-summaries, relevant verified memory, failure evidence when retrying, and bounded
-repository hints. Sibling conversations and hidden reasoning are not copied.
+Execution contracts use the small responsibility set `MUTATION`,
+`TEST_MUTATION`, `VERIFY_ONLY`, `INTERFACE_REUSE`, and `INTEGRATION_CHECK`.
+Each contract carries plan/node/requirement/obligation/impact/surface/evidence
+IDs, separate mutation and inspection paths, reusable interfaces, local
+preservation, prohibitions, test checks, completion conditions, dependencies,
+provenance, and a deterministic contract hash. Pure reuse and preservation
+nodes are attached to a relevant executable or verification contract, so they
+do not create unnecessary Builder calls. A bounded responsibility that cannot
+fit returns `EXECUTION_CONTRACT_TOO_LARGE`; required authority is never
+silently trimmed.
+
+The execution graph is deterministic and validates dependency existence,
+cycles, exact contract identity, duplicate ownership, executable mutation and
+test coverage, and attached reuse/preservation/prohibition responsibilities.
+MissionCompiler receives only one contract projection and completed dependency
+summaries. Its mission must keep targets inside mutation scope, inspection
+references inside inspection scope, requirements and completion conditions
+inside the contract, and all protections intact. Each Worker receives a fresh
+bounded context and can inspect approved read-only paths, but mutation tools
+reject out-of-contract, inspect-only, protected, or stale paths with
+`CONTRACT_SCOPE_VIOLATION` or `APPROVED_PLAN_STALE`.
+
+Greenfield `NEW_PROJECT` runs keep their existing Stage 1/2-to-task-fit
+execution semantics unless an approved Stage 3 plan is actually present.
+Direct baseline mode remains the frozen pre-Stage-2 comparison: it shares only
+project-mode bookkeeping and the existing approval/safety guard when a caller
+explicitly supplies approved-plan state; it does not silently receive the
+recursive contract graph. Stage 4A adds no model role, no budget increase, no
+parallel scheduler, and no change to mutation recovery.
+
+Outside the approved Stage 4A contract handoff, each execution receives a
+fresh, bounded Node Packet containing the compact root contract, current node
+contract, parent summary, verified dependency summaries, relevant verified
+memory, failure evidence when retrying, and bounded repository hints. Stage 4A
+replaces that broad packet with the single immutable contract projection.
+Sibling conversations and hidden reasoning are not copied.
 The final transaction is committed only after executable evidence, a read-only
 adversarial Falsifier pass, and the deterministic evidence gate succeed. A
 `TASK_TOO_BROAD` result triggers a materially smaller re-split when budget
