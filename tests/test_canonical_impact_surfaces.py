@@ -66,6 +66,27 @@ class CanonicalImpactSurfaceTests(unittest.TestCase):
         self.assertTrue(impact.validate_canonical_surface_registry(value, self.evidence)["valid"])
         return value
 
+    def planning_packet(self, max_chars=None, brain=None, project_invariants=None):
+        registry = self.registry()
+        kwargs = {}
+        if max_chars is not None:
+            kwargs["max_chars"] = max_chars
+        return impact.build_canonical_planning_packet(
+            brain or self.brain, self.requirements, self.evidence,
+            project_invariants=project_invariants or ["preserve current owners"],
+            surface_registry=registry, **kwargs,
+        )
+
+    def seed_decision(self, impact_id="IMPACT-001", **overrides):
+        value = {
+            "impact_id": impact_id,
+            "disposition": "MUST_CHANGE",
+            "requirement_ids": ["REQ-001", "REQ-002"],
+            "action": "Handle Escape through the existing canonical owner.",
+        }
+        value.update(overrides)
+        return value
+
     def canonical_candidate(self, registry=None):
         registry = registry or self.registry()
         by_symbol = {
@@ -128,6 +149,271 @@ class CanonicalImpactSurfaceTests(unittest.TestCase):
         self.assertIn("REPO-004", encoded)
         self.assertNotIn("file_contents", encoded)
         self.assertNotIn("this.paused", encoded)
+
+    def test_v182_planner_packet_is_dedicated_and_complete(self):
+        packet = self.planning_packet()
+        self.assertIn("requirements", packet["packet"])
+        self.assertIn("surfaces", packet["packet"])
+        self.assertIn("impact_seeds", packet["packet"])
+        self.assertIn("preservation_constraints", packet["packet"])
+        self.assertIn("planning_rules", packet["packet"])
+        self.assertTrue(impact.validate_planning_packet(
+            packet, registry=self.registry(), requirements=self.requirements,
+        )["valid"])
+
+    def test_v182_context_pressure_trims_optional_prose_first(self):
+        brain = copy.deepcopy(self.brain)
+        brain["known_non_goals"] = [{
+            "text": "OPTIONAL_TASK_PROSE " + ("x" * 600),
+            "requirement_ids": [], "evidence_ids": [],
+        } for _ in range(8)]
+        brain["relevant_project_brain_projection"] = [{
+            "text": "OPTIONAL_PROJECT_PROSE " + ("y" * 600),
+            "requirement_ids": [], "evidence_ids": [],
+        } for _ in range(8)]
+        packet = self.planning_packet(max_chars=6000, brain=brain,
+                                     project_invariants=["OPTIONAL_PROJECT_INVARIANT " + ("z" * 600)] * 8)
+        payload = packet["packet"]
+        self.assertTrue(packet["packet_complete"], packet["errors"])
+        self.assertEqual(len(payload["requirements"]), len(self.requirements))
+        self.assertEqual(len(payload["surfaces"]), 7)
+        self.assertEqual(len(payload["impact_seeds"]), 7)
+        self.assertNotIn("OPTIONAL_PROJECT_PROSE", json.dumps(payload))
+        self.assertNotIn("OPTIONAL_TASK_PROSE", json.dumps(payload))
+
+    def test_v182_controlled_packet_serializes_seven_and_drops_zero(self):
+        packet = self.planning_packet()
+        observability = packet["observability"]
+        self.assertEqual(len(observability["selected_surface_ids"]), 7)
+        self.assertEqual(observability["selected_surface_ids"], observability["serialized_surface_ids"])
+        self.assertEqual(observability["dropped_surface_ids"], [])
+        self.assertEqual(len(packet["impact_seeds"]), 7)
+
+    def test_v182_legacy_context_cannot_tail_drop_controlled_surfaces(self):
+        context = impact.build_planner_context(
+            self.brain, self.requirements, self.evidence,
+            project_invariants=["preserve owners"], surface_registry=self.registry(),
+        )
+        self.assertEqual([item["surface_id"] for item in context["surfaces"]], [
+            "SURF-001", "SURF-002", "SURF-003", "SURF-004", "SURF-005", "SURF-006", "SURF-007",
+        ])
+        self.assertEqual(len(context["impact_seeds"]), 7)
+
+    def test_v182_impossible_packet_blocks_before_planner_inference(self):
+        original_limit = impact.MAX_PLANNER_CONTEXT_CHARS
+        calls = []
+        impact.MAX_PLANNER_CONTEXT_CHARS = 100
+        try:
+            contract = {
+                "source_requirement_ledger": mini.build_source_requirement_ledger(self.requirements),
+                "requirements": [item["text"] for item in self.requirements],
+            }
+            result = mini.prepare_stage3_context(
+                {"project_mode": mini.EXISTING_PROJECT, "task_brain": self.brain,
+                 "reconnaissance": {"evidence": self.evidence}},
+                contract, interactive=False, terminal_available=False,
+                planner_structured_call=lambda *_args: calls.append(True) or self.canonical_candidate(),
+            )
+        finally:
+            impact.MAX_PLANNER_CONTEXT_CHARS = original_limit
+        self.assertEqual(result["orchestration_failure"], impact.IMPACT_PLANNING_CONTEXT_INCOMPLETE)
+        self.assertEqual(mini.RUN["impact_planner_calls"], 0)
+        self.assertEqual(calls, [])
+
+    def test_v182_seed_ids_and_bindings_are_deterministic(self):
+        packet = self.planning_packet()
+        seeds = packet["impact_seeds"]
+        self.assertEqual([item["impact_id"] for item in seeds], [
+            "IMPACT-001", "IMPACT-002", "IMPACT-003", "IMPACT-004",
+            "IMPACT-005", "IMPACT-006", "IMPACT-007",
+        ])
+        self.assertEqual([item["surface_id"] for item in seeds], packet["serialized_surface_ids"])
+        self.assertTrue(all(item["canonical_path"] and item["canonical_evidence_ids"] for item in seeds))
+
+    def test_v182_missing_surface_id_uses_seed_binding_and_safe_normalization(self):
+        registry = self.registry()
+        packet = self.planning_packet()
+        hydrated = impact.hydrate_impact_map(
+            self.seed_decision("impact_001"), registry, self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"], hydrated["hydration_errors"])
+        self.assertEqual(hydrated["impacts"][0]["impact_id"], "IMPACT-001")
+        self.assertEqual(hydrated["impacts"][0]["surface_id"], "SURF-001")
+        self.assertEqual(hydrated["impacts"][0]["path"], "src/input.js")
+
+    def test_v182_wrong_optional_surface_id_cannot_override_seed(self):
+        packet = self.planning_packet()
+        decision = self.seed_decision("IMPACT_001", surface_id="SURF-999", path="not-authoritative.js")
+        hydrated = impact.hydrate_impact_map(
+            decision, self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"])
+        self.assertEqual(hydrated["impacts"][0]["surface_id"], "SURF-001")
+        self.assertEqual(hydrated["impacts"][0]["path"], "src/input.js")
+        self.assertGreaterEqual(hydrated["impact_seed_surface_binding_conflicts"], 1)
+
+    def test_v182_invalid_optional_interface_is_dropped_without_losing_decision(self):
+        packet = self.planning_packet()
+        decision = self.seed_decision(
+            interfaces_to_reuse=["surface_input_handler", "SURF-004"],
+        )
+        hydrated = impact.hydrate_impact_map(
+            decision, self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"])
+        self.assertEqual(hydrated["impacts"][0]["interfaces_to_reuse"], ["SURF-004"])
+        self.assertGreaterEqual(hydrated["impact_invented_interfaces_rejected"], 1)
+        self.assertNotIn("surface_input_handler", json.dumps(hydrated["impacts"]))
+
+    def test_v182_known_canonical_interfaces_are_accepted(self):
+        packet = self.planning_packet()
+        hydrated = impact.hydrate_impact_map(
+            {"impacts": [
+                self.seed_decision("IMPACT-001", interfaces_to_reuse=["SURF-004"]),
+                self.seed_decision("IMPACT-002", interfaces_to_reuse=["SURF-003"]),
+            ]}, self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"])
+        self.assertEqual(
+            {item["impact_id"]: item["interfaces_to_reuse"] for item in hydrated["impacts"]},
+            {"IMPACT-001": ["SURF-004"], "IMPACT-002": ["SURF-003"]},
+        )
+
+    def test_v182_per_decision_validation_keeps_good_and_rejects_bad(self):
+        packet = self.planning_packet()
+        hydrated = impact.hydrate_impact_map(
+            {"impacts": [
+                self.seed_decision("IMPACT-001"),
+                self.seed_decision("IMPACT-002", disposition="NOT_A_DISPOSITION",
+                                    requirement_ids=["REQ-999"]),
+            ]}, self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"])
+        self.assertEqual([item["impact_id"] for item in hydrated["impacts"]], ["IMPACT-001"])
+        self.assertGreaterEqual(hydrated["impact_invalid_requirement_references_rejected"], 1)
+        self.assertEqual(hydrated["impact_seed_decisions_rejected"], 1)
+
+    def test_v182_zero_usable_seed_decisions_is_impact_map_invalid(self):
+        packet = self.planning_packet()
+        candidate = {"impact_id": "IMPACT-999", "disposition": "MUST_CHANGE",
+                     "requirement_ids": ["REQ-001"], "action": "Unknown seed."}
+        self.assertFalse(impact.validate_planner_output(
+            candidate, self.requirements, impact_seeds=packet["impact_seeds"],
+        ))
+        hydrated = impact.hydrate_impact_map(
+            candidate, self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertFalse(hydrated["hydration_valid"])
+        self.assertEqual(hydrated["impacts"], [])
+
+    def test_v182_partial_map_reaches_challenger_gap_machinery(self):
+        packet = self.planning_packet()
+        hydrated = impact.hydrate_impact_map(
+            self.seed_decision("IMPACT-001"), self.registry(), self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        challenges = impact.deterministic_challenges(
+            hydrated, self.requirements, self.evidence, surface_registry=self.registry(),
+        )
+        self.assertTrue(any(item["challenge_type"] == "TEST_GAP" for item in challenges))
+        self.assertTrue(any(item["challenge_type"] == "REQUIREMENT_GAP" for item in challenges))
+
+    def test_v182_challenger_packet_retains_every_reviewed_impact(self):
+        registry = self.registry()
+        hydrated = impact.hydrate_impact_map(
+            self.canonical_candidate(registry), registry, self.requirements, self.evidence,
+        )
+        packet = impact.build_challenger_packet(
+            hydrated, self.requirements, self.evidence, task_brain=self.brain,
+            surface_registry=registry,
+        )
+        self.assertTrue(packet["packet_complete"], packet["errors"])
+        self.assertEqual(packet["reviewed_impact_ids"], packet["serialized_impact_ids"])
+        self.assertEqual(packet["dropped_impact_ids"], [])
+
+    def test_v182_seed_bound_full_plan_has_canonical_semantics(self):
+        registry = self.registry()
+        packet = self.planning_packet()
+        hydrated = impact.hydrate_impact_map(
+            {"impacts": [
+                self.seed_decision("IMPACT-001", preserve=["WASD/arrow controls"]),
+                self.seed_decision("IMPACT-003", disposition="INTERFACE_REUSE",
+                                    requirement_ids=["REQ-001", "REQ-002"],
+                                    interfaces_to_reuse=["SURF-003"], action="Reuse togglePause."),
+                self.seed_decision("IMPACT-004", disposition="INTERFACE_REUSE",
+                                    requirement_ids=["REQ-002"], interfaces_to_reuse=["SURF-004"],
+                                    action="Reuse isPressed."),
+                self.seed_decision("IMPACT-005", disposition="PRESERVATION_ONLY",
+                                    requirement_ids=["REQ-003"], preserve=["persistent best-score behavior"],
+                                    action="Preserve best-score persistence."),
+                self.seed_decision("IMPACT-006", disposition="TEST_CHANGE",
+                                    requirement_ids=["REQ-004"], verification=["pause tests pass"],
+                                    action="Update input tests."),
+            ]}, registry, self.requirements, self.evidence,
+            impact_seeds=packet["impact_seeds"],
+        )
+        self.assertTrue(hydrated["hydration_valid"], hydrated["hydration_errors"])
+        plan = impact.build_minimal_change_plan(
+            hydrated, self.requirements, self.evidence, surface_registry=registry,
+        )
+        gate = impact.validate_change_plan(
+            plan, self.requirements, self.evidence, surface_registry=registry,
+        )
+        self.assertTrue(gate["valid"], gate["errors"])
+        self.assertIn("SURF-001", plan["mutation_surface_ids"])
+        self.assertIn("SURF-003", plan["interface_surface_ids"])
+        self.assertIn("SURF-006", plan["mutation_surface_ids"])
+        self.assertIn("SURF-005", plan["do_not_touch_surface_ids"])
+        self.assertTrue(set(plan["mutation_surface_ids"]).isdisjoint(plan["do_not_touch_surface_ids"]))
+
+    def test_v182_seed_bound_pipeline_reaches_noninteractive_approval(self):
+        candidate = {"impacts": [
+            self.seed_decision("IMPACT-001", interfaces_to_reuse=["SURF-004"],
+                                preserve=["WASD/arrow controls"]),
+            self.seed_decision("IMPACT-002", disposition="VERIFY_ONLY",
+                                action="Verify the existing pause-state owner."),
+            self.seed_decision("IMPACT-003", disposition="INTERFACE_REUSE",
+                                interfaces_to_reuse=["SURF-003"], action="Reuse togglePause."),
+            self.seed_decision("IMPACT-004", disposition="INTERFACE_REUSE",
+                                requirement_ids=["REQ-002"], interfaces_to_reuse=["SURF-004"],
+                                action="Reuse isPressed."),
+            self.seed_decision("IMPACT-005", disposition="PRESERVATION_ONLY",
+                                requirement_ids=["REQ-003"], preserve=["persistent best-score behavior"],
+                                action="Preserve best-score persistence."),
+            self.seed_decision("IMPACT-006", disposition="TEST_CHANGE",
+                                requirement_ids=["REQ-004"], verification=["pause tests pass"],
+                                action="Update input tests."),
+            self.seed_decision("IMPACT-007", disposition="INSUFFICIENT_EVIDENCE",
+                                requirement_ids=["REQ-004"], action="No entrypoint change is supported."),
+        ]}
+        contract = {
+            "source_requirement_ledger": mini.build_source_requirement_ledger(self.requirements),
+            "requirements": [item["text"] for item in self.requirements],
+        }
+        understanding = {
+            "project_mode": mini.EXISTING_PROJECT, "task_brain": self.brain,
+            "reconnaissance": {"evidence": self.evidence},
+        }
+        result = mini.prepare_stage3_context(
+            understanding, contract, interactive=False, terminal_available=False,
+            planner_structured_call=lambda *_args: candidate,
+            challenger_structured_call=lambda *_args: {"challenges": []},
+        )
+        self.assertEqual(result["status"], "plan_approval_required")
+        self.assertEqual(result["terminal_state"], mini.PLAN_APPROVAL_REQUIRED)
+        self.assertEqual(mini.RUN["impact_planner_calls"], 1)
+        self.assertEqual(mini.RUN["impact_challenger_calls"], 1)
+        self.assertEqual(mini.RUN["impact_seed_decisions_received"], 7)
+        self.assertEqual(mini.RUN["impact_seed_decisions_validated"], 7)
+        self.assertEqual(mini.RUN["impact_seed_decisions_rejected"], 0)
+        self.assertEqual(mini.RUN["worker_missions_executed"], 0)
+        self.assertEqual(mini.RUN["builder_calls"], 0)
 
     def test_hydration_rejects_hallucinated_paths_and_interfaces(self):
         registry = self.registry()

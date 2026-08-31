@@ -1436,9 +1436,21 @@ def new_metrics(mode):
         "impact_supported": 0,
         "impact_preservation_only": 0,
         "impact_unknown_surface_references": 0,
+        "impact_unknown_impact_seed_references": 0,
         "impact_surface_evidence_mismatches": 0,
         "impact_invented_existing_paths_rejected": 0,
         "impact_invented_interfaces_rejected": 0,
+        "impact_invalid_optional_fields_rejected": 0,
+        "impact_invalid_requirement_references_rejected": 0,
+        "impact_seed_surface_binding_conflicts": 0,
+        "impact_planning_surfaces_selected": 0,
+        "impact_planning_surfaces_serialized": 0,
+        "impact_planning_surfaces_dropped": 0,
+        "impact_seed_decisions_received": 0,
+        "impact_seed_decisions_validated": 0,
+        "impact_seed_decisions_rejected": 0,
+        "impact_planning_context_incomplete": 0,
+        "impact_challenger_context_incomplete": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -4329,6 +4341,15 @@ impact_challenge_schema = stage3.challenge_schema
 canonical_surface_registry_schema = stage3.canonical_surface_registry_schema
 build_canonical_surface_registry = stage3.build_canonical_surface_registry
 build_impact_seeds = stage3.build_impact_seeds
+surface_bound_impact_seeds = stage3.surface_bound_impact_seeds
+select_task_relevant_surfaces = stage3.select_task_relevant_surfaces
+validate_impact_seeds = stage3.validate_impact_seeds
+normalize_impact_id = stage3.normalize_impact_id
+build_canonical_planning_packet = stage3.build_canonical_planning_packet
+build_complete_planning_packet = stage3.build_complete_planning_packet
+build_planner_packet = stage3.build_planner_packet
+validate_planning_packet = stage3.validate_planning_packet
+bind_impact_decisions_to_seeds = stage3.bind_impact_decisions_to_seeds
 hydrate_impact_map = stage3.hydrate_impact_map
 audit_impact_surfaces = stage3.audit_impact_surfaces
 derive_do_not_touch_surface_ids = stage3.derive_do_not_touch_surface_ids
@@ -4368,23 +4389,21 @@ def _impact_project_invariants(task_brain):
 
 def _impact_planner_prompt(context):
     return f"""You are IMPACT PLANNER, a narrow read-only role in a weak-model coding orchestrator.
-Propose one COMPLETE bounded Impact Map for the current existing-project task. The canonical surface registry
-below is the ONLY authority for existing repository identity. For every existing impact output a valid
-surface_id from that registry and one bounded disposition: MUST_CHANGE, INTERFACE_REUSE, TEST_CHANGE,
-PRESERVATION_ONLY, VERIFY_ONLY, or INSUFFICIENT_EVIDENCE. Output requirement IDs, actions, interface surface
-IDs, preservation promises, and verification only. Do not author or infer paths, symbols, owners, or
-interface names: they are hydrated later from surface IDs. Never use a path or symbol that is not represented
-by a supplied surface ID. Relevant does not mean MUST_CHANGE. A preservation surface remains unmodified
-unless requirements and evidence prove mutation necessary. Every impact must cite valid Source Requirement
-IDs; evidence IDs are optional in the response and are checked against the selected surface. If no existing
-surface can safely represent a responsibility, emit a separate justified NEW_SURFACE_PROPOSAL rather than
-inventing an existing path, and bind its impact through new_surface_proposal_ids with no surface_id. Each
-impact must use exactly one target authority: an existing surface_id or validated new-surface proposal IDs.
+Propose one COMPLETE bounded semantic decision set for the deterministic impact slots in the packet below.
+The orchestrator has already bound every existing slot to a canonical surface. For each known existing
+impact, decide only its disposition: MUST_CHANGE, INTERFACE_REUSE, TEST_CHANGE, PRESERVATION_ONLY,
+VERIFY_ONLY, or INSUFFICIENT_EVIDENCE. Return the impact_id, valid Source Requirement IDs, and a concise
+action/reason. Optionally return canonical INTERFACE surface IDs to reuse, preservation promises, and
+verification/test contracts. Do not author or infer paths, symbols, owners, repository evidence IDs, or
+existing surface bindings. surface_id is unnecessary; if you return one it is non-authoritative and must
+match the supplied seed. Relevant does not mean MUST_CHANGE. A preservation surface remains unmodified
+unless requirements and evidence prove mutation necessary. If no existing surface can safely represent a
+responsibility, emit a separate justified NEW_SURFACE_PROPOSAL rather than using a fake existing identity.
 Do not write code, execute tests, decompose Workers, call tools, or reproduce
 raw source. Return only the requested structured map.
 
-BOUNDED TASK/REPOSITORY FACT CONTEXT:
-{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_PLANNER_CONTEXT_CHARS)}"""
+COMPLETE CANONICAL PLANNING PACKET:
+{json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
 def create_impact_map(task_brain, contract, repository_evidence, structured_call=None):
@@ -4394,24 +4413,65 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     requirements = _active_stage3_requirements(contract)
     RUN["task_brain"] = copy.deepcopy(task_brain or {})
     registry = stage3.build_canonical_surface_registry(task_brain, repository_evidence)
-    seeds = stage3.build_impact_seeds(task_brain, requirements, repository_evidence, registry)
     registry_validation = stage3.validate_canonical_surface_registry(registry, repository_evidence)
     if not registry_validation.get("valid"):
         raise ImpactPlanningError(
             "IMPACT_MAP_INVALID: canonical surface registry is invalid: "
             + "; ".join(registry_validation.get("errors", []))
         )
+    planning_packet = stage3.build_canonical_planning_packet(
+        task_brain, requirements, repository_evidence,
+        project_invariants=_impact_project_invariants(task_brain),
+        surface_registry=registry,
+    )
+    packet = planning_packet.get("packet", planning_packet)
+    packet_observability = planning_packet.get("observability", {})
     RUN["canonical_surface_registry"] = registry
+    seeds = copy.deepcopy(planning_packet.get("impact_seeds", []))
     RUN["impact_seeds"] = seeds
+    RUN["impact_planning_packet"] = copy.deepcopy(packet)
+    RUN["impact_planning_packet_observability"] = copy.deepcopy(packet_observability)
+    for metric, key in (
+        ("impact_planning_surfaces_selected", "selected_surface_ids"),
+        ("impact_planning_surfaces_serialized", "serialized_surface_ids"),
+        ("impact_planning_surfaces_dropped", "dropped_surface_ids"),
+    ):
+        RUN[metric] = len(packet_observability.get(key, []) or [])
+    record_run_event(
+        "impact_planning_packet_created", **packet_observability,
+        packet_status=planning_packet.get("status"),
+    )
+    if not planning_packet.get("packet_complete"):
+        RUN["impact_planning_context_incomplete"] = RUN.get(
+            "impact_planning_context_incomplete", 0,
+        ) + 1
+        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        record_run_event(
+            "impact_planning_context_incomplete",
+            errors=planning_packet.get("errors", []),
+            packet_observability=packet_observability,
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
+            + "; ".join(planning_packet.get("errors", []))
+        )
     record_run_event(
         "canonical_surface_registry_created", surface_count=len(registry.get("surfaces", [])),
         evidence_count=len(registry.get("evidence_ids", [])), registry=registry,
     )
-    context = stage3.build_planner_context(
-        task_brain, requirements, repository_evidence,
-        project_invariants=_impact_project_invariants(task_brain),
-        surface_registry=registry, impact_seeds=seeds,
+    packet_validation = stage3.validate_planning_packet(
+        planning_packet, registry=registry, requirements=requirements, impact_seeds=seeds,
     )
+    if not packet_validation.get("valid"):
+        RUN["impact_planning_context_incomplete"] = RUN.get(
+            "impact_planning_context_incomplete", 0,
+        ) + 1
+        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
+            + "; ".join(packet_validation.get("errors", []))
+        )
+    context = packet
     RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
     RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
     RUN["impact_planner_context"] = context
@@ -4420,6 +4480,7 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     def validator(data):
         return stage3.validate_planner_output(
             data, requirements, allow_legacy=structured_call is not None,
+            impact_seeds=seeds,
         )
 
     try:
@@ -4439,14 +4500,23 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         impact_map = stage3.hydrate_impact_map(
             candidate, registry, requirements, repository_evidence,
             allow_legacy_exact=structured_call is not None,
+            impact_seeds=seeds,
         )
         RUN["impact_map_hydration"] = impact_map
         for metric in (
             "impact_unknown_surface_references", "impact_surface_evidence_mismatches",
             "impact_invented_existing_paths_rejected", "impact_invented_interfaces_rejected",
+            "impact_unknown_impact_seed_references", "impact_invalid_optional_fields_rejected",
+            "impact_invalid_requirement_references_rejected", "impact_seed_surface_binding_conflicts",
         ):
             RUN[metric] = RUN.get(metric, 0) + int(impact_map.get(metric, 0) or 0)
-        if not impact_map.get("hydration_valid"):
+        for metric, fallback in (
+            ("impact_seed_decisions_received", "impact_decisions_received"),
+            ("impact_seed_decisions_validated", "impact_decisions_validated"),
+            ("impact_seed_decisions_rejected", "impact_decisions_rejected"),
+        ):
+            RUN[metric] = RUN.get(metric, 0) + int(impact_map.get(metric, impact_map.get(fallback, 0)) or 0)
+        if not impact_map.get("hydration_valid") or not impact_map.get("impacts"):
             RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
             raise ImpactPlanningError(
                 "IMPACT_MAP_INVALID: " + "; ".join(impact_map.get("hydration_errors", []))
@@ -4511,8 +4581,8 @@ Deterministically evaluate unsupported necessity, wrong owner, duplicate ownersh
 change, preservation risk, missed interface reuse, test/dependency/requirement gaps. Do not review code, write
 code, call tools, inspect the full repository, or claim perfect correctness. Return only structured challenges.
 
-BOUNDED FALSIFICATION CONTEXT:
-{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_CHALLENGER_CONTEXT_CHARS)}"""
+COMPLETE BOUNDED FALSIFICATION PACKET:
+{json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
 def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
@@ -4528,6 +4598,20 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
         impact_map, requirements, repository_evidence, task_brain,
         surface_registry=registry,
     )
+    if not context.get("packet_complete", True):
+        RUN["impact_challenger_context_incomplete"] = RUN.get(
+            "impact_challenger_context_incomplete", 0,
+        ) + 1
+        RUN["orchestration_failure"] = stage3.IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
+        record_run_event(
+            "impact_challenger_context_incomplete",
+            errors=context.get("errors", []),
+            packet_observability=context.get("packet_observability", {}),
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_CHALLENGER_CONTEXT_INCOMPLETE}: "
+            + "; ".join(context.get("errors", []))
+        )
     RUN.setdefault("control_flow", []).append("IMPACT_CHALLENGER")
     RUN["impact_challenger_calls"] = RUN.get("impact_challenger_calls", 0) + 1
     RUN["impact_challenger_context"] = context
@@ -4578,7 +4662,62 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     return validation
 
 
+def _bounded_impact_revision_context(context):
+    """Bound revision metadata without truncating the canonical packet."""
+    value = copy.deepcopy(context) if isinstance(context, dict) else {}
+    candidate = value.get("candidate_impact_map")
+    if isinstance(candidate, dict):
+        impact_keys = (
+            "impact_id", "surface_id", "canonical_surface_id", "disposition",
+            "impact_kind", "necessity_status", "requirement_ids",
+            "repository_evidence_ids", "action", "reason", "interfaces_to_reuse",
+            "existing_interfaces_to_reuse", "preserve", "verification",
+            "surface_kind", "surface_role", "owner_surface_id",
+        )
+        candidate["impacts"] = [
+            {
+                key: copy.deepcopy(impact.get(key))
+                for key in impact_keys
+                if impact.get(key) not in (None, "", [], {})
+            }
+            for impact in list(candidate.get("impacts", []) or [])
+            if isinstance(impact, dict)
+        ]
+        for impact in list(candidate.get("impacts", []) or []):
+            if not isinstance(impact, dict):
+                continue
+            for field in ("action", "reason", "candidate_change"):
+                if isinstance(impact.get(field), str):
+                    impact[field] = compact_text(impact[field], 360)
+    challenges = value.get("validated_challenges")
+    if isinstance(challenges, list):
+        for challenge in challenges:
+            if not isinstance(challenge, dict):
+                continue
+            for field in ("claim", "proposed_resolution"):
+                if isinstance(challenge.get(field), str):
+                    challenge[field] = compact_text(challenge[field], 260)
+    if isinstance(value.get("user_confirmed_revision"), dict):
+        value["user_confirmed_revision"] = {
+            key: compact_text(item, 320) if isinstance(item, str) else copy.deepcopy(item)
+            for key, item in value["user_confirmed_revision"].items()
+        }
+    planning_packet = value.get("planning_packet")
+    if isinstance(planning_packet, dict):
+        # The dedicated packet's requirements, surfaces, seeds,
+        # preservation constraints, and rules are authoritative.  Optional
+        # prose/fact projections are safe to omit from a revision envelope
+        # when the already-complete packet must share the budget with the
+        # candidate and challenges.
+        planning_packet.pop("task_facts", None)
+        planning_packet.pop("project_context", None)
+        planning_packet.pop("accepted_repository_evidence", None)
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return value, len(encoded) <= stage3.MAX_REVISION_CONTEXT_CHARS
+
+
 def _impact_revision_prompt(context):
+    bounded_context, _ = _bounded_impact_revision_context(context)
     return f"""You are IMPACT PLAN REVISER. Perform the single allowed bounded revision of an existing-project
 Impact Map. Use only the current candidate map, validated challenges, explicit USER_CONFIRMED revision (if
 present), Source Requirements, and accepted repository facts below. Resolve supported criticism without
@@ -4586,8 +4725,8 @@ inventing surfaces, preserve verified ownership, reuse verified interfaces, reta
 and keep explicit test responsibility. Every concrete impact still requires valid requirement and REPO evidence
 IDs. Do not write code, call tools, inspect raw files, or debate. Return only one complete Impact Map.
 
-BOUNDED REVISION CONTEXT:
-{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_REVISION_CONTEXT_CHARS)}"""
+COMPLETE BOUNDED REVISION CONTEXT:
+{json.dumps(bounded_context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
 def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
@@ -4598,30 +4737,46 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
     registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
         task_brain, repository_evidence,
     )
-    planner_context = stage3.build_planner_context(
+    planning_packet = stage3.build_canonical_planning_packet(
         task_brain, requirements, repository_evidence,
         project_invariants=_impact_project_invariants(task_brain),
         surface_registry=registry,
-        impact_seeds=RUN.get("impact_seeds", []),
     )
+    planner_context = planning_packet.get("packet", planning_packet)
+    if not planning_packet.get("packet_complete"):
+        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
+            + "; ".join(planning_packet.get("errors", []))
+        )
     context = {
         "candidate_impact_map": impact_map,
         "validated_challenges": list(validated_challenges or [])[:MAX_IMPACT_CHALLENGES],
         "user_confirmed_revision": _compact_brain_record(user_revision, 900)
         if isinstance(user_revision, dict) else None,
-        "source_requirements": requirements,
-        "accepted_repository_evidence": planner_context.get("accepted_repository_evidence", []),
-        "current_owners": planner_context.get("current_owners", []),
-        "current_interfaces": planner_context.get("current_interfaces", []),
-        "current_state_ownership": planner_context.get("current_state_ownership", []),
-        "preservation_constraints": planner_context.get("preservation_constraints", []),
+        "planning_packet": planner_context,
     }
+    context, context_complete = _bounded_impact_revision_context(context)
+    if not context_complete:
+        RUN["impact_planning_context_incomplete"] = RUN.get(
+            "impact_planning_context_incomplete", 0,
+        ) + 1
+        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        record_run_event(
+            "impact_plan_revision_context_incomplete",
+            errors=["complete bounded revision context exceeds the serialized-size bound"],
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
+            "complete bounded revision context exceeds the serialized-size bound"
+        )
     RUN["impact_plan_revision_calls"] = RUN.get("impact_plan_revision_calls", 0) + 1
     prompt_text = _impact_revision_prompt(context)
 
     def validator(data):
         return stage3.validate_planner_output(
             data, requirements, allow_legacy=structured_call is not None,
+            impact_seeds=RUN.get("impact_seeds", []),
         )
 
     try:
@@ -4637,7 +4792,21 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         revised = stage3.hydrate_impact_map(
             data, registry, requirements, repository_evidence,
             allow_legacy_exact=structured_call is not None,
+            impact_seeds=RUN.get("impact_seeds", []),
         )
+        for metric in (
+            "impact_unknown_surface_references", "impact_surface_evidence_mismatches",
+            "impact_invented_existing_paths_rejected", "impact_invented_interfaces_rejected",
+            "impact_unknown_impact_seed_references", "impact_invalid_optional_fields_rejected",
+            "impact_invalid_requirement_references_rejected", "impact_seed_surface_binding_conflicts",
+        ):
+            RUN[metric] = RUN.get(metric, 0) + int(revised.get(metric, 0) or 0)
+        for metric, fallback in (
+            ("impact_seed_decisions_received", "impact_decisions_received"),
+            ("impact_seed_decisions_validated", "impact_decisions_validated"),
+            ("impact_seed_decisions_rejected", "impact_decisions_rejected"),
+        ):
+            RUN[metric] = RUN.get(metric, 0) + int(revised.get(metric, revised.get(fallback, 0)) or 0)
         if not revised.get("hydration_valid"):
             raise StructuredOutputError("; ".join(revised.get("hydration_errors", [])))
         validation = stage3.validate_impact_map(
@@ -4666,6 +4835,7 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
     reconciled, resolved, unresolved = stage3.reconcile_impact_map(
         impact_map, challenge_validation.get("validated", []),
         requirements, repository_evidence, surface_registry=registry,
+        impact_seeds=RUN.get("impact_seeds", []),
     )
     RUN.setdefault("control_flow", []).append("MINIMAL_EFFECTIVE_CHANGE_PLAN")
     plan = stage3.build_minimal_change_plan(
@@ -4951,6 +5121,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         return {
             "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
             "summary": str(exc), "project_mode": mode,
+            "orchestration_failure": RUN.get("orchestration_failure"),
         }
     if not gate.get("valid"):
         fingerprint_after = _stage3_workspace_fingerprint()
@@ -4995,6 +5166,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             return {
                 "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
                 "summary": str(exc), "project_mode": mode,
+                "orchestration_failure": RUN.get("orchestration_failure"),
             }
         if not gate.get("valid"):
             return {
@@ -13054,6 +13226,54 @@ def run_self_test(install_browser=False):
             v18_canonical_plan, interactive=False, terminal_available=False,
         )
 
+        # v18.2 surface-bound planner checks use a complete deterministic
+        # packet and mocked semantic decisions.  They never invoke Gemma,
+        # Ollama, a Challenger model, or a Worker.
+        v18_planning_packet = stage3.build_canonical_planning_packet(
+            v17_existing_task_brain, v18_requirements, v17_existing_evidence,
+            project_invariants=["preserve verified owners"], surface_registry=v18_registry,
+        )
+        v18_planning_packet_validation = stage3.validate_planning_packet(
+            v18_planning_packet, registry=v18_registry, requirements=v18_requirements,
+        )
+        v18_input_surface = next(
+            (item for item in v18_registry.get("surfaces", [])
+             if item.get("path") == "src/input.js" and item.get("kind") == "OWNER"),
+            {},
+        )
+        v18_seed_decision = {
+            "impact_id": "impact_001",
+            "disposition": "MUST_CHANGE",
+            "requirement_ids": [v18_req_by_prefix["Add "], v18_req_by_prefix["Reuse "]],
+            "interfaces_to_reuse": ["surface_input_handler"],
+            "action": "Handle Escape using the current input architecture.",
+            "preserve": ["WASD/arrow controls"],
+            "verification": ["Escape is detected"],
+        }
+        v18_seed_hydration = stage3.hydrate_impact_map(
+            v18_seed_decision, v18_registry, v18_requirements, v17_existing_evidence,
+            impact_seeds=v18_planning_packet.get("impact_seeds", []),
+        )
+        v18_partial_hydration = stage3.hydrate_impact_map(
+            {"impacts": [
+                {
+                    "impact_id": "IMPACT_001", "disposition": "MUST_CHANGE",
+                    "requirement_ids": [v18_req_by_prefix["Add "]],
+                    "action": "Handle Escape through the current input owner.",
+                },
+                {
+                    "impact_id": "IMPACT-002", "disposition": "NOT_A_DISPOSITION",
+                    "requirement_ids": [v18_req_by_prefix["Reuse "]],
+                    "action": "Malformed decision should be rejected independently.",
+                },
+            ]}, v18_registry, v18_requirements, v17_existing_evidence,
+            impact_seeds=v18_planning_packet.get("impact_seeds", []),
+        )
+        v18_challenger_packet = stage3.build_challenger_packet(
+            v18_canonical, v18_requirements, v17_existing_evidence,
+            task_brain=v17_existing_task_brain, surface_registry=v18_registry,
+        )
+
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
         (v17_auth_root / "src" / "legacy-auth.js").write_text(
@@ -13262,6 +13482,39 @@ def run_self_test(install_browser=False):
             "v18.1 canonical noninteractive approval": (
                 v18_canonical_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
                 and v18_canonical_noninteractive.get("status") == "plan_approval_required"
+            ),
+            "v18.2 complete planning packet": (
+                v18_planning_packet.get("packet_complete")
+                and v18_planning_packet_validation.get("valid")
+                and len(v18_planning_packet.get("observability", {}).get("selected_surface_ids", [])) == 7
+                and v18_planning_packet.get("observability", {}).get("selected_surface_ids")
+                == v18_planning_packet.get("observability", {}).get("serialized_surface_ids")
+                and not v18_planning_packet.get("observability", {}).get("dropped_surface_ids")
+                and len(v18_planning_packet.get("impact_seeds", [])) == 7
+            ),
+            "v18.2 seed-bound decision": (
+                v18_seed_hydration.get("hydration_valid")
+                and len(v18_seed_hydration.get("impacts", [])) == 1
+                and v18_seed_hydration["impacts"][0].get("impact_id") == "IMPACT-001"
+                and v18_seed_hydration["impacts"][0].get("surface_id") == v18_input_surface.get("surface_id")
+                and v18_seed_hydration["impacts"][0].get("path") == "src/input.js"
+            ),
+            "v18.2 optional bad interface": (
+                v18_seed_hydration.get("impact_invented_interfaces_rejected", 0) >= 1
+                and v18_seed_hydration.get("impact_invalid_optional_fields_rejected", 0) >= 1
+                and "surface_input_handler" not in json.dumps(v18_seed_hydration.get("impacts", []))
+            ),
+            "v18.2 partial validation": (
+                v18_partial_hydration.get("hydration_valid")
+                and len(v18_partial_hydration.get("impacts", [])) == 1
+                and v18_partial_hydration.get("impact_seed_decisions_validated") == 1
+                and v18_partial_hydration.get("impact_seed_decisions_rejected") >= 1
+            ),
+            "v18.2 challenger complete": (
+                v18_challenger_packet.get("packet_complete")
+                and v18_challenger_packet.get("reviewed_impact_ids")
+                == v18_challenger_packet.get("serialized_impact_ids")
+                and not v18_challenger_packet.get("dropped_impact_ids")
             ),
         }
         for name, ok in checks.items():
