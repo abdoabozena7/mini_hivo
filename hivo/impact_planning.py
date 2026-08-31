@@ -70,6 +70,12 @@ REQUIREMENT_OBLIGATION_TYPES = (
 )
 OBLIGATION_COVERAGE_STATES = ("COVERED", "UNCOVERED")
 CHALLENGE_LIFECYCLE_STATES = ("OPEN", "RESOLVED", "SUPERSEDED", "REJECTED")
+CHALLENGE_APPLICABILITY_STATES = (
+    "VALIDATED_APPLICABLE", "VALIDATED_NON_APPLICABLE", "REJECTED",
+)
+CHALLENGE_EFFECT_STATES = (
+    "PENDING", "DEFERRED", "APPLIED", "SUPPRESSED", "NOT_APPLICABLE",
+)
 CHALLENGE_TYPES = (
     "UNSUPPORTED_NECESSITY",
     "WRONG_OWNER",
@@ -1785,12 +1791,19 @@ def normalize_impact_map(candidate, authoritative=False):
     for key in (
         "requirement_obligation_ledger", "semantic_obligation_coverage",
         "behavior_anchor_closure_actions", "challenge_lifecycle",
+        "obligation_closure_actions", "prohibition_constraints",
     ):
         if key in candidate:
             normalized[key] = copy.deepcopy(candidate.get(key))
-    normalized["deterministic_behavior_anchor_promotions"] = int(
-        candidate.get("deterministic_behavior_anchor_promotions", 0) or 0
-    )
+    for key in (
+        "deterministic_behavior_anchor_promotions", "obligation_impacts_synthesized",
+        "preservation_obligations_closed", "reuse_obligations_closed",
+        "test_obligations_closed", "prohibition_obligations_closed",
+        "impact_challenges_applicable", "impact_challenges_non_applicable",
+        "challenge_effects_applied", "challenge_effects_suppressed",
+        "challenges_resolved_post_reconciliation", "challenges_remaining_open",
+    ):
+        normalized[key] = int(candidate.get(key, 0) or 0)
     return normalized
 
 
@@ -3220,7 +3233,7 @@ def build_challenger_context(impact_map, requirements, evidence, task_brain=None
 def _impact_text(impact):
     return " ".join(str(impact.get(key, "")) for key in (
         "component", "path", "symbols", "reason", "existing_owner", "candidate_change",
-        "existing_interfaces_to_reuse", "preserve",
+        "action", "existing_interfaces_to_reuse", "preserve",
     ))
 
 
@@ -3467,7 +3480,20 @@ def _preservation_fragments(text):
 def _prohibition_constraints(text):
     if not _PROHIBITION_RE.search(str(text or "")):
         return []
-    return [f"Do not violate this source constraint: {_compact(text, 300)}"]
+    value = str(text or "")
+    result = [f"Do not violate this source constraint: {_compact(value, 300)}"]
+    terms = _domain_tokens(value)
+    if "input" in terms and "owner" in terms:
+        result.append(
+            "Keep the verified input owner as the sole input-state owner; "
+            "do not create duplicate input state ownership."
+        )
+    if ({"pause", "paused", "game"} & terms) and ({"owner", "state"} & terms):
+        result.append(
+            "Keep the verified GameState as the sole pause-state owner; "
+            "do not create another game-state owner."
+        )
+    return _bounded_strings(result, 6, 320)
 
 
 def _integration_check_for_obligation(obligation):
@@ -3575,6 +3601,334 @@ def _apply_obligation_constraints(impact_map, requirements, surface_registry=Non
     return revised
 
 
+def _seed_requirements_for_obligation(seed, obligation_type, obligation_by_id, req_by_id):
+    direct = [
+        str(requirement_id) for requirement_id in seed.get("requirement_ids", [])
+        if obligation_type in obligation_by_id.get(str(requirement_id), {}).get("obligation_types", [])
+    ]
+    if direct:
+        return _bounded_ids(direct, MAX_REQUIREMENT_REFS_PER_IMPACT)
+    seed_text = " ".join(str(seed.get(key, "")) for key in (
+        "verified_fact", "verified_symbol", "surface_role", "surface_kind",
+    ))
+    seed_terms = _domain_tokens(seed_text)
+    matches = [
+        requirement_id for requirement_id, obligation in obligation_by_id.items()
+        if obligation_type in obligation.get("obligation_types", [])
+        and (
+            seed_terms.intersection(_domain_tokens(obligation.get("text", "")))
+            or len([
+                item for item in obligation_by_id.values()
+                if obligation_type in item.get("obligation_types", [])
+            ]) == 1
+        )
+        and requirement_id in req_by_id
+    ]
+    return _bounded_ids(matches, MAX_REQUIREMENT_REFS_PER_IMPACT)
+
+
+def _seed_impact_record(seed, surface, disposition, requirement_ids, action,
+                        closure_type):
+    surface_id = str(surface.get("surface_id") or seed.get("surface_id") or "")
+    evidence_ids = _bounded_ids(
+        surface.get("evidence_ids") or seed.get("canonical_evidence_ids") or seed.get("evidence_ids"),
+        MAX_EVIDENCE_REFS_PER_IMPACT,
+    )
+    symbol = str(surface.get("symbol") or seed.get("verified_symbol") or "")
+    impact_id = normalize_impact_id(seed.get("impact_id"))
+    action = _compact(action, MAX_TEXT_CHARS)
+    return {
+        "impact_id": impact_id,
+        "surface_id": surface_id,
+        "canonical_surface_id": surface_id,
+        "disposition": disposition,
+        "component": symbol or surface.get("role") or surface.get("path"),
+        "path": _normal_path(surface.get("path") or seed.get("canonical_path")),
+        "symbols": _bounded_strings([symbol] if symbol else [], 6, 160),
+        "impact_kind": _impact_kind_for_disposition(disposition),
+        "requirement_ids": _bounded_ids(requirement_ids, MAX_REQUIREMENT_REFS_PER_IMPACT),
+        "repository_evidence_ids": evidence_ids,
+        "reason": _compact(surface.get("verified_fact") or seed.get("verified_fact"), MAX_TEXT_CHARS),
+        "existing_owner": symbol if surface.get("kind") == "OWNER" else "",
+        "existing_interfaces_to_reuse": [],
+        "interfaces_to_reuse": [],
+        "interface_surface_ids": [],
+        "preserve": [],
+        "local_preservation_constraints": [],
+        "prohibition_constraints": [],
+        "candidate_change": action,
+        "action": action,
+        "local_verification": [],
+        "verification": [],
+        "test_contract": [],
+        "local_test_contract": [],
+        "necessity_status": {
+            "MUST_CHANGE": "MUST_CHANGE",
+            "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+        }.get(disposition, "CANDIDATE"),
+        "new_surface_proposal_ids": [],
+        "surface_kind": surface.get("kind") or seed.get("surface_kind"),
+        "surface_role": surface.get("role") or seed.get("surface_role"),
+        "owner_surface_id": surface.get("owner_surface_id") or seed.get("owner_surface_id"),
+        "closure_metadata": {
+            "closure_type": closure_type,
+            "requirement_ids": _bounded_ids(requirement_ids, 6),
+            "surface_id": surface_id,
+            "seed_id": seed.get("seed_id"),
+            "provenance": DERIVED_PLAN_DECISION,
+        },
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+
+
+def _mark_obligation_closure(impact, requirement_ids, surface_id, seed_id, closure_type):
+    impact["requirement_ids"] = _bounded_ids(
+        list(impact.get("requirement_ids", [])) + list(requirement_ids),
+        MAX_REQUIREMENT_REFS_PER_IMPACT,
+    )
+    impact["closure_metadata"] = {
+        "closure_type": closure_type,
+        "requirement_ids": _bounded_ids(requirement_ids, 6),
+        "surface_id": surface_id,
+        "seed_id": seed_id,
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+    impact["provenance"] = DERIVED_PLAN_DECISION
+
+
+def _synthesize_obligation_impacts(impact_map, requirements, evidence,
+                                   surface_registry=None, impact_seeds=None,
+                                   obligation_ledger=None):
+    """Restore deterministic canonical responsibilities omitted by the model."""
+    revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
+    if not surface_registry or not impact_seeds:
+        return revised, []
+    ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    records = _obligation_records(ledger)
+    obligation_by_id = {str(item.get("requirement_id")): item for item in records}
+    req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
+    surface_by_id = canonical_surface_by_id(surface_registry)
+    impacts = list(revised.get("impacts", []) or [])
+    by_surface = {
+        str(item.get("surface_id")): item for item in impacts
+        if isinstance(item, dict) and item.get("surface_id")
+    }
+    seeds = [item for item in list(impact_seeds or []) if isinstance(item, dict)]
+    actions = []
+
+    def apply_seed(seed, obligation_type, disposition, action, closure_type,
+                   only_kinds=None, convert_existing=True):
+        surface = surface_by_id.get(str(seed.get("surface_id")))
+        if not surface or (only_kinds and surface.get("kind") not in only_kinds):
+            return None
+        requirement_ids = _seed_requirements_for_obligation(
+            seed, obligation_type, obligation_by_id, req_by_id,
+        )
+        if not requirement_ids:
+            return None
+        surface_id = str(surface.get("surface_id"))
+        target = by_surface.get(surface_id)
+        if target is None:
+            if len(impacts) >= MAX_IMPACT_ENTRIES:
+                return None
+            target = _seed_impact_record(
+                seed, surface, disposition, requirement_ids, action, closure_type,
+            )
+            impacts.append(target)
+            by_surface[surface_id] = target
+            actions.append({
+                "action": "SYNTHESIZED",
+                "closure_type": closure_type,
+                "impact_id": target.get("impact_id"),
+                "surface_id": surface_id,
+                "requirement_ids": list(requirement_ids),
+                "seed_id": seed.get("seed_id"),
+                "provenance": DERIVED_PLAN_DECISION,
+            })
+            return target
+        if convert_existing:
+            linked_types = {
+                obligation_type_name
+                for requirement_id in target.get("requirement_ids", [])
+                for obligation_type_name in obligation_by_id.get(str(requirement_id), {}).get("obligation_types", [])
+            }
+            # A persistence surface with an independently required behavior
+            # mutation remains a mutation target; its preservation duty is
+            # carried as a constraint instead of being silently collapsed.
+            if not (
+                obligation_type == "PRESERVATION"
+                and "BEHAVIOR_CHANGE" in linked_types
+                and _impact_claims_mutation(target)
+            ):
+                target["disposition"] = disposition
+                target["impact_kind"] = _impact_kind_for_disposition(disposition)
+                target["necessity_status"] = {
+                    "MUST_CHANGE": "MUST_CHANGE",
+                    "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+                }.get(disposition, "CANDIDATE")
+        _mark_obligation_closure(
+            target, requirement_ids, surface_id, seed.get("seed_id"), closure_type,
+        )
+        if disposition == "PRESERVATION_ONLY":
+            target["preserve"] = _bounded_strings(
+                list(target.get("preserve", []))
+                + [req_by_id[item]["text"] for item in requirement_ids if item in req_by_id],
+                8, 300,
+            )
+            target["candidate_change"] = (
+                "No mutation planned; preserve the verified current behavior."
+            )
+            target["action"] = target["candidate_change"]
+        elif disposition == "TEST_CHANGE":
+            target["candidate_change"] = _compact(
+                action or "Update or add focused coverage at the verified test boundary.",
+                MAX_TEXT_CHARS,
+            )
+            target["action"] = target["candidate_change"]
+            target["local_verification"] = _bounded_strings(
+                list(target.get("local_verification", []))
+                + [req_by_id[item]["text"] for item in requirement_ids if item in req_by_id],
+                6, 300,
+            )
+        elif disposition == "INTERFACE_REUSE":
+            target["candidate_change"] = _compact(action, MAX_TEXT_CHARS)
+            target["action"] = target["candidate_change"]
+            target["interfaces_to_reuse"] = _bounded_ids(
+                list(target.get("interfaces_to_reuse", [])) + [surface_id], 6,
+            )
+            target["interface_surface_ids"] = list(target["interfaces_to_reuse"])
+            target["existing_interfaces_to_reuse"] = _bounded_strings(
+                list(target.get("existing_interfaces_to_reuse", []))
+                + [surface.get("symbol")], 6, 180,
+            )
+        return target
+
+    # Preservation and test duties are restored from their specialized
+    # canonical surfaces before behavior closure chooses a mutation anchor.
+    for seed in seeds:
+        if seed.get("surface_kind") == "PERSISTENCE":
+            apply_seed(
+                seed, "PRESERVATION", "PRESERVATION_ONLY",
+                "No mutation planned; preserve the verified persistence surface.",
+                "OBLIGATION_CLOSURE_PRESERVATION", {"PERSISTENCE"},
+            )
+    for seed in seeds:
+        if seed.get("surface_kind") == "TEST":
+            apply_seed(
+                seed, "TEST", "TEST_CHANGE",
+                "Update or add focused coverage at the verified test boundary.",
+                "OBLIGATION_CLOSURE_TEST", {"TEST"},
+            )
+
+    # A newly confirmed preservation requirement may belong to the changed
+    # canonical owner rather than to a persistence surface.  Attach it as a
+    # local constraint without converting an independently required behavior
+    # mutation into a non-mutating preservation node.
+    for seed in seeds:
+        if seed.get("surface_kind") != "OWNER":
+            continue
+        requirement_ids = _seed_requirements_for_obligation(
+            seed, "PRESERVATION", obligation_by_id, req_by_id,
+        )
+        target = by_surface.get(str(seed.get("surface_id")))
+        if not requirement_ids or target is None:
+            continue
+        linked_types = {
+            obligation_type_name
+            for requirement_id in target.get("requirement_ids", [])
+            for obligation_type_name in obligation_by_id.get(str(requirement_id), {}).get("obligation_types", [])
+        }
+        linked_types.update(
+            obligation_type_name
+            for requirement_id in seed.get("requirement_ids", [])
+            for obligation_type_name in obligation_by_id.get(str(requirement_id), {}).get("obligation_types", [])
+        )
+        _mark_obligation_closure(
+            target, requirement_ids, str(seed.get("surface_id")),
+            seed.get("seed_id"), "OBLIGATION_CLOSURE_PRESERVATION",
+        )
+        target["preserve"] = _bounded_strings(
+            list(target.get("preserve", []))
+            + [req_by_id[item]["text"] for item in requirement_ids if item in req_by_id],
+            8, 300,
+        )
+        if "BEHAVIOR_CHANGE" not in linked_types:
+            target["disposition"] = "PRESERVATION_ONLY"
+            target["impact_kind"] = "PRESERVATION_ONLY"
+            target["necessity_status"] = "PRESERVATION_ONLY"
+        actions.append({
+            "action": "ATTACHED",
+            "closure_type": "OBLIGATION_CLOSURE_PRESERVATION",
+            "impact_id": target.get("impact_id"),
+            "surface_id": seed.get("surface_id"),
+            "requirement_ids": list(requirement_ids),
+            "seed_id": seed.get("seed_id"),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+
+    # Restore every verified interface seed linked to an architecture-reuse
+    # obligation.  These are inspect/reuse responsibilities, never product
+    # mutation anchors.
+    for seed in seeds:
+        if seed.get("surface_kind") == "INTERFACE":
+            apply_seed(
+                seed, "ARCHITECTURE_REUSE", "INTERFACE_REUSE",
+                f"Reuse the verified interface {seed.get('verified_symbol') or seed.get('surface_id')}.",
+                "OBLIGATION_CLOSURE_REUSE", {"INTERFACE"},
+            )
+
+    revised["impacts"] = impacts[:MAX_IMPACT_ENTRIES]
+    revised["obligation_impacts_synthesized"] = int(
+        revised.get("obligation_impacts_synthesized", 0) or 0
+    ) + sum(item.get("action") == "SYNTHESIZED" for item in actions)
+    revised["obligation_closure_actions"] = actions
+    revised["prohibition_constraints"] = _bounded_strings([
+        constraint
+        for obligation in records
+        for constraint in _prohibition_constraints(obligation.get("text"))
+    ], 8, 320)
+
+    # Make verified interfaces available on a changed owner even if the model
+    # omitted the separate interface decisions.  The interface identities
+    # still come only from the canonical registry.
+    by_surface = {
+        str(item.get("surface_id")): item for item in revised["impacts"]
+        if isinstance(item, dict) and item.get("surface_id")
+    }
+    reuse_requirement_ids = {
+        str(item.get("requirement_id")) for item in records
+        if "ARCHITECTURE_REUSE" in item.get("obligation_types", [])
+    }
+    interface_surfaces = [
+        item for item in surface_by_id.values() if item.get("kind") == "INTERFACE"
+    ]
+    for target in revised["impacts"]:
+        if _impact_surface_kind(target, surface_by_id) != "OWNER":
+            continue
+        target_requirements = {str(item) for item in target.get("requirement_ids", [])}
+        if not (
+            target_requirements.intersection(reuse_requirement_ids)
+            or target.get("disposition") == "MUST_CHANGE"
+        ):
+            continue
+        interface_ids = list(target.get("interfaces_to_reuse", []))
+        for interface in interface_surfaces:
+            seed = next((item for item in seeds if str(item.get("surface_id")) == str(interface.get("surface_id"))), {})
+            seed_reqs = {str(item) for item in seed.get("requirement_ids", [])}
+            if (
+                interface.get("owner_surface_id") == target.get("surface_id")
+                or seed_reqs.intersection(reuse_requirement_ids | target_requirements)
+            ):
+                interface_ids.append(str(interface.get("surface_id")))
+        interface_ids = _bounded_ids(interface_ids, 6)
+        target["interfaces_to_reuse"] = interface_ids
+        target["interface_surface_ids"] = list(interface_ids)
+        target["existing_interfaces_to_reuse"] = _bounded_strings([
+            surface_by_id[item].get("symbol") for item in interface_ids if item in surface_by_id
+        ], 6, 180)
+    return revised, actions
+
+
 def close_behavior_obligation_gaps(impact_map, requirements, evidence,
                                    surface_registry=None, impact_seeds=None,
                                    obligation_ledger=None):
@@ -3601,6 +3955,10 @@ def close_behavior_obligation_gaps(impact_map, requirements, evidence,
         for item in revised.get("impacts", []) if isinstance(item, dict) and item.get("surface_id")
     }
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
+    obligation_by_id = {
+        str(item.get("requirement_id")): item
+        for item in _obligation_records(ledger)
+    }
     actions = []
     for requirement_id in sorted(open_behavior):
         exists, _ = _verified_behavior_exists(req_by_id.get(requirement_id, {}), evidence)
@@ -3608,7 +3966,14 @@ def close_behavior_obligation_gaps(impact_map, requirements, evidence,
             continue
         candidates = []
         for seed in list(impact_seeds or []):
-            if requirement_id not in seed.get("requirement_ids", []):
+            seed_requirement_ids = set(str(item) for item in seed.get("requirement_ids", []))
+            if requirement_id not in seed_requirement_ids:
+                # Recompute the typed seed hint rather than trusting a weak
+                # model's partial relationship list.
+                seed_requirement_ids.update(_seed_requirements_for_obligation(
+                    seed, "BEHAVIOR_CHANGE", obligation_by_id, req_by_id,
+                ))
+            if requirement_id not in seed_requirement_ids:
                 continue
             surface = surface_by_id.get(str(seed.get("surface_id"))) if surface_by_id else None
             if not surface or surface.get("kind") != "OWNER":
@@ -3616,11 +3981,34 @@ def close_behavior_obligation_gaps(impact_map, requirements, evidence,
             target = impact_by_id.get(normalize_impact_id(seed.get("impact_id"))) or impact_by_surface.get(
                 str(seed.get("surface_id"))
             )
-            if not target or target.get("disposition") in {
-                "PRESERVATION_ONLY", "TEST_CHANGE", "INSUFFICIENT_EVIDENCE",
-            }:
+            if target is None:
+                # Preserve the v18.3 ambiguity guard for a completely empty
+                # map.  A partial planner map may be completed from seeds,
+                # but an empty map has not established any usable planner
+                # responsibility to reconcile.
+                if not revised.get("impacts"):
+                    continue
+                if len(revised.get("impacts", []) or []) >= MAX_IMPACT_ENTRIES:
+                    continue
+                target = _seed_impact_record(
+                    seed, surface, "VERIFY_ONLY", [requirement_id],
+                    "Use the verified current owner for the linked behavior responsibility.",
+                    "OBLIGATION_CLOSURE_BEHAVIOR",
+                )
+                target["impact_kind"] = "BEHAVIOR_CHANGE"
+                target["disposition"] = "VERIFY_ONLY"
+                target["necessity_status"] = "CANDIDATE"
+                revised.setdefault("impacts", []).append(target)
+                impact_by_id[normalize_impact_id(target.get("impact_id"))] = target
+                impact_by_surface[str(target.get("surface_id"))] = target
+                revised["obligation_impacts_synthesized"] = int(
+                    revised.get("obligation_impacts_synthesized", 0) or 0
+                ) + 1
+            if target.get("disposition") in {"PRESERVATION_ONLY", "TEST_CHANGE"}:
                 continue
-            if target.get("surface_kind") in {"TEST", "PERSISTENCE", "ENTRYPOINT", "INTERFACE"}:
+            if _impact_surface_kind(target, surface_by_id) in {
+                "TEST", "PERSISTENCE", "ENTRYPOINT", "INTERFACE",
+            }:
                 continue
             candidates.append((seed, surface, target))
         # An owner whose existing interface already accounts for all of the
@@ -3669,7 +4057,15 @@ def close_behavior_obligation_gaps(impact_map, requirements, evidence,
             same_owner = interface.get("owner_surface_id") == surface.get("surface_id")
             linked_interface_impact = impact_by_surface.get(str(interface.get("surface_id")), {})
             linked_requirements = {str(item) for item in linked_interface_impact.get("requirement_ids", [])}
-            if same_owner or related_ids.intersection(linked_requirements):
+            interface_seed = next(
+                (
+                    item for item in list(impact_seeds or [])
+                    if str(item.get("surface_id")) == str(interface.get("surface_id"))
+                ),
+                {},
+            )
+            seeded_requirements = {str(item) for item in interface_seed.get("requirement_ids", [])}
+            if same_owner or related_ids.intersection(linked_requirements | seeded_requirements):
                 interface_ids.append(str(interface.get("surface_id")))
         target["interfaces_to_reuse"] = _bounded_ids(interface_ids, 6)
         target["interface_surface_ids"] = list(target["interfaces_to_reuse"])
@@ -3688,7 +4084,7 @@ def close_behavior_obligation_gaps(impact_map, requirements, evidence,
             list(target.get("local_verification", [])) + [req_by_id[requirement_id]["text"]], 6, 300,
         )
         target["closure_metadata"] = {
-            "closure_type": "UNIQUE_SAFE_OWNER_PROMOTION",
+            "closure_type": "OBLIGATION_CLOSURE_BEHAVIOR",
             "requirement_ids": [requirement_id],
             "surface_id": surface.get("surface_id"),
             "seed_id": seed.get("seed_id"),
@@ -3768,7 +4164,7 @@ def deterministic_challenges(impact_map, requirements, evidence, surface_registr
                 "Exclude the unrelated surface from the mutation plan.",
             ))
         state_facts = [item for item in linked_evidence if item.get("category") == "CURRENT_STATE_OWNER"]
-        duplicate_state_claim = _NEW_OWNER_RE.search(text) and bool(re.search(
+        duplicate_state_claim = _impact_implies_duplicate_owner(impact) and bool(re.search(
             r"\b(?:pause|paused|state|owner)\b", text, re.IGNORECASE,
         ))
         if state_facts and duplicate_state_claim:
@@ -3861,6 +4257,330 @@ def deterministic_challenges(impact_map, requirements, evidence, surface_registr
     return normalize_challenges({"challenges": challenges}, source="DETERMINISTIC")
 
 
+def _impact_surface_kind(impact, surface_by_id=None):
+    surface_by_id = surface_by_id or {}
+    surface = surface_by_id.get(str((impact or {}).get("surface_id")), {})
+    return surface.get("kind") or (impact or {}).get("surface_kind")
+
+
+_NON_MUTATING_RESPONSIBILITIES = frozenset({
+    "INTERFACE_REUSE", "PRESERVATION_ONLY", "VERIFY_ONLY", "TEST_REFERENCE",
+    "TEST_CHANGE",
+})
+
+
+def _impact_implies_duplicate_owner(impact):
+    value = impact if isinstance(impact, dict) else {}
+    text = " ".join((_impact_text(value), str(value.get("goal", ""))))
+    if re.search(
+        r"\b(?:do not|don't|must not|never|without)\b.{0,50}"
+        r"\b(?:add|create|introduce|new|another|second|duplicate|additional|extra)\b",
+        text, re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        _NEW_OWNER_RE.search(text)
+        or re.search(
+            r"\b(?:new|another|second|duplicate|additional|extra)\b"
+            r".{0,80}\b(?:owner|state|store|controller|field|flag)\b",
+            text, re.IGNORECASE,
+        )
+    )
+
+
+def _impact_claims_mutation(impact):
+    """Return whether an impact claims an existing/new-surface mutation."""
+    value = impact if isinstance(impact, dict) else {}
+    disposition = str(value.get("disposition", "")).upper()
+    necessity = str(value.get("necessity_status", "")).upper()
+    if disposition in _NON_MUTATING_RESPONSIBILITIES:
+        return False
+    if str(value.get("impact_kind", "")).upper() in {
+        "PRESERVATION_ONLY", "INTERFACE_REUSE", "CROSS_CUTTING_VERIFICATION",
+        "TEST_CHANGE",
+    }:
+        return False
+    if disposition == "MUST_CHANGE" or necessity == "MUST_CHANGE":
+        return True
+    if value.get("mutation_required"):
+        return True
+    proposal_ids = _list_value(value.get("new_surface_proposal_ids"))
+    return bool(proposal_ids)
+
+
+def _challenge_requirement_types(challenge, req_by_id, obligation_ledger=None):
+    records = {
+        item.get("requirement_id"): item
+        for item in _obligation_records(obligation_ledger or list(req_by_id.values()))
+    }
+    return {
+        obligation_type
+        for requirement_id in challenge.get("requirement_ids", [])
+        for obligation_type in records.get(requirement_id, {}).get("obligation_types", [])
+    }
+
+
+def _test_responsibility_exists(impacts, requirement_ids, surface_by_id=None):
+    wanted = {str(item) for item in requirement_ids}
+    surface_by_id = surface_by_id or {}
+    for impact in list(impacts or []):
+        if not wanted.intersection(str(item) for item in impact.get("requirement_ids", [])):
+            continue
+        kind = _impact_surface_kind(impact, surface_by_id)
+        if (
+            (impact.get("disposition") == "TEST_CHANGE" or impact.get("impact_kind") == "TEST_CHANGE")
+            and (kind == "TEST" or not surface_by_id)
+        ):
+            return True
+    return False
+
+
+def _verified_owner_names(impact, challenge, evidence_by_id, surface_by_id=None):
+    surface_by_id = surface_by_id or {}
+    refs = list(impact.get("repository_evidence_ids", []) or []) + list(
+        challenge.get("repository_evidence_ids", []) or []
+    )
+    names = set()
+    for evidence_id in refs:
+        item = evidence_by_id.get(str(evidence_id), {})
+        if item.get("category") not in {"CURRENT_OWNER", "CURRENT_STATE_OWNER"}:
+            continue
+        symbol = str(item.get("symbol", ""))
+        if symbol:
+            names.add(symbol.split(".", 1)[0])
+    surface = surface_by_id.get(str(impact.get("surface_id")), {})
+    if surface.get("kind") == "OWNER" and surface.get("symbol"):
+        names.add(str(surface.get("symbol")).split(".", 1)[0])
+    return names
+
+
+def _owner_conflicts_with_verified_owner(impact, challenge, evidence_by_id, surface_by_id=None):
+    verified = _verified_owner_names(impact, challenge, evidence_by_id, surface_by_id)
+    if not verified:
+        return False
+    surface_by_id = surface_by_id or {}
+    surface = surface_by_id.get(str(impact.get("surface_id")), {})
+    proposed = (
+        impact.get("model_existing_owner")
+        or impact.get("existing_owner")
+        or impact.get("component")
+    )
+    proposed_base = str(proposed or "").split(".", 1)[0].strip()
+    if proposed_base and proposed_base not in verified:
+        # Canonical OWNER identity is already verified; do not treat its
+        # component label as a conflict merely because the challenge cites a
+        # broader owner fact.
+        if not (surface.get("kind") == "OWNER" and proposed_base == str(surface.get("symbol", "")).split(".", 1)[0]):
+            return True
+    text = _impact_text(impact)
+    explicit_names = {
+        str(item.get("symbol", "")).split(".", 1)[0]
+        for item in evidence_by_id.values()
+        if item.get("category") in {"CURRENT_OWNER", "CURRENT_STATE_OWNER"}
+        and item.get("symbol")
+        and str(item.get("symbol")).split(".", 1)[0] in text
+    }
+    return bool(explicit_names - verified)
+
+
+def _challenge_reference_status(challenge, impacts, req_by_id, evidence_by_id,
+                                surface_registry=None):
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    impact_ids = {str(item) for item in challenge.get("impact_ids", [])}
+    requirement_ids = {str(item) for item in challenge.get("requirement_ids", [])}
+    evidence_ids = {str(item) for item in challenge.get("repository_evidence_ids", [])}
+    if any(item not in impacts for item in impact_ids):
+        return False, "unknown impact reference"
+    if any(item not in req_by_id for item in requirement_ids):
+        return False, "unknown requirement reference"
+    if any(item not in evidence_by_id for item in evidence_ids):
+        return False, "unknown repository evidence reference"
+    if surface_registry:
+        surface_ids = {str(item) for item in challenge.get("surface_ids", [])}
+        if any(item not in surface_by_id for item in surface_ids):
+            return False, "unknown canonical surface reference"
+        impact_surfaces = {
+            str(impacts[item].get("surface_id")) for item in impact_ids if item in impacts
+        }
+        if surface_ids and impact_surfaces and not surface_ids.issubset(impact_surfaces):
+            return False, "challenge surface does not match impact surface"
+    return True, "valid canonical references"
+
+
+def evaluate_challenge_applicability(challenge, impact_map, requirements, evidence,
+                                     surface_registry=None, obligation_ledger=None):
+    """Classify a validated challenge against the responsibility it targets.
+
+    Reference validity and semantic applicability are intentionally separate.
+    A valid, evidence-grounded criticism can therefore remain audit evidence
+    while its effect is suppressed when the target does not make the claim
+    that the challenge type attacks.
+    """
+    value = impact_map if isinstance(impact_map, dict) else {}
+    impacts = {
+        str(item.get("impact_id")): item
+        for item in list(value.get("impacts", []) or [])
+        if isinstance(item, dict) and item.get("impact_id")
+    }
+    req_by_id = {
+        item["requirement_id"]: item for item in active_requirements(requirements)
+    }
+    evidence_by_id = {
+        item["evidence_id"]: item
+        for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
+    }
+    references_valid, reference_reason = _challenge_reference_status(
+        challenge, impacts, req_by_id, evidence_by_id, surface_registry,
+    )
+    if not references_valid:
+        return {
+            "applicable": False,
+            "status": "REJECTED",
+            "reason": reference_reason,
+            "reference_status": "REJECTED",
+        }
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    impact_refs = [impacts[item] for item in challenge.get("impact_ids", []) if item in impacts]
+    req_refs = [req_by_id[item] for item in challenge.get("requirement_ids", []) if item in req_by_id]
+    req_types = _challenge_requirement_types(challenge, req_by_id, obligation_ledger)
+    # Never trust a cached coverage projection while classifying a challenge;
+    # applicability is a final-state semantic question, not an ID-presence
+    # shortcut.
+    semantic = evaluate_requirement_obligations(
+        {"impacts": list(impacts.values())}, requirements, evidence,
+        surface_registry, obligation_ledger,
+    )
+    semantic_by_id = {
+        str(item.get("requirement_id")): item
+        for item in semantic.get("requirements", [])
+    }
+    challenge_type = challenge.get("challenge_type")
+    applicable = False
+    reason = "challenge type is not applicable to the cited responsibility"
+
+    if challenge_type == "UNSUPPORTED_NECESSITY":
+        applicable = any(_impact_claims_mutation(item) for item in impact_refs)
+        reason = (
+            "target claims mutation necessity"
+            if applicable else
+            "target is non-mutating; unsupported mutation necessity cannot demote it"
+        )
+    elif challenge_type == "WRONG_OWNER":
+        applicable = any(
+            _impact_claims_mutation(item)
+            and _owner_conflicts_with_verified_owner(item, challenge, evidence_by_id, surface_by_id)
+            for item in impact_refs
+        )
+        reason = "mutation responsibility conflicts with verified owner" if applicable else reason
+    elif challenge_type == "DUPLICATE_OWNERSHIP_RISK":
+        applicable = any(
+            _impact_implies_duplicate_owner(item)
+            and bool(_verified_owner_names(item, challenge, evidence_by_id, surface_by_id))
+            for item in impact_refs
+        )
+        reason = "responsibility implies a second owner or state owner" if applicable else reason
+    elif challenge_type == "INTERFACE_REUSE_MISSED":
+        for item in impact_refs:
+            surface = surface_by_id.get(str(item.get("surface_id")), {})
+            interfaces = [
+                known for known in surface_by_id.values()
+                if known.get("kind") == "INTERFACE"
+                and (
+                    known.get("owner_surface_id") == surface.get("surface_id")
+                    or known.get("surface_id") in challenge.get("surface_ids", [])
+                )
+            ]
+            relevant_evidence_ids = set(str(value) for value in (
+                list(item.get("repository_evidence_ids", []) or [])
+                + list(challenge.get("repository_evidence_ids", []) or [])
+            ))
+            verified_interface = any(
+                evidence_by_id.get(evidence_id, {}).get("category") == "CURRENT_INTERFACE"
+                for evidence_id in relevant_evidence_ids
+            )
+            present_ids = set(str(value) for value in item.get("interfaces_to_reuse", []))
+            present_ids.update(str(value) for value in item.get("interface_surface_ids", []))
+            present_names = set(str(value) for value in item.get("existing_interfaces_to_reuse", []))
+            known_names = {str(value.get("symbol")) for value in interfaces if value.get("symbol")}
+            if (interfaces or verified_interface) and not (present_ids or present_names.intersection(known_names)):
+                applicable = True
+                break
+        reason = "verified reusable interface is absent" if applicable else reason
+    elif challenge_type == "TEST_GAP":
+        has_test_obligation = "TEST" in req_types or (
+            "BEHAVIOR_CHANGE" in req_types
+            and any(item.get("category") == "CURRENT_TEST" for item in evidence_by_id.values())
+        )
+        applicable = has_test_obligation and not _test_responsibility_exists(
+            impacts.values(), challenge.get("requirement_ids", []), surface_by_id,
+        )
+        reason = "test obligation lacks a valid TEST responsibility" if applicable else reason
+    elif challenge_type == "REQUIREMENT_GAP":
+        applicable = any(
+            semantic_by_id.get(str(item), {}).get("state") != "COVERED"
+            for item in challenge.get("requirement_ids", [])
+        )
+        reason = "obligation-aware semantic coverage is missing" if applicable else reason
+    elif challenge_type == "PRESERVATION_RISK":
+        applicable = any(
+            "PRESERVATION" in req_types
+            and (
+                _impact_claims_mutation(item)
+                or _impact_surface_kind(item, surface_by_id) == "PERSISTENCE"
+            )
+            and not (item.get("local_preservation_constraints") or item.get("preserve"))
+            for item in impact_refs
+        )
+        reason = "mutation threatens an uncovered preservation obligation" if applicable else reason
+    elif challenge_type == "UNRELATED_CHANGE":
+        requirement_terms = _domain_tokens(" ".join(item.get("text", "") for item in req_refs))
+        impact_terms = _domain_tokens(" ".join(_impact_text(item) for item in impact_refs))
+        evidence_terms = _domain_tokens(" ".join(
+            str(item.get(key, "")) for item in evidence_by_id.values()
+            for key in ("fact", "path", "symbol")
+            if str(item.get("evidence_id")) in set(challenge.get("repository_evidence_ids", []))
+        ))
+        applicable = bool(impact_refs and req_refs) and any(
+            _impact_claims_mutation(item) for item in impact_refs
+        ) and not (requirement_terms & impact_terms) and not (requirement_terms & evidence_terms)
+        reason = "mutation has no semantic relationship to cited requirements" if applicable else reason
+    elif challenge_type == "MISSING_IMPACT":
+        applicable = any(
+            semantic_by_id.get(str(item), {}).get("state") != "COVERED"
+            and not any(
+                str(item) in {str(value) for value in impact.get("requirement_ids", [])}
+                for impact in impacts.values()
+            )
+            for item in challenge.get("requirement_ids", [])
+        )
+        reason = "semantic obligation has no responsible impact" if applicable else reason
+    elif challenge_type == "DEPENDENCY_GAP":
+        dependency_evidence = {
+            str(item.get("evidence_id")) for item in evidence_by_id.values()
+            if item.get("category") == "CURRENT_DEPENDENCY"
+            and str(item.get("evidence_id")) in set(challenge.get("repository_evidence_ids", []))
+        }
+        represented = any(
+            impact.get("dependencies")
+            or impact.get("integration_verification")
+            for impact in impact_refs
+        ) or bool(value.get("integration_verification"))
+        applicable = bool(dependency_evidence) and not represented
+        reason = "verified dependency is absent from the responsibility" if applicable else reason
+    else:
+        applicable = bool(impact_refs or req_refs)
+        reason = "valid responsibility reference" if applicable else reason
+    return {
+        "applicable": bool(applicable),
+        "status": "VALIDATED_APPLICABLE" if applicable else "VALIDATED_NON_APPLICABLE",
+        "reason": reason,
+        "reference_status": "VALID_REFERENCES",
+    }
+
+
+validate_challenge_applicability = evaluate_challenge_applicability
+
+
 def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by_id,
                                       surface_registry=None):
     challenge_type = challenge.get("challenge_type")
@@ -3893,18 +4613,17 @@ def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by
     if challenge_type == "UNSUPPORTED_NECESSITY":
         if not impact_refs:
             return False
+        # Relationship validation only proves that the criticism cites an
+        # existing responsibility.  Whether unsupported necessity applies is
+        # a separate semantic question handled below; otherwise a valid
+        # challenge against INTERFACE_REUSE would be rejected before it could
+        # be retained as suppressed audit evidence.
         return any(
-            item.get("necessity_status") in {"MUST_CHANGE", "CANDIDATE"}
-            and (
-                not item.get("requirement_ids")
-                or (
-                    not item.get("repository_evidence_ids")
-                    and not item.get("new_surface_proposal_ids")
-                )
-                or any(_PRESERVE_RE.search(req["text"]) for req in requirement_refs)
-                or item.get("impact_kind") == "PERSISTENCE_ONLY"
-                or item.get("surface_kind") == "PERSISTENCE"
-            )
+            _impact_claims_mutation(item)
+            or item.get("disposition") in {
+                "INTERFACE_REUSE", "PRESERVATION_ONLY", "VERIFY_ONLY",
+                "TEST_REFERENCE", "TEST_CHANGE",
+            }
             for item in impact_refs
         )
     if challenge_type == "REQUIREMENT_GAP":
@@ -3940,6 +4659,7 @@ def validate_challenges(challenges, impact_map, requirements, evidence, surface_
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     evidence_by_id = {item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)}
     accepted, rejected = [], []
+    applicable, non_applicable = [], []
     seen = set()
     for item in list(challenges or [])[:MAX_CHALLENGES]:
         challenge = copy.deepcopy(item)
@@ -4003,15 +4723,39 @@ def validate_challenges(challenges, impact_map, requirements, evidence, surface_
         if errors:
             challenge["validation_status"] = "REJECTED"
             challenge["validation_errors"] = errors
+            challenge["reference_status"] = "REJECTED"
+            challenge["applicability_status"] = "REJECTED"
+            challenge["applicability_reason"] = "; ".join(errors[:2])
+            challenge["effect_status"] = "NOT_APPLICABLE"
             challenge["lifecycle_state"] = "REJECTED"
             challenge["resolution_status"] = "REJECTED"
             rejected.append(challenge)
         else:
+            applicability = evaluate_challenge_applicability(
+                challenge, {"impacts": list(impacts.values())}, requirements, evidence,
+                surface_registry=surface_registry,
+            )
             challenge["validation_status"] = "VALIDATED"
+            challenge["reference_status"] = applicability.get(
+                "reference_status", "VALID_REFERENCES",
+            )
+            challenge["applicability_status"] = applicability.get(
+                "status", "VALIDATED_NON_APPLICABLE",
+            )
+            challenge["applicability_reason"] = applicability.get("reason", "")
+            challenge["effect_status"] = (
+                "PENDING" if applicability.get("applicable") else "NOT_APPLICABLE"
+            )
             challenge["lifecycle_state"] = "OPEN"
             challenge["resolution_status"] = "OPEN"
             accepted.append(challenge)
-    return {"validated": accepted, "rejected": rejected}
+            (applicable if applicability.get("applicable") else non_applicable).append(challenge)
+    return {
+        "validated": accepted,
+        "rejected": rejected,
+        "applicable": applicable,
+        "non_applicable": non_applicable,
+    }
 
 
 def merge_challenges(model_challenges, deterministic):
@@ -4110,10 +4854,152 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
     return impacts
 
 
+def _unsupported_necessity_defect_exists(target, evidence_by_id, surface_by_id=None):
+    linked = [
+        evidence_by_id[item] for item in target.get("repository_evidence_ids", [])
+        if item in evidence_by_id
+    ]
+    return _impact_claims_mutation(target) and (
+        not target.get("requirement_ids")
+        or (
+            not target.get("repository_evidence_ids")
+            and not target.get("new_surface_proposal_ids")
+        )
+        or _impact_surface_kind(target, surface_by_id) == "PERSISTENCE"
+        or any(item.get("category") == "CURRENT_PERSISTENCE" for item in linked)
+    )
+
+
+def _challenge_defect_exists(challenge, final_source, target_source, requirements,
+                             evidence, surface_registry=None, obligation_ledger=None):
+    """Evaluate whether a challenge's semantic defect survives final closure."""
+    value = target_source if isinstance(target_source, dict) else {}
+    impacts = {
+        str(item.get("impact_id")): item
+        for item in list(value.get("impacts", []) or [])
+        if isinstance(item, dict) and item.get("impact_id")
+    }
+    targets = [
+        impacts[item] for item in challenge.get("impact_ids", []) if item in impacts
+    ]
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    evidence_by_id = {
+        item["evidence_id"]: item
+        for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
+    }
+    semantic = evaluate_requirement_obligations(
+        final_source if isinstance(final_source, dict) else value,
+        requirements, evidence, surface_registry, obligation_ledger,
+    )
+    semantic_by_id = {
+        str(item.get("requirement_id")): item
+        for item in semantic.get("requirements", [])
+    }
+    challenge_type = challenge.get("challenge_type")
+    if challenge_type in {"REQUIREMENT_GAP", "MISSING_IMPACT", "DEPENDENCY_GAP"}:
+        return any(
+            semantic_by_id.get(str(requirement_id), {}).get("state") != "COVERED"
+            for requirement_id in challenge.get("requirement_ids", [])
+        )
+    if challenge_type == "TEST_GAP":
+        return any(
+            any(
+                item.get("obligation_type") == "TEST" and item.get("state") != "COVERED"
+                for item in semantic_by_id.get(str(requirement_id), {}).get("obligations", [])
+            )
+            for requirement_id in challenge.get("requirement_ids", [])
+        )
+    if challenge_type == "INTERFACE_REUSE_MISSED":
+        return any(not (
+            item.get("interfaces_to_reuse") or item.get("interface_surface_ids")
+            or item.get("existing_interfaces_to_reuse")
+        ) for item in targets)
+    if challenge_type == "PRESERVATION_RISK":
+        return any(not (
+            item.get("preserve") or item.get("local_preservation_constraints")
+            or item.get("preservation_constraints")
+        ) for item in targets)
+    if challenge_type == "UNSUPPORTED_NECESSITY":
+        return any(_unsupported_necessity_defect_exists(item, evidence_by_id, surface_by_id) for item in targets)
+    if challenge_type in {"WRONG_OWNER", "DUPLICATE_OWNERSHIP_RISK"}:
+        applicability = evaluate_challenge_applicability(
+            challenge, value, requirements, evidence,
+            surface_registry=surface_registry, obligation_ledger=obligation_ledger,
+        )
+        return bool(applicability.get("applicable"))
+    if challenge_type == "UNRELATED_CHANGE":
+        req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
+        req_terms = _domain_tokens(" ".join(
+            req_by_id[item]["text"] for item in challenge.get("requirement_ids", [])
+            if item in req_by_id
+        ))
+        return any(
+            _impact_claims_mutation(item)
+            and req_terms
+            and not (req_terms & _domain_tokens(_impact_text(item)))
+            for item in targets
+        )
+    return not bool(challenge.get("effect_status") in {"APPLIED", "SUPPRESSED"})
+
+
+def re_evaluate_challenge_lifecycle(challenges, final_source, requirements, evidence,
+                                    surface_registry=None, obligation_ledger=None,
+                                    impact_map=None, closure_actions=None):
+    """Recompute challenge state from final responsibilities, not branch history."""
+    final_source = final_source if isinstance(final_source, dict) else {}
+    target_source = impact_map if isinstance(impact_map, dict) else final_source
+    resolved, unresolved, lifecycle = [], [], []
+    closure_actions = list(closure_actions or [])
+    for item in list(challenges or [])[:MAX_CHALLENGES]:
+        challenge = copy.deepcopy(item)
+        initial_status = challenge.get("applicability_status")
+        if initial_status is None:
+            initial = evaluate_challenge_applicability(
+                challenge, target_source, requirements, evidence,
+                surface_registry=surface_registry, obligation_ledger=obligation_ledger,
+            )
+            initial_status = initial.get("status")
+            challenge["applicability_status"] = initial_status
+            challenge["applicability_reason"] = initial.get("reason", "")
+        final_applicability = evaluate_challenge_applicability(
+            challenge, target_source, requirements, evidence,
+            surface_registry=surface_registry, obligation_ledger=obligation_ledger,
+        )
+        challenge["final_applicability_status"] = final_applicability.get("status")
+        challenge["final_applicability_reason"] = final_applicability.get("reason", "")
+        defect = False if initial_status == "VALIDATED_NON_APPLICABLE" else _challenge_defect_exists(
+            challenge, final_source, target_source, requirements, evidence,
+            surface_registry=surface_registry, obligation_ledger=obligation_ledger,
+        )
+        if defect:
+            state = "OPEN"
+        elif challenge.get("effect_status") == "APPLIED":
+            state = "RESOLVED"
+        elif initial_status == "VALIDATED_NON_APPLICABLE":
+            state = "SUPERSEDED"
+        elif any(
+            str(requirement_id) in {
+                str(value) for value in action.get("requirement_ids", [])
+            }
+            for action in closure_actions
+            for requirement_id in challenge.get("requirement_ids", [])
+        ):
+            state = "SUPERSEDED"
+        else:
+            state = "SUPERSEDED"
+        challenge["final_defect_exists"] = bool(defect)
+        challenge["lifecycle_state"] = state
+        challenge["resolution_status"] = state
+        challenge["post_reconciliation_evaluation"] = True
+        lifecycle.append(challenge)
+        (unresolved if state == "OPEN" else resolved).append(challenge)
+    return lifecycle, resolved, unresolved
+
+
 def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence,
                          surface_registry=None, impact_seeds=None,
                          obligation_ledger=None, task_goal=None, task_brain=None):
-    """Apply one bounded deterministic revision; unresolved criticism stays blocking."""
+    """Apply one bounded deterministic revision while conserving obligations."""
     revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
     impacts = list(revised.get("impacts", []) or [])
     by_id = {str(item.get("impact_id")): item for item in impacts}
@@ -4123,11 +5009,32 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
     obligation_ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    challenge_records = []
+    for item in list(validated_challenges or [])[:MAX_CHALLENGES]:
+        challenge = copy.deepcopy(item)
+        if challenge.get("applicability_status") not in {
+            "VALIDATED_APPLICABLE", "VALIDATED_NON_APPLICABLE",
+        }:
+            applicability = evaluate_challenge_applicability(
+                challenge, {"impacts": impacts}, requirements, evidence,
+                surface_registry=surface_registry,
+                obligation_ledger=obligation_ledger,
+            )
+            challenge["reference_status"] = applicability.get("reference_status")
+            challenge["applicability_status"] = applicability.get("status")
+            challenge["applicability_reason"] = applicability.get("reason")
+        challenge_records.append(challenge)
     application_by_id = {}
-    for challenge in list(validated_challenges or [])[:MAX_CHALLENGES]:
+    deferred_effects = []
+    for challenge in challenge_records:
         challenge_type = challenge.get("challenge_type")
         targets = [by_id[item] for item in challenge.get("impact_ids", []) if item in by_id]
         applied = False
+        challenge_id = str(challenge.get("challenge_id"))
+        if challenge.get("applicability_status") != "VALIDATED_APPLICABLE":
+            challenge["effect_status"] = "SUPPRESSED"
+            application_by_id[challenge_id] = "SUPPRESSED"
+            continue
         if challenge_type in {"UNSUPPORTED_NECESSITY", "UNRELATED_CHANGE"}:
             for target in targets:
                 if challenge_type == "UNRELATED_CHANGE" and target.get("disposition") == "PRESERVATION_ONLY":
@@ -4141,7 +5048,7 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                     target.get("impact_kind") == "PRESERVATION_ONLY"
                     or any(item.get("category") == "CURRENT_PERSISTENCE" for item in linked)
                 )
-                if preservation:
+                if preservation and challenge_type == "UNSUPPORTED_NECESSITY":
                     target["impact_kind"] = "PRESERVATION_ONLY"
                     target["disposition"] = "PRESERVATION_ONLY"
                     target["necessity_status"] = "PRESERVATION_ONLY"
@@ -4154,10 +5061,14 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                         ],
                         6, 300,
                     )
+                    applied = True
                 else:
-                    target["disposition"] = "INSUFFICIENT_EVIDENCE"
-                    target["necessity_status"] = "INSUFFICIENT_EVIDENCE"
-                applied = True
+                    # Destructive demotion is deliberately deferred until
+                    # behavior/preservation/test closure has inspected every
+                    # canonical anchor.  A later pass can still demote a
+                    # genuinely unsupported mutation.
+                    deferred_effects.append((challenge, str(target.get("impact_id"))))
+                    challenge["effect_status"] = "DEFERRED"
         elif challenge_type in {"WRONG_OWNER", "DUPLICATE_OWNERSHIP_RISK"}:
             for target in targets:
                 owner_facts = [
@@ -4233,14 +5144,26 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                     list(target.get("preserve", [])) + [challenge.get("proposed_resolution")], 6, 300,
                 )
                 applied = True
-        application_by_id[str(challenge.get("challenge_id"))] = bool(applied)
+        if applied:
+            challenge["effect_status"] = "APPLIED"
+            application_by_id[challenge_id] = "APPLIED"
+        elif challenge.get("effect_status") != "DEFERRED":
+            challenge["effect_status"] = "PENDING"
+            application_by_id[challenge_id] = "PENDING"
     revised["impacts"] = impacts[:MAX_IMPACT_ENTRIES]
     revised["challenge_rounds"] = 1
-    revised["revision_rounds"] = 1 if validated_challenges else 0
+    revised["revision_rounds"] = 1 if challenge_records else 0
     if task_goal is not None:
-        revised["task_goal"] = _compact(task_goal, 1000)
+        # The caller supplies the already canonical Source Contract goal.
+        # Preserve it exactly; prompt-file whitespace must not become plan
+        # authority.
+        revised["task_goal"] = str(task_goal)
     revised = _apply_obligation_constraints(
         revised, requirements, surface_registry, impact_seeds, obligation_ledger,
+    )
+    revised, synthesized_actions = _synthesize_obligation_impacts(
+        revised, requirements, evidence, surface_registry, impact_seeds,
+        obligation_ledger,
     )
     revised, closure_actions = close_behavior_obligation_gaps(
         revised, requirements, evidence, surface_registry, impact_seeds,
@@ -4249,7 +5172,92 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     revised = _apply_obligation_constraints(
         revised, requirements, surface_registry, impact_seeds, obligation_ledger,
     )
+
+    # Apply only those deferred destructive effects that still describe a
+    # real final-state defect.  A canonical owner carrying a behavior duty is
+    # conserved even when a weak criticism was initially aimed at its weaker
+    # disposition.
+    for challenge, target_id in deferred_effects:
+        current_by_id = {
+            str(item.get("impact_id")): item
+            for item in revised.get("impacts", [])
+            if isinstance(item, dict) and item.get("impact_id")
+        }
+        target = current_by_id.get(target_id)
+        if target is None:
+            continue
+        challenge_id = str(challenge.get("challenge_id"))
+        if challenge.get("challenge_type") == "UNSUPPORTED_NECESSITY":
+            linked = [
+                evidence_by_id[item] for item in target.get("repository_evidence_ids", [])
+                if item in evidence_by_id
+            ]
+            behavior_link = any(
+                "BEHAVIOR_CHANGE" in next(
+                    (
+                        record.get("obligation_types", [])
+                        for record in _obligation_records(obligation_ledger)
+                        if record.get("requirement_id") == str(requirement_id)
+                    ),
+                    [],
+                )
+                for requirement_id in target.get("requirement_ids", [])
+            )
+            still_unsupported = (
+                _impact_claims_mutation(target)
+                and not behavior_link
+                and (
+                    not target.get("requirement_ids")
+                    or (
+                        not target.get("repository_evidence_ids")
+                        and not target.get("new_surface_proposal_ids")
+                    )
+                    or _impact_surface_kind(target, surface_by_id) == "PERSISTENCE"
+                    or any(item.get("category") == "CURRENT_PERSISTENCE" for item in linked)
+                )
+            )
+        else:
+            requirement_terms = _domain_tokens(" ".join(
+                req_by_id[item]["text"] for item in challenge.get("requirement_ids", [])
+                if item in req_by_id
+            ))
+            impact_terms = _domain_tokens(_impact_text(target))
+            still_unsupported = bool(requirement_terms) and not (
+                requirement_terms & impact_terms
+            ) and _impact_claims_mutation(target)
+        if still_unsupported:
+            target["disposition"] = "INSUFFICIENT_EVIDENCE"
+            target["necessity_status"] = "INSUFFICIENT_EVIDENCE"
+            target["impact_kind"] = "INTEGRATION_CHANGE"
+            challenge["effect_status"] = "APPLIED"
+            application_by_id[challenge_id] = "APPLIED"
+        else:
+            challenge["effect_status"] = "SUPPRESSED"
+            application_by_id[challenge_id] = "SUPPRESSED"
+    revised["impacts"] = list(revised.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES]
+    revised["obligation_impacts_synthesized"] = int(
+        revised.get("obligation_impacts_synthesized", 0) or 0
+    )
+    revised["challenge_effects_applied"] = sum(
+        value == "APPLIED" for value in application_by_id.values()
+    )
+    revised["challenge_effects_suppressed"] = sum(
+        value == "SUPPRESSED" for value in application_by_id.values()
+    )
+    revised["impact_challenges_applicable"] = sum(
+        item.get("applicability_status") == "VALIDATED_APPLICABLE"
+        for item in challenge_records
+    )
+    revised["impact_challenges_non_applicable"] = sum(
+        item.get("applicability_status") == "VALIDATED_NON_APPLICABLE"
+        for item in challenge_records
+    )
     normalized = normalize_impact_map(revised, authoritative=bool(surface_registry))
+    if task_goal is not None:
+        # normalize_impact_map intentionally compacts ordinary model text;
+        # the Stage 3 authority passed by the Source Contract is different
+        # and must survive byte-for-byte into the final plan/hash.
+        normalized["task_goal"] = str(task_goal)
     semantic = evaluate_requirement_obligations(
         normalized, requirements, evidence, surface_registry, obligation_ledger,
     )
@@ -4257,78 +5265,24 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     normalized["semantic_obligation_coverage"] = semantic
     normalized["deterministic_behavior_anchor_promotions"] = len(closure_actions)
     normalized["behavior_anchor_closure_actions"] = closure_actions
-
-    semantic_by_id = {
-        item["requirement_id"]: item for item in semantic.get("requirements", [])
+    obligation_metric_keys = {
+        "PRESERVATION": "preservation_obligations_closed",
+        "ARCHITECTURE_REUSE": "reuse_obligations_closed",
+        "TEST": "test_obligations_closed",
+        "PROHIBITION": "prohibition_obligations_closed",
     }
-    normalized_impacts = {
-        str(item.get("impact_id")): item for item in normalized.get("impacts", [])
-    }
-    resolved, unresolved = [], []
-    lifecycle = []
-    for challenge in list(validated_challenges or [])[:MAX_CHALLENGES]:
-        challenge_type = challenge.get("challenge_type")
-        challenge_id = str(challenge.get("challenge_id"))
-        applied = application_by_id.get(challenge_id, False)
-        target_records = [
-            normalized_impacts[item] for item in challenge.get("impact_ids", [])
-            if item in normalized_impacts
-        ]
-        if challenge_type in {"REQUIREMENT_GAP", "MISSING_IMPACT", "DEPENDENCY_GAP"}:
-            is_open = any(
-                semantic_by_id.get(str(requirement_id), {}).get("state") != "COVERED"
-                for requirement_id in challenge.get("requirement_ids", [])
-            )
-        elif challenge_type == "TEST_GAP":
-            is_open = any(
-                any(
-                    item.get("obligation_type") == "TEST" and item.get("state") != "COVERED"
-                    for item in semantic_by_id.get(str(requirement_id), {}).get("obligations", [])
-                )
-                for requirement_id in challenge.get("requirement_ids", [])
-            )
-        elif challenge_type == "INTERFACE_REUSE_MISSED":
-            is_open = any(not (
-                item.get("interfaces_to_reuse") or item.get("existing_interfaces_to_reuse")
-            ) for item in target_records)
-        elif challenge_type == "PRESERVATION_RISK":
-            is_open = any(not (
-                item.get("preserve") or item.get("local_preservation_constraints")
-            ) for item in target_records)
-        elif challenge_type in {"WRONG_OWNER", "DUPLICATE_OWNERSHIP_RISK"}:
-            is_open = any(_NEW_OWNER_RE.search(_impact_text(item)) for item in target_records)
-        elif challenge_type == "UNSUPPORTED_NECESSITY":
-            is_open = any(
-                item.get("necessity_status") == "MUST_CHANGE"
-                and (
-                    not item.get("requirement_ids")
-                    or (
-                        not item.get("repository_evidence_ids")
-                        and not item.get("new_surface_proposal_ids")
-                    )
-                    or item.get("surface_kind") == "PERSISTENCE"
-                )
-                for item in target_records
-            )
-        elif challenge_type == "UNRELATED_CHANGE":
-            is_open = any(
-                item.get("necessity_status") not in {"INSUFFICIENT_EVIDENCE", "PRESERVATION_ONLY"}
-                for item in target_records
-            ) and not applied
-        else:
-            is_open = not applied
-        record = copy.deepcopy(challenge)
-        if is_open:
-            state = "OPEN"
-        elif applied or closure_actions:
-            state = "RESOLVED" if applied else "SUPERSEDED"
-        else:
-            state = "SUPERSEDED"
-        record["lifecycle_state"] = state
-        record["resolution_status"] = state
-        record["post_reconciliation_evaluation"] = True
-        lifecycle.append(record)
-        (unresolved if state == "OPEN" else resolved).append(record)
+    for obligation_type, metric in obligation_metric_keys.items():
+        normalized[metric] = sum(
+            item.get("state") == "COVERED"
+            for record in semantic.get("requirements", [])
+            for item in record.get("obligations", [])
+            if item.get("obligation_type") == obligation_type
+        )
+    lifecycle, resolved, unresolved = re_evaluate_challenge_lifecycle(
+        challenge_records, normalized, requirements, evidence,
+        surface_registry=surface_registry, obligation_ledger=obligation_ledger,
+        impact_map=normalized, closure_actions=closure_actions + synthesized_actions,
+    )
     normalized["challenge_lifecycle"] = lifecycle
     normalized["challenges_resolved_post_reconciliation"] = len(resolved)
     normalized["challenges_remaining_open"] = len(unresolved)
@@ -4436,6 +5390,48 @@ def finalize_plan_identity(plan):
     digest = plan_content_hash(value)
     value["plan_id"] = f"PLAN-{digest[:12].upper()}"
     value["plan_hash"] = digest
+    return value
+
+
+def _plan_challenge_record(challenge):
+    """Keep final challenge state auditable without duplicating model prose."""
+    value = challenge if isinstance(challenge, dict) else {}
+    return {
+        key: copy.deepcopy(value.get(key))
+        for key in (
+            "challenge_id", "challenge_type", "impact_ids", "requirement_ids",
+            "blocking",
+            "applicability_status", "effect_status", "lifecycle_state",
+            "resolution_status",
+        )
+        if value.get(key) not in (None, "", [], {})
+    }
+
+
+compact_challenge_record = _plan_challenge_record
+
+
+def _fit_plan_to_serialized_bound(plan):
+    """Trim only redundant compatibility projections when the plan is tight."""
+    value = plan if isinstance(plan, dict) else {}
+    # These fields are retained in ordinary plans for compatibility, but are
+    # exact projections of canonical fields already present in the node.  A
+    # newly confirmed requirement can otherwise push an otherwise valid plan
+    # a few characters beyond the fixed Stage 3 bound.
+    optional_node_fields = (
+        "objective", "target_paths", "test_contract", "new_surface_proposals",
+        "parent_scopes", "dependencies", "inspect_targets",
+    )
+    for field in optional_node_fields:
+        if _json_size(value) <= MAX_PLAN_CHARS - 128:
+            break
+        for node in value.get("approved_change_nodes", []) or []:
+            node.pop(field, None)
+    # Semantic coverage is recomputed by the Plan Gate; retain it whenever
+    # possible, but use it as the final compactability valve for unusually
+    # verbose confirmed requirement text.
+    if _json_size(value) > MAX_PLAN_CHARS - 128:
+        value.pop("semantic_obligation_coverage", None)
     return value
 
 
@@ -4692,8 +5688,12 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             surface_registry.get("version") if surface_registry else None
         ),
         "new_surface_proposals": copy.deepcopy((impact_map or {}).get("new_surface_proposals", [])),
-        "resolved_challenges": list(resolved_challenges or [])[:MAX_CHALLENGES],
-        "unresolved_challenges": list(unresolved_challenges or [])[:MAX_CHALLENGES],
+        "resolved_challenges": [
+            _plan_challenge_record(item) for item in list(resolved_challenges or [])[:MAX_CHALLENGES]
+        ],
+        "unresolved_challenges": [
+            _plan_challenge_record(item) for item in list(unresolved_challenges or [])[:MAX_CHALLENGES]
+        ],
         "coverage": coverage,
         "requirement_obligation_ledger": compact_requirement_obligation_ledger(obligation_ledger),
         "semantic_obligation_coverage": semantic,
@@ -4718,7 +5718,7 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             "revision_rounds": min(1, int(bool(resolved_challenges or unresolved_challenges))),
         },
     }
-    return finalize_plan_identity(plan)
+    return finalize_plan_identity(_fit_plan_to_serialized_bound(plan))
 
 
 def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PROJECT,
@@ -4858,7 +5858,7 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
             evidence_by_id[item] for item in node_evidence
             if item in evidence_by_id and evidence_by_id[item].get("category") == "CURRENT_STATE_OWNER"
         ]
-        if state_facts and _NEW_OWNER_RE.search(str(node.get("goal", ""))):
+        if state_facts and _impact_implies_duplicate_owner(node):
             owners = {
                 str(item.get("symbol", "")).split(".", 1)[0]
                 for item in state_facts if item.get("symbol")
@@ -4976,6 +5976,35 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         "behavior_obligations": semantic_result.get("behavior_obligations", 0),
         "behavior_obligations_covered": semantic_result.get("behavior_obligations_covered", 0),
         "behavior_obligations_uncovered": semantic_result.get("behavior_obligations_uncovered", 0),
+        "impact_challenges_applicable": int(value.get("impact_challenges_applicable", 0) or 0),
+        "impact_challenges_non_applicable": int(value.get("impact_challenges_non_applicable", 0) or 0),
+        "challenge_effects_applied": int(value.get("challenge_effects_applied", 0) or 0),
+        "challenge_effects_suppressed": int(value.get("challenge_effects_suppressed", 0) or 0),
+        "obligation_impacts_synthesized": int(value.get("obligation_impacts_synthesized", 0) or 0),
+        "preservation_obligations_closed": sum(
+            item.get("state") == "COVERED"
+            for record in semantic_result.get("requirements", [])
+            for item in record.get("obligations", [])
+            if item.get("obligation_type") == "PRESERVATION"
+        ),
+        "reuse_obligations_closed": sum(
+            item.get("state") == "COVERED"
+            for record in semantic_result.get("requirements", [])
+            for item in record.get("obligations", [])
+            if item.get("obligation_type") == "ARCHITECTURE_REUSE"
+        ),
+        "test_obligations_closed": sum(
+            item.get("state") == "COVERED"
+            for record in semantic_result.get("requirements", [])
+            for item in record.get("obligations", [])
+            if item.get("obligation_type") == "TEST"
+        ),
+        "prohibition_obligations_closed": sum(
+            item.get("state") == "COVERED"
+            for record in semantic_result.get("requirements", [])
+            for item in record.get("obligations", [])
+            if item.get("obligation_type") == "PROHIBITION"
+        ),
         "semantic_obligation_coverage": semantic_result,
     }
 
