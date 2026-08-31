@@ -1850,6 +1850,528 @@ def validate_mission_against_contract(mission, contract, require_identity=False)
     return {"valid": not errors, "errors": errors[:30]}
 
 
+MISSION_ADVICE_FIELDS = (
+    "objective", "implementation_steps", "inspection_order", "interface_usage",
+    "implementation_notes", "verification_notes",
+)
+MISSION_ADVICE_LIST_FIELDS = (
+    "implementation_steps", "inspection_order", "interface_usage",
+    "implementation_notes", "verification_notes",
+)
+MISSION_ADVICE_MAX_ITEMS = 6
+MISSION_ADVICE_ITEM_CHARS = 360
+
+# These keys may still appear in a weak model's legacy response.  They are
+# explicitly recorded and ignored; none of them can enter hydrated authority.
+MISSION_ADVICE_NON_AUTHORITATIVE_FIELDS = frozenset({
+    "execution_contract_id", "execution_contract_hash", "contract_hash",
+    "approved_plan_id", "approved_plan_hash", "plan_id", "plan_hash",
+    "responsibility_type", "requirement_ids", "requirements", "obligation_types",
+    "canonical_surface_ids", "surface_ids", "impact_ids", "repository_evidence_ids",
+    "allowed_mutation_paths", "allowed_inspection_paths", "mutation_targets",
+    "mutation_paths", "targets", "inspection_targets", "inspect_targets",
+    "do_not_touch", "global_do_not_touch", "preservation", "preserves",
+    "invariants", "preservation_constraints", "prohibitions", "prohibition_constraints",
+    "structured_prohibitions", "test_contract",
+    "integration_responsibility", "done_when", "dependencies", "dependency_ids",
+    "test_file", "test_files", "new_files", "new_surface_proposals",
+    "approved_new_surface_parent_scopes", "goal", "goal_anchor", "task",
+    "expected_outcome", "existing_facts", "interfaces_to_reuse",
+    "interface_surface_ids", "source_provenance", "provenance", "derivation",
+})
+MISSION_ADVICE_ALIASES = {
+    "objective": ("objective", "implementation_objective", "goal_anchor", "task"),
+    "implementation_steps": ("implementation_steps", "steps", "implementation_plan", "approach"),
+    "inspection_order": ("inspection_order", "inspect_order"),
+    "interface_usage": ("interface_usage", "interface_advice", "interfaces_to_reuse"),
+    "implementation_notes": ("implementation_notes", "notes", "cautions", "project_specific_quality_rules"),
+    "verification_notes": ("verification_notes", "verification_steps", "verification_plan", "checks"),
+}
+
+_ADVICE_MUTATION_VERBS = re.compile(
+    r"\b(?:add|change|create|delete|edit|implement|modify|move|mutate|patch|remove|rename|replace|set|store|touch|update|write)\w*\b",
+    re.IGNORECASE,
+)
+_ADVICE_SAFE_VERBS = re.compile(
+    r"\b(?:call|check|inspect|invoke|look\s+at|read|reference|review|reuse|use|verify)\b",
+    re.IGNORECASE,
+)
+_ADVICE_NEGATION = re.compile(
+    r"(?:\bdo\s+not\b|\bdon['’]t\b|\bmust\s+not\b|\bnever\b|\bavoid\b|\bwithout\b|\binstead\s+of\b|\bno\b)",
+    re.IGNORECASE,
+)
+_ADVICE_DUPLICATE_STATE = re.compile(
+    r"\b(?:duplicate|second|another|new)\b[^.!?;]{0,70}\b(?:input|pause|game(?:-state)?|state|owner)\b"
+    r"|\b(?:input|pause|game(?:-state)?|state|owner)\b[^.!?;]{0,50}\b(?:duplicate|second|another|new)\b",
+    re.IGNORECASE,
+)
+_ADVICE_NEW_FILE = re.compile(
+    r"\b(?:create|add|generate|write)\b[^.!?;]{0,50}\b(?:a\s+)?(?:new\s+)?file\b",
+    re.IGNORECASE,
+)
+
+
+def mission_advice_schema():
+    """Return the small advisory schema used by the one MissionCompiler call."""
+    properties = {
+        "objective": {"type": "string", "maxLength": MAX_TEXT_CHARS},
+    }
+    for field in MISSION_ADVICE_LIST_FIELDS:
+        properties[field] = {
+            "type": "array", "maxItems": MISSION_ADVICE_MAX_ITEMS,
+            "items": {"type": "string", "maxLength": MISSION_ADVICE_ITEM_CHARS},
+        }
+    # Additional properties stay syntactically tolerated so legacy weak-model
+    # fields can be observed and rejected deterministically after the call.
+    return {
+        "type": "object", "properties": properties,
+        "required": [], "additionalProperties": True,
+    }
+
+
+def _advice_field_value(raw, field):
+    value = raw if isinstance(raw, dict) else {}
+    for alias in MISSION_ADVICE_ALIASES.get(field, (field,)):
+        if alias in value and value.get(alias) not in (None, "", [], {}):
+            return value.get(alias), alias
+    return None, None
+
+
+def _advice_list(value, field):
+    if value in (None, "", [], ()):
+        return [], []
+    values = [value] if isinstance(value, str) else list(value) if isinstance(value, (list, tuple)) else None
+    if values is None:
+        return [], [f"{field} must be a string or list of strings"]
+    errors = []
+    if len(values) > MISSION_ADVICE_MAX_ITEMS:
+        errors.append(
+            f"{field} exceeds the bounded advice list ({len(values)} > {MISSION_ADVICE_MAX_ITEMS})"
+        )
+    result = []
+    for index, item in enumerate(values[:MISSION_ADVICE_MAX_ITEMS], 1):
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{field}[{index}] must be a non-empty string")
+            continue
+        normalized = " ".join(item.split())
+        if len(normalized) > MISSION_ADVICE_ITEM_CHARS:
+            errors.append(
+                f"{field}[{index}] exceeds the bounded advice length ({MISSION_ADVICE_ITEM_CHARS} characters)"
+            )
+            continue
+        if normalized not in result:
+            result.append(normalized)
+    return result, errors
+
+
+def _advice_interface_name(value, canonical):
+    text = " ".join(str(value or "").split()).casefold()
+    compact = re.sub(r"[()\[\]{}]", "", text)
+    for interface in canonical:
+        expected = " ".join(str(interface or "").split()).casefold()
+        if expected and (expected in text or expected.replace("()", "") in compact):
+            return str(interface)
+    return None
+
+
+def _advice_rejected_field(key, value, reason, *, category="non_authoritative"):
+    rendered = _json(value)
+    if len(rendered) > 500:
+        rendered = rendered[:497] + "..."
+    return {"field": str(key), "category": category, "reason": str(reason), "value": rendered}
+
+
+def _advice_negated(text, position):
+    prefix = str(text or "")[max(0, int(position) - 70):int(position)]
+    return bool(_ADVICE_NEGATION.search(prefix))
+
+
+def _advice_mutation_allowed(contract, path):
+    return _mutation_path_allowed(contract, path)
+
+
+def _advice_clean_path(path):
+    return _path(str(path or "").rstrip(".,;:!?)]}"))
+
+
+def _advice_path_mutation_states(text):
+    """Associate an obvious mutation verb with its nearby path."""
+    actions = []
+    for match in _ADVICE_MUTATION_VERBS.finditer(text):
+        actions.append((match.start(), match.end(), "mutation", match))
+    for match in _ADVICE_SAFE_VERBS.finditer(text):
+        actions.append((match.start(), match.end(), "safe", match))
+    actions.sort(key=lambda item: (item[0], item[1]))
+    paths = []
+    for path_match in _PATH_RE.finditer(text):
+        previous = [item for item in actions if item[1] <= path_match.start()]
+        if previous:
+            between = text[previous[-1][1]:path_match.start()]
+            if re.search(r"[.;!?]", between):
+                previous = []
+        candidate = previous[-1] if previous else None
+        if candidate is None:
+            next_actions = [item for item in actions if item[0] >= path_match.end()]
+            if next_actions:
+                next_candidate = next_actions[0]
+                between = text[path_match.end():next_candidate[0]]
+                if next_candidate[0] - path_match.end() <= 70 and not re.search(r"[.;!?]", between):
+                    candidate = next_candidate
+        is_mutation = bool(
+            candidate
+            and candidate[2] == "mutation"
+            and not _advice_negated(text, candidate[3].start())
+        )
+        paths.append((_advice_clean_path(path_match.group(1)), is_mutation))
+    return paths
+
+
+def _advice_conflicts(advice, contract):
+    """Reject only obvious unsafe semantic implementation directions."""
+    authority = contract if isinstance(contract, dict) else {}
+    errors = []
+    mutation_paths = {
+        _path(item).casefold().rstrip("/")
+        for item in authority.get("allowed_mutation_paths", []) or []
+    }
+    inspection_paths = {
+        _path(item).casefold().rstrip("/")
+        for item in authority.get("allowed_inspection_paths", []) or []
+    }
+    dnt_paths = {
+        _path(item).casefold().rstrip("/")
+        for item in authority.get("global_do_not_touch", []) or []
+    }
+    responsibility = str(authority.get("responsibility_type", ""))
+    text_fields = (
+        ("objective", advice.get("objective", "")),
+        ("implementation_steps", advice.get("implementation_steps", [])),
+        ("inspection_order", advice.get("inspection_order", [])),
+        ("interface_usage", advice.get("interface_usage", [])),
+        ("implementation_notes", advice.get("implementation_notes", [])),
+        ("verification_notes", advice.get("verification_notes", [])),
+    )
+    for field, values in text_fields:
+        items = [values] if isinstance(values, str) else list(values or [])
+        for item in items:
+            text = " ".join(str(item).split())
+            if not text:
+                continue
+            mutation_matches = [match for match in _ADVICE_MUTATION_VERBS.finditer(text) if not _advice_negated(text, match.start())]
+            if mutation_matches:
+                path_states = _advice_path_mutation_states(text)
+                for clean_path, is_mutation in path_states:
+                    if not is_mutation:
+                        continue
+                    normalized_path = clean_path.casefold().rstrip("/")
+                    if not normalized_path:
+                        continue
+                    if normalized_path in dnt_paths:
+                        errors.append(
+                            f"{field}: do_not_touch path {clean_path} was given mutation instructions"
+                        )
+                    elif not _advice_mutation_allowed(authority, clean_path):
+                        errors.append(
+                            f"{field}: explicit mutation of unapproved path {clean_path}"
+                        )
+                    elif normalized_path not in mutation_paths and normalized_path in inspection_paths:
+                        errors.append(
+                            f"{field}: inspection-only path {clean_path} was given mutation instructions"
+                        )
+                if responsibility not in {MUTATION, TEST_MUTATION}:
+                    errors.append(
+                        f"{field}: {responsibility} responsibility cannot contain positive mutation instructions"
+                    )
+                if responsibility == TEST_MUTATION and not path_states and re.search(
+                    r"\b(?:source|implementation|application)\b", text, re.IGNORECASE,
+                ):
+                    errors.append(
+                        f"{field}: TEST_MUTATION advice cannot direct source implementation changes"
+                    )
+            for match in _ADVICE_DUPLICATE_STATE.finditer(text):
+                context_window = text[max(0, match.start() - 70):match.end() + 1]
+                if not _advice_negated(text, match.start()) and not _ADVICE_NEGATION.search(context_window):
+                    errors.append(
+                        f"{field}: advice proposes duplicate or new state/owner creation"
+                    )
+            if _ADVICE_NEW_FILE.search(text) and not authority.get("target_new_surface_proposal_ids"):
+                errors.append(f"{field}: advice proposes an unapproved new file")
+            if responsibility == TEST_MUTATION and re.search(
+                r"\b(?:src/|source\s+file|implementation)\b", text, re.IGNORECASE,
+            ) and mutation_matches:
+                errors.append(f"{field}: advice conflicts with TEST_MUTATION responsibility")
+    return _unique(errors, limit=30, text_limit=MAX_TEXT_CHARS)
+
+
+def sanitize_mission_advice(raw, contract):
+    """Validate bounded semantic advice while discarding model authority claims."""
+    value = raw if isinstance(raw, dict) else {}
+    errors = []
+    rejected = []
+    recognized = set()
+    advice = {"objective": ""}
+    for field in MISSION_ADVICE_FIELDS:
+        raw_value, alias = _advice_field_value(value, field)
+        recognized.update(MISSION_ADVICE_ALIASES.get(field, (field,)))
+        if field == "objective":
+            if raw_value in (None, ""):
+                continue
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                errors.append("objective must be a non-empty string")
+                continue
+            normalized = " ".join(raw_value.split())
+            if len(normalized) > MAX_TEXT_CHARS:
+                errors.append(f"objective exceeds the bounded advice length ({MAX_TEXT_CHARS} characters)")
+            else:
+                advice[field] = normalized
+            continue
+        normalized, field_errors = _advice_list(raw_value, field)
+        errors.extend(field_errors)
+        advice[field] = normalized
+        if field == "interface_usage" and normalized:
+            canonical = list((contract or {}).get("interfaces_to_reuse", []) or [])
+            accepted = []
+            for suggestion in normalized:
+                match = _advice_interface_name(suggestion, canonical)
+                if match and match not in accepted:
+                    accepted.append(match)
+                elif not match:
+                    rejected.append(_advice_rejected_field(
+                        field, suggestion, "unknown interface suggestion dropped",
+                        category="unknown_optional_interface",
+                    ))
+            advice[field] = accepted
+
+    if not advice.get("objective"):
+        errors.append("semantic advice requires a concise objective")
+    for key, item in value.items():
+        if key in recognized:
+            continue
+        if key in MISSION_ADVICE_NON_AUTHORITATIVE_FIELDS:
+            rejected.append(_advice_rejected_field(
+                key, item, "model field cannot author execution authority",
+                category=("non_authoritative_scope" if key in {
+                    "mutation_targets", "mutation_paths", "targets", "allowed_mutation_paths",
+                    "allowed_inspection_paths", "inspection_targets", "inspect_targets",
+                } else "non_authoritative"),
+            ))
+        else:
+            rejected.append(_advice_rejected_field(
+                key, item, "unknown optional model field dropped", category="unknown_optional_field",
+            ))
+    # A recognized legacy alias can still be semantic advice, but its source
+    # field must be observable as non-authoritative whenever it could have
+    # carried authority in the old rich mission schema.
+    legacy_used = {
+        alias for field in MISSION_ADVICE_FIELDS
+        for alias in MISSION_ADVICE_ALIASES.get(field, ())
+        if alias in value and alias != field and value.get(alias) not in (None, "", [], {})
+    }
+    for key in sorted(legacy_used):
+        if key in MISSION_ADVICE_NON_AUTHORITATIVE_FIELDS and not any(
+            item.get("field") == key for item in rejected
+        ):
+            rejected.append(_advice_rejected_field(
+                key, value.get(key), "legacy authority-shaped alias retained only as advice",
+                category="non_authoritative",
+            ))
+    conflicts = _advice_conflicts(advice, contract) if isinstance(contract, dict) and contract else []
+    return {
+        "valid": bool(isinstance(raw, dict) and not errors and not conflicts),
+        "advice": advice,
+        "rejected_fields": rejected,
+        "semantic_conflicts": conflicts,
+        "errors": _unique(errors, limit=30, text_limit=MAX_TEXT_CHARS),
+    }
+
+
+def validate_mission_advice_shape(value):
+    """Small validator passed to structured_model_call before contract binding."""
+    checked = sanitize_mission_advice(value, None)
+    return bool(checked.get("valid"))
+
+
+def _completed_dependency_summaries(values, allowed_ids=None):
+    allowed = {str(item) for item in list(allowed_ids or [])}
+    result = []
+    for item in list(values or []):
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("task_id") or item.get("execution_contract_id") or "")
+        status = str(item.get("status", "")).casefold()
+        if not task_id or status not in {"done", "verified", "passed"}:
+            continue
+        if allowed and task_id not in allowed:
+            continue
+        result.append({
+            "task_id": _text(task_id, 100),
+            "status": _text(item.get("status"), 40),
+            "summary": _text(item.get("summary"), 500),
+            "changed_files": _unique(
+                [_path(path) for path in item.get("changed_files", []) or []],
+                limit=12, text_limit=MAX_PATH_CHARS,
+            ),
+        })
+    if allowed:
+        by_id = {}
+        for item in result:
+            by_id.setdefault(str(item.get("task_id")), item)
+        return [
+            by_id[dependency_id] for dependency_id in list(allowed_ids or [])
+            if dependency_id in by_id
+        ][:MAX_DEPENDENCIES_PER_CONTRACT]
+    return result[:MAX_DEPENDENCIES_PER_CONTRACT]
+
+
+def hydrate_worker_mission(contract, advice, dependency_summaries=None):
+    """Construct the rich Worker Mission from immutable contract authority."""
+    authority = contract if isinstance(contract, dict) else {}
+    semantic = advice if isinstance(advice, dict) else {}
+    normalized_advice = sanitize_mission_advice(semantic, authority)
+    if normalized_advice.get("valid"):
+        semantic = normalized_advice.get("advice", {})
+    dependencies = _completed_dependency_summaries(
+        dependency_summaries, authority.get("dependencies", []) or [],
+    )
+    hash_payload = {
+        "execution_contract_id": authority.get("execution_contract_id"),
+        "execution_contract_hash": authority.get("contract_hash"),
+        "approved_plan_id": authority.get("plan_id"),
+        "approved_plan_hash": authority.get("plan_hash"),
+        "implementation_advice": _copy(semantic),
+        "completed_dependency_summaries": _copy(dependencies),
+    }
+    mission_hash = deterministic_hash(hash_payload)
+    mission = {
+        "mission_id": f"MISSION-{mission_hash[:16].upper()}",
+        "mission_hash": mission_hash,
+        "execution_contract_id": authority.get("execution_contract_id"),
+        "execution_contract_hash": authority.get("contract_hash"),
+        "approved_plan_id": authority.get("plan_id"),
+        "approved_plan_hash": authority.get("plan_hash"),
+        "goal": _copy(authority.get("goal")),
+        "responsibility_type": _copy(authority.get("responsibility_type")),
+        "plan_node_ids": _copy(authority.get("plan_node_ids", []) or []),
+        "requirement_ids": _copy(authority.get("requirement_ids", []) or []),
+        "obligation_types": _copy(authority.get("obligation_types", []) or []),
+        "requirements": _copy(authority.get("requirements", []) or []),
+        "canonical_surface_ids": _copy(authority.get("canonical_surface_ids", []) or []),
+        "repository_evidence_ids": _copy(authority.get("repository_evidence_ids", []) or []),
+        "allowed_mutation_surface_ids": _copy(authority.get("allowed_mutation_surface_ids", []) or []),
+        "allowed_mutation_paths": _copy(authority.get("allowed_mutation_paths", []) or []),
+        "allowed_inspection_surface_ids": _copy(authority.get("allowed_inspection_surface_ids", []) or []),
+        "allowed_inspection_paths": _copy(authority.get("allowed_inspection_paths", []) or []),
+        # The existing Worker event reader uses this alias; it is copied from
+        # the contract exactly, not from semantic advice.
+        "targets": _copy(authority.get("allowed_mutation_paths", []) or []),
+        "interfaces_to_reuse": _copy(authority.get("interfaces_to_reuse", []) or []),
+        "interface_surface_ids": _copy(authority.get("interface_surface_ids", []) or []),
+        "preservation": _copy(authority.get("local_preservation_constraints", []) or []),
+        "prohibitions": _copy(authority.get("structured_prohibitions", []) or []),
+        "do_not_touch": _copy(authority.get("global_do_not_touch", []) or []),
+        "test_contract": _copy(authority.get("test_contract", []) or []),
+        "integration_responsibility": _copy(authority.get("integration_responsibility", []) or []),
+        "done_when": _copy(authority.get("done_when", []) or []),
+        "dependency_ids": _copy(authority.get("dependencies", []) or []),
+        "dependencies": dependencies,
+        "implementation_advice": _copy(semantic),
+    }
+    return mission
+
+
+def validate_hydrated_worker_mission(mission, contract, dependency_summaries=None):
+    """Validate the deterministic hydrated mission against contract authority."""
+    value = mission if isinstance(mission, dict) else {}
+    authority = contract if isinstance(contract, dict) else {}
+    errors = []
+    expected_fields = {
+        "mission_id", "mission_hash", "execution_contract_id", "execution_contract_hash",
+        "approved_plan_id", "approved_plan_hash", "goal", "responsibility_type",
+        "plan_node_ids", "requirement_ids", "obligation_types", "requirements",
+        "canonical_surface_ids", "repository_evidence_ids", "allowed_mutation_surface_ids",
+        "allowed_mutation_paths", "allowed_inspection_surface_ids", "allowed_inspection_paths",
+        "targets", "interfaces_to_reuse", "interface_surface_ids", "preservation",
+        "prohibitions", "do_not_touch", "test_contract", "integration_responsibility",
+        "done_when", "dependency_ids", "dependencies", "implementation_advice",
+    }
+    for key in value:
+        if key not in expected_fields:
+            errors.append(f"hydrated mission contains unexpected field {key}")
+    exact_fields = (
+        ("execution_contract_id", "execution_contract_id"),
+        ("execution_contract_hash", "contract_hash"),
+        ("approved_plan_id", "plan_id"),
+        ("approved_plan_hash", "plan_hash"),
+        ("goal", "goal"),
+        ("responsibility_type", "responsibility_type"),
+        ("plan_node_ids", "plan_node_ids"),
+        ("requirement_ids", "requirement_ids"),
+        ("obligation_types", "obligation_types"),
+        ("requirements", "requirements"),
+        ("canonical_surface_ids", "canonical_surface_ids"),
+        ("repository_evidence_ids", "repository_evidence_ids"),
+        ("allowed_mutation_surface_ids", "allowed_mutation_surface_ids"),
+        ("allowed_inspection_surface_ids", "allowed_inspection_surface_ids"),
+        ("allowed_mutation_paths", "allowed_mutation_paths"),
+        ("allowed_inspection_paths", "allowed_inspection_paths"),
+        ("interfaces_to_reuse", "interfaces_to_reuse"),
+        ("interface_surface_ids", "interface_surface_ids"),
+        ("preservation", "local_preservation_constraints"),
+        ("prohibitions", "structured_prohibitions"),
+        ("do_not_touch", "global_do_not_touch"),
+        ("test_contract", "test_contract"),
+        ("integration_responsibility", "integration_responsibility"),
+        ("done_when", "done_when"),
+        ("dependency_ids", "dependencies"),
+    )
+    for mission_field, contract_field in exact_fields:
+        if value.get(mission_field) != authority.get(contract_field):
+            errors.append(f"{mission_field} does not exactly match contract authority")
+    if value.get("targets") != authority.get("allowed_mutation_paths"):
+        errors.append("targets do not exactly match contract mutation scope")
+    expected_dependencies = _completed_dependency_summaries(
+        dependency_summaries, authority.get("dependencies", []) or [],
+    ) if dependency_summaries is not None else list(value.get("dependencies", []) or [])
+    if value.get("dependencies") != expected_dependencies:
+        errors.append("dependencies do not match completed approved dependency summaries")
+    required_dependency_ids = [str(item) for item in authority.get("dependencies", []) or []]
+    actual_dependency_ids = [
+        str(item.get("task_id")) for item in list(value.get("dependencies", []) or [])
+        if isinstance(item, dict)
+    ]
+    if actual_dependency_ids != required_dependency_ids:
+        errors.append("mission dependency summaries do not cover exactly the approved dependencies")
+    if any(
+        str(item.get("task_id")) not in set(required_dependency_ids)
+        or str(item.get("status", "")).casefold() not in {"done", "verified", "passed"}
+        for item in list(value.get("dependencies", []) or []) if isinstance(item, dict)
+    ):
+        errors.append("mission contains an unapproved dependency summary")
+    advice_check = sanitize_mission_advice(value.get("implementation_advice"), authority)
+    if not advice_check.get("valid"):
+        errors.extend(f"implementation_advice: {item}" for item in advice_check.get("errors", []))
+        errors.extend(f"implementation_advice: {item}" for item in advice_check.get("semantic_conflicts", []))
+    elif advice_check.get("rejected_fields") or advice_check.get("advice") != value.get("implementation_advice"):
+        errors.append("implementation_advice contains non-authoritative or non-canonical fields")
+    hash_payload = {
+        "execution_contract_id": authority.get("execution_contract_id"),
+        "execution_contract_hash": authority.get("contract_hash"),
+        "approved_plan_id": authority.get("plan_id"),
+        "approved_plan_hash": authority.get("plan_hash"),
+        "implementation_advice": _copy(value.get("implementation_advice", {})),
+        "completed_dependency_summaries": _copy(value.get("dependencies", []) or []),
+    }
+    expected_hash = deterministic_hash(hash_payload)
+    if value.get("mission_hash") != expected_hash:
+        errors.append("mission hash does not match contract identity, advice, and dependencies")
+    if value.get("mission_id") != f"MISSION-{expected_hash[:16].upper()}":
+        errors.append("mission_id does not match deterministic mission hash")
+    for key in value:
+        if str(key).startswith("raw_") or key in {"raw_response", "raw_mission_compiler_output"}:
+            errors.append(f"hydrated mission contains raw model field {key}")
+    return {"valid": not errors, "errors": errors[:40]}
+
+
 def normalize_mission_for_contract(mission, contract, *, task_goal=None):
     """Restore mandatory authority from the immutable contract before Worker handoff."""
     value = _copy(mission if isinstance(mission, dict) else {})

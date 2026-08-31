@@ -1572,6 +1572,14 @@ def new_metrics(mode):
         "contract_child_scope_rejections": 0,
         "worker_contract_contexts_created": 0,
         "mission_contract_failures": 0,
+        "mission_contract_validation_failures": 0,
+        "mission_advice_received": 0,
+        "mission_advice_validated": 0,
+        "mission_advice_rejected": 0,
+        "mission_non_authoritative_fields_rejected": 0,
+        "mission_semantic_conflicts": 0,
+        "hydrated_worker_missions_created": 0,
+        "hydrated_worker_mission_failures": 0,
         "control_flow": [],
         "specification_expansions": 0,
         "specification_expansion_failures": 0,
@@ -5608,6 +5616,11 @@ validate_plan_execution_graph = stage4.validate_execution_graph
 contract_projection = stage4.contract_projection
 build_worker_contract_context = stage4.build_worker_contract_context
 validate_mission_against_contract = stage4.validate_mission_against_contract
+mission_advice_schema = stage4.mission_advice_schema
+validate_mission_advice_shape = stage4.validate_mission_advice_shape
+sanitize_mission_advice = stage4.sanitize_mission_advice
+hydrate_worker_mission = stage4.hydrate_worker_mission
+validate_hydrated_worker_mission = stage4.validate_hydrated_worker_mission
 validate_child_contract = stage4.validate_child_contract
 
 
@@ -6078,12 +6091,23 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
 def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
                            strategy_context=None, task_context=None, structured_call=None,
                            plan_node_contract=None, execution_contract=None):
-    """Compile one node into a small mission before any Worker tool call."""
+    """Compile one node into a bounded Worker mission before any tool call.
+
+    Contract-backed nodes use one model call for semantic implementation
+    advice only.  The rich mission is reconstructed deterministically from the
+    current immutable Execution Contract and that validated advice.  The
+    legacy non-contract path intentionally retains its existing schema.
+    """
     RUN["mission_compilations"] = RUN.get("mission_compilations", 0) + 1
     task = task if isinstance(task, dict) else {}
     projection = brain_projection if isinstance(brain_projection, dict) else {}
+    dependency_window = (
+        list(dependency_summaries or [])
+        if isinstance(execution_contract, dict)
+        else list(dependency_summaries or [])[-3:]
+    )
     dependencies = [
-        _compact_brain_record(item, 420) for item in list(dependency_summaries or [])[-3:]
+        _compact_brain_record(item, 420) for item in dependency_window
         if isinstance(item, dict) and str(item.get("status", "")).casefold() in {"done", "verified", "passed"}
     ]
     strategy = {}
@@ -6136,8 +6160,27 @@ def compile_worker_mission(task, brain_projection, dependency_summaries=None, re
         }
         context.pop("bounded_strategy", None)
         context.pop("relevant_task_context", None)
+        context.pop("approved_plan_node_contract", None)
         context["repository_hints"] = "(contract-scoped repository evidence is authoritative above)"
-    prompt_text = f"""You are the MISSION COMPILER for exactly one bounded node in a weak-model coding orchestrator.
+    if isinstance(execution_contract, dict):
+        prompt_text = f"""You are the MISSION COMPILER for one bounded Worker responsibility.
+The execution scope is already fixed. Do not propose new mutation targets. Do not restate or redesign architecture.
+Return only concise semantic implementation guidance for this contract; do not mutate files, call tools, decompose
+siblings, or return conversation. The Execution Contract is authoritative for all paths, requirements, interfaces,
+preservation, prohibitions, do_not_touch protections, tests, dependencies, and hashes. Do not emit or modify those
+authority fields. Explain only the implementation objective, optional ordered steps, optional inspection order,
+canonical interface usage, implementation cautions, and optional verification suggestions. Mention an inspection-only
+file only as something to read or reuse; never turn it into a mutation instruction.
+
+Return compact advice with an objective and any useful implementation_steps, inspection_order, interface_usage,
+implementation_notes, and verification_notes. Unknown or extra fields have no authority and will be discarded.
+
+BOUNDED CONTRACT CONTEXT:
+{_compact_mission_compiler_context(context)}"""
+        schema = mission_advice_schema()
+        validator = validate_mission_advice_shape
+    else:
+        prompt_text = f"""You are the MISSION COMPILER for exactly one bounded node in a weak-model coding orchestrator.
 Use only the current node, its relevant Project Brain projection, verified dependencies, repository hints, approved
 plan-node or Stage 4A execution contract, and any bounded strategy/task context below. Do not mutate files, call tools,
 decompose siblings, expand approved scope, or return conversation.
@@ -6148,66 +6191,98 @@ The goal anchor must remain compatible with the root project goal. Return only t
 
 BOUNDED COMPILER CONTEXT:
 {_compact_mission_compiler_context(context)}"""
-    schema = worker_mission_schema()
+        schema = worker_mission_schema()
+        validator = _worker_mission_validator
+    contract_backed = isinstance(execution_contract, dict)
+    advice_rejection_recorded = False
+    advice_validated = False
+    hydration_started = False
+    hydration_failure_recorded = False
     try:
         if structured_call is None:
             data = structured_model_call(
-                prompt_text, _worker_mission_validator, "mission-compilation", schema,
+                prompt_text, validator, "mission-compilation", schema,
                 role="MissionCompiler",
             )
         else:
-            data = structured_call(prompt_text, _worker_mission_validator, "mission-compilation", schema)
-        if not _worker_mission_validator(data):
-            raise StructuredOutputError("mission compiler returned an invalid mission")
-        if isinstance(execution_contract, dict):
-            # Validate the model's claims before any deterministic authority
-            # binding.  This keeps an omitted or expanded protection a
-            # controlled MissionCompiler failure instead of allowing the later
-            # normalization pass to conceal the omission.
-            contract_check = stage4.validate_mission_against_contract(
-                data, execution_contract,
+            data = structured_call(prompt_text, validator, "mission-compilation", schema)
+        if contract_backed:
+            RUN["mission_advice_received"] = RUN.get("mission_advice_received", 0) + 1
+            advice_check = stage4.sanitize_mission_advice(data, execution_contract)
+            rejected_fields = advice_check.get("rejected_fields", [])
+            conflicts = advice_check.get("semantic_conflicts", [])
+            RUN["mission_non_authoritative_fields_rejected"] = RUN.get(
+                "mission_non_authoritative_fields_rejected", 0,
+            ) + len(rejected_fields)
+            RUN["mission_semantic_conflicts"] = RUN.get(
+                "mission_semantic_conflicts", 0,
+            ) + len(conflicts)
+            record_run_event(
+                "mission_advice_received", task_id=task.get("id"),
+                execution_contract_id=execution_contract.get("execution_contract_id"),
+                raw_mission_compiler_output=copy.deepcopy(data),
+                rejected_non_authoritative_fields=copy.deepcopy(rejected_fields),
+                accepted_semantic_advice=copy.deepcopy(advice_check.get("advice", {})),
+                semantic_conflicts=copy.deepcopy(conflicts),
             )
-            if not contract_check.get("valid"):
+            if not validator(data) or not advice_check.get("valid"):
+                advice_rejection_recorded = True
+                RUN["mission_advice_rejected"] = RUN.get("mission_advice_rejected", 0) + 1
+                detail = advice_check.get("errors", []) + conflicts
                 raise StructuredOutputError(
                     MISSION_CONTRACT_VIOLATION + ": "
-                    + "; ".join(contract_check.get("errors", []))
+                    + "; ".join(detail or ["semantic advice was not usable"])
                 )
-        mission = (
-            _normalize_contract_worker_mission(task, projection, data)
-            if isinstance(execution_contract, dict)
-            else normalize_worker_mission(task, projection, data)
-        )
-        if not _worker_mission_validator(mission):
-            raise StructuredOutputError("normalized mission is incomplete")
-        if isinstance(execution_contract, dict):
-            # Restoration is deterministic authority binding, not a second
-            # model repair attempt.  Mandatory contract fields are prepended
-            # before the strict identity/protection check below.
-            mission = stage4.normalize_mission_for_contract(
-                mission, execution_contract, task_goal=task.get("goal"),
+            advice_validated = True
+            RUN["mission_advice_validated"] = RUN.get("mission_advice_validated", 0) + 1
+            hydration_started = True
+            mission = stage4.hydrate_worker_mission(
+                execution_contract, advice_check.get("advice", {}), dependencies,
             )
+            final_check = stage4.validate_hydrated_worker_mission(
+                mission, execution_contract, dependencies,
+            )
+            if not final_check.get("valid"):
+                RUN["mission_contract_validation_failures"] = RUN.get(
+                    "mission_contract_validation_failures", 0,
+                ) + 1
+                RUN["hydrated_worker_mission_failures"] = RUN.get(
+                    "hydrated_worker_mission_failures", 0,
+                ) + 1
+                hydration_failure_recorded = True
+                raise StructuredOutputError(
+                    MISSION_CONTRACT_VIOLATION + ": "
+                    + "; ".join(final_check.get("errors", []))
+                )
             if len(json.dumps(mission, ensure_ascii=False, default=str)) > MAX_WORKER_MISSION_CHARS:
+                RUN["mission_contract_validation_failures"] = RUN.get(
+                    "mission_contract_validation_failures", 0,
+                ) + 1
+                RUN["hydrated_worker_mission_failures"] = RUN.get(
+                    "hydrated_worker_mission_failures", 0,
+                ) + 1
+                hydration_failure_recorded = True
                 raise StructuredOutputError(
-                    MISSION_CONTRACT_VIOLATION + ": contract-bound mission exceeds the Worker context limit"
+                    MISSION_CONTRACT_VIOLATION + ": hydrated mission exceeds the Worker context limit"
                 )
-            contract_check = stage4.validate_mission_against_contract(
-                mission, execution_contract, require_identity=True,
-            )
-            if not contract_check.get("valid"):
-                raise StructuredOutputError(
-                    MISSION_CONTRACT_VIOLATION + ": "
-                    + "; ".join(contract_check.get("errors", []))
-                )
-            mission["execution_contract_id"] = execution_contract.get(
-                "execution_contract_id",
-            )
-            mission["execution_contract_hash"] = execution_contract.get(
-                "contract_hash",
-            )
+            RUN["hydrated_worker_missions_created"] = RUN.get(
+                "hydrated_worker_missions_created", 0,
+            ) + 1
             RUN["worker_contract_contexts_created"] = RUN.get(
                 "worker_contract_contexts_created", 0,
             ) + 1
-        if isinstance(plan_node_contract, dict):
+            record_run_event(
+                "hydrated_worker_mission_created", task_id=task.get("id"),
+                execution_contract_id=execution_contract.get("execution_contract_id"),
+                hydrated_worker_mission=copy.deepcopy(mission),
+            )
+        else:
+            if not validator(data):
+                raise StructuredOutputError("mission compiler returned an invalid response")
+            mission = normalize_worker_mission(task, projection, data)
+            if not _worker_mission_validator(mission):
+                raise StructuredOutputError("normalized mission is incomplete")
+        if isinstance(plan_node_contract, dict) and not contract_backed:
             mission["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
                 plan_node_contract,
             )
@@ -6215,8 +6290,17 @@ BOUNDED COMPILER CONTEXT:
         return mission
     except (StructuredOutputError, stage4.ExecutionContractError) as exc:
         RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
-        if isinstance(execution_contract, dict):
+        if contract_backed:
             RUN["mission_contract_failures"] = RUN.get("mission_contract_failures", 0) + 1
+            if not advice_validated and not advice_rejection_recorded:
+                RUN["mission_advice_rejected"] = RUN.get("mission_advice_rejected", 0) + 1
+            if hydration_started and not hydration_failure_recorded:
+                RUN["mission_contract_validation_failures"] = RUN.get(
+                    "mission_contract_validation_failures", 0,
+                ) + 1
+                RUN["hydrated_worker_mission_failures"] = RUN.get(
+                    "hydrated_worker_mission_failures", 0,
+                ) + 1
         record_run_event(
             "mission_compilation_failure", task_id=task.get("id"), error=str(exc),
         )
@@ -7611,12 +7695,20 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         if isinstance(brain_projection, dict) and brain_projection else ""
     )
     mission_section = (
-        f"WORKER MISSION (compiled for this node only):\n"
+        f"FINAL HYDRATED WORKER MISSION (fresh, bounded, and contract-derived):\n"
         f"{json.dumps(worker_mission, ensure_ascii=False, default=str)[:MAX_WORKER_MISSION_CHARS]}\n\n"
         if isinstance(worker_mission, dict) and worker_mission else ""
     )
+    implementation_advice_section = (
+        "IMPLEMENTATION ADVICE (validated semantic advice only; subordinate to the contract):\n"
+        f"{json.dumps(worker_mission.get('implementation_advice', {}), ensure_ascii=False, default=str)}\n\n"
+        if isinstance(execution_contract, dict) and isinstance(worker_mission, dict) else ""
+    )
     execution_contract_section = (
-        f"EXECUTION CONTRACT (authoritative Stage 4A projection; do not expand):\n"
+        "AUTHORITATIVE EXECUTION CONTRACT (Stage 4A; this is the only source of execution authority):\n"
+        "You are executing an already-approved bounded contract. Do not decide architecture or scope. "
+        "You may modify ONLY the listed mutation targets. Inspection-only files may be read but not changed. "
+        "Implementation advice below is subordinate to the execution contract.\n"
         f"{json.dumps(stage4.contract_projection(execution_contract), ensure_ascii=False, default=str)}\n\n"
         if isinstance(execution_contract, dict) else ""
     )
@@ -7634,8 +7726,9 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"{root_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
         f"{brain_section}"
-        f"{mission_section}"
         f"{execution_contract_section}"
+        f"{mission_section}"
+        f"{implementation_advice_section}"
         f"PARENT (goal + short verified summary):\n{compact_text(parent_summary or '(none)', 700)}\n\n"
         f"DEPENDENCIES (verified summaries only):\n{json.dumps(dependencies, ensure_ascii=False)[:1900] or '(none)'}\n\n"
         f"PROJECT INVARIANTS (canonical facts; extend, do not redefine):\n"
@@ -10725,7 +10818,7 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
     RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
     record_run_event(
         "worker_mission_ready", task_id=task.get("id"),
-        goal_anchor=compact_text(mission.get("goal_anchor", ""), 300),
+        goal_anchor=compact_text(mission.get("goal_anchor") or mission.get("goal", ""), 300),
         target_count=len(mission.get("targets", [])),
         execution_contract_id=(execution_contract or {}).get("execution_contract_id"),
     )
@@ -14547,6 +14640,66 @@ def run_self_test(install_browser=False):
             "done_when": list(v19_mutation_contract.get("done_when", [])),
             "scope_hint": list(v19_mutation_contract.get("allowed_mutation_paths", [])) + ["src/game.js"],
         }])
+        # v19.1 contract-hydrated mission checks use a mock MissionCompiler
+        # response only. They exercise the real handoff path without Gemma,
+        # Worker execution, or live benchmark work.
+        v191_task = make_task(
+            "EXEC-001", v19_mutation_contract.get("goal", "approved mutation"), 1, "ROOT",
+            v19_mutation_contract.get("done_when", []),
+            v19_mutation_contract.get("allowed_mutation_paths", []),
+            execution_contract_id="EXEC-001", execution_contract=v19_mutation_contract,
+        )
+        v191_live_raw = {
+            "goal_anchor": "Extend InputManager Escape handling using the existing pause interface.",
+            "mutation_targets": ["src/input.js", "src/game.js"],
+            "interfaces_to_reuse": list(v19_mutation_contract.get("interfaces_to_reuse", [])),
+            "implementation_plan": [
+                "Inspect GameState.togglePause in src/game.js and reuse it.",
+                "Modify src/input.js.",
+            ],
+            "verification_plan": ["Verify the bounded Escape behavior."],
+        }
+        v191_prompts = []
+        v191_live_mission = compile_worker_mission(
+            v191_task, {}, repo_snapshot={"files": []},
+            execution_contract=v19_mutation_contract,
+            structured_call=lambda prompt, _validator, _label, _schema: (
+                v191_prompts.append(prompt) or v191_live_raw
+            ),
+        )
+        v191_packet = build_node_context(
+            v191_task, {}, None, {"files": []},
+            worker_mission=v191_live_mission, execution_contract=v19_mutation_contract,
+        )
+        v191_conflict = stage4.sanitize_mission_advice({
+            "objective": "Modify src/game.js and add a new paused state owned by InputManager.",
+        }, v19_mutation_contract)
+        v19_test_contract = next(
+            item for item in v19_compiled.get("contracts", [])
+            if item.get("responsibility_type") == stage4.TEST_MUTATION
+        )
+        v191_test_dependency = [{
+            "task_id": "EXEC-001", "status": "done", "summary": "verified input mutation",
+            "changed_files": ["src/input.js"],
+        }]
+        v191_test_mission = compile_worker_mission(
+            make_task(
+                "EXEC-002", v19_test_contract.get("goal", "approved test"), 1, "ROOT",
+                v19_test_contract.get("done_when", []),
+                v19_test_contract.get("allowed_mutation_paths", []),
+                execution_contract_id="EXEC-002", execution_contract=v19_test_contract,
+            ), {}, repo_snapshot={"files": []},
+            execution_contract=v19_test_contract,
+            dependency_summaries=v191_test_dependency,
+            structured_call=lambda _prompt, _validator, _label, _schema: {
+                "objective": "Update the existing focused input test.",
+                "implementation_steps": ["Modify tests/input.test.js."],
+                "test_file": "tests/pause.test.js",
+            },
+        )
+        v191_test_conflict = stage4.sanitize_mission_advice({
+            "objective": "Create tests/pause.test.js for the new behavior.",
+        }, v19_test_contract)
         v19_unapproved = stage4.validate_approved_plan(
             v184_plan, dict(v19_approval, approval_status="PENDING"),
             v184_source_goal, current_plan=v184_plan,
@@ -14922,6 +15075,55 @@ def run_self_test(install_browser=False):
                 and v19_unapproved.get("code") == stage4.PLAN_APPROVAL_REQUIRED
                 and not v19_stale.get("valid")
                 and v19_stale.get("code") == stage4.APPROVED_PLAN_STALE
+            ),
+            "v19.1 live mission regression": (
+                len(v191_prompts) == 1
+                and stage4.validate_hydrated_worker_mission(
+                    v191_live_mission, v19_mutation_contract, [],
+                ).get("valid")
+                and v191_live_mission.get("allowed_mutation_paths") == ["src/input.js"]
+                and v191_live_mission.get("targets") == ["src/input.js"]
+                and set(v19_mutation_contract.get("local_preservation_constraints", [])).issubset(
+                    set(v191_live_mission.get("preservation", []))
+                )
+                and set(v19_mutation_contract.get("structured_prohibitions", [])).issubset(
+                    set(v191_live_mission.get("prohibitions", []))
+                )
+                and set(v19_mutation_contract.get("global_do_not_touch", [])).issubset(
+                    set(v191_live_mission.get("do_not_touch", []))
+                )
+                and "src/game.js" not in v191_live_mission.get("allowed_mutation_paths", [])
+            ),
+            "v19.1 worker handoff": (
+                v191_live_mission.get("mission_id") in v191_packet
+                and "AUTHORITATIVE EXECUTION CONTRACT" in v191_packet
+                and "IMPLEMENTATION ADVICE" in v191_packet
+                and "Extend InputManager Escape handling" in v191_packet
+            ),
+            "v19.1 clean authority": (
+                "mutation_targets" not in v191_packet
+                and "raw_mission_compiler_output" not in v191_packet
+                and v191_live_mission.get("implementation_advice", {}).get("objective")
+                and v19_mutation_contract.get("contract_hash") in v191_packet
+            ),
+            "v19.1 semantic conflict block": (
+                not v191_conflict.get("valid")
+                and bool(v191_conflict.get("semantic_conflicts"))
+                and not v191_conflict.get("advice", {}).get("implementation_steps")
+            ),
+            "v19.1 test contract authority": (
+                stage4.validate_hydrated_worker_mission(
+                    v191_test_mission, v19_test_contract, v191_test_dependency,
+                ).get("valid")
+                and v191_test_mission.get("allowed_mutation_paths") == ["tests/input.test.js"]
+                and "tests/pause.test.js" not in v191_test_mission.get("allowed_mutation_paths", [])
+                and not v191_test_conflict.get("valid")
+            ),
+            "v19.1 mission observability": (
+                RUN.get("mission_advice_received", 0) >= 2
+                and RUN.get("mission_advice_validated", 0) >= 2
+                and RUN.get("mission_non_authoritative_fields_rejected", 0) >= 1
+                and RUN.get("hydrated_worker_missions_created", 0) >= 2
             ),
         }
         for name, ok in checks.items():
