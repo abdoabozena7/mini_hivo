@@ -523,13 +523,22 @@ describe("keyboard input", () => {
             },
             reset=True, finish=False,
             specification_override=empty_specification(contract["goal"]),
+            impact_planner_structured_call=lambda *_args: mini.stage3.deterministic_impact_map(
+                mini.RUN["task_brain"]["task_goal"]["text"],
+                mini._active_stage3_requirements(contract), mini.RUN["repository_evidence"],
+            ),
+            impact_challenger_structured_call=lambda *_args: {"challenges": []},
+            plan_approval_selector=lambda *_args, **_kwargs: 0,
+            terminal_available=True,
         )
         flow = mini.RUN["control_flow"]
         self.assertEqual(result["status"], "done")
         self.assertLess(flow.index("REPOSITORY_RECONNAISSANCE"), flow.index("SPECIFICATION_EXPANSION"))
         self.assertLess(flow.index("SPECIFICATION_EXPANSION"), flow.index("PROJECT_BRAIN"))
         self.assertLess(flow.index("PROJECT_BRAIN"), flow.index("TASK_BRAIN"))
-        self.assertLess(flow.index("TASK_BRAIN"), flow.index("TASK_FIT"))
+        self.assertLess(flow.index("TASK_BRAIN"), flow.index("IMPACT_MAP"))
+        self.assertLess(flow.index("IMPACT_MAP"), flow.index("DECOMPOSITION") if "DECOMPOSITION" in flow else flow.index("TASK_FIT"))
+        self.assertLess(flow.index("USER_PLAN_APPROVAL"), flow.index("TASK_FIT"))
 
     def test_new_project_skips_recon_and_still_creates_one_task_brain(self):
         raw = "Build a browser game from scratch.\n" + "\n".join(

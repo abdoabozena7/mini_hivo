@@ -34,6 +34,7 @@ from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
+from hivo import impact_planning as stage3
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -120,6 +121,12 @@ MAX_TASK_BRAIN_INTERFACES = stage2.MAX_TASK_BRAIN_INTERFACES
 MAX_TASK_BRAIN_ASSUMPTIONS = stage2.MAX_TASK_BRAIN_ASSUMPTIONS
 MAX_TASK_BRAIN_OPEN_QUESTIONS = stage2.MAX_TASK_BRAIN_OPEN_QUESTIONS
 MAX_TASK_BRAIN_PROJECTION_CHARS = stage2.MAX_TASK_BRAIN_PROJECTION_CHARS
+MAX_IMPACT_ENTRIES = stage3.MAX_IMPACT_ENTRIES
+MAX_PLAN_NODES = stage3.MAX_PLAN_NODES
+MAX_IMPACT_CHALLENGES = stage3.MAX_CHALLENGES
+MAX_IMPACT_PLAN_CHARS = stage3.MAX_PLAN_CHARS
+MAX_IMPACT_CHALLENGE_ROUNDS = stage3.MAX_CHALLENGE_ROUNDS
+MAX_IMPACT_PLAN_REVISION_ROUNDS = stage3.MAX_REVISION_ROUNDS
 NEW_PROJECT = stage2.NEW_PROJECT
 EXISTING_PROJECT = stage2.EXISTING_PROJECT
 REPOSITORY_EMPTY = stage2.REPOSITORY_EMPTY
@@ -129,6 +136,11 @@ REPOSITORY_RECONNAISSANCE_COMPLETE = stage2.REPOSITORY_RECONNAISSANCE_COMPLETE
 PROJECT_BRAIN = stage2.PROJECT_BRAIN
 REPOSITORY_EVIDENCE = stage2.REPOSITORY_EVIDENCE
 DERIVED_TASK_ASSUMPTION = stage2.DERIVED_TASK_ASSUMPTION
+DERIVED_PLAN_DECISION = stage3.DERIVED_PLAN_DECISION
+PLAN_APPROVAL_REQUIRED = "PLAN_APPROVAL_REQUIRED"
+PLAN_REJECTED = "PLAN_REJECTED"
+PLAN_INCOMPLETE = "PLAN_INCOMPLETE"
+UNAPPROVED_SCOPE_EXPANSION = "UNAPPROVED_SCOPE_EXPANSION"
 MAX_NODE_SUMMARY_CHARS = 700
 MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
@@ -213,6 +225,14 @@ class MissionCompilationError(RuntimeError):
 
 class TaskBrainValidationError(RuntimeError):
     """The temporary task context failed its deterministic Stage 2 gate."""
+
+
+class ImpactPlanningError(RuntimeError):
+    """The bounded Stage 3 evidence/coverage gate rejected a plan."""
+
+
+class PlanApprovalRequiredError(RuntimeError):
+    """An existing-project Worker was reached without a current approval."""
 
 
 # ---------------------------------------------------------------------------
@@ -1138,6 +1158,61 @@ def tools_for_role(role, tool_policy=None):
     return TOOLS
 
 
+def _normalized_workspace_relative_path(raw_path):
+    target = safe_path(raw_path)
+    if target is None or WORKSPACE is None:
+        return None
+    try:
+        return target.relative_to(Path(WORKSPACE).resolve()).as_posix().casefold()
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _stage3_mutation_guard(name, args):
+    if name not in {"write_file", "edit_file", "edit_file_range"}:
+        return None
+    if not RUN.get("impact_planning_required") or RUN.get("project_mode") != EXISTING_PROJECT:
+        return None
+    plan = RUN.get("approved_change_plan")
+    approval = RUN.get("plan_approval")
+    if not stage3.approval_is_current(plan, approval):
+        return (
+            f"error: {PLAN_APPROVAL_REQUIRED}; existing-project mutation is read-only "
+            "until the current plan hash is approved"
+        )
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    if active.get("approved_plan_hash") != plan.get("plan_hash"):
+        return f"error: {PLAN_APPROVAL_REQUIRED}; active Worker plan hash is stale"
+    target = _normalized_workspace_relative_path((args or {}).get("path"))
+    approved = {
+        str(item).replace("\\", "/").casefold()
+        for item in active.get("approved_targets", []) or []
+    }
+    inspect_only = {
+        str(item).replace("\\", "/").casefold()
+        for item in active.get("inspect_only_targets", []) or []
+    }
+    do_not_touch = {
+        str(item).replace("\\", "/").casefold()
+        for item in active.get("do_not_touch", []) or []
+    }
+    if (
+        target is None or active.get("verification_only")
+        or target in do_not_touch or target in inspect_only or target not in approved
+    ):
+        RUN["unapproved_scope_expansions"] = RUN.get("unapproved_scope_expansions", 0) + 1
+        record_run_event(
+            "unapproved_scope_expansion", target=target,
+            approved_targets=sorted(approved), inspect_only_targets=sorted(inspect_only),
+            do_not_touch=sorted(do_not_touch), plan_id=plan.get("plan_id"),
+        )
+        return (
+            f"error: {UNAPPROVED_SCOPE_EXPANSION}; '{(args or {}).get('path')}' "
+            "is not an approved mutation target for this plan node"
+        )
+    return None
+
+
 def run_tool(name, args, role="System"):
     if role == "Falsifier" and name in {"write_file", "edit_file", "edit_file_range", "backup_file"}:
         return "error: Falsifier is read-only and may not modify files"
@@ -1146,6 +1221,9 @@ def run_tool(name, args, role="System"):
     issue = tool_argument_error(name, args)
     if issue:
         return issue
+    stage3_issue = _stage3_mutation_guard(name, args)
+    if stage3_issue:
+        return stage3_issue
     if name == "write_file":
         return write_file(args["path"], args["content"], role=role)
     if name == "edit_file":
@@ -1351,6 +1429,28 @@ def new_metrics(mode):
         "task_brain_creation_failures": 0,
         "recon_agent_calls": 0,
         "task_brain_compiler_calls": 0,
+        # v18 evidence-grounded impact planning and approval accounting.
+        "impact_maps_created": 0,
+        "impact_map_failures": 0,
+        "impact_candidates": 0,
+        "impact_supported": 0,
+        "impact_preservation_only": 0,
+        "impact_challenges": 0,
+        "impact_challenges_validated": 0,
+        "impact_challenges_rejected": 0,
+        "change_plans_created": 0,
+        "change_plan_gate_failures": 0,
+        "plan_nodes": 0,
+        "plan_requirements_covered": 0,
+        "plan_requirements_unassigned": 0,
+        "plan_approval_required": 0,
+        "plan_approval_granted": 0,
+        "plan_approval_rejected": 0,
+        "unapproved_scope_expansions": 0,
+        "impact_planner_calls": 0,
+        "impact_challenger_calls": 0,
+        "impact_plan_revision_calls": 0,
+        "plan_approval_requests": 0,
         "control_flow": [],
         "specification_expansions": 0,
         "specification_expansion_failures": 0,
@@ -1918,7 +2018,8 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                             "Coordinator": 1536, "Quality": 1536, "Specifier": 1536,
                             "MissionCompiler": 1536, "Clarifier": 1536,
                             "RequirementExtractor": 1536, "ReconAgent": 1024,
-                            "TaskBrainCompiler": 1024}.get(role, 2048),
+                            "TaskBrainCompiler": 1024, "ImpactPlanner": 1536,
+                            "ImpactChallenger": 1280, "ImpactPlanReviser": 1536}.get(role, 2048),
             "temperature": MODEL_POLICY.temperature(role) if temperature is None else temperature,
             "seed": 0,
         },
@@ -4215,6 +4316,708 @@ def prepare_stage2_context(raw_goal, contract, repo_snapshot=None, interactive=T
     }
 
 
+# ---------------------------------------------------------------------------
+# STAGE 3: EVIDENCE-GROUNDED IMPACT PLANNING
+# ---------------------------------------------------------------------------
+
+impact_map_schema = stage3.impact_map_schema
+impact_challenge_schema = stage3.challenge_schema
+validate_impact_map = stage3.validate_impact_map
+validate_impact_challenges = stage3.validate_challenges
+validate_change_plan = stage3.validate_change_plan
+plan_content_hash = stage3.plan_content_hash
+approval_is_current = stage3.approval_is_current
+
+
+def _active_stage3_requirements(contract):
+    contract = contract if isinstance(contract, dict) else {}
+    ledger = contract.get("source_requirement_ledger")
+    records = ledger_requirements(ledger, include_confirmed=True)
+    if records:
+        return stage3.active_requirements(records)
+    # Compatibility contracts used by deterministic architecture tests may
+    # predate the Source Requirement Ledger.  Give them stable local IDs
+    # without changing Stage 1 production semantics.
+    values = list(contract.get("requirements", []) or [])
+    return stage3.active_requirements([
+        {
+            "requirement_id": f"REQ-{index:03d}", "text": value,
+            "provenance": USER_STATED, "status": "active",
+        }
+        for index, value in enumerate(values, 1) if str(value).strip()
+    ])
+
+
+def _impact_project_invariants(task_brain):
+    values = []
+    for item in list((task_brain or {}).get("relevant_project_brain_projection", []) or []):
+        if isinstance(item, dict) and str(item.get("text", "")).strip():
+            values.append(item.get("text"))
+    return values[:8]
+
+
+def _impact_planner_prompt(context):
+    return f"""You are IMPACT PLANNER, a narrow read-only role in a weak-model coding orchestrator.
+Propose one COMPLETE bounded Impact Map for the current existing-project task. Identify current owners,
+behavior/integration/test responsibilities, verified interfaces to reuse, preservation-only surfaces, and
+fan-in verification. Relevant does not mean MUST_CHANGE. A preservation surface should remain unmodified
+unless the supplied requirements and repository evidence prove mutation is necessary. Every concrete impact
+must cite valid Source Requirement IDs and accepted REPO evidence IDs from this context. Prefer
+INSUFFICIENT_EVIDENCE over invention. Do not write code, execute tests, decompose Workers, call tools,
+invent files, or reproduce raw source. Return only the requested structured map.
+
+BOUNDED TASK/REPOSITORY FACT CONTEXT:
+{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_PLANNER_CONTEXT_CHARS)}"""
+
+
+def create_impact_map(task_brain, contract, repository_evidence, structured_call=None):
+    """Invoke one bounded ImpactPlanner call and deterministically gate its map."""
+    if RUN.get("impact_planner_calls", 0) >= 1:
+        raise ImpactPlanningError("only one top-level ImpactPlanner invocation is allowed")
+    requirements = _active_stage3_requirements(contract)
+    context = stage3.build_planner_context(
+        task_brain, requirements, repository_evidence,
+        project_invariants=_impact_project_invariants(task_brain),
+    )
+    RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
+    RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
+    RUN["impact_planner_context"] = context
+    prompt_text = _impact_planner_prompt(context)
+
+    def validator(data):
+        return stage3.impact_map_is_valid(
+            data, requirements, repository_evidence, EXISTING_PROJECT,
+        )
+
+    try:
+        if structured_call is None:
+            candidate = structured_model_call(
+                prompt_text, validator, "impact-map", stage3.impact_map_schema(),
+                retries=1, role="ImpactPlanner",
+            )
+        else:
+            candidate = structured_call(
+                prompt_text, validator, "impact-map", stage3.impact_map_schema(),
+            )
+        impact_map = stage3.normalize_impact_map(candidate)
+        validation = stage3.validate_impact_map(
+            impact_map, requirements, repository_evidence, EXISTING_PROJECT,
+        )
+        if not validation.get("valid"):
+            raise StructuredOutputError("; ".join(validation.get("errors", [])))
+    except StructuredOutputError as exc:
+        RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        record_run_event("impact_planner_fallback", error=str(exc))
+        impact_map = stage3.deterministic_impact_map(
+            (task_brain or {}).get("task_goal", {}).get("text", "coding task"),
+            requirements, repository_evidence,
+        )
+        validation = stage3.validate_impact_map(
+            impact_map, requirements, repository_evidence, EXISTING_PROJECT,
+        )
+    if not validation.get("valid"):
+        raise ImpactPlanningError("IMPACT_MAP_INCOMPLETE: " + "; ".join(validation.get("errors", [])))
+    RUN.setdefault("control_flow", []).append("IMPACT_MAP")
+    RUN["impact_map"] = impact_map
+    RUN["impact_map_validation"] = validation
+    RUN["impact_maps_created"] = RUN.get("impact_maps_created", 0) + 1
+    RUN["impact_candidates"] = RUN.get("impact_candidates", 0) + validation.get("impact_candidates", 0)
+    RUN["impact_supported"] = RUN.get("impact_supported", 0) + validation.get("impact_supported", 0)
+    RUN["impact_preservation_only"] = RUN.get("impact_preservation_only", 0) + validation.get(
+        "impact_preservation_only", 0,
+    )
+    record_run_event(
+        "impact_map_created", impact_count=len(impact_map.get("impacts", [])),
+        serialized_chars=validation.get("serialized_chars"), impact_map=impact_map,
+    )
+    return impact_map
+
+
+def _impact_challenger_output_valid(data):
+    if not isinstance(data, dict) or not isinstance(data.get("challenges"), list):
+        return False
+    if len(data.get("challenges", [])) > MAX_IMPACT_CHALLENGES:
+        return False
+    return all(
+        isinstance(item, dict)
+        and str(item.get("challenge_type", "")).upper() in stage3.CHALLENGE_TYPES
+        and isinstance(item.get("impact_ids"), list)
+        and isinstance(item.get("requirement_ids"), list)
+        and isinstance(item.get("repository_evidence_ids"), list)
+        for item in data.get("challenges", [])
+    )
+
+
+def _impact_challenger_prompt(context):
+    return f"""You are IMPACT CHALLENGER, a narrow read-only adversarial planning role.
+Try to falsify the candidate Impact Map using only the bounded requirements, accepted repository facts,
+ownership, interfaces, tests, and preservation constraints below. Ask whether each MUST_CHANGE surface is
+actually necessary, whether ownership is duplicated or wrong, whether a verified interface was missed,
+whether a required surface/test/dependency is absent, and whether unrelated scope was introduced.
+Every challenge must cite its impact IDs (except a true missing-impact gap), Source Requirement IDs, and
+applicable REPO evidence IDs. Unsupported criticism is not authoritative. Do not review code, write code,
+call tools, inspect the full repository, or claim perfect correctness. Return only structured challenges.
+
+BOUNDED FALSIFICATION CONTEXT:
+{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_CHALLENGER_CONTEXT_CHARS)}"""
+
+
+def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
+                         structured_call=None):
+    """Run exactly one normal weak-model challenge round plus deterministic checks."""
+    if RUN.get("impact_challenger_calls", 0) >= MAX_IMPACT_CHALLENGE_ROUNDS:
+        raise ImpactPlanningError("only one top-level ImpactChallenger round is allowed")
+    requirements = _active_stage3_requirements(contract)
+    context = stage3.build_challenger_context(
+        impact_map, requirements, repository_evidence, task_brain,
+    )
+    RUN.setdefault("control_flow", []).append("IMPACT_CHALLENGER")
+    RUN["impact_challenger_calls"] = RUN.get("impact_challenger_calls", 0) + 1
+    RUN["impact_challenger_context"] = context
+    prompt_text = _impact_challenger_prompt(context)
+    try:
+        if structured_call is None:
+            data = structured_model_call(
+                prompt_text, _impact_challenger_output_valid, "impact-challenge",
+                stage3.challenge_schema(), retries=1, role="ImpactChallenger",
+            )
+        else:
+            data = structured_call(
+                prompt_text, _impact_challenger_output_valid, "impact-challenge",
+                stage3.challenge_schema(),
+            )
+        model_challenges = stage3.normalize_challenges(data, source="MODEL")
+    except StructuredOutputError as exc:
+        model_challenges = []
+        record_run_event("impact_challenger_structured_fallback", error=str(exc))
+    deterministic = stage3.deterministic_challenges(
+        impact_map, requirements, repository_evidence,
+    )
+    challenges = stage3.merge_challenges(model_challenges, deterministic)
+    validation = stage3.validate_challenges(
+        challenges, impact_map, requirements, repository_evidence,
+    )
+    RUN["impact_challenges"] = RUN.get("impact_challenges", 0) + len(challenges)
+    RUN["impact_challenges_validated"] = RUN.get("impact_challenges_validated", 0) + len(
+        validation.get("validated", []),
+    )
+    RUN["impact_challenges_rejected"] = RUN.get("impact_challenges_rejected", 0) + len(
+        validation.get("rejected", []),
+    )
+    RUN["impact_challenge_rounds"] = 1
+    RUN["impact_challenges_output"] = challenges
+    RUN["impact_challenge_validation"] = validation
+    record_run_event(
+        "impact_challenges_validated", challenge_count=len(challenges),
+        validated_count=len(validation.get("validated", [])),
+        rejected_count=len(validation.get("rejected", [])),
+    )
+    return validation
+
+
+def _impact_revision_prompt(context):
+    return f"""You are IMPACT PLAN REVISER. Perform the single allowed bounded revision of an existing-project
+Impact Map. Use only the current candidate map, validated challenges, explicit USER_CONFIRMED revision (if
+present), Source Requirements, and accepted repository facts below. Resolve supported criticism without
+inventing surfaces, preserve verified ownership, reuse verified interfaces, retain preservation-only surfaces,
+and keep explicit test responsibility. Every concrete impact still requires valid requirement and REPO evidence
+IDs. Do not write code, call tools, inspect raw files, or debate. Return only one complete Impact Map.
+
+BOUNDED REVISION CONTEXT:
+{compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_REVISION_CONTEXT_CHARS)}"""
+
+
+def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
+                      repository_evidence, user_revision=None, structured_call=None):
+    if RUN.get("impact_plan_revision_calls", 0) >= MAX_IMPACT_PLAN_REVISION_ROUNDS:
+        raise ImpactPlanningError("the bounded Impact Plan revision round is already exhausted")
+    requirements = _active_stage3_requirements(contract)
+    planner_context = stage3.build_planner_context(
+        task_brain, requirements, repository_evidence,
+        project_invariants=_impact_project_invariants(task_brain),
+    )
+    context = {
+        "candidate_impact_map": impact_map,
+        "validated_challenges": list(validated_challenges or [])[:MAX_IMPACT_CHALLENGES],
+        "user_confirmed_revision": _compact_brain_record(user_revision, 900)
+        if isinstance(user_revision, dict) else None,
+        "source_requirements": requirements,
+        "accepted_repository_evidence": planner_context.get("accepted_repository_evidence", []),
+        "current_owners": planner_context.get("current_owners", []),
+        "current_interfaces": planner_context.get("current_interfaces", []),
+        "current_state_ownership": planner_context.get("current_state_ownership", []),
+        "preservation_constraints": planner_context.get("preservation_constraints", []),
+    }
+    RUN["impact_plan_revision_calls"] = RUN.get("impact_plan_revision_calls", 0) + 1
+    prompt_text = _impact_revision_prompt(context)
+
+    def validator(data):
+        return stage3.impact_map_is_valid(data, requirements, repository_evidence, EXISTING_PROJECT)
+
+    try:
+        if structured_call is None:
+            data = structured_model_call(
+                prompt_text, validator, "impact-plan-revision", stage3.impact_map_schema(),
+                retries=1, role="ImpactPlanReviser",
+            )
+        else:
+            data = structured_call(
+                prompt_text, validator, "impact-plan-revision", stage3.impact_map_schema(),
+            )
+        revised = stage3.normalize_impact_map(data)
+        validation = stage3.validate_impact_map(
+            revised, requirements, repository_evidence, EXISTING_PROJECT,
+        )
+        if not validation.get("valid"):
+            raise StructuredOutputError("; ".join(validation.get("errors", [])))
+    except StructuredOutputError as exc:
+        record_run_event("impact_plan_revision_fallback", error=str(exc))
+        revised = stage3.deterministic_impact_map(
+            (task_brain or {}).get("task_goal", {}).get("text", "coding task"),
+            requirements, repository_evidence,
+        )
+    return revised
+
+
+def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
+                                  repository_evidence):
+    requirements = _active_stage3_requirements(contract)
+    RUN.setdefault("control_flow", []).append("PLAN_RECONCILIATION")
+    reconciled, resolved, unresolved = stage3.reconcile_impact_map(
+        impact_map, challenge_validation.get("validated", []),
+        requirements, repository_evidence,
+    )
+    RUN.setdefault("control_flow", []).append("MINIMAL_EFFECTIVE_CHANGE_PLAN")
+    plan = stage3.build_minimal_change_plan(
+        reconciled, requirements, repository_evidence,
+        resolved_challenges=resolved, unresolved_challenges=unresolved,
+        project_mode=EXISTING_PROJECT,
+    )
+    RUN.setdefault("control_flow", []).append("PLAN_GATE")
+    gate = stage3.validate_change_plan(
+        plan, requirements, repository_evidence, EXISTING_PROJECT,
+    )
+    RUN["change_plans_created"] = RUN.get("change_plans_created", 0) + 1
+    RUN["plan_nodes"] = RUN.get("plan_nodes", 0) + gate.get("plan_nodes", 0)
+    RUN["plan_requirements_covered"] = RUN.get("plan_requirements_covered", 0) + gate.get(
+        "requirements_covered", 0,
+    )
+    RUN["plan_requirements_unassigned"] = RUN.get("plan_requirements_unassigned", 0) + gate.get(
+        "requirements_unassigned", 0,
+    )
+    if not gate.get("valid"):
+        RUN["change_plan_gate_failures"] = RUN.get("change_plan_gate_failures", 0) + 1
+    RUN["reconciled_impact_map"] = reconciled
+    RUN["minimal_effective_change_plan"] = plan
+    RUN["change_plan_gate"] = gate
+    record_run_event(
+        "minimal_effective_change_plan", plan_id=plan.get("plan_id"),
+        plan_hash=plan.get("plan_hash"), gate=gate, plan=plan,
+    )
+    return plan, gate
+
+
+def plan_approval_option_labels(allow_revision=True):
+    labels = ["Approve plan                         Recommended"]
+    if allow_revision:
+        labels.append("Review/change scope")
+    labels.append("Cancel")
+    if allow_revision:
+        labels.append("Other...")
+    return labels
+
+
+def navigate_plan_approval_options(key_sequence, initial_index=0, allow_revision=True):
+    return navigate_clarification_options(
+        plan_approval_option_labels(allow_revision), key_sequence, initial_index,
+    )
+
+
+def format_plan_approval_summary(plan):
+    summary = stage3.plan_summary(plan)
+    lines = ["\nHIVO reviewed the existing project.\n", "Proposed change plan:"]
+    for index, item in enumerate(summary.get("changes", []), 1):
+        component = item.get("component") or "Project responsibility"
+        mode = "change" if item.get("mutation_required") else "reuse/verify"
+        lines.append(f"{index}. {component} [{mode}]\n   {item.get('behavior', '')}")
+    if summary.get("preserve"):
+        lines.append("\nPreserve:")
+        lines.extend(f"- {item}" for item in summary["preserve"])
+    if summary.get("tests"):
+        lines.append("\nTests:")
+        lines.extend(f"- {item}" for item in summary["tests"])
+    if summary.get("do_not_touch"):
+        lines.append("\nNo change planned:")
+        lines.extend(f"- {item}" for item in summary["do_not_touch"])
+    return "\n".join(lines)
+
+
+def select_plan_approval_option(plan, key_sequence=None, output_fn=print,
+                                terminal_available=None, allow_revision=True):
+    labels = plan_approval_option_labels(allow_revision)
+    if key_sequence is not None:
+        return navigate_plan_approval_options(key_sequence, allow_revision=allow_revision)
+    if terminal_available is None:
+        terminal_available = bool(sys.stdin.isatty() and sys.stdout.isatty())
+    if not terminal_available:
+        return None
+    output_fn(format_plan_approval_summary(plan))
+    if PROMPT_TOOLKIT_AVAILABLE:
+        try:
+            from prompt_toolkit.shortcuts import radiolist_dialog
+            selected = radiolist_dialog(
+                title="HIVO change plan", text="Use Up/Down and Enter to select.",
+                values=[(index, label) for index, label in enumerate(labels)],
+                ok_text="Select", cancel_text="Cancel",
+            ).run()
+            return int(selected) if selected is not None else None
+        except (ImportError, EOFError, KeyboardInterrupt, TypeError, ValueError):
+            return None
+    if os.name == "nt":
+        try:
+            import msvcrt
+            index = 0
+            while True:
+                key = msvcrt.getwch()
+                if key in {"\r", "\n"}:
+                    return index
+                if key == "\x1b":
+                    return None
+                if key in {"\x00", "\xe0"}:
+                    arrow = msvcrt.getwch()
+                    if arrow == "H":
+                        index = max(0, index - 1)
+                    elif arrow == "P":
+                        index = min(len(labels) - 1, index + 1)
+        except (ImportError, EOFError, KeyboardInterrupt):
+            return None
+    output_fn("Use arrow keys and Enter; Esc cancels.")
+    return None
+
+
+def _plan_approval_record(plan, status, source, user_revision=None):
+    return {
+        "plan_id": plan.get("plan_id"),
+        "plan_hash": plan.get("plan_hash"),
+        "approval_status": status,
+        "approved_at": datetime.now().isoformat(timespec="seconds") if status == "APPROVED" else None,
+        "approval_source": source,
+        "user_revision": copy.deepcopy(user_revision) if isinstance(user_revision, dict) else None,
+    }
+
+
+def request_plan_approval(plan, interactive=True, terminal_available=None, selector=None,
+                          answer_reader=None, allow_revision=True):
+    RUN.setdefault("control_flow", []).append("USER_PLAN_APPROVAL")
+    RUN["plan_approval_requests"] = RUN.get("plan_approval_requests", 0) + 1
+    RUN["plan_approval_required"] = RUN.get("plan_approval_required", 0) + 1
+    if terminal_available is None:
+        terminal_available = bool(sys.stdin.isatty() and sys.stdout.isatty())
+    payload = {
+        "terminal_state": PLAN_APPROVAL_REQUIRED,
+        "plan_id": plan.get("plan_id"), "plan_hash": plan.get("plan_hash"),
+        "summary": stage3.plan_summary(plan), "plan": plan,
+    }
+    RUN["plan_approval_payload"] = payload
+    if not interactive or not terminal_available:
+        record = _plan_approval_record(plan, "REQUIRED", "NON_INTERACTIVE")
+        RUN["plan_approval"] = record
+        record_run_event("plan_approval_required", **{
+            key: value for key, value in payload.items() if key != "plan"
+        })
+        return {
+            "status": "plan_approval_required", "terminal_state": PLAN_APPROVAL_REQUIRED,
+            "summary": "A valid existing-project change plan requires user approval before mutation.",
+            "plan": plan, "plan_summary": payload["summary"],
+            "approval_payload": payload, "approval": record,
+        }
+    choose = selector or select_plan_approval_option
+    try:
+        selected = choose(
+            plan, terminal_available=terminal_available, allow_revision=allow_revision,
+        )
+    except TypeError:
+        try:
+            selected = choose(plan, terminal_available=terminal_available)
+        except TypeError:
+            selected = choose(plan)
+    labels = plan_approval_option_labels(allow_revision)
+    if selected is None:
+        selected_label = "Cancel"
+    else:
+        selected = min(max(int(selected), 0), len(labels) - 1)
+        selected_label = labels[selected]
+    if selected_label.startswith("Approve plan"):
+        record = _plan_approval_record(plan, "APPROVED", "TERMINAL_ARROW_SELECTION")
+        RUN["plan_approval"] = record
+        RUN["plan_approval_granted"] = RUN.get("plan_approval_granted", 0) + 1
+        record_run_event(
+            "plan_approved", plan_id=plan.get("plan_id"), plan_hash=plan.get("plan_hash"),
+        )
+        return {"status": "approved", "plan": plan, "approval": record}
+    if allow_revision and selected_label in {"Review/change scope", "Other..."}:
+        reader = answer_reader or read_user_prompt
+        try:
+            text = reader("Plan revision> ")
+        except TypeError:
+            text = reader()
+        if str(text or "").strip():
+            return {"status": "revision_requested", "revision_text": str(text).strip(), "plan": plan}
+    record = _plan_approval_record(plan, "REJECTED", "TERMINAL_ARROW_SELECTION")
+    RUN["plan_approval"] = record
+    RUN["plan_approval_rejected"] = RUN.get("plan_approval_rejected", 0) + 1
+    record_run_event(
+        "plan_rejected", plan_id=plan.get("plan_id"), plan_hash=plan.get("plan_hash"),
+    )
+    return {
+        "status": "plan_rejected", "terminal_state": PLAN_REJECTED,
+        "summary": "The proposed change plan was rejected; no subject files were mutated.",
+        "plan": plan, "approval": record,
+    }
+
+
+def apply_plan_user_revision(contract, revision_text):
+    """Add one explicit plan-scope decision without overwriting USER_STATED facts."""
+    updated = copy.deepcopy(contract if isinstance(contract, dict) else {})
+    text = str(revision_text or "").strip()
+    if not text:
+        return updated, None
+    ledger = updated.get("source_requirement_ledger")
+    ledger = append_confirmed_requirement(
+        ledger, text, question_id="PLAN-REVISION-001", category="plan_scope",
+        affected_requirement_ids=[
+            item.get("requirement_id") for item in ledger_requirements(ledger)
+        ][:8],
+        repository_evidence_ids=[], phase="USER_PLAN_REVISION",
+    )
+    new_requirement = ledger_requirements(ledger, include_confirmed=True)[-1]
+    decision = {
+        "decision_id": "PLAN-DEC-001",
+        "question_id": "PLAN-REVISION-001",
+        "answer": compact_text(text, 700),
+        "selected_option": "Review/change scope",
+        "affected_requirement_ids": list(new_requirement.get("affected_requirement_ids", [])),
+        "repository_evidence_ids": [],
+        "phase": "USER_PLAN_REVISION",
+        "provenance": USER_CONFIRMED,
+        "requirement_id": new_requirement.get("requirement_id"),
+    }
+    updated["source_requirement_ledger"] = ledger
+    updated["source_requirements"] = ledger_requirements(ledger)
+    updated["user_stated_requirements"] = ledger_requirements(ledger)
+    updated["user_confirmed_requirements"] = list(
+        updated.get("user_confirmed_requirements", []) or []
+    ) + [decision]
+    updated["requirements"] = list(updated.get("requirements", []) or []) + [text]
+    updated["source_contract"] = source_contract_from_ledger(
+        updated.get("original_goal") or updated.get("goal") or text,
+        ledger, confirmed=updated.get("user_confirmed_requirements", []),
+        derived=updated.get("derived_assumptions", []),
+        questions=updated.get("clarification_questions", []),
+        answers=updated.get("clarification_answers", []),
+        interaction_style=updated.get("interaction_style"),
+    )
+    RUN["source_requirement_ledger"] = ledger
+    RUN["source_contract"] = updated["source_contract"]
+    RUN["plan_user_revision"] = decision
+    return updated, decision
+
+
+def _stage3_workspace_fingerprint():
+    if WORKSPACE is None:
+        return None
+    return stage2.inventory_repository(WORKSPACE).get("fingerprint")
+
+
+def prepare_stage3_context(understanding, contract, interactive=True, terminal_available=None,
+                           planner_structured_call=None, challenger_structured_call=None,
+                           reviser_structured_call=None, approval_selector=None,
+                           approval_answer_reader=None):
+    """Create, challenge, gate, and approve the task-scoped existing-project plan."""
+    understanding = understanding if isinstance(understanding, dict) else {}
+    mode = understanding.get("project_mode")
+    if mode in {NEW_PROJECT, EXISTING_PROJECT}:
+        RUN["project_mode"] = mode
+    if mode != EXISTING_PROJECT:
+        RUN.setdefault("control_flow", []).append("IMPACT_PLANNING_SKIPPED_GREENFIELD")
+        RUN["impact_planning_required"] = False
+        return {"status": "ready", "contract": contract, "project_mode": mode}
+    RUN["impact_planning_required"] = True
+    fingerprint_before = _stage3_workspace_fingerprint()
+    task_brain = understanding.get("task_brain") or RUN.get("task_brain") or {}
+    repository_evidence = list(
+        (understanding.get("reconnaissance") or {}).get("evidence", [])
+        or RUN.get("repository_evidence", []) or []
+    )
+    try:
+        impact_map = create_impact_map(
+            task_brain, contract, repository_evidence,
+            structured_call=planner_structured_call,
+        )
+        challenge_validation = challenge_impact_map(
+            impact_map, task_brain, contract, repository_evidence,
+            structured_call=challenger_structured_call,
+        )
+        plan, gate = reconcile_minimal_change_plan(
+            impact_map, challenge_validation, contract, repository_evidence,
+        )
+    except ImpactPlanningError as exc:
+        return {
+            "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+            "summary": str(exc), "project_mode": mode,
+        }
+    if not gate.get("valid"):
+        fingerprint_after = _stage3_workspace_fingerprint()
+        RUN["stage3_workspace_fingerprint_before"] = fingerprint_before
+        RUN["stage3_workspace_fingerprint_after"] = fingerprint_after
+        return {
+            "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+            "summary": "; ".join(gate.get("errors", [])),
+            "project_mode": mode, "impact_map": impact_map,
+            "plan": plan, "plan_gate": gate,
+        }
+    approval = request_plan_approval(
+        plan, interactive=interactive, terminal_available=terminal_available,
+        selector=approval_selector, answer_reader=approval_answer_reader,
+        allow_revision=True,
+    )
+    if approval.get("status") == "revision_requested":
+        contract, decision = apply_plan_user_revision(
+            contract, approval.get("revision_text", ""),
+        )
+        try:
+            impact_map = revise_impact_map(
+                impact_map, challenge_validation.get("validated", []), task_brain,
+                contract, repository_evidence, user_revision=decision,
+                structured_call=reviser_structured_call,
+            )
+            # The one model Challenger is not invoked again. Deterministic
+            # falsification still checks the revised map against the same facts.
+            revised_challenges = stage3.deterministic_challenges(
+                impact_map, _active_stage3_requirements(contract), repository_evidence,
+            )
+            revised_validation = stage3.validate_challenges(
+                revised_challenges, impact_map, _active_stage3_requirements(contract),
+                repository_evidence,
+            )
+            plan, gate = reconcile_minimal_change_plan(
+                impact_map, revised_validation, contract, repository_evidence,
+            )
+        except ImpactPlanningError as exc:
+            return {
+                "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+                "summary": str(exc), "project_mode": mode,
+            }
+        if not gate.get("valid"):
+            return {
+                "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+                "summary": "; ".join(gate.get("errors", [])),
+                "project_mode": mode, "impact_map": impact_map,
+                "plan": plan, "plan_gate": gate, "contract": contract,
+            }
+        approval = request_plan_approval(
+            plan, interactive=interactive, terminal_available=terminal_available,
+            selector=approval_selector, answer_reader=approval_answer_reader,
+            allow_revision=False,
+        )
+    fingerprint_after = _stage3_workspace_fingerprint()
+    RUN["stage3_workspace_fingerprint_before"] = fingerprint_before
+    RUN["stage3_workspace_fingerprint_after"] = fingerprint_after
+    RUN["stage3_read_only_before_approval"] = fingerprint_before == fingerprint_after
+    if approval.get("status") != "approved":
+        result = dict(approval)
+        result.update({
+            "project_mode": mode, "impact_map": impact_map,
+            "plan": plan, "plan_gate": gate, "contract": contract,
+            "read_only": fingerprint_before == fingerprint_after,
+        })
+        return result
+    RUN["approved_change_plan"] = plan
+    RUN["plan_approval"] = approval.get("approval")
+    return {
+        "status": "ready", "project_mode": mode, "contract": contract,
+        "impact_map": impact_map, "plan": plan, "plan_gate": gate,
+        "approval": approval.get("approval"),
+        "read_only": fingerprint_before == fingerprint_after,
+    }
+
+
+def current_approved_change_plan():
+    plan = RUN.get("approved_change_plan")
+    approval = RUN.get("plan_approval")
+    if stage3.approval_is_current(plan, approval):
+        return plan
+    return None
+
+
+def approved_plan_node_contract_for_task(task):
+    plan = current_approved_change_plan()
+    if not isinstance(plan, dict):
+        return None
+    task = task if isinstance(task, dict) else {}
+    node_ids = list(task.get("plan_node_ids", []) or [])
+    return stage3.approved_plan_node_contract(plan, node_ids or None)
+
+
+def attach_approved_plan_to_task(task, plan, node_ids=None):
+    if not isinstance(task, dict) or not isinstance(plan, dict):
+        return task
+    selected = list(node_ids or []) or [
+        item.get("node_id") for item in plan.get("approved_change_nodes", [])
+    ]
+    contract = stage3.approved_plan_node_contract(plan, selected)
+    task["approved_plan_id"] = plan.get("plan_id")
+    task["approved_plan_hash"] = plan.get("plan_hash")
+    task["plan_node_ids"] = selected
+    task["plan_requirement_ids"] = _bounded_brain_strings([
+        value for node in contract.get("nodes", []) for value in node.get("requirement_ids", [])
+    ], 24, 80)
+    task["plan_impact_ids"] = _bounded_brain_strings([
+        value for node in contract.get("nodes", []) for value in node.get("impact_ids", [])
+    ], 16, 80)
+    task["plan_evidence_ids"] = _bounded_brain_strings([
+        value for node in contract.get("nodes", []) for value in node.get("evidence_ids", [])
+    ], 24, 80)
+    task["verification_only"] = bool(contract.get("nodes")) and all(
+        node.get("verification_only") for node in contract.get("nodes", [])
+    )
+    return task
+
+
+def _stage3_execution_gate(task=None):
+    if not RUN.get("impact_planning_required") or RUN.get("project_mode") != EXISTING_PROJECT:
+        return {"allowed": True, "plan": None, "contract": None}
+    plan = current_approved_change_plan()
+    if not isinstance(plan, dict):
+        return {"allowed": False, "terminal_state": PLAN_APPROVAL_REQUIRED}
+    task = task if isinstance(task, dict) else {}
+    if task.get("approved_plan_hash") and task.get("approved_plan_hash") != plan.get("plan_hash"):
+        return {"allowed": False, "terminal_state": PLAN_APPROVAL_REQUIRED}
+    return {
+        "allowed": True, "plan": plan,
+        "contract": stage3.approved_plan_node_contract(plan, task.get("plan_node_ids") or None),
+    }
+
+
+def _active_plan_tool_contract_fields(task):
+    gate = _stage3_execution_gate(task)
+    if not gate.get("allowed") or not isinstance(gate.get("contract"), dict):
+        return {
+            "impact_plan_required": bool(RUN.get("impact_planning_required")),
+            "approved_plan_id": None, "approved_plan_hash": None,
+            "approved_targets": [], "inspect_only_targets": [], "do_not_touch": [],
+            "verification_only": False,
+        }
+    plan_contract = gate["contract"]
+    scope = stage3.mutation_scope(plan_contract)
+    return {
+        "impact_plan_required": True,
+        "approved_plan_id": plan_contract.get("plan_id"),
+        "approved_plan_hash": plan_contract.get("plan_hash"),
+        **scope,
+    }
+
+
 _WORKER_MISSION_FIELDS = (
     "goal_anchor", "task", "expected_outcome", "targets", "existing_facts", "implementation_plan",
     "interfaces_to_reuse", "invariants", "project_specific_quality_rules", "do_not",
@@ -4311,6 +5114,7 @@ def _bound_worker_mission(mission, max_chars=MAX_WORKER_MISSION_CHARS):
             continue
         break
     if len(encoded) > max_chars:
+        approved_contract = mission.get("approved_plan_node_contract")
         mission = {
             "goal_anchor": compact_text(mission.get("goal_anchor", "coding task"), 240),
             "task": compact_text(mission.get("task", "complete the current node"), 280),
@@ -4326,7 +5130,72 @@ def _bound_worker_mission(mission, max_chars=MAX_WORKER_MISSION_CHARS):
             "done_when": _bounded_brain_strings(mission.get("done_when"), 1, 220)
             or ["the current node is verified"],
         }
+        if isinstance(approved_contract, dict):
+            mission["approved_plan_node_contract"] = approved_contract
     return mission
+
+
+def _compact_approved_plan_node_contract(contract, max_chars=2400):
+    """Keep every assigned node visible while deduplicating repeated fields."""
+    contract = contract if isinstance(contract, dict) else {}
+    nodes = list(contract.get("nodes", []) or [])[:MAX_PLAN_NODES]
+    result = {
+        "plan_id": contract.get("plan_id"),
+        "plan_hash": contract.get("plan_hash"),
+        "node_responsibilities": [{
+            "node_id": node.get("node_id"),
+            "goal": compact_text(node.get("goal", ""), 180),
+            "current_owner": compact_text(node.get("current_owner", ""), 100),
+            "candidate_targets": _bounded_brain_strings(node.get("candidate_targets"), 2, 140),
+            "inspect_targets": _bounded_brain_strings(node.get("inspect_targets"), 2, 140),
+            "mutation_required": bool(node.get("mutation_required")),
+            "verification_only": bool(node.get("verification_only")),
+        } for node in nodes],
+        "requirement_ids": _bounded_brain_strings([
+            item for node in nodes for item in node.get("requirement_ids", [])
+        ], 24, 80),
+        "impact_ids": _bounded_brain_strings([
+            item for node in nodes for item in node.get("impact_ids", [])
+        ], 16, 80),
+        "evidence_ids": _bounded_brain_strings([
+            item for node in nodes for item in node.get("evidence_ids", [])
+        ], 24, 80),
+        "interfaces_to_reuse": _bounded_brain_strings([
+            item for node in nodes for item in node.get("interfaces_to_reuse", [])
+        ], 8, 140),
+        "preservation_constraints": _bounded_brain_strings([
+            item for node in nodes for item in node.get("preservation_constraints", [])
+        ], 8, 180),
+        "local_test_contract": _bounded_brain_strings([
+            item for node in nodes for item in node.get("local_test_contract", [])
+        ], 8, 180),
+        "done_when": _bounded_brain_strings([
+            item for node in nodes for item in node.get("done_when", [])
+        ], 8, 180),
+        "do_not_touch": _bounded_brain_strings(contract.get("do_not_touch"), 8, 140),
+    }
+    encoded = json.dumps(result, ensure_ascii=False, default=str)
+    while len(encoded) > max_chars:
+        removed = False
+        for field in (
+            "done_when", "preservation_constraints", "interfaces_to_reuse",
+            "impact_ids", "evidence_ids", "requirement_ids",
+        ):
+            values = result.get(field)
+            if isinstance(values, list) and len(values) > 1:
+                values.pop()
+                removed = True
+                break
+        if not removed:
+            for node in result.get("node_responsibilities", []):
+                if len(node.get("goal", "")) > 90:
+                    node["goal"] = compact_text(node.get("goal", ""), 90)
+                    removed = True
+                    break
+        if not removed:
+            break
+        encoded = json.dumps(result, ensure_ascii=False, default=str)
+    return result
 
 
 def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CONTEXT_CHARS):
@@ -4363,6 +5232,14 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
                 )
         elif isinstance(context.get("bounded_strategy"), dict):
             context.pop("bounded_strategy", None)
+        elif isinstance(context.get("approved_plan_node_contract"), dict):
+            # This is the execution authority, so compact it rather than
+            # dropping it like optional discovery context.
+            current_contract = context["approved_plan_node_contract"]
+            current_size = len(json.dumps(current_contract, ensure_ascii=False, default=str))
+            context["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
+                current_contract, max_chars=max(1000, current_size // 2),
+            )
         else:
             current = context.get("current_node") if isinstance(context.get("current_node"), dict) else {}
             projection = context.get("project_brain_projection")
@@ -4384,7 +5261,8 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
 
 
 def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
-                           strategy_context=None, task_context=None, structured_call=None):
+                           strategy_context=None, task_context=None, structured_call=None,
+                           plan_node_contract=None):
     """Compile one node into a small mission before any Worker tool call."""
     RUN["mission_compilations"] = RUN.get("mission_compilations", 0) + 1
     task = task if isinstance(task, dict) else {}
@@ -4417,9 +5295,14 @@ def compile_worker_mission(task, brain_projection, dependency_summaries=None, re
         context["relevant_task_context"] = compact_text(
             json.dumps(task_context, ensure_ascii=False, default=str), 1600,
         )
+    if isinstance(plan_node_contract, dict):
+        context["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
+            plan_node_contract,
+        )
     prompt_text = f"""You are the MISSION COMPILER for exactly one bounded node in a weak-model coding orchestrator.
-Use only the current node, its relevant Project Brain projection, verified dependencies, repository hints, and any
-bounded strategy/task context below. Do not mutate files, call tools, decompose siblings, or return conversation.
+Use only the current node, its relevant Project Brain projection, verified dependencies, repository hints, approved
+plan-node execution contract, and any bounded strategy/task context below. Do not mutate files, call tools,
+decompose siblings, expand approved scope, or return conversation.
 Prepare the Worker so it can execute the stated plan without rediscovering the whole project architecture.
 State what to implement, where it belongs, which verified interfaces/facts to reuse, concrete project-specific rules,
 mistakes to avoid, and how deterministic verification will establish completion. Do not invent unsupported features.
@@ -4441,6 +5324,11 @@ BOUNDED COMPILER CONTEXT:
         mission = normalize_worker_mission(task, projection, data)
         if not _worker_mission_validator(mission):
             raise StructuredOutputError("normalized mission is incomplete")
+        if isinstance(plan_node_contract, dict):
+            mission["approved_plan_node_contract"] = _compact_approved_plan_node_contract(
+                plan_node_contract,
+            )
+            mission = _bound_worker_mission(mission)
         return mission
     except StructuredOutputError as exc:
         RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
@@ -4620,7 +5508,12 @@ def deterministic_fit_fallback(task, depth, contract, force_smaller=False):
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard recursion/task budget reached"}
-    responsibilities = task.get("done_when") or list(contract.get("requirements", [])) + list(contract.get("success_criteria", []))
+    plan = current_approved_change_plan()
+    planned_nodes = (
+        stage3.approved_plan_node_contract(plan, task.get("plan_node_ids") or None).get("nodes", [])
+        if isinstance(plan, dict) else []
+    )
+    responsibilities = planned_nodes or task.get("done_when") or list(contract.get("requirements", [])) + list(contract.get("success_criteria", []))
     # A proven scope assessment may force a smaller decomposition.  A raw
     # TASK_TOO_BROAD execution marker is not a scope assessment.
     if (force_smaller and _has_positive_scope_evidence(task, task.get("initial_result"))) or len(responsibilities) >= 3:
@@ -4647,6 +5540,16 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard budget reached"}
     failure = task.get("failure_evidence", [])[-3:]
+    approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict) and not approved_plan.get("approved_change_nodes"):
+        return {
+            "decision": "execute",
+            "reason": "approved plan contains preservation/verification only",
+        }
+    approved_plan_packet = (
+        stage3.decomposition_plan_packet(approved_plan)
+        if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
+    )
     prompt_text = f"""Decide TASK GRANULARITY FIT, not generic complexity.
 Question: Is CURRENT NODE small and explicit enough that THIS pinned local model is likely to implement AND verify it reliably in ONE focused Builder execution?
 Return only EXECUTE or SPLIT in the schema. Find the coarsest reliable granularity; more splitting is not automatically better.
@@ -4655,6 +5558,7 @@ Sequential milestones MAY edit the same file; cohesive/single-file work is NOT a
 {('The previous focused execution exceeded capacity. SPLIT into materially smaller scope if budget permits.' if force_smaller else '')}
 MODEL={MODEL}; CAPACITY_HINT={MODEL_TASK_CAPACITY}/4 heuristic only; DEPTH={depth}/{MAX_DEPTH}; REMAINING={remaining}
 ROOT CONTRACT: {compact_contract(contract)}
+APPROVED PLAN EXECUTION CONTRACT: {json.dumps(approved_plan_packet, ensure_ascii=False, default=str)}
 PROJECT BRAIN (expanded specification + verified state): {project_brain_task_planning_packet(task, dependency_summaries, repo_snapshot, max_chars=4200)}
 CURRENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 900)}
@@ -4726,22 +5630,66 @@ def fallback_child_contracts(task):
     ]
 
 
+def bind_decomposition_to_approved_plan(specs):
+    """Deterministically enforce the approved Stage 3 responsibility graph."""
+    plan = current_approved_change_plan()
+    if not isinstance(plan, dict):
+        return list(specs or [])
+    bound = stage3.bind_decomposition_to_plan(specs, plan)
+    expansions = list(bound.get("scope_expansions", []) or [])
+    if expansions:
+        RUN["unapproved_scope_expansions"] = RUN.get("unapproved_scope_expansions", 0) + len(expansions)
+        record_run_event(
+            "unapproved_scope_expansion", paths=expansions,
+            plan_id=plan.get("plan_id"), plan_hash=plan.get("plan_hash"),
+        )
+    if not bound.get("valid"):
+        raise ImpactPlanningError(
+            "DECOMPOSITION_PLAN_COVERAGE_FAILURE: "
+            + ", ".join(bound.get("unassigned_plan_node_ids", []))
+        )
+    RUN["decomposition_plan_coverage"] = {
+        "plan_id": plan.get("plan_id"), "plan_hash": plan.get("plan_hash"),
+        "covered_plan_node_ids": sorted({
+            item for spec in bound.get("specs", []) for item in spec.get("plan_node_ids", [])
+        }),
+        "scope_expansions_rejected": expansions,
+    }
+    return bound.get("specs", [])
+
+
 def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None, force_smaller=False):
     if str(task.get("id", "")) == "ROOT" and "DECOMPOSITION" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("DECOMPOSITION")
     if task.get("kind") == "integration":
-        return decompose_integration_task(
+        integration_children = decompose_integration_task(
             task, contract, repo_snapshot, parent_summary, dependency_summaries, force_smaller,
         )
+        plan = current_approved_change_plan()
+        if isinstance(plan, dict):
+            for child in integration_children:
+                attach_approved_plan_to_task(
+                    child, plan, task.get("plan_node_ids") or None,
+                )
+        return integration_children
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if remaining < 2:
         return []
+    approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict) and not approved_plan.get("approved_change_nodes"):
+        return []
+    approved_plan_packet = (
+        stage3.decomposition_plan_packet(approved_plan)
+        if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
+    )
     prompt_text = f"""Split CURRENT NODE into 2-4 SMALL STRUCTURED SEQUENTIAL child contracts for the pinned weak local model.
 Each child supplies only goal, done_when, scope_hint. Children together must preserve the parent goal.
 Prefer independently verifiable milestones. Sequential children MAY touch the same file; never create parallel ownership assumptions.
 Do not create arbitrary microtasks like 'write import' or 'create variable' unless previous failure proves larger scope is still too broad.
+For an approved existing-project plan, every child must stay inside its plan nodes; do not invent mutation surfaces.
 {('The failed parent still exceeded capacity: make each child materially smaller in simultaneous reasoning/context.' if force_smaller else '')}
 ROOT CONTRACT: {compact_contract(contract)}
+APPROVED PLAN EXECUTION CONTRACT: {json.dumps(approved_plan_packet, ensure_ascii=False, default=str)}
 PROJECT BRAIN (expanded specification + verified state): {project_brain_task_planning_packet(task, dependency_summaries, repo_snapshot, max_chars=5200)}
 PARENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}
@@ -4754,6 +5702,12 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
         specs = fallback_child_contracts(task)
         record_run_event("structured_fallback", label="decompose-task", error=str(exc))
     specs = specs[:min(MAX_CHILDREN, remaining)]
+    if isinstance(approved_plan, dict):
+        specs = bind_decomposition_to_approved_plan(specs)
+        if len(specs) > min(MAX_CHILDREN, remaining):
+            specs = bind_decomposition_to_approved_plan(
+                specs[:min(MAX_CHILDREN, remaining)],
+            )
     if len(specs) < 2:
         return []
     children = []
@@ -4761,6 +5715,12 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
         child_id = str(index) if task["id"] == "ROOT" else f"{task['id']}.{index}"
         child = make_task(child_id, spec["goal"], task["depth"] + 1, task["id"],
                           spec.get("done_when", []), spec.get("scope_hint", []))
+        if isinstance(approved_plan, dict):
+            attach_approved_plan_to_task(child, approved_plan, spec.get("plan_node_ids"))
+            child["plan_requirement_ids"] = list(spec.get("requirement_ids", []))
+            child["plan_impact_ids"] = list(spec.get("impact_ids", []))
+            child["plan_evidence_ids"] = list(spec.get("evidence_ids", []))
+            child["verification_only"] = bool(spec.get("verification_only"))
         TASKS[child_id] = child
         task["children"].append(child_id)
         RUN["tasks_created"] += 1
@@ -4957,7 +5917,12 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
             reason="candidate boundaries paraphrased a failed decomposition",
         )
         return []
-    return list(specs)[:MAX_CHILDREN]
+    specs = list(specs)[:MAX_CHILDREN]
+    if isinstance(current_approved_change_plan(), dict):
+        specs = bind_decomposition_to_approved_plan(specs)
+        if len(specs) > MAX_CHILDREN:
+            specs = bind_decomposition_to_approved_plan(specs[:MAX_CHILDREN])
+    return specs
 
 
 def alternate_strategy_schema():
@@ -8621,17 +9586,34 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
     brain = RUN.get("project_brain")
     if not isinstance(brain, dict):
         return None, None
+    execution_gate = _stage3_execution_gate(task)
+    if not execution_gate.get("allowed"):
+        raise PlanApprovalRequiredError(
+            "existing-project mutation cannot begin before approval of the current plan hash"
+        )
     refresh_project_brain_verified_state()
     projection = build_brain_projection(
         brain, task, dependency_summaries, repo_snapshot, record=True,
     )
-    if task_context is None and isinstance(RUN.get("task_brain"), dict):
+    plan_node_contract = execution_gate.get("contract")
+    if task_context is None and isinstance(plan_node_contract, dict):
+        # Stage 3 carries the explicit node/test contract.  Do not depend on a
+        # relevance-ranked Task Brain tail to preserve that responsibility.
+        task_context = {
+            "approved_plan_id": plan_node_contract.get("plan_id"),
+            "approved_plan_hash": plan_node_contract.get("plan_hash"),
+            "plan_node_ids": [
+                item.get("node_id") for item in plan_node_contract.get("nodes", [])
+            ],
+        }
+    elif task_context is None and isinstance(RUN.get("task_brain"), dict):
         task_context = stage2.task_brain_projection(
             RUN["task_brain"], task, max_chars=MAX_TASK_BRAIN_PROJECTION_CHARS,
         )
     mission = compile_worker_mission(
         task, projection, dependency_summaries, repo_snapshot,
         strategy_context=strategy_context, task_context=task_context,
+        plan_node_contract=plan_node_contract,
     )
     RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
     record_run_event(
@@ -8655,12 +9637,16 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             task, contract, repo_snapshot, parent_summary, dependency_summaries,
             strategy_context=strategy_context,
         )
-    except MissionCompilationError as exc:
+    except (MissionCompilationError, PlanApprovalRequiredError) as exc:
         if ACTIVE_TRANSACTION is not None:
             rollback_transaction()
+        orchestration_failure = (
+            PLAN_APPROVAL_REQUIRED if isinstance(exc, PlanApprovalRequiredError)
+            else "MISSION_COMPILATION_FAILURE"
+        )
         return {
             "status": "failed", "failure_type": "ORCHESTRATION_FAILURE",
-            "orchestration_failure": "MISSION_COMPILATION_FAILURE",
+            "orchestration_failure": orchestration_failure,
             "summary": str(exc), "memory": memory,
             "failure_evidence": [{
                 "kind": "orchestration_failure", "status": "FAIL", "source": "mission_compiler",
@@ -8682,6 +9668,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
         "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
     }
+    ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context)
     memory = builder["memory"]
     if _is_execution_budget_exhausted(builder):
@@ -8936,6 +9923,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
         "task_id": task["id"], "project_invariants": RUN.get("project_invariants", []),
     }
+    ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     builder = execute_agent_task(
         task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
     )
@@ -10501,6 +11489,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         "constraints": contract.get("constraints", []), "success_criteria": task.get("done_when", []),
         "task_id": label, "project_invariants": RUN.get("project_invariants", []),
     }
+    ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     context = (
         f"PROJECT BRAIN ALIGNMENT:\n{json.dumps(integration_contract.get('project_brain_alignment', {}), ensure_ascii=False)[:MAX_BRAIN_PROJECTION_CHARS]}\n"
         f"HIERARCHICAL INTEGRATION CONTRACT:\n{json.dumps(integration_contract, ensure_ascii=False)[:9000]}\n"
@@ -10754,6 +11743,13 @@ def _materialize_alternative_children(task, specs, attempt):
             child_id, spec["goal"], int(task.get("depth", 0)) + 1, task.get("id"),
             spec.get("done_when", []), spec.get("scope_hint", []),
         )
+        plan = current_approved_change_plan()
+        if isinstance(plan, dict):
+            attach_approved_plan_to_task(child, plan, spec.get("plan_node_ids"))
+            child["plan_requirement_ids"] = list(spec.get("requirement_ids", []))
+            child["plan_impact_ids"] = list(spec.get("impact_ids", []))
+            child["plan_evidence_ids"] = list(spec.get("evidence_ids", []))
+            child["verification_only"] = bool(spec.get("verification_only"))
         TASKS[child_id] = child
         task.setdefault("children", []).append(child_id)
         RUN["tasks_created"] += 1
@@ -11185,6 +12181,11 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
     RUN["baseline_stage2_scope"] = "PROJECT_MODE_BOOKKEEPING_ONLY"
     begin_durable_run(contract)
     root = root_task_from_contract(contract)
+    approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict):
+        # Direct frozen-baseline runs never create this state.  An auto run may
+        # already have obtained approval before routing to the shared leaf.
+        attach_approved_plan_to_task(root, approved_plan)
     TASKS["ROOT"] = root
     RUN["tasks_created"] = 1
     update_task_ledger(root)
@@ -11200,7 +12201,12 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
 def run_recursive_request(user_text, memory, interactive=True, contract_override=None, repo_snapshot=None,
                           fit_decider=None, leaf_executor=None, aggregator=None, reset=True, finish=True,
                           initial_decision=None, specification_override=None,
-                          understanding_override=None):
+                          understanding_override=None, impact_planning_override=None,
+                          impact_planner_structured_call=None,
+                          impact_challenger_structured_call=None,
+                          impact_reviser_structured_call=None,
+                          plan_approval_selector=None, plan_approval_answer_reader=None,
+                          terminal_available=None):
     if reset:
         reset_run("recursive")
     elif RUN.get("mode") != "auto":
@@ -11246,7 +12252,35 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         return result, memory
     contract = understanding.get("contract", contract)
     begin_durable_run(contract)
+    try:
+        impact_planning = impact_planning_override or prepare_stage3_context(
+            understanding, contract, interactive=interactive,
+            terminal_available=terminal_available,
+            planner_structured_call=impact_planner_structured_call,
+            challenger_structured_call=impact_challenger_structured_call,
+            reviser_structured_call=impact_reviser_structured_call,
+            approval_selector=plan_approval_selector,
+            approval_answer_reader=plan_approval_answer_reader,
+        )
+    except ProviderError as exc:
+        result = {
+            "status": "failed", "failure_type": "ENVIRONMENT_ERROR",
+            "summary": str(exc), "memory": memory,
+        }
+        if finish:
+            finish_metrics("failed")
+        return result, memory
+    if impact_planning.get("status") != "ready":
+        result = dict(impact_planning)
+        result["memory"] = memory
+        if finish:
+            finish_metrics(result.get("status", "failed"))
+        return result, memory
+    contract = impact_planning.get("contract", contract)
     root = root_task_from_contract(contract)
+    approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict):
+        attach_approved_plan_to_task(root, approved_plan)
     TASKS["ROOT"] = root
     RUN["tasks_created"] = 1
     routed_fit = fit_decider
@@ -11301,7 +12335,23 @@ def run_auto_request(user_text, memory, interactive=True):
         f"[PROJECT MODE] {understanding.get('project_mode')} | "
         f"recon={recon.get('status')} evidence={len(recon.get('evidence', []))}"
     )
+    begin_durable_run(contract)
+    try:
+        impact_planning = prepare_stage3_context(
+            understanding, contract, interactive=interactive,
+        )
+    except ProviderError as exc:
+        event(f"[ERROR] {exc}", role="ImpactPlanner", task="ROOT", action="impact planning provider failure")
+        finish_metrics("failed")
+        return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc)}, memory
+    if impact_planning.get("status") != "ready":
+        finish_metrics(impact_planning.get("status", "failed"))
+        return impact_planning, memory
+    contract = impact_planning.get("contract", contract)
     root = root_task_from_contract(contract)
+    approved_plan = current_approved_change_plan()
+    if isinstance(approved_plan, dict):
+        attach_approved_plan_to_task(root, approved_plan)
     # Auto is explicitly decided after Stage 2 Task Brain preparation.
     try:
         decision = decide_task_fit(root, 0, contract, repo_snapshot)
@@ -11321,7 +12371,8 @@ def run_auto_request(user_text, memory, interactive=True):
                                                repo_snapshot=repo_snapshot, reset=False, finish=False,
                                                initial_decision=decision,
                                                specification_override=understanding.get("specification"),
-                                               understanding_override=understanding)
+                                               understanding_override=understanding,
+                                               impact_planning_override=impact_planning)
     finish_metrics("done" if result.get("status") == "done" else result.get("status", "failed"))
     return result, memory
 
@@ -11713,6 +12764,143 @@ def run_self_test(install_browser=False):
             ),
         }
 
+        # v18 Stage 3 self-test scenarios use the accepted v17 evidence and
+        # injected/deterministic outputs only. No model or Worker is invoked.
+        v18_requirements = stage3.active_requirements(ledger_requirements(v17_pause_ledger))
+        v18_req_by_prefix = {
+            prefix: next(
+                item.get("requirement_id") for item in v18_requirements
+                if item.get("text", "").startswith(prefix)
+            )
+            for prefix in ("Add ", "Reuse ", "Preserve ", "Update ")
+        }
+
+        def v18_evidence_id(category, path, symbol_text=""):
+            return next(
+                item.get("evidence_id") for item in v17_existing_evidence
+                if item.get("category") == category
+                and item.get("path") == path
+                and (not symbol_text or symbol_text in str(item.get("symbol", "")))
+            )
+
+        v18_input_owner = v18_evidence_id("CURRENT_OWNER", "src/input.js", "InputManager")
+        v18_input_state = v18_evidence_id("CURRENT_STATE_OWNER", "src/input.js", "InputManager")
+        v18_input_interface = v18_evidence_id("CURRENT_INTERFACE", "src/input.js", "isPressed")
+        v18_game_owner = v18_evidence_id("CURRENT_OWNER", "src/game.js", "GameState")
+        v18_pause_state = v18_evidence_id("CURRENT_STATE_OWNER", "src/game.js", "GameState")
+        v18_pause_interface = v18_evidence_id("CURRENT_INTERFACE", "src/game.js", "togglePause")
+        v18_persistence = v18_evidence_id("CURRENT_PERSISTENCE", "src/storage.js", "BEST_SCORE_KEY")
+        v18_input_test = v18_evidence_id("CURRENT_TEST", "tests/input.test.js", "InputManager")
+        v18_candidate = stage3.normalize_impact_map({
+            "task_goal": v17_pause_raw,
+            "impacts": [
+                {
+                    "impact_id": "IMP-001", "component": "InputManager", "path": "src/input.js",
+                    "symbols": ["InputManager", "InputManager.isPressed"],
+                    "impact_kind": "BEHAVIOR_CHANGE",
+                    "requirement_ids": [v18_req_by_prefix["Add "], v18_req_by_prefix["Reuse "], v18_req_by_prefix["Preserve "]],
+                    "repository_evidence_ids": [v18_input_owner, v18_input_state, v18_input_interface],
+                    "reason": "InputManager is the current keyboard owner.",
+                    "existing_owner": "InputManager",
+                    "existing_interfaces_to_reuse": ["InputManager.isPressed"],
+                    "preserve": ["WASD/arrow controls"],
+                    "candidate_change": "Integrate Escape detection through the current InputManager.",
+                    "local_verification": ["Escape is detected and WASD/arrow controls remain intact"],
+                    "necessity_status": "MUST_CHANGE",
+                },
+                {
+                    "impact_id": "IMP-002", "component": "GameState", "path": "src/game.js",
+                    "symbols": ["GameState", "GameState.paused", "GameState.togglePause"],
+                    "impact_kind": "INTEGRATION_CHANGE",
+                    "requirement_ids": [v18_req_by_prefix["Add "], v18_req_by_prefix["Reuse "]],
+                    "repository_evidence_ids": [v18_game_owner, v18_pause_state, v18_pause_interface],
+                    "reason": "GameState owns the paused state and transition.",
+                    "existing_owner": "GameState",
+                    "existing_interfaces_to_reuse": ["GameState.togglePause"],
+                    "preserve": ["GameState remains the paused-state owner"],
+                    "candidate_change": "Connect Escape handling to GameState.togglePause.",
+                    "local_verification": ["Escape toggles current GameState.paused"],
+                    "necessity_status": "CANDIDATE",
+                },
+                {
+                    "impact_id": "IMP-003", "component": "best-score persistence", "path": "src/storage.js",
+                    "symbols": ["BEST_SCORE_KEY"], "impact_kind": "INTEGRATION_CHANGE",
+                    "requirement_ids": [v18_req_by_prefix["Preserve "]],
+                    "repository_evidence_ids": [v18_persistence],
+                    "reason": "Best-score persistence must remain unchanged.",
+                    "existing_owner": "BEST_SCORE_KEY", "existing_interfaces_to_reuse": [],
+                    "preserve": ["persistent best-score behavior"],
+                    "candidate_change": "Modify storage for pause support.",
+                    "local_verification": ["best-score persistence remains unchanged"],
+                    "necessity_status": "MUST_CHANGE",
+                },
+                {
+                    "impact_id": "IMP-004", "component": "input tests", "path": "tests/input.test.js",
+                    "symbols": ["InputManager"], "impact_kind": "TEST_CHANGE",
+                    "requirement_ids": [v18_req_by_prefix["Update "]],
+                    "repository_evidence_ids": [v18_input_test],
+                    "reason": "The current input test is relevant.", "existing_owner": "",
+                    "existing_interfaces_to_reuse": [], "preserve": ["existing input assertions"],
+                    "candidate_change": "Update or add relevant pause/input tests.",
+                    "local_verification": ["pause/input tests pass"],
+                    "necessity_status": "CANDIDATE",
+                },
+            ],
+            "integration_verification": [
+                "Escape toggles current GameState.paused", "WASD/arrow controls still work",
+                "best-score persistence is unchanged", "no duplicate owner exists", "relevant tests pass",
+            ],
+            "insufficient_evidence": [],
+        })
+        v18_challenges = stage3.deterministic_challenges(
+            v18_candidate, v18_requirements, v17_existing_evidence,
+        )
+        v18_challenge_validation = stage3.validate_challenges(
+            v18_challenges, v18_candidate, v18_requirements, v17_existing_evidence,
+        )
+        v18_reconciled, v18_resolved, v18_unresolved = stage3.reconcile_impact_map(
+            v18_candidate, v18_challenge_validation.get("validated", []),
+            v18_requirements, v17_existing_evidence,
+        )
+        v18_plan = stage3.build_minimal_change_plan(
+            v18_reconciled, v18_requirements, v17_existing_evidence,
+            v18_resolved, v18_unresolved,
+        )
+        v18_plan_gate = stage3.validate_change_plan(
+            v18_plan, v18_requirements, v17_existing_evidence,
+        )
+        v18_approval = request_plan_approval(
+            v18_plan, interactive=True, terminal_available=True,
+            selector=lambda *_args, **_kwargs: 0,
+        )
+        v18_noninteractive = request_plan_approval(
+            v18_plan, interactive=False, terminal_available=False,
+        )
+        v18_duplicate = copy.deepcopy(v18_candidate)
+        v18_duplicate["impacts"][0]["candidate_change"] = "Add a paused field to InputManager."
+        v18_duplicate["impacts"][0]["repository_evidence_ids"] = [
+            v18_input_owner, v18_pause_state, v18_pause_interface,
+        ]
+        v18_duplicate_types = {
+            item.get("challenge_type") for item in stage3.deterministic_challenges(
+                v18_duplicate, v18_requirements, v17_existing_evidence,
+            )
+        }
+        v18_missing_test = copy.deepcopy(v18_candidate)
+        v18_missing_test["impacts"] = [
+            item for item in v18_missing_test["impacts"] if item.get("impact_kind") != "TEST_CHANGE"
+        ]
+        v18_test_challenges = stage3.deterministic_challenges(
+            v18_missing_test, v18_requirements, v17_existing_evidence,
+        )
+        v18_test_validation = stage3.validate_challenges(
+            v18_test_challenges, v18_missing_test, v18_requirements, v17_existing_evidence,
+        )
+        v18_test_reconciled, _, _ = stage3.reconcile_impact_map(
+            v18_missing_test, v18_test_validation.get("validated", []),
+            v18_requirements, v17_existing_evidence,
+        )
+
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
         (v17_auth_root / "src" / "legacy-auth.js").write_text(
@@ -11871,6 +13059,30 @@ def run_self_test(install_browser=False):
                 and "support" not in json.dumps(
                     v17_existing_task_brain.get("evidence_index", []), ensure_ascii=False,
                 )
+            ),
+            "v18 valid existing plan": (
+                v18_plan_gate.get("valid")
+                and v18_approval.get("status") == "approved"
+                and stage3.approval_is_current(v18_plan, v18_approval.get("approval"))
+            ),
+            "v18 unnecessary mutation": (
+                "src/storage.js" in v18_plan.get("do_not_touch", [])
+                and not any(
+                    "src/storage.js" in node.get("candidate_targets", [])
+                    for node in v18_plan.get("approved_change_nodes", [])
+                )
+            ),
+            "v18 duplicate ownership": (
+                {"DUPLICATE_OWNERSHIP_RISK", "WRONG_OWNER"}.issubset(v18_duplicate_types)
+                and "InputManager.paused" not in json.dumps(v18_plan, ensure_ascii=False)
+            ),
+            "v18 test gap": (
+                any(item.get("challenge_type") == "TEST_GAP" for item in v18_test_challenges)
+                and any(item.get("impact_kind") == "TEST_CHANGE" for item in v18_test_reconciled.get("impacts", []))
+            ),
+            "v18 noninteractive approval": (
+                v18_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
+                and v18_noninteractive.get("status") == "plan_approval_required"
             ),
         }
         for name, ok in checks.items():

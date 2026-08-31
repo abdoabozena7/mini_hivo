@@ -26,6 +26,7 @@ migrated once into `list/project-1`.
 - `hivo/memory.py`: per-project SQLite memory, verified-note retrieval, and a resumable run/task ledger.
 - `hivo/playbooks.py`: deterministic project classification and a legacy stage projection; adaptive execution does not call it.
 - `hivo/project_understanding.py`: deterministic project-mode classification, bounded read-only repository evidence, repository conflicts, and temporary Task Brain validation/projection.
+- `hivo/impact_planning.py`: bounded Impact Map and challenge schemas, evidence/coverage gates, minimal-effective plan reconciliation, immutable plan IDs, and approved-scope projection.
 - `hivo/evidence.py`: latest-evidence semantics; resolved failures do not poison a run.
 - `hivo/verification.py`: contract-aware browser pass/fail rules.
 - `hivo/browser_checks.py`: deterministic profile-specific interactions for timers and other web apps.
@@ -124,6 +125,41 @@ serialized size are deterministically bounded and validated before task-fit or
 decomposition. Run evidence retains it for audit, but it is never promoted into
 Project Brain; Workers receive only a node-relevant slice through the existing
 Mission Compiler.
+
+For an `EXISTING_PROJECT` recursive run, Stage 3 now executes immediately after
+that Task Brain and before task-fit: ImpactPlanner → Impact Map → one
+ImpactChallenger round → deterministic challenge validation/reconciliation →
+Minimal Effective Change Plan → coverage/evidence gate → user plan approval.
+Both model-backed planning roles and the optional single ImpactPlanReviser use
+the same pinned `gemma4:e4b`; their inputs contain only bounded requirement,
+Task Brain, Project Brain invariant, and accepted `REPO-*` fact projections.
+The Impact Map distinguishes a relevant surface from a necessary mutation, so
+an existing persistence owner can be `PRESERVATION_ONLY` and become an explicit
+`do_not_touch` target rather than an edit merely because it matters to
+acceptance. Every active requirement is assigned to change, preservation,
+test, or cross-cutting responsibility; an unassigned requirement, unsupported
+`MUST_CHANGE`, unresolved blocking challenge, missing test responsibility, or
+ownership conflict stops as `PLAN_INCOMPLETE` before approval.
+
+The concise approval UI reuses arrow keys and Enter: Approve, Review/change
+scope, Cancel, and Other. An explicit revision becomes a separate
+`USER_CONFIRMED` task decision and permits at most one bounded plan revision;
+the original `USER_STATED` records remain unchanged. Approval records include
+the deterministic plan ID/hash. Any content change makes the approval stale.
+An existing-project run without an interactive terminal stops cleanly as
+`PLAN_APPROVAL_REQUIRED`; rejection stops as `PLAN_REJECTED`. Neither state is
+a root implementation failure or clarification request, and subject-project
+files remain fingerprint-identical through planning and approval.
+
+After approval, plan nodes become the decomposition and Mission Compiler
+execution contract. Children trace to plan, requirement, impact, and evidence
+IDs; test responsibility is copied into each relevant node rather than relying
+on Task Brain ordering. Mutation tools reject inspect-only, preservation-only,
+stale-plan, and out-of-plan paths as `UNAPPROVED_SCOPE_EXPANSION`. Greenfield
+`NEW_PROJECT` runs skip repository-style Stage 3 approval and continue directly
+from Task Brain to task-fit. Direct frozen-baseline runs remain limited to the
+pre-Stage-2 project-mode bookkeeping path and do not receive recursive Stage 3
+planning.
 
 Every execution receives a fresh, bounded Node Packet containing the compact
 root contract, current node contract, parent summary, verified dependency
