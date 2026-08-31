@@ -42,6 +42,11 @@ MAX_REQUIREMENT_TEXT_CHARS = 900
 MAX_CONTRACT_CHARS = 14000
 MAX_SNAPSHOT_CHARS = 26000
 MAX_CONTEXT_CHARS = 14000
+# The full hydrated mission is an internal audit/provenance artifact.  It has
+# its own generous bound and must not be confused with the model-facing Worker
+# context limit owned by the orchestrator.
+MAX_HYDRATED_MISSION_CHARS = 26000
+WORKER_CONTEXT_RENDERING_VERSION = "v19.3-1"
 
 APPROVED_PLAN = "APPROVED_PLAN"
 REPOSITORY_EVIDENCE = "REPOSITORY_EVIDENCE"
@@ -62,6 +67,10 @@ CONTRACT_SCOPE_VIOLATION = "CONTRACT_SCOPE_VIOLATION"
 MISSION_CONTRACT_VIOLATION = "MISSION_CONTRACT_VIOLATION"
 EXECUTION_GRAPH_INVALID = "EXECUTION_GRAPH_INVALID"
 EXECUTION_DEPENDENCY_BLOCKED = "EXECUTION_DEPENDENCY_BLOCKED"
+HYDRATED_MISSION_TOO_LARGE = "HYDRATED_MISSION_TOO_LARGE"
+WORKER_CONTEXT_TOO_LARGE = "WORKER_CONTEXT_TOO_LARGE"
+WORKER_CONTEXT_AUTHORITY_TOO_LARGE = "WORKER_CONTEXT_AUTHORITY_TOO_LARGE"
+WORKER_CONTEXT_ADVICE_UNAVAILABLE = "WORKER_CONTEXT_ADVICE_UNAVAILABLE"
 
 RESPONSIBILITY_TYPES = (MUTATION, TEST_MUTATION, VERIFY_ONLY, INTERFACE_REUSE, INTEGRATION_CHECK)
 
@@ -390,6 +399,11 @@ def _ids(values, limit=None):
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _serialized_chars(value):
+    """Count the stable human-readable JSON artifact used for evidence."""
+    return len(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def deterministic_hash(value):
@@ -2459,6 +2473,12 @@ def validate_hydrated_worker_mission(mission, contract, dependency_summaries=Non
     value = mission if isinstance(mission, dict) else {}
     authority = contract if isinstance(contract, dict) else {}
     errors = []
+    mission_chars = _serialized_chars(value)
+    if mission_chars > MAX_HYDRATED_MISSION_CHARS:
+        errors.append(
+            f"{HYDRATED_MISSION_TOO_LARGE}: hydrated mission exceeds its internal artifact bound "
+            f"({mission_chars} > {MAX_HYDRATED_MISSION_CHARS})"
+        )
     expected_fields = {
         "mission_id", "mission_hash", "execution_contract_id", "execution_contract_hash",
         "approved_plan_id", "approved_plan_hash", "goal", "responsibility_type",
@@ -2544,7 +2564,540 @@ def validate_hydrated_worker_mission(mission, contract, dependency_summaries=Non
     for key in value:
         if str(key).startswith("raw_") or key in {"raw_response", "raw_mission_compiler_output"}:
             errors.append(f"hydrated mission contains raw model field {key}")
-    return {"valid": not errors, "errors": errors[:40]}
+    return {
+        "valid": not errors,
+        "errors": errors[:40],
+        "serialized_chars": mission_chars,
+        "internal_limit": MAX_HYDRATED_MISSION_CHARS,
+    }
+
+
+def hydrated_worker_mission_chars(mission):
+    """Return the serialized size of the full internal mission artifact."""
+    return _serialized_chars(mission if isinstance(mission, dict) else {})
+
+
+_WORKER_CONTEXT_EXCLUDED_STRUCTURES = (
+    "full approved plan", "approved plan snapshot", "execution graph",
+    "full plan nodes", "obligation ledger", "full Project Brain",
+    "full Task Brain", "full Source Ledger", "raw Planner output",
+    "raw Challenger output", "raw MissionCompiler output",
+)
+_WORKER_CONTEXT_INCLUDED_SECTIONS = (
+    "identity", "goal", "responsibility", "mutation scope",
+    "inspection scope", "interfaces", "requirements", "preservation",
+    "prohibitions", "do_not_touch", "test contract", "done_when",
+    "dependencies", "repository facts", "implementation advice",
+)
+
+
+def _compact_worker_repository_facts(contract):
+    """Keep only the small fact needed to orient this Worker responsibility."""
+    result = []
+    for item in list((contract or {}).get("relevant_repository_facts", []) or [])[:MAX_REPOSITORY_FACTS_PER_CONTRACT]:
+        if not isinstance(item, dict):
+            continue
+        fact = _text(item.get("fact"), MAX_TEXT_CHARS)
+        path = _path(item.get("path"))
+        symbol = _text(item.get("symbol"), 240)
+        evidence_id = str(item.get("evidence_id") or "")
+        if not fact and not path and not symbol:
+            continue
+        # Deliberately omit line ranges, hashes, provenance objects, and the
+        # rest of the full REPOSITORY_EVIDENCE record.  Those remain internal.
+        result.append({
+            "evidence_id": evidence_id,
+            "fact": fact,
+            "path": path,
+            "symbol": symbol,
+        })
+    return result
+
+
+def _worker_context_authority(mission, contract):
+    """Build the compact authority portion from the validated contract."""
+    value = mission if isinstance(mission, dict) else {}
+    authority = contract if isinstance(contract, dict) else {}
+    requirements = []
+    for item in list(authority.get("requirements", []) or []):
+        if isinstance(item, dict):
+            requirements.append({
+                "requirement_id": str(item.get("requirement_id") or ""),
+                "text": str(item.get("text") or ""),
+            })
+        else:
+            requirements.append({"requirement_id": "", "text": str(item or "")})
+    return {
+        "mission_id": value.get("mission_id"),
+        "mission_hash": value.get("mission_hash"),
+        "execution_contract_id": authority.get("execution_contract_id"),
+        "execution_contract_hash": authority.get("contract_hash"),
+        "approved_plan_id": authority.get("plan_id"),
+        "approved_plan_hash": authority.get("plan_hash"),
+        "goal": _copy(authority.get("goal")),
+        "responsibility_type": _copy(authority.get("responsibility_type")),
+        "allowed_mutation_paths": _copy(authority.get("allowed_mutation_paths", []) or []),
+        "allowed_inspection_paths": _copy(authority.get("allowed_inspection_paths", []) or []),
+        "interfaces_to_reuse": _copy(authority.get("interfaces_to_reuse", []) or []),
+        "requirements": requirements,
+        "preservation": _copy(authority.get("local_preservation_constraints", []) or []),
+        "prohibitions": _copy(authority.get("structured_prohibitions", []) or []),
+        "do_not_touch": _copy(authority.get("global_do_not_touch", []) or []),
+        "test_contract": _copy(authority.get("test_contract", []) or []),
+        "done_when": _copy(authority.get("done_when", []) or []),
+        "dependencies": _copy(value.get("dependencies", []) or []),
+        "relevant_repository_facts": _compact_worker_repository_facts(authority),
+    }
+
+
+def _worker_context_advice_items(advice):
+    """Return deterministic whole-item semantic advice candidates."""
+    value = advice if isinstance(advice, dict) else {}
+    result = []
+    objective = value.get("objective")
+    if objective not in (None, ""):
+        result.append(("objective", "objective", objective))
+    for field in (
+        "implementation_steps", "interface_usage", "verification_notes",
+        "implementation_notes", "inspection_order",
+    ):
+        for index, item in enumerate(list(value.get(field, []) or []), 1):
+            result.append((f"{field}[{index}]", field, item))
+    return result
+
+
+def _worker_context_advice_selection_labels(advice, source_advice):
+    """Label retained advice against the original full-advice positions."""
+    selected = advice if isinstance(advice, dict) else {}
+    source = source_advice if isinstance(source_advice, dict) else {}
+    labels = []
+    if selected.get("objective") not in (None, ""):
+        labels.append("objective")
+    for field in (
+        "implementation_steps", "interface_usage", "verification_notes",
+        "implementation_notes", "inspection_order",
+    ):
+        source_values = list(source.get(field, []) or [])
+        cursor = 0
+        for item in list(selected.get(field, []) or []):
+            try:
+                index = source_values.index(item, cursor) + 1
+            except ValueError:
+                labels.append(f"{field}[?]")
+                continue
+            labels.append(f"{field}[{index}]")
+            cursor = index
+    return labels
+
+
+def _make_worker_context_projection(authority, advice, audit):
+    projection = _copy(authority)
+    projection["implementation_advice"] = _copy(advice if isinstance(advice, dict) else {})
+    projection["projection_audit"] = _copy(audit if isinstance(audit, dict) else {})
+    projection["rendering_version"] = WORKER_CONTEXT_RENDERING_VERSION
+    projection["worker_context_projection_hash"] = deterministic_hash(
+        _without(projection, "worker_context_projection_hash"),
+    )
+    return projection
+
+
+def _render_worker_context_projection_lines(projection, *, include_advice=True):
+    """Render the model-facing projection without serializing internal JSON."""
+    value = projection if isinstance(projection, dict) else {}
+    lines = [
+        "AUTHORITATIVE CONTRACT (AUTHORITATIVE EXECUTION CONTRACT)",
+        "Execution authority is fixed by the validated contract; this context is informational.",
+        "IDENTITY:",
+        f"- plan: {value.get('approved_plan_id')} / {value.get('approved_plan_hash')}",
+        f"- contract: {value.get('execution_contract_id')} / {value.get('execution_contract_hash')}",
+        f"- mission: {value.get('mission_id')} / {value.get('mission_hash')}",
+        "GOAL:",
+        str(value.get("goal") or "(none)"),
+        "RESPONSIBILITY:",
+        f"{value.get('responsibility_type') or '(none)'}",
+    ]
+
+    def add_list(title, values, formatter=None):
+        lines.append(f"{title}:")
+        values = list(values or [])
+        if not values:
+            lines.append("- (none)")
+            return
+        for item in values:
+            lines.append("- " + (formatter(item) if formatter else str(item)))
+
+    add_list("MAY MODIFY", value.get("allowed_mutation_paths"))
+    add_list("MAY INSPECT", value.get("allowed_inspection_paths"))
+    add_list("REUSE", value.get("interfaces_to_reuse"))
+    add_list(
+        "REQUIREMENTS",
+        value.get("requirements"),
+        lambda item: (
+            f"{item.get('requirement_id')}: {item.get('text')}"
+            if isinstance(item, dict) else str(item)
+        ),
+    )
+    add_list("MUST PRESERVE", value.get("preservation"))
+    add_list("MUST NOT DO", value.get("prohibitions"))
+    add_list("DO NOT MODIFY", value.get("do_not_touch"))
+    add_list("TEST CONTRACT", value.get("test_contract"))
+    add_list("DONE WHEN", value.get("done_when"))
+    add_list(
+        "COMPLETED DEPENDENCIES",
+        value.get("dependencies"),
+        lambda item: (
+            f"{item.get('task_id')} [{item.get('status')}]: {item.get('summary')}"
+            + (f" (changed: {', '.join(item.get('changed_files', []) or [])})"
+               if item.get("changed_files") else "")
+            if isinstance(item, dict) else str(item)
+        ),
+    )
+    add_list(
+        "VERIFIED REPOSITORY FACTS",
+        value.get("relevant_repository_facts"),
+        lambda item: (
+            f"{item.get('evidence_id')}: {item.get('fact')}"
+            + (f" [{item.get('path')}; {item.get('symbol')}]"
+               if item.get("path") or item.get("symbol") else "")
+            if isinstance(item, dict) else str(item)
+        ),
+    )
+    if include_advice:
+        advice = value.get("implementation_advice")
+        if isinstance(advice, dict) and advice:
+            lines.append("IMPLEMENTATION ADVICE:")
+            if advice.get("objective"):
+                lines.append(f"- Objective: {advice['objective']}")
+            labels = {
+                "implementation_steps": "Step",
+                "interface_usage": "Interface",
+                "verification_notes": "Verify",
+                "implementation_notes": "Note",
+                "inspection_order": "Inspect",
+            }
+            for field in (
+                "implementation_steps", "interface_usage", "verification_notes",
+                "implementation_notes", "inspection_order",
+            ):
+                for item in list(advice.get(field, []) or []):
+                    lines.append(f"- {labels[field]}: {item}")
+        else:
+            lines.extend(("IMPLEMENTATION ADVICE:", "- (none)"))
+    return lines
+
+
+def render_worker_context_projection(projection, max_chars=MAX_CONTEXT_CHARS):
+    """Render exactly the bounded Worker context represented by a projection."""
+    limit = MAX_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
+    rendered = "\n".join(_render_worker_context_projection_lines(projection))
+    if len(rendered) > limit:
+        raise ExecutionContractError(
+            WORKER_CONTEXT_TOO_LARGE,
+            f"rendered Worker context exceeds its bound ({len(rendered)} > {limit})",
+        )
+    return rendered
+
+
+def _worker_context_audit(
+    *, full_mission_chars, required_authority_chars,
+    required_authority_serialized_chars, optional_advice_chars_before,
+    optional_advice_chars_retained, final_projection_chars,
+    rendered_context_chars, context_limit, retained, dropped,
+):
+    return {
+        "full_mission_chars": int(full_mission_chars),
+        "required_authority_chars": int(required_authority_chars),
+        "required_authority_serialized_chars": int(required_authority_serialized_chars),
+        "optional_advice_chars_before_projection": int(optional_advice_chars_before),
+        "optional_advice_chars_retained": int(optional_advice_chars_retained),
+        "final_projection_chars": int(final_projection_chars),
+        "rendered_context_chars": int(rendered_context_chars),
+        "context_limit": int(context_limit),
+        # Counts keep the projection itself compact.  The exact labels are
+        # retained in the orchestration evidence/cache alongside this object.
+        "optional_items_retained": len(list(retained)),
+        "optional_items_dropped": len(list(dropped)),
+        "authority_items_dropped": 0,
+        "authority_overflow": False,
+        "included_sections": list(_WORKER_CONTEXT_INCLUDED_SECTIONS),
+        "excluded_internal_structures": list(_WORKER_CONTEXT_EXCLUDED_STRUCTURES),
+    }
+
+
+def build_worker_context_projection(
+    mission, contract, dependency_summaries=None, max_chars=MAX_CONTEXT_CHARS,
+):
+    """Project one validated rich mission into a deterministic Worker context."""
+    value = mission if isinstance(mission, dict) else {}
+    authority = contract if isinstance(contract, dict) else {}
+    limit = MAX_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
+    mission_chars = hydrated_worker_mission_chars(value)
+    if mission_chars > MAX_HYDRATED_MISSION_CHARS:
+        raise ExecutionContractError(
+            HYDRATED_MISSION_TOO_LARGE,
+            f"hydrated mission exceeds its internal artifact bound ({mission_chars} > {MAX_HYDRATED_MISSION_CHARS})",
+        )
+    mission_check = validate_hydrated_worker_mission(
+        value, authority, dependency_summaries,
+    )
+    if not mission_check.get("valid"):
+        raise ExecutionContractError(
+            MISSION_CONTRACT_VIOLATION,
+            "; ".join(mission_check.get("errors", [])) or "full hydrated mission is invalid",
+        )
+
+    authority_projection = _worker_context_authority(value, authority)
+    full_advice = _copy(value.get("implementation_advice", {}) or {})
+    advice_candidates = _worker_context_advice_items(full_advice)
+    all_labels = [item[0] for item in advice_candidates]
+    optional_advice_chars_before = _serialized_chars(full_advice)
+    empty_audit = _worker_context_audit(
+        full_mission_chars=mission_chars,
+        required_authority_chars=0,
+        required_authority_serialized_chars=0,
+        optional_advice_chars_before=optional_advice_chars_before,
+        optional_advice_chars_retained=0,
+        final_projection_chars=0,
+        rendered_context_chars=0,
+        context_limit=limit,
+        retained=[], dropped=[],
+    )
+    required_projection = _make_worker_context_projection(
+        authority_projection, {}, empty_audit,
+    )
+    required_rendered = "\n".join(
+        _render_worker_context_projection_lines(required_projection, include_advice=False),
+    )
+    required_rendered_chars = len(required_rendered)
+    required_serialized_chars = _serialized_chars(required_projection)
+    # Only the deterministic textual rendering is sent to the Worker.  The
+    # structured projection is an internal auditable artifact and may remain
+    # richer than the model-facing character budget.
+    if required_rendered_chars > limit:
+        raise ExecutionContractError(
+            WORKER_CONTEXT_AUTHORITY_TOO_LARGE,
+            "required Worker authority cannot fit without dropping authority",
+            details=[
+                f"required_rendered_chars={required_rendered_chars}",
+                f"required_projection_chars={required_serialized_chars}",
+                f"context_limit={limit}",
+            ],
+        )
+
+    retained = []
+    dropped = []
+
+    def advice_from_labels(labels):
+        selected = {}
+        for label, field, item in advice_candidates:
+            if label == "objective":
+                if label in labels:
+                    selected["objective"] = item
+                continue
+            if label not in labels:
+                continue
+            selected.setdefault(field, []).append(item)
+        return selected
+
+    def candidate_projection(labels):
+        selected_advice = advice_from_labels(labels)
+        future_dropped = [label for label in all_labels if label not in labels]
+        audit = _worker_context_audit(
+            full_mission_chars=mission_chars,
+            required_authority_chars=required_rendered_chars,
+            required_authority_serialized_chars=required_serialized_chars,
+            optional_advice_chars_before=optional_advice_chars_before,
+            optional_advice_chars_retained=_serialized_chars(selected_advice),
+            final_projection_chars=0,
+            rendered_context_chars=0,
+            context_limit=limit,
+            retained=list(labels), dropped=future_dropped,
+        )
+        return _make_worker_context_projection(
+            authority_projection, selected_advice, audit,
+        )
+
+    for label, _field, _item in advice_candidates:
+        proposed = retained + [label]
+        candidate = candidate_projection(proposed)
+        try:
+            candidate_rendered = render_worker_context_projection(candidate, limit)
+            candidate_fits = len(candidate_rendered) <= limit
+        except ExecutionContractError as exc:
+            if exc.code != WORKER_CONTEXT_TOO_LARGE:
+                raise
+            candidate_fits = False
+        if candidate_fits:
+            retained = proposed
+        else:
+            dropped.append(label)
+
+    if not retained:
+        raise ExecutionContractError(
+            WORKER_CONTEXT_ADVICE_UNAVAILABLE,
+            "required authority fits but no validated semantic advice item fits",
+            details=[f"context_limit={limit}"],
+        )
+
+    # Finalize the audit fields after selection.  A tiny fixed-point loop keeps
+    # the recorded serialized/rendered sizes equal to the final artifact.
+    while True:
+        dropped = [label for label in all_labels if label not in retained]
+        selected_advice = advice_from_labels(retained)
+        audit = _worker_context_audit(
+            full_mission_chars=mission_chars,
+            required_authority_chars=required_rendered_chars,
+            required_authority_serialized_chars=required_serialized_chars,
+            optional_advice_chars_before=optional_advice_chars_before,
+            optional_advice_chars_retained=_serialized_chars(selected_advice),
+            final_projection_chars=0,
+            rendered_context_chars=0,
+            context_limit=limit,
+            retained=retained, dropped=dropped,
+        )
+        projection = _make_worker_context_projection(
+            authority_projection, selected_advice, audit,
+        )
+        for _ in range(5):
+            rendered = render_worker_context_projection(projection, limit)
+            projection["projection_audit"]["final_projection_chars"] = _serialized_chars(projection)
+            projection["projection_audit"]["rendered_context_chars"] = len(rendered)
+            projection["worker_context_projection_hash"] = deterministic_hash(
+                _without(projection, "worker_context_projection_hash"),
+            )
+            updated_chars = _serialized_chars(projection)
+            updated_rendered_chars = len(rendered)
+            if (
+                projection["projection_audit"]["final_projection_chars"] == updated_chars
+                and projection["projection_audit"]["rendered_context_chars"] == updated_rendered_chars
+            ):
+                break
+        if len(rendered) <= limit:
+            return projection
+        if len(retained) <= 1:
+            raise ExecutionContractError(
+                WORKER_CONTEXT_TOO_LARGE,
+                "Worker context projection exceeds its bound after deterministic budgeting",
+                details=[f"context_limit={limit}"],
+            )
+        # Drop the lowest-priority whole advice item; authority is never
+        # removed by this loop.
+        retained.pop()
+
+
+def _projection_forbidden_keys(value, path="projection"):
+    forbidden = set(_RAW_FORBIDDEN_KEYS) | {
+        "approved_plan_snapshot", "snapshot", "execution_graph", "graph",
+        "full_plan", "plan_nodes", "obligation_ledger", "raw_response",
+        "raw_mission_compiler_output", "file_sha256", "line_start", "line_end",
+        "provenance", "source_provenance",
+    }
+    found = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).casefold() in {str(entry).casefold() for entry in forbidden}:
+                found.append(f"{path}.{key}")
+            found.extend(_projection_forbidden_keys(item, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found.extend(_projection_forbidden_keys(item, f"{path}[{index}]"))
+    return found
+
+
+def validate_worker_context_projection(
+    projection, mission, contract, dependency_summaries=None,
+    max_chars=MAX_CONTEXT_CHARS,
+):
+    """Validate the compact projection without making it an authority source."""
+    value = projection if isinstance(projection, dict) else {}
+    authority = contract if isinstance(contract, dict) else {}
+    full_mission = mission if isinstance(mission, dict) else {}
+    limit = MAX_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
+    errors = []
+    mission_check = validate_hydrated_worker_mission(
+        full_mission, authority, dependency_summaries,
+    )
+    if not mission_check.get("valid"):
+        errors.extend(f"full mission: {item}" for item in mission_check.get("errors", []))
+    expected_authority = _worker_context_authority(full_mission, authority)
+    expected_keys = set(expected_authority) | {
+        "implementation_advice", "projection_audit", "rendering_version",
+        "worker_context_projection_hash",
+    }
+    for key in sorted(set(value) - expected_keys):
+        errors.append(f"projection contains unexpected field {key}")
+    for key, expected in expected_authority.items():
+        if value.get(key) != expected:
+            errors.append(f"projection authority field {key} does not match the contract")
+    if value.get("mission_hash") != full_mission.get("mission_hash"):
+        errors.append("projection does not reference the full mission hash")
+    if value.get("execution_contract_hash") != authority.get("contract_hash"):
+        errors.append("projection does not reference the contract hash")
+    if value.get("approved_plan_hash") != authority.get("plan_hash"):
+        errors.append("projection does not reference the approved plan hash")
+    if value.get("rendering_version") != WORKER_CONTEXT_RENDERING_VERSION:
+        errors.append("projection rendering version is not current")
+
+    advice = value.get("implementation_advice")
+    full_advice = full_mission.get("implementation_advice", {})
+    if not isinstance(advice, dict):
+        errors.append("projection implementation_advice must be an object")
+        advice = {}
+    if isinstance(full_advice, dict):
+        if advice.get("objective") not in (None, "") and advice.get("objective") != full_advice.get("objective"):
+            errors.append("projection objective is not accepted full-mission advice")
+        for field in MISSION_ADVICE_LIST_FIELDS:
+            selected = list(advice.get(field, []) or [])
+            source = list(full_advice.get(field, []) or [])
+            cursor = 0
+            for item in selected:
+                try:
+                    cursor = source.index(item, cursor) + 1
+                except ValueError:
+                    errors.append(f"projection advice {field} contains an item not in the full mission")
+                    break
+
+    audit = value.get("projection_audit")
+    if not isinstance(audit, dict):
+        errors.append("projection_audit is required")
+        audit = {}
+    if audit.get("authority_items_dropped", 0) != 0:
+        errors.append("projection dropped required authority")
+    forbidden = _projection_forbidden_keys(value)
+    if forbidden:
+        errors.extend(f"projection contains forbidden internal field {item}" for item in forbidden[:20])
+    expected_hash = deterministic_hash(_without(value, "worker_context_projection_hash"))
+    if value.get("worker_context_projection_hash") != expected_hash:
+        errors.append("worker context projection hash is invalid")
+
+    serialized_chars = _serialized_chars(value)
+    try:
+        rendered = render_worker_context_projection(value, limit)
+    except ExecutionContractError as exc:
+        rendered = ""
+        errors.append(str(exc))
+    rendered_chars = len(rendered)
+    if audit.get("final_projection_chars") not in (None, serialized_chars):
+        errors.append("projection audit final_projection_chars is stale")
+    if audit.get("rendered_context_chars") not in (None, rendered_chars):
+        errors.append("projection audit rendered_context_chars is stale")
+    all_labels = [item[0] for item in _worker_context_advice_items(full_advice)]
+    selected_labels = _worker_context_advice_selection_labels(advice, full_advice)
+    if audit.get("optional_items_retained") not in (None, len(selected_labels)):
+        errors.append("projection audit retained advice is stale")
+    expected_dropped = [label for label in all_labels if label not in selected_labels]
+    if audit.get("optional_items_dropped") not in (None, len(expected_dropped)):
+        errors.append("projection audit dropped advice is stale")
+    return {
+        "valid": not errors,
+        "errors": errors[:40],
+        "serialized_chars": serialized_chars,
+        "rendered_chars": rendered_chars,
+        "required_authority_chars": audit.get("required_authority_chars", 0),
+        "optional_advice_chars": audit.get("optional_advice_chars_retained", 0),
+        "optional_items_dropped": len(expected_dropped),
+        "authority_items_dropped": audit.get("authority_items_dropped", 0),
+    }
 
 
 def normalize_mission_for_contract(mission, contract, *, task_goal=None):

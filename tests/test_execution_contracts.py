@@ -66,6 +66,36 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
             structured_call=lambda _prompt, _validator, _label, _schema: advice,
         )
 
+    def exact_live_advice(self):
+        return {
+            "implementation_notes": [
+                "Do not introduce new state variables for pause status; rely entirely on the state managed by GameState or the existing input flow.",
+                "The pause logic must integrate seamlessly with the existing game loop/update cycle to halt/resume correctly.",
+                "The primary focus is wiring the key event to the existing state toggle function.",
+            ],
+            "implementation_steps": [
+                "Modify InputManager (src/input.js) to listen for the Escape key press.",
+                "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
+                "Ensure that the pause state correctly halts game logic updates and input processing when active, and resumes them when unpaused.",
+                "Verify that WASD/arrow controls and best-score persistence remain unaffected by this addition.",
+            ],
+            "inspection_order": [
+                "Read src/input.js to understand current input event handling.",
+                "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
+                "Review existing test files to identify necessary additions for Escape key testing.",
+            ],
+            "interface_usage": [
+                "Use the existing input event listener mechanism within InputManager.",
+                "Call GameState.togglePause() to manage the game's pause state.",
+                "Rely on the existing GameState object for pause status checks.",
+            ],
+            "objective": "Implement Escape-key handling within InputManager to trigger the game's pause/resume functionality, strictly reusing existing state management and input handling mechanisms.",
+            "verification_notes": [
+                "Thoroughly test pausing and unpausing via Escape key while ensuring WASD movement and score persistence are maintained.",
+                "Confirm that the input system correctly ignores movement inputs when the game is paused.",
+            ],
+        }
+
     def test_snapshot_is_approved_bounded_immutable_and_hygienic(self):
         snapshot = self.snapshot()
         checked = execution.validate_snapshot(
@@ -595,34 +625,7 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
     def test_exact_live_advice_is_accepted_and_hydrated_deterministically(self):
         _, compiled, _ = self.compiled()
         contract = compiled["contracts"][0]
-        raw = {
-            "implementation_notes": [
-                "Do not introduce new state variables for pause status; rely entirely on the state managed by GameState or the existing input flow.",
-                "The pause logic must integrate seamlessly with the existing game loop/update cycle to halt/resume correctly.",
-                "The primary focus is wiring the key event to the existing state toggle function.",
-            ],
-            "implementation_steps": [
-                "Modify InputManager (src/input.js) to listen for the Escape key press.",
-                "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
-                "Ensure that the pause state correctly halts game logic updates and input processing when active, and resumes them when unpaused.",
-                "Verify that WASD/arrow controls and best-score persistence remain unaffected by this addition.",
-            ],
-            "inspection_order": [
-                "Read src/input.js to understand current input event handling.",
-                "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
-                "Review existing test files to identify necessary additions for Escape key testing.",
-            ],
-            "interface_usage": [
-                "Use the existing input event listener mechanism within InputManager.",
-                "Call GameState.togglePause() to manage the game's pause state.",
-                "Rely on the existing GameState object for pause status checks.",
-            ],
-            "objective": "Implement Escape-key handling within InputManager to trigger the game's pause/resume functionality, strictly reusing existing state management and input handling mechanisms.",
-            "verification_notes": [
-                "Thoroughly test pausing and unpausing via Escape key while ensuring WASD movement and score persistence are maintained.",
-                "Confirm that the input system correctly ignores movement inputs when the game is paused.",
-            ],
-        }
+        raw = self.exact_live_advice()
         checked = execution.sanitize_mission_advice(raw, contract)
         self.assertTrue(checked["valid"], checked)
         self.assertFalse(checked["semantic_conflicts"], checked)
@@ -655,6 +658,263 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
         self.assertIn("AUTHORITATIVE EXECUTION CONTRACT", packet)
         self.assertIn("IMPLEMENTATION ADVICE", packet)
         self.assertNotIn("mutation_targets", packet)
+
+    def test_v193_full_mission_and_projection_are_distinct_and_authority_preserving(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        checked = execution.sanitize_mission_advice(self.exact_live_advice(), contract)
+        mission = execution.hydrate_worker_mission(contract, checked["advice"], [])
+        self.assertTrue(checked["valid"], checked)
+        self.assertTrue(execution.validate_hydrated_worker_mission(mission, contract, [])["valid"])
+        self.assertEqual(mission["implementation_advice"], checked["advice"])
+        self.assertGreater(execution.hydrated_worker_mission_chars(mission), mini.MAX_WORKER_MISSION_CHARS)
+        projection = execution.build_worker_context_projection(
+            mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+        )
+        self.assertNotEqual(mission, projection)
+        self.assertEqual(projection["mission_hash"], mission["mission_hash"])
+        self.assertEqual(projection["execution_contract_hash"], contract["contract_hash"])
+        self.assertEqual(projection["approved_plan_hash"], contract["plan_hash"])
+        self.assertEqual(projection["goal"], contract["goal"])
+        self.assertEqual(projection["responsibility_type"], contract["responsibility_type"])
+        self.assertEqual(projection["allowed_mutation_paths"], ["src/input.js"])
+        self.assertEqual(projection["allowed_inspection_paths"], contract["allowed_inspection_paths"])
+        self.assertEqual(projection["interfaces_to_reuse"], contract["interfaces_to_reuse"])
+        self.assertEqual(
+            projection["requirements"],
+            [{"requirement_id": item["requirement_id"], "text": item["text"]}
+             for item in contract["requirements"]],
+        )
+        self.assertEqual(projection["preservation"], contract["local_preservation_constraints"])
+        self.assertEqual(projection["prohibitions"], contract["structured_prohibitions"])
+        self.assertEqual(projection["do_not_touch"], contract["global_do_not_touch"])
+        self.assertEqual(projection["done_when"], contract["done_when"])
+        self.assertEqual(projection["implementation_advice"], mission["implementation_advice"])
+        self.assertEqual(projection["projection_audit"]["authority_items_dropped"], 0)
+        artifact = mini._worker_context_projection_artifact(mission, contract, [])
+        self.assertTrue(all(
+            source == "CONTRACT"
+            for source in artifact["authority_field_sources"].values()
+        ))
+        self.assertEqual(artifact["advice_field_source"], "MODEL")
+        self.assertTrue(execution.validate_worker_context_projection(
+            projection, mission, contract, [], mini.MAX_WORKER_MISSION_CHARS,
+        )["valid"])
+
+    def test_v193_projection_is_deterministic_zero_model_call_and_excludes_verbose_internals(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        mission = execution.hydrate_worker_mission(
+            contract,
+            execution.sanitize_mission_advice(self.exact_live_advice(), contract)["advice"],
+            [],
+        )
+        with patch.object(mini, "structured_model_call", side_effect=AssertionError("projection called a model")):
+            first = execution.build_worker_context_projection(
+                mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+            )
+            second = execution.build_worker_context_projection(
+                mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+            )
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first["worker_context_projection_hash"],
+            execution.deterministic_hash(execution._without(first, "worker_context_projection_hash")),
+        )
+        encoded = json.dumps(first, ensure_ascii=False, default=str).casefold()
+        for forbidden in (
+            "file_sha256", "line_start", "approved_plan_snapshot", "execution_graph",
+            "full_project_brain", "full_task_brain", "source_ledger",
+            "raw_mission_compiler_output",
+        ):
+            self.assertNotIn(forbidden, encoded)
+        rendered = execution.render_worker_context_projection(
+            first, mini.MAX_WORKER_MISSION_CHARS,
+        )
+        self.assertGreater(len(json.dumps(first, ensure_ascii=False, default=str)), mini.MAX_WORKER_MISSION_CHARS)
+        self.assertLessEqual(len(rendered), mini.MAX_WORKER_MISSION_CHARS)
+        for section in (
+            "AUTHORITATIVE CONTRACT", "GOAL:", "MAY MODIFY:", "MAY INSPECT:",
+            "REUSE:", "MUST PRESERVE:", "MUST NOT DO:", "DO NOT MODIFY:",
+            "DONE WHEN:", "IMPLEMENTATION ADVICE:", "IDENTITY:",
+        ):
+            self.assertIn(section, rendered)
+
+    def test_v193_required_authority_precedes_optional_advice_and_drop_is_observable(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        large_advice = {
+            "objective": "Implement the approved input behavior.",
+            "implementation_steps": [
+                f"Apply the verified responsibility detail {index} " + ("carefully " * 24)
+                for index in range(execution.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "interface_usage": [
+                "Use the approved interface " + ("without duplication " * 10)
+            ],
+            "verification_notes": [
+                f"Run the bounded verification detail {index} " + ("without broadening scope " * 10)
+                for index in range(execution.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "implementation_notes": [
+                f"Keep the implementation detail bounded {index} " + ("and contract-local " * 10)
+                for index in range(execution.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "inspection_order": [
+                f"Inspect the relevant approved boundary {index} " + ("before editing " * 10)
+                for index in range(execution.MISSION_ADVICE_MAX_ITEMS)
+            ],
+        }
+        mission = self.compile_advice(contract, large_advice)
+        projection = execution.build_worker_context_projection(
+            mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+        )
+        audit = projection["projection_audit"]
+        self.assertEqual(audit["authority_items_dropped"], 0)
+        self.assertEqual(audit["authority_overflow"], False)
+        self.assertGreater(audit["optional_items_dropped"], 0)
+        self.assertGreaterEqual(audit["optional_items_retained"], 1)
+        self.assertEqual(audit["full_mission_chars"], execution.hydrated_worker_mission_chars(mission))
+        self.assertLessEqual(audit["required_authority_chars"], audit["rendered_context_chars"])
+        self.assertGreater(audit["final_projection_chars"], mini.MAX_WORKER_MISSION_CHARS)
+        self.assertLessEqual(audit["rendered_context_chars"], mini.MAX_WORKER_MISSION_CHARS)
+        self.assertIn("objective", projection["implementation_advice"])
+        self.assertTrue(execution.validate_worker_context_projection(
+            projection, mission, contract, [], mini.MAX_WORKER_MISSION_CHARS,
+        )["valid"])
+
+    def test_v193_internal_mission_bound_is_distinct_from_worker_context_bound(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        mission = execution.hydrate_worker_mission(
+            contract,
+            execution.sanitize_mission_advice({"objective": "Implement the approved input behavior."}, contract)["advice"],
+            [],
+        )
+        oversized = copy.deepcopy(mission)
+        oversized["internal_growth"] = "x" * (execution.MAX_HYDRATED_MISSION_CHARS + 1)
+        checked = execution.validate_hydrated_worker_mission(oversized, contract, [])
+        self.assertFalse(checked["valid"])
+        self.assertTrue(any(execution.HYDRATED_MISSION_TOO_LARGE in item for item in checked["errors"]))
+        with self.assertRaises(execution.ExecutionContractError) as raised:
+            execution.build_worker_context_projection(
+                oversized, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+            )
+        self.assertEqual(raised.exception.code, execution.HYDRATED_MISSION_TOO_LARGE)
+
+    def test_v193_required_authority_overflow_blocks_projection_without_trimming(self):
+        _, compiled, _ = self.compiled()
+        contract = copy.deepcopy(compiled["contracts"][0])
+        contract["local_preservation_constraints"] = [
+            f"Preserve required invariant {index}: " + ("critical-" * 90)
+            for index in range(12)
+        ]
+        contract["contract_hash"] = execution.deterministic_hash(
+            execution._without(contract, "contract_hash"),
+        )
+        mission = execution.hydrate_worker_mission(
+            contract,
+            execution.sanitize_mission_advice({"objective": "Implement the approved input behavior."}, contract)["advice"],
+            [],
+        )
+        self.assertTrue(execution.validate_hydrated_worker_mission(mission, contract, [])["valid"])
+        with self.assertRaises(execution.ExecutionContractError) as raised:
+            execution.build_worker_context_projection(
+                mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+            )
+        self.assertEqual(raised.exception.code, execution.WORKER_CONTEXT_AUTHORITY_TOO_LARGE)
+
+    def test_v193_projection_hash_separates_rendering_from_mission_hash(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        mission = self.compile_advice(contract, {"objective": "Extend InputManager Escape handling."})
+        projection = execution.build_worker_context_projection(
+            mission, contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+        )
+        changed = copy.deepcopy(projection)
+        changed["rendering_version"] = "v19.3-test-rendering"
+        changed["worker_context_projection_hash"] = execution.deterministic_hash(
+            execution._without(changed, "worker_context_projection_hash"),
+        )
+        self.assertEqual(changed["mission_hash"], mission["mission_hash"])
+        self.assertNotEqual(changed["worker_context_projection_hash"], projection["worker_context_projection_hash"])
+
+        changed_contract = copy.deepcopy(contract)
+        changed_contract["goal"] += " with the same approved owner"
+        changed_contract["contract_hash"] = execution.deterministic_hash(
+            execution._without(changed_contract, "contract_hash"),
+        )
+        changed_mission = execution.hydrate_worker_mission(
+            changed_contract, mission["implementation_advice"], [],
+        )
+        changed_projection = execution.build_worker_context_projection(
+            changed_mission, changed_contract, [], max_chars=mini.MAX_WORKER_MISSION_CHARS,
+        )
+        self.assertNotEqual(changed_contract["contract_hash"], contract["contract_hash"])
+        self.assertNotEqual(changed_mission["mission_hash"], mission["mission_hash"])
+        self.assertNotEqual(
+            changed_projection["worker_context_projection_hash"],
+            projection["worker_context_projection_hash"],
+        )
+
+    def test_v193_exec002_projection_is_fresh_and_does_not_inherit_mutation_scope(self):
+        _, compiled, _ = self.compiled()
+        mutation, test_contract = compiled["contracts"]
+        dependency = [{
+            "task_id": "EXEC-001", "status": "done",
+            "summary": "verified input mutation", "changed_files": ["src/input.js"],
+        }]
+        test_mission = self.compile_advice(test_contract, {
+            "objective": "Update the existing focused input test.",
+            "implementation_steps": ["Modify tests/input.test.js."],
+        }, dependency_summaries=dependency)
+        projection = execution.build_worker_context_projection(
+            test_mission, test_contract, dependency,
+            max_chars=mini.MAX_WORKER_MISSION_CHARS,
+        )
+        rendered = execution.render_worker_context_projection(
+            projection, mini.MAX_WORKER_MISSION_CHARS,
+        )
+        self.assertNotEqual(projection["mission_hash"], mutation.get("contract_hash"))
+        self.assertEqual(projection["allowed_mutation_paths"], ["tests/input.test.js"])
+        self.assertEqual(projection["allowed_inspection_paths"], ["tests/input.test.js", "src/input.js"])
+        self.assertNotIn("src/input.js", projection["allowed_mutation_paths"])
+        self.assertEqual(projection["do_not_touch"], test_contract["global_do_not_touch"])
+        self.assertIn("EXEC-001", rendered)
+        self.assertNotIn("FIRST_ONLY", rendered)
+        self.assertNotIn("worker transcript", rendered.casefold())
+        self.assertTrue(execution.validate_worker_context_projection(
+            projection, test_mission, test_contract, dependency,
+            mini.MAX_WORKER_MISSION_CHARS,
+        )["valid"])
+
+    def test_v193_mock_worker_receives_rendered_projection_and_scope_stays_contract_bound(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        mission = self.compile_advice(contract, self.exact_live_advice())
+        packet = mini.build_node_context(
+            self.mission_task(contract), {}, None, {"files": []},
+            worker_mission=mission, execution_contract=contract,
+        )
+        self.assertLessEqual(len(packet), mini.MAX_WORKER_MISSION_CHARS)
+        captured = []
+
+        def fake_worker(messages, **_kwargs):
+            captured.append(copy.deepcopy(messages))
+            return {"role": "assistant", "content": "mock worker reached"}
+
+        with patch.object(mini, "ask_ollama", side_effect=fake_worker):
+            mini.execute_agent_task(
+                contract["goal"], {}, role="Builder", task_id="EXEC-001",
+                extra_context=packet, max_steps=1,
+            )
+        self.assertEqual(len(captured), 1)
+        worker_input = captured[0][1]["content"]
+        self.assertIn(packet, worker_input)
+        self.assertIn("src/input.js", worker_input)
+        self.assertIn("src/game.js", worker_input)
+        self.assertNotIn('"allowed_mutation_paths": ["src/game.js"]', worker_input)
+        self.assertFalse(mini.stage4.tool_scope(contract, "src/game.js", mutation=True)["allowed"])
 
     def test_real_paths_and_contract_local_scope_still_conflict(self):
         _, compiled, _ = self.compiled()
