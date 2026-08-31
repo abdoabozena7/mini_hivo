@@ -1198,6 +1198,13 @@ def new_metrics(mode):
         "plan_nodes": 0,
         "plan_requirements_covered": 0,
         "plan_requirements_unassigned": 0,
+        "requirement_obligations_created": 0,
+        "behavior_obligations": 0,
+        "behavior_obligations_covered": 0,
+        "behavior_obligations_uncovered": 0,
+        "deterministic_behavior_anchor_promotions": 0,
+        "challenges_resolved_post_reconciliation": 0,
+        "challenges_remaining_open": 0,
         "plan_approval_required": 0,
         "plan_approval_granted": 0,
         "plan_approval_rejected": 0,
@@ -4080,6 +4087,8 @@ impact_challenge_schema = stage3.challenge_schema
 canonical_surface_registry_schema = stage3.canonical_surface_registry_schema
 build_canonical_surface_registry = stage3.build_canonical_surface_registry
 build_impact_seeds = stage3.build_impact_seeds
+build_requirement_obligation_ledger = stage3.build_requirement_obligation_ledger
+evaluate_requirement_obligations = stage3.evaluate_requirement_obligations
 surface_bound_impact_seeds = stage3.surface_bound_impact_seeds
 select_task_relevant_surfaces = stage3.select_task_relevant_surfaces
 validate_impact_seeds = stage3.validate_impact_seeds
@@ -4118,6 +4127,17 @@ def _active_stage3_requirements(contract):
     ])
 
 
+def _authoritative_stage3_task_goal(contract, task_brain=None):
+    value = contract if isinstance(contract, dict) else {}
+    for candidate in (value.get("original_goal"), value.get("goal")):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    brain_goal = (task_brain or {}).get("task_goal", "")
+    if isinstance(brain_goal, dict):
+        brain_goal = brain_goal.get("text", "")
+    return str(brain_goal or "")
+
+
 def _impact_project_invariants(task_brain):
     values = []
     for item in list((task_brain or {}).get("relevant_project_brain_projection", []) or []):
@@ -4150,6 +4170,13 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     if RUN.get("impact_planner_calls", 0) >= 1:
         raise ImpactPlanningError("only one top-level ImpactPlanner invocation is allowed")
     requirements = _active_stage3_requirements(contract)
+    obligation_ledger = stage3.build_requirement_obligation_ledger(requirements)
+    RUN["requirement_obligation_ledger"] = copy.deepcopy(obligation_ledger)
+    RUN["requirement_obligations_created"] = obligation_ledger.get("obligation_count", 0)
+    RUN["behavior_obligations"] = sum(
+        "BEHAVIOR_CHANGE" in item.get("obligation_types", [])
+        for item in obligation_ledger.get("requirements", [])
+    )
     RUN["task_brain"] = copy.deepcopy(task_brain or {})
     registry = stage3.build_canonical_surface_registry(task_brain, repository_evidence)
     registry_validation = stage3.validate_canonical_surface_registry(registry, repository_evidence)
@@ -4409,7 +4436,7 @@ def _bounded_impact_revision_context(context):
         impact_keys = (
             "impact_id", "surface_id", "canonical_surface_id", "disposition",
             "impact_kind", "necessity_status", "requirement_ids",
-            "repository_evidence_ids", "action", "reason", "interfaces_to_reuse",
+            "repository_evidence_ids", "action", "interfaces_to_reuse",
             "existing_interfaces_to_reuse", "preserve", "verification",
             "surface_kind", "surface_role", "owner_surface_id",
         )
@@ -4430,12 +4457,16 @@ def _bounded_impact_revision_context(context):
                     impact[field] = compact_text(impact[field], 360)
     challenges = value.get("validated_challenges")
     if isinstance(challenges, list):
-        for challenge in challenges:
-            if not isinstance(challenge, dict):
-                continue
-            for field in ("claim", "proposed_resolution"):
-                if isinstance(challenge.get(field), str):
-                    challenge[field] = compact_text(challenge[field], 260)
+        challenge_keys = (
+            "challenge_id", "challenge_type", "impact_ids", "surface_ids",
+            "requirement_ids", "repository_evidence_ids",
+            "proposed_resolution", "blocking",
+        )
+        value["validated_challenges"] = [{
+            key: compact_text(challenge.get(key), 220)
+            if key in {"claim", "proposed_resolution"} else copy.deepcopy(challenge.get(key))
+            for key in challenge_keys if challenge.get(key) not in (None, "", [], {})
+        } for challenge in challenges if isinstance(challenge, dict)]
     if isinstance(value.get("user_confirmed_revision"), dict):
         value["user_confirmed_revision"] = {
             key: compact_text(item, 320) if isinstance(item, str) else copy.deepcopy(item)
@@ -4571,10 +4602,16 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         task_brain, repository_evidence,
     )
     RUN.setdefault("control_flow", []).append("PLAN_RECONCILIATION")
+    obligation_ledger = stage3.build_requirement_obligation_ledger(requirements)
+    RUN["requirement_obligation_ledger"] = copy.deepcopy(obligation_ledger)
+    authoritative_task_goal = _authoritative_stage3_task_goal(contract, task_brain)
     reconciled, resolved, unresolved = stage3.reconcile_impact_map(
         impact_map, challenge_validation.get("validated", []),
         requirements, repository_evidence, surface_registry=registry,
         impact_seeds=RUN.get("impact_seeds", []),
+        obligation_ledger=obligation_ledger,
+        task_goal=authoritative_task_goal,
+        task_brain=task_brain,
     )
     RUN.setdefault("control_flow", []).append("MINIMAL_EFFECTIVE_CHANGE_PLAN")
     plan = stage3.build_minimal_change_plan(
@@ -4582,11 +4619,15 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         resolved_challenges=resolved, unresolved_challenges=unresolved,
         project_mode=EXISTING_PROJECT,
         surface_registry=registry,
+        obligation_ledger=obligation_ledger,
+        task_goal=authoritative_task_goal,
     )
     RUN.setdefault("control_flow", []).append("PLAN_GATE")
     gate = stage3.validate_change_plan(
         plan, requirements, repository_evidence, EXISTING_PROJECT,
         surface_registry=registry,
+        obligation_ledger=obligation_ledger,
+        authoritative_task_goal=authoritative_task_goal,
     )
     RUN["change_plans_created"] = RUN.get("change_plans_created", 0) + 1
     RUN["plan_nodes"] = RUN.get("plan_nodes", 0) + gate.get("plan_nodes", 0)
@@ -4595,6 +4636,22 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
     )
     RUN["plan_requirements_unassigned"] = RUN.get("plan_requirements_unassigned", 0) + gate.get(
         "requirements_unassigned", 0,
+    )
+    for metric in (
+        "behavior_obligations", "behavior_obligations_covered", "behavior_obligations_uncovered",
+    ):
+        RUN[metric] = int(gate.get(metric, RUN.get(metric, 0)) or 0)
+    RUN["requirement_obligations_created"] = int(
+        gate.get("requirement_obligations_created", obligation_ledger.get("obligation_count", 0)) or 0
+    )
+    RUN["deterministic_behavior_anchor_promotions"] = int(
+        reconciled.get("deterministic_behavior_anchor_promotions", 0) or 0
+    )
+    RUN["challenges_resolved_post_reconciliation"] = int(
+        reconciled.get("challenges_resolved_post_reconciliation", len(resolved)) or 0
+    )
+    RUN["challenges_remaining_open"] = int(
+        reconciled.get("challenges_remaining_open", len(unresolved)) or 0
     )
     if not gate.get("valid"):
         RUN["change_plan_gate_failures"] = RUN.get("change_plan_gate_failures", 0) + 1
@@ -13000,6 +13057,106 @@ def run_self_test(install_browser=False):
             task_brain=v17_existing_task_brain, surface_registry=v18_registry,
         )
 
+        # v18.3 obligation-aware semantic closure starts from the weak
+        # v18.2-style outcome: owners/interfaces are reused or preserved,
+        # but no behavior or test mutation is proposed.  All closure below is
+        # deterministic and canonical-surface-bound.
+        v183_seeds = v18_planning_packet.get("impact_seeds", [])
+
+        def v183_surface(kind, path=None, symbol_text=""):
+            return next(
+                item for item in v18_registry.get("surfaces", [])
+                if item.get("kind") == kind
+                and (not path or item.get("path") == path)
+                and (not symbol_text or symbol_text in str(item.get("symbol", "")))
+            )
+
+        def v183_impact_id(surface):
+            return next(
+                item.get("impact_id") for item in v183_seeds
+                if item.get("surface_id") == surface.get("surface_id")
+            )
+
+        v183_input_owner = v183_surface("OWNER", "src/input.js", "InputManager")
+        v183_game_owner = v183_surface("OWNER", "src/game.js", "GameState")
+        v183_pause_interface_surface = v183_surface("INTERFACE", "src/game.js", "togglePause")
+        v183_input_interface_surface = v183_surface("INTERFACE", "src/input.js", "isPressed")
+        v183_storage_surface = v183_surface("PERSISTENCE", "src/storage.js")
+        v183_weak_output = {"impacts": [
+            {
+                "impact_id": v183_impact_id(v183_input_owner),
+                "disposition": "INTERFACE_REUSE",
+                "requirement_ids": [v18_req_by_prefix["Reuse "], v18_req_by_prefix["Preserve "]],
+                "interfaces_to_reuse": [v183_input_interface_surface.get("surface_id")],
+                "action": "Reuse the current input owner.",
+            },
+            {
+                "impact_id": v183_impact_id(v183_game_owner),
+                "disposition": "PRESERVATION_ONLY",
+                "requirement_ids": [v18_req_by_prefix["Add "], v18_req_by_prefix["Reuse "], v18_req_by_prefix["Preserve "]],
+                "action": "Preserve the current game-state owner.",
+            },
+            {
+                "impact_id": v183_impact_id(v183_pause_interface_surface),
+                "disposition": "INTERFACE_REUSE",
+                "requirement_ids": [v18_req_by_prefix["Add "], v18_req_by_prefix["Reuse "]],
+                "interfaces_to_reuse": [v183_pause_interface_surface.get("surface_id")],
+                "action": "Reuse the current pause transition.",
+            },
+            {
+                "impact_id": v183_impact_id(v183_input_interface_surface),
+                "disposition": "INTERFACE_REUSE",
+                "requirement_ids": [v18_req_by_prefix["Reuse "]],
+                "interfaces_to_reuse": [v183_input_interface_surface.get("surface_id")],
+                "action": "Reuse the current keyboard query.",
+            },
+            {
+                "impact_id": v183_impact_id(v183_storage_surface),
+                "disposition": "PRESERVATION_ONLY",
+                "requirement_ids": [v18_req_by_prefix["Reuse "]],
+                "action": "Preserve current storage behavior.",
+            },
+        ]}
+        v183_hydrated = stage3.hydrate_impact_map(
+            v183_weak_output, v18_registry, v18_requirements, v17_existing_evidence,
+            impact_seeds=v183_seeds,
+        )
+        v183_before_coverage = stage3.evaluate_requirement_obligations(
+            v183_hydrated, v18_requirements, v17_existing_evidence, v18_registry,
+        )
+        v183_challenges = stage3.deterministic_challenges(
+            v183_hydrated, v18_requirements, v17_existing_evidence, v18_registry,
+        )
+        v183_challenge_validation = stage3.validate_challenges(
+            v183_challenges, v183_hydrated, v18_requirements,
+            v17_existing_evidence, v18_registry,
+        )
+        v183_reconciled, v183_resolved, v183_unresolved = stage3.reconcile_impact_map(
+            v183_hydrated, v183_challenge_validation.get("validated", []),
+            v18_requirements, v17_existing_evidence, v18_registry, v183_seeds,
+            task_goal=v17_pause_raw,
+        )
+        v183_plan = stage3.build_minimal_change_plan(
+            v183_reconciled, v18_requirements, v17_existing_evidence,
+            v183_resolved, v183_unresolved, surface_registry=v18_registry,
+            task_goal=v17_pause_raw,
+        )
+        v183_gate = stage3.validate_change_plan(
+            v183_plan, v18_requirements, v17_existing_evidence,
+            surface_registry=v18_registry, authoritative_task_goal=v17_pause_raw,
+        )
+        v183_noninteractive = request_plan_approval(
+            v183_plan, interactive=False, terminal_available=False,
+        )
+        v183_input_impact = next(
+            item for item in v183_reconciled.get("impacts", [])
+            if item.get("surface_id") == v183_input_owner.get("surface_id")
+        )
+        v183_input_node = next(
+            item for item in v183_plan.get("approved_change_nodes", [])
+            if item.get("target_surface_ids") == [v183_input_owner.get("surface_id")]
+        )
+
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
         (v17_auth_root / "src" / "legacy-auth.js").write_text(
@@ -13241,6 +13398,60 @@ def run_self_test(install_browser=False):
                 and v18_challenger_packet.get("reviewed_impact_ids")
                 == v18_challenger_packet.get("serialized_impact_ids")
                 and not v18_challenger_packet.get("dropped_impact_ids")
+            ),
+            "v18.3 behavior gap detected": (
+                any(
+                    item.get("requirement_id") == v18_req_by_prefix["Add "]
+                    and item.get("state") == "UNCOVERED"
+                    for item in v183_before_coverage.get("requirements", [])
+                )
+            ),
+            "v18.3 unique behavior anchor": (
+                v183_reconciled.get("deterministic_behavior_anchor_promotions") == 1
+                and v183_input_impact.get("disposition") == "MUST_CHANGE"
+                and v183_input_impact.get("impact_id") == v183_impact_id(v183_input_owner)
+                and {
+                    v183_pause_interface_surface.get("surface_id"),
+                    v183_input_interface_surface.get("surface_id"),
+                }.issubset(set(v183_input_impact.get("interfaces_to_reuse", [])))
+            ),
+            "v18.3 stale challenge closure": (
+                not v183_unresolved
+                and all(
+                    item.get("lifecycle_state") in {"RESOLVED", "SUPERSEDED"}
+                    for item in v183_resolved
+                )
+                and any(
+                    item.get("challenge_type") == "REQUIREMENT_GAP"
+                    and v18_req_by_prefix["Update "] in item.get("requirement_ids", [])
+                    and item.get("lifecycle_state") == "SUPERSEDED"
+                    for item in v183_resolved
+                )
+            ),
+            "v18.3 structured preservation": (
+                all(
+                    term in json.dumps(
+                        v183_input_node.get("local_preservation_constraints", []),
+                        ensure_ascii=False,
+                    ).casefold()
+                    for term in ("wasd", "arrow", "input ownership")
+                )
+                and v183_storage_surface.get("surface_id")
+                in v183_plan.get("do_not_touch_surface_ids", [])
+            ),
+            "v18.3 task goal integrity": (
+                v183_plan.get("task_goal") == v17_pause_raw
+                and v183_plan.get("plan_hash") == stage3.plan_content_hash(v183_plan)
+            ),
+            "v18.3 valid noninteractive plan": (
+                v183_gate.get("valid")
+                and v183_gate.get("semantic_requirements_covered") == len(v18_requirements)
+                and v183_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
+                and v183_noninteractive.get("status") == "plan_approval_required"
+                and not any(
+                    "src/game.js" in node.get("candidate_targets", [])
+                    for node in v183_plan.get("approved_change_nodes", [])
+                )
             ),
         }
         for name, ok in checks.items():
