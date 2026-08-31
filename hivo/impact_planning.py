@@ -112,6 +112,47 @@ _RAW_CONTEXT_KEYS = frozenset({
 })
 _SURFACE_ID_RE = re.compile(r"^SURF-[0-9]{3,}$", re.IGNORECASE)
 _NEW_SURFACE_ID_RE = re.compile(r"^NEW-[A-Z0-9][A-Z0-9_.-]*$", re.IGNORECASE)
+_IMPACT_ID_RE = re.compile(r"^IMPACT[-_](\d+)$", re.IGNORECASE)
+
+# These are orchestration states, not model or repository identities.  They
+# let the caller distinguish a bounded planning-packet failure from a bad
+# model decision without adding another inference attempt.
+IMPACT_PLANNING_CONTEXT_INCOMPLETE = "IMPACT_PLANNING_CONTEXT_INCOMPLETE"
+IMPACT_CHALLENGER_CONTEXT_INCOMPLETE = "IMPACT_CHALLENGER_CONTEXT_INCOMPLETE"
+
+
+def _compact_json(value):
+    """Serialize a planning packet deterministically and without whitespace."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _estimated_tokens(value):
+    """Return a conservative character-based estimate for observability."""
+    chars = len(value) if isinstance(value, str) else len(_compact_json(value))
+    return (chars + 3) // 4
+
+
+def _list_value(value):
+    """Return bounded field values without iterating malformed strings.
+
+    A scalar is treated as one value rather than as an iterable of characters;
+    this lets optional interface tokens be rejected individually while keeping
+    a malformed optional field from destroying the surrounding decision.
+    """
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if value is None or isinstance(value, (dict, set)):
+        return []
+    return [value]
+
+
+def _candidate_impact_items(candidate):
+    """Return the bounded raw decision items for observability accounting."""
+    value = candidate if isinstance(candidate, dict) else {}
+    if "impacts" in value:
+        raw = value.get("impacts")
+        return list(raw)[:MAX_IMPACT_ENTRIES] if isinstance(raw, (list, tuple)) else []
+    return [value] if value.get("impact_id") else []
 
 
 def _compact(value, limit=MAX_TEXT_CHARS):
@@ -482,14 +523,204 @@ def _task_brain_evidence_ids(task_brain):
     return list(dict.fromkeys(result))
 
 
-def build_impact_seeds(task_brain, requirements, evidence, registry=None):
-    """Create eligible, non-authoritative impact seeds from verified facts."""
+def normalize_impact_id(value):
+    """Normalize only the bounded orchestration form of an impact ID.
+
+    Impact IDs are local planner slots, so accepting harmless underscore and
+    case variations is safe.  This function deliberately does not normalize
+    paths, symbols, surface IDs, or repository evidence IDs.
+    """
+    text = str(value or "").strip()
+    match = _IMPACT_ID_RE.fullmatch(text)
+    if not match:
+        return text
+    return f"IMPACT-{int(match.group(1)):03d}"
+
+
+def _task_brain_surface_signals(task_brain):
+    """Collect deterministic identity signals already present in Task Brain."""
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    fields = (
+        "current_owners", "current_state_ownership", "current_interfaces",
+        "relevant_tests", "preservation_constraints", "relevant_dependencies",
+        "acceptance_conditions",
+    )
+    surface_ids = set()
+    evidence_ids = set(_task_brain_evidence_ids(brain))
+    paths = set()
+    symbols = set()
+    terms = set()
+    for field in fields:
+        for item in list(brain.get(field, []) or []):
+            if not isinstance(item, dict):
+                continue
+            for key in ("surface_id", "canonical_surface_id"):
+                if item.get(key):
+                    surface_ids.add(str(item[key]))
+            evidence_ids.update(str(value) for value in list(item.get("evidence_ids", []) or []))
+            path = _normal_path(item.get("path"))
+            if path:
+                paths.add(path.casefold())
+            symbol = str(item.get("symbol") or "").strip()
+            if symbol:
+                symbols.add(symbol.casefold())
+            terms.update(_tokens(" ".join(
+                str(item.get(key, "")) for key in ("text", "fact", "path", "symbol", "category")
+            )))
+    goal = brain.get("task_goal", "")
+    if isinstance(goal, dict):
+        goal = goal.get("text", "")
+    terms.update(_tokens(goal))
+    return {
+        "surface_ids": surface_ids,
+        "evidence_ids": evidence_ids,
+        "paths": paths,
+        "symbols": symbols,
+        "terms": terms,
+    }
+
+
+def select_task_relevant_surfaces(task_brain, requirements, evidence, registry=None,
+                                  max_surfaces=MAX_CANONICAL_SURFACES):
+    """Select canonical surfaces before any packet serialization.
+
+    Selection is driven only by Stage 1/2 material already available to the
+    orchestrator.  Explicit Task Brain evidence and identity references are
+    required signals; requirement/fact token overlap is a lower-priority
+    relevance signal.  The returned order is always the registry's canonical
+    order, so selection cannot renumber or otherwise mutate repository
+    identity.
+    """
     registry = registry or build_canonical_surface_registry(task_brain, evidence)
-    by_id = canonical_surface_by_id(registry)
+    surfaces = [
+        item for item in list(registry.get("surfaces", []) or [])
+        if isinstance(item, dict) and item.get("surface_id")
+    ]
+    max_surfaces = min(MAX_CANONICAL_SURFACES, max(1, int(max_surfaces)))
+    signals = _task_brain_surface_signals(task_brain)
+    reqs = active_requirements(requirements)
+    goal = (task_brain or {}).get("task_goal", "") if isinstance(task_brain, dict) else ""
+    if isinstance(goal, dict):
+        goal = goal.get("text", "")
+    goal_terms = _tokens(goal)
+    scored = []
+    for index, surface in enumerate(surfaces):
+        surface_id = str(surface.get("surface_id"))
+        surface_evidence = {str(item) for item in surface.get("evidence_ids", []) or []}
+        path = _normal_path(surface.get("path"))
+        symbol = str(surface.get("symbol") or "").strip()
+        surface_terms = _tokens(" ".join([
+            str(surface.get("verified_fact", "")), symbol, str(surface.get("role", "")),
+            str(surface.get("kind", "")), path,
+        ]))
+        score = 0
+        required = False
+        reasons = []
+        if surface_id in signals["surface_ids"]:
+            score += 10000
+            required = True
+            reasons.append("task_brain_surface_id")
+        evidence_overlap = surface_evidence.intersection(signals["evidence_ids"])
+        if evidence_overlap:
+            score += 4000 + min(300, len(evidence_overlap) * 50)
+            required = True
+            reasons.append("task_brain_evidence")
+        if path.casefold() in signals["paths"]:
+            score += 2500
+            required = True
+            reasons.append("task_brain_path")
+        if symbol and symbol.casefold() in signals["symbols"]:
+            score += 2500
+            required = True
+            reasons.append("task_brain_symbol")
+        requirement_overlap = 0
+        for requirement in reqs:
+            requirement_overlap = max(
+                requirement_overlap,
+                len(_tokens(requirement.get("text")) & surface_terms),
+            )
+        if requirement_overlap:
+            score += 100 + requirement_overlap * 10
+            reasons.append("requirement_overlap")
+        goal_overlap = len(goal_terms & surface_terms)
+        if goal_overlap:
+            score += goal_overlap * 5
+            reasons.append("task_goal_overlap")
+        scored.append({
+            "index": index, "surface": surface, "score": score, "required": required,
+            "reasons": reasons,
+        })
+
+    explicit = [item for item in scored if item["required"]]
+    relevant = [item for item in scored if item["score"] > 0]
+    if not relevant:
+        # An existing-project registry with no direct Task Brain signal is
+        # still safer when retained in full up to the deterministic registry
+        # bound; there is no model inference involved in this fallback.
+        relevant = list(scored)
+    ranked = sorted(relevant, key=lambda item: (-item["score"], item["index"]))
+    chosen = ranked[:max_surfaces]
+    chosen_ids = {str(item["surface"].get("surface_id")) for item in chosen}
+    required_ids = {
+        str(item["surface"].get("surface_id")) for item in explicit
+    }
+    by_surface_id = {
+        str(item.get("surface_id")): item for item in surfaces
+    }
+    # An interface without its verified owner is not a complete planning
+    # choice.  Add owner dependencies before serialization when the bound
+    # allows it; otherwise the packet builder reports a controlled omission.
+    dependency_ids = {
+        str(item.get("surface", {}).get("owner_surface_id"))
+        for item in chosen
+        if item.get("surface", {}).get("owner_surface_id")
+    }
+    required_ids.update(dependency_ids)
+    for dependency_id in sorted(dependency_ids):
+        if dependency_id in chosen_ids or len(chosen_ids) >= max_surfaces:
+            continue
+        if dependency_id in by_surface_id:
+            chosen_ids.add(dependency_id)
+    missing_required = sorted(required_ids - chosen_ids)
+    # Never silently replace a required identity with a lower-scoring one.
+    # The packet builder will turn this into a controlled incomplete state.
+    selected = [item for item in surfaces if str(item.get("surface_id")) in chosen_ids]
+    dropped = [
+        str(item.get("surface_id")) for item in surfaces
+        if str(item.get("surface_id")) not in chosen_ids
+    ]
+    return {
+        "selected": selected,
+        "selected_surface_ids": [str(item.get("surface_id")) for item in selected],
+        "dropped_surface_ids": dropped,
+        "required_surface_ids": sorted(required_ids),
+        "missing_required_surface_ids": missing_required,
+        "scores": {
+            str(item["surface"].get("surface_id")): {
+                "score": item["score"], "required": item["required"],
+                "reasons": list(item["reasons"]),
+            }
+            for item in scored
+        },
+        "registry_surface_ids": [str(item.get("surface_id")) for item in surfaces],
+    }
+
+
+def build_impact_seeds(task_brain, requirements, evidence, registry=None,
+                       selected_surface_ids=None):
+    """Create deterministic, non-authoritative impact slots from verified facts."""
+    registry = registry or build_canonical_surface_registry(task_brain, evidence)
+    selected = None
+    if selected_surface_ids is not None:
+        selected = {str(item) for item in list(selected_surface_ids or [])}
     brain_ids = set(_task_brain_evidence_ids(task_brain))
     reqs = active_requirements(requirements)
     seeds = []
-    for surface in list(registry.get("surfaces", []) or [])[:MAX_IMPACT_SEEDS]:
+    for registry_index, surface in enumerate(list(registry.get("surfaces", []) or []), 1):
+        if selected is not None and str(surface.get("surface_id")) not in selected:
+            continue
+        if len(seeds) >= MAX_IMPACT_SEEDS:
+            break
         evidence_ids = list(surface.get("evidence_ids", []) or [])
         relevant = bool(brain_ids.intersection(evidence_ids)) if brain_ids else True
         terms = _tokens(
@@ -500,7 +731,11 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None):
             if terms.intersection(_tokens(requirement.get("text"))):
                 req_ids.append(requirement["requirement_id"])
         seeds.append({
-            "seed_id": f"SEED-{len(seeds) + 1:03d}",
+            # Keep slot identity stable when relevance selection omits an
+            # earlier registry surface; IMPACT-005 remains the slot for the
+            # fifth canonical surface in every packet.
+            "seed_id": f"SEED-{registry_index:03d}",
+            "impact_id": f"IMPACT-{registry_index:03d}",
             "surface_id": surface.get("surface_id"),
             "kind": surface.get("kind"),
             "role": surface.get("task_relevance_role") or surface.get("role"),
@@ -510,12 +745,64 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None):
             "verified_path": surface.get("path"),
             "verified_symbol": surface.get("symbol"),
             "verified_fact": surface.get("verified_fact"),
+            "canonical_path": surface.get("path"),
+            "canonical_symbol": surface.get("symbol"),
+            "canonical_evidence_ids": _bounded_ids(evidence_ids, MAX_SURFACE_EVIDENCE_IDS),
+            "owner_surface_id": surface.get("owner_surface_id"),
+            "surface_kind": surface.get("kind"),
+            "surface_role": surface.get("role"),
             "provenance": REPOSITORY_EVIDENCE,
         })
     return seeds
 
 
 canonical_impact_seeds = build_impact_seeds
+surface_bound_impact_seeds = build_impact_seeds
+
+
+def validate_impact_seeds(seeds, registry, selected_surface_ids=None):
+    """Validate that every deterministic seed is bound to a known surface."""
+    by_id = canonical_surface_by_id(registry)
+    selected = {str(item) for item in list(selected_surface_ids or [])}
+    errors = []
+    seen = set()
+    normalized = []
+    for seed in list(seeds or [])[:MAX_IMPACT_SEEDS]:
+        if not isinstance(seed, dict):
+            errors.append("impact seed must be an object")
+            continue
+        impact_id = normalize_impact_id(seed.get("impact_id"))
+        surface_id = str(seed.get("surface_id") or "")
+        if not _IMPACT_ID_RE.fullmatch(impact_id) or impact_id in seen:
+            errors.append(f"{impact_id or '<missing>'}: invalid or duplicate impact seed ID")
+        seen.add(impact_id)
+        surface = by_id.get(surface_id)
+        if not surface:
+            errors.append(f"{impact_id}: unknown canonical surface binding")
+            continue
+        if selected and surface_id not in selected:
+            errors.append(f"{impact_id}: seed surface is outside selected packet surfaces")
+        if _normal_path(seed.get("canonical_path", seed.get("verified_path"))) != _normal_path(surface.get("path")):
+            errors.append(f"{impact_id}: seed path is not canonical")
+        if str(seed.get("canonical_symbol", seed.get("verified_symbol", ""))) != str(surface.get("symbol", "")):
+            errors.append(f"{impact_id}: seed symbol is not canonical")
+        if set(str(item) for item in seed.get("canonical_evidence_ids", seed.get("evidence_ids", [])) or []) != set(
+            str(item) for item in surface.get("evidence_ids", []) or []
+        ):
+            errors.append(f"{impact_id}: seed evidence is not canonical")
+        if seed.get("owner_surface_id") not in {None, surface.get("owner_surface_id")}:
+            errors.append(f"{impact_id}: seed owner relation is not canonical")
+        normalized.append({**copy.deepcopy(seed), "impact_id": impact_id})
+    expected = [item.get("impact_id") for item in normalized]
+    return {
+        "valid": not errors,
+        "errors": errors[:24],
+        "seeds": normalized,
+        "impact_ids": [item.get("impact_id") for item in normalized],
+        "surface_ids": [item.get("surface_id") for item in normalized],
+        "expected_impact_ids": expected,
+        "seed_count": len(normalized),
+    }
 
 
 def _task_brain_slice(task_brain):
@@ -623,45 +910,422 @@ def _planner_surface_registry_slice(registry):
     }
 
 
-def build_planner_context(task_brain, requirements, evidence, project_invariants=None,
-                          surface_registry=None, impact_seeds=None):
-    """Build the only context the ImpactPlanner may see."""
-    reqs = active_requirements(requirements)
-    facts = bounded_evidence(evidence)
-    slice_value = _task_brain_slice(task_brain)
-    context = {
-        "task_goal": copy.deepcopy(slice_value.get("task_goal", {})),
-        "source_requirements": reqs,
-        "user_confirmed_decisions": copy.deepcopy(slice_value.get("user_confirmed_decisions", [])),
-        "task_brain_slice": slice_value,
-        "project_invariants": _bounded_strings(project_invariants, 8, 360),
-        "accepted_repository_evidence": facts,
-        "current_owners": copy.deepcopy(slice_value.get("current_owners", [])),
-        "current_interfaces": copy.deepcopy(slice_value.get("current_interfaces", [])),
-        "current_state_ownership": copy.deepcopy(slice_value.get("current_state_ownership", [])),
-        "relevant_tests": copy.deepcopy(slice_value.get("relevant_tests", [])),
-        "preservation_constraints": copy.deepcopy(slice_value.get("preservation_constraints", [])),
-        "canonical_surface_registry": _planner_surface_registry_slice(surface_registry),
-        "impact_seeds": copy.deepcopy(list(impact_seeds or [])[:MAX_IMPACT_SEEDS]),
+def _planner_requirement_projection(requirements):
+    return [{
+        "requirement_id": item["requirement_id"],
+        "text": _compact(item.get("text"), 700),
+        "provenance": item.get("provenance", USER_STATED),
+    } for item in active_requirements(requirements)]
+
+
+def _planner_evidence_projection(evidence, selected_surface_ids=None, registry=None):
+    """Expose evidence labels without repeating raw repository support."""
+    selected = {str(item) for item in list(selected_surface_ids or [])}
+    by_id = canonical_surface_by_id(registry)
+    evidence_ids = set()
+    if selected and by_id:
+        for surface_id in selected:
+            evidence_ids.update(str(item) for item in by_id.get(surface_id, {}).get("evidence_ids", []) or [])
+    result = []
+    for item in bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2):
+        if evidence_ids and str(item.get("evidence_id")) not in evidence_ids:
+            continue
+        result.append({
+            "evidence_id": item.get("evidence_id"),
+            "category": item.get("category"),
+            "path": _normal_path(item.get("path")),
+            "symbol": str(item.get("symbol") or ""),
+        })
+    return result
+
+
+def _planner_task_fact_projection(task_brain):
+    """Make a compact optional Task Brain projection.
+
+    Canonical surfaces and requirements already carry the planning authority;
+    this projection is useful only as a small semantic hint and is the first
+    Task Brain material removed under context pressure.
+    """
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    result = {}
+    fields = (
+        "user_confirmed_decisions", "current_owners", "current_state_ownership",
+        "current_interfaces", "relevant_tests", "relevant_dependencies",
+        "acceptance_conditions", "known_non_goals",
+    )
+    for field in fields:
+        values = []
+        for item in list(brain.get(field, []) or [])[:8]:
+            if not isinstance(item, dict):
+                continue
+            value = {
+                "text": _compact(item.get("text") or item.get("fact"), 240),
+                "requirement_ids": _bounded_ids(item.get("requirement_ids"), 8),
+                "evidence_ids": _bounded_ids(item.get("evidence_ids"), 8),
+                "path": _normal_path(item.get("path")),
+                "symbol": _compact(item.get("symbol"), 160),
+                "category": _compact(item.get("category"), 80),
+            }
+            values.append({key: item for key, item in value.items() if item not in ("", [], None)})
+        if values:
+            result[field] = values
+    return result
+
+
+def _planner_preservation_projection(task_brain, requirements):
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    result = []
+    for item in list(brain.get("preservation_constraints", []) or [])[:8]:
+        if isinstance(item, dict):
+            value = {
+                "text": _compact(item.get("text") or item.get("fact"), 520),
+                "requirement_ids": _bounded_ids(item.get("requirement_ids"), 8),
+                "evidence_ids": _bounded_ids(item.get("evidence_ids"), 8),
+                "provenance": item.get("provenance", USER_STATED),
+            }
+        else:
+            value = {"text": _compact(item, 520), "requirement_ids": [], "evidence_ids": [],
+                     "provenance": USER_STATED}
+        if value["text"]:
+            result.append(value)
+    existing_text = {str(item.get("text", "")).casefold() for item in result}
+    for requirement in active_requirements(requirements):
+        text = requirement.get("text", "")
+        if _PRESERVE_RE.search(text) and text.casefold() not in existing_text:
+            result.append({
+                "text": _compact(text, 520),
+                "requirement_ids": [requirement["requirement_id"]],
+                "evidence_ids": [],
+                "provenance": requirement.get("provenance", USER_STATED),
+            })
+    return result[:8]
+
+
+def _planner_surface_packet(surface):
+    """Serialize one complete canonical surface in a compact form."""
+    return {
+        "surface_id": str(surface.get("surface_id")),
+        "kind": surface.get("kind"),
+        "role": surface.get("role"),
+        "path": _normal_path(surface.get("path")),
+        "symbol": str(surface.get("symbol") or ""),
+        "verified_fact": _compact(surface.get("verified_fact") or surface.get("fact"), 360),
+        "evidence_ids": _bounded_ids(surface.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
+        "owner_surface_id": surface.get("owner_surface_id"),
+    }
+
+
+def _planner_seed_packet(seed):
+    return {
+        "impact_id": normalize_impact_id(seed.get("impact_id")),
+        "surface_id": str(seed.get("surface_id") or ""),
+        "kind": seed.get("kind"),
+        "role": seed.get("role"),
+        "requirement_ids": _bounded_ids(seed.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
+        "evidence_ids": _bounded_ids(seed.get("canonical_evidence_ids") or seed.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
+        "owner_surface_id": seed.get("owner_surface_id"),
+        "verified_path": _normal_path(seed.get("canonical_path") or seed.get("verified_path")),
+        "verified_symbol": str(seed.get("canonical_symbol") or seed.get("verified_symbol") or ""),
+        "verified_fact": _compact(seed.get("verified_fact"), 240),
+        "eligible": bool(seed.get("eligible", True)),
+    }
+
+
+def _trim_planner_optional_payload(packet, max_chars):
+    """Trim only optional prose/facts; never trim planning authority."""
+    value = copy.deepcopy(packet)
+
+    def size():
+        return len(_compact_json(value))
+
+    while size() > max_chars:
+        project = value.get("project_context")
+        if isinstance(project, list) and project:
+            project.pop()
+            continue
+        task_facts = value.get("task_facts")
+        removed = False
+        if isinstance(task_facts, dict):
+            for field in (
+                "known_non_goals", "acceptance_conditions", "relevant_dependencies",
+                "current_interfaces", "current_state_ownership", "current_owners",
+                "relevant_tests", "user_confirmed_decisions",
+            ):
+                values = task_facts.get(field)
+                if isinstance(values, list) and values:
+                    values.pop()
+                    removed = True
+                    break
+                if isinstance(values, list) and not values:
+                    task_facts.pop(field, None)
+            if not removed and task_facts:
+                value["task_facts"] = {}
+                removed = True
+        if removed:
+            continue
+        evidence = value.get("accepted_repository_evidence")
+        if isinstance(evidence, list) and evidence:
+            evidence.pop()
+            continue
+        break
+    return value
+
+
+def _planning_packet_payload(task_brain, requirements, evidence, surfaces, seeds,
+                             project_invariants=None, max_chars=MAX_PLANNER_CONTEXT_CHARS):
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    goal = brain.get("task_goal", "")
+    if isinstance(goal, dict):
+        goal = goal.get("text", "")
+    selected_ids = [str(item.get("surface_id")) for item in surfaces]
+    packet = {
+        "version": 1,
+        "task_goal": _compact(goal, 1000),
+        "requirements": _planner_requirement_projection(requirements),
+        "surfaces": [_planner_surface_packet(item) for item in surfaces],
+        "impact_seeds": [_planner_seed_packet(item) for item in seeds],
+        "preservation_constraints": _planner_preservation_projection(task_brain, requirements),
+        "planning_rules": [
+            "Decide disposition for each known impact slot; do not invent repository identity.",
+            "Use only valid Source Requirement IDs.",
+            "Reuse only canonical INTERFACE surface IDs when needed.",
+            "Preserve verified owners, interfaces, tests, and persistence unless evidence proves change necessary.",
+            "A genuinely new surface requires a separate justified NEW_SURFACE_PROPOSAL.",
+        ],
+        "accepted_repository_evidence": _planner_evidence_projection(
+            evidence, selected_surface_ids=selected_ids, registry={"surfaces": surfaces},
+        ),
+        "task_facts": _planner_task_fact_projection(task_brain),
+        "project_context": _bounded_strings(project_invariants, 8, 360),
         "bounds": {
             "max_impact_entries": MAX_IMPACT_ENTRIES,
             "max_requirement_refs_per_impact": MAX_REQUIREMENT_REFS_PER_IMPACT,
             "max_evidence_refs_per_impact": MAX_EVIDENCE_REFS_PER_IMPACT,
-            "max_serialized_chars": MAX_PLANNER_CONTEXT_CHARS,
             "max_canonical_surfaces": MAX_CANONICAL_SURFACES,
             "max_impact_seeds": MAX_IMPACT_SEEDS,
+            "max_serialized_chars": max_chars,
         },
     }
-    return _trim_context(context, MAX_PLANNER_CONTEXT_CHARS)
+    return _trim_planner_optional_payload(packet, max_chars)
+
+
+def build_canonical_planning_packet(task_brain, requirements, evidence,
+                                    project_invariants=None, surface_registry=None,
+                                    max_chars=None,
+                                    max_surfaces=MAX_CANONICAL_SURFACES):
+    """Build and validate the complete ImpactPlanner-specific packet.
+
+    The generic context projection is intentionally not used here.  Required
+    requirements, selected canonical surfaces, seeds, and preservation
+    constraints are core packet authority; only optional Task/Project Brain
+    prose can be trimmed.  If the core cannot fit, the result is explicitly
+    incomplete and callers must not invoke the planner.
+    """
+    max_chars = MAX_PLANNER_CONTEXT_CHARS if max_chars is None else max_chars
+    max_chars = max(1, int(max_chars))
+    registry = surface_registry or build_canonical_surface_registry(task_brain, evidence)
+    registry_validation = validate_canonical_surface_registry(registry, evidence)
+    selection = select_task_relevant_surfaces(
+        task_brain, requirements, evidence, registry=registry, max_surfaces=max_surfaces,
+    )
+    selected = list(selection.get("selected", []))
+    required_ids = set(selection.get("required_surface_ids", []))
+    selected_ids = [str(item.get("surface_id")) for item in selected]
+    errors = list(registry_validation.get("errors", [])) if not registry_validation.get("valid") else []
+    if selection.get("missing_required_surface_ids"):
+        errors.append("required canonical surfaces exceed the deterministic surface bound")
+
+    scores = selection.get("scores", {})
+
+    def assemble(surface_values):
+        surface_values = list(surface_values)
+        ids = [str(item.get("surface_id")) for item in surface_values]
+        seeds = build_impact_seeds(
+            task_brain, requirements, evidence, registry=registry,
+            selected_surface_ids=ids,
+        )
+        seed_validation = validate_impact_seeds(seeds, registry, selected_surface_ids=ids)
+        payload = _planning_packet_payload(
+            task_brain, requirements, evidence, surface_values, seeds,
+            project_invariants=project_invariants, max_chars=max_chars,
+        )
+        return payload, seeds, seed_validation, len(_compact_json(payload))
+
+    payload, seeds, seed_validation, packet_chars = assemble(selected)
+    # Optional relevant surfaces are dropped before serialization only when
+    # the complete candidate set cannot fit.  Required surfaces are never
+    # silently dropped.
+    optional = [
+        item for item in selected
+        if str(item.get("surface_id")) not in required_ids
+    ]
+    optional.sort(key=lambda item: (
+        scores.get(str(item.get("surface_id")), {}).get("score", 0),
+        selected.index(item),
+    ))
+    while packet_chars > max_chars and optional:
+        remove = optional.pop(0)
+        selected = [item for item in selected if item is not remove]
+        payload, seeds, seed_validation, packet_chars = assemble(selected)
+    selected_ids = [str(item.get("surface_id")) for item in selected]
+    serialized_ids = [str(item.get("surface_id")) for item in payload.get("surfaces", [])]
+    dropped_ids = [
+        str(item.get("surface_id")) for item in list(registry.get("surfaces", []) or [])
+        if str(item.get("surface_id")) not in selected_ids
+    ]
+    if packet_chars > max_chars:
+        errors.append(
+            f"complete canonical planning authority exceeds {max_chars} serialized characters"
+        )
+    if not seed_validation.get("valid"):
+        errors.extend(seed_validation.get("errors", []))
+    if set(selected_ids) != set(serialized_ids):
+        errors.append("selected canonical surfaces were not serialized completely")
+    if serialized_ids and not seeds:
+        errors.append("planner packet has no surface-bound impact seeds")
+    if len(seeds) != len(serialized_ids):
+        errors.append("surface-bound impact seeds were not serialized completely")
+    complete = not errors
+    payload["packet_complete"] = complete
+    packet_chars = len(_compact_json(payload))
+    if packet_chars > max_chars and not any(
+        "serialized-size bound" in str(error) for error in errors
+    ):
+        errors.append(
+            f"complete canonical planning authority exceeds {max_chars} serialized characters"
+        )
+        complete = False
+        payload["packet_complete"] = False
+        packet_chars = len(_compact_json(payload))
+    selection = copy.deepcopy(selection)
+    selection.update({
+        "selected": copy.deepcopy(selected),
+        "selected_surface_ids": list(selected_ids),
+        "dropped_surface_ids": list(dropped_ids),
+        "missing_required_surface_ids": sorted(
+            set(selection.get("required_surface_ids", [])) - set(selected_ids)
+        ),
+    })
+    observability = {
+        "selected_surface_ids": selected_ids,
+        "serialized_surface_ids": serialized_ids,
+        "dropped_surface_ids": dropped_ids,
+        "impact_seed_ids": [normalize_impact_id(item.get("impact_id")) for item in seeds],
+        "packet_chars": packet_chars,
+        "estimated_tokens": _estimated_tokens(_compact_json(payload)),
+        "packet_complete": complete,
+    }
+    result = copy.deepcopy(payload)
+    result.update({
+        "packet": copy.deepcopy(payload),
+        "observability": observability,
+        "selected_surface_ids": selected_ids,
+        "serialized_surface_ids": serialized_ids,
+        "dropped_surface_ids": dropped_ids,
+        "impact_seed_ids": observability["impact_seed_ids"],
+        "packet_chars": packet_chars,
+        "estimated_tokens": observability["estimated_tokens"],
+        "packet_complete": complete,
+        "status": "READY" if complete else IMPACT_PLANNING_CONTEXT_INCOMPLETE,
+        "errors": errors[:24],
+        "impact_seeds": copy.deepcopy(seeds),
+        "seed_validation": seed_validation,
+        "selection": selection,
+    })
+    return result
+
+
+build_complete_planning_packet = build_canonical_planning_packet
+build_planner_packet = build_canonical_planning_packet
+
+
+def validate_planning_packet(packet, registry=None, requirements=None, impact_seeds=None,
+                              max_chars=MAX_PLANNER_CONTEXT_CHARS):
+    """Independently verify complete planner-packet authority and retention."""
+    wrapper = packet if isinstance(packet, dict) else {}
+    value = wrapper.get("packet") if isinstance(wrapper.get("packet"), dict) else wrapper
+    surfaces = [item for item in list(value.get("surfaces", []) or []) if isinstance(item, dict)]
+    serialized_ids = [str(item.get("surface_id")) for item in surfaces]
+    selected_ids = [str(item) for item in wrapper.get("selected_surface_ids", serialized_ids)]
+    seeds = list(impact_seeds if impact_seeds is not None else value.get("impact_seeds", []) or [])
+    if not seeds and isinstance(wrapper.get("impact_seeds"), list):
+        seeds = list(wrapper.get("impact_seeds"))
+    errors = []
+    if not value.get("requirements"):
+        errors.append("planner packet requirements are missing")
+    if selected_ids != serialized_ids:
+        errors.append("selected surfaces were not serialized completely")
+    if len({str(item) for item in serialized_ids}) != len(serialized_ids):
+        errors.append("planner packet contains duplicate surface IDs")
+    serialized_set = set(serialized_ids)
+    for surface in surfaces:
+        owner_id = surface.get("owner_surface_id")
+        if owner_id and str(owner_id) not in serialized_set:
+            errors.append(f"{surface.get('surface_id')}: owner surface is missing from packet")
+    if serialized_ids and not seeds:
+        errors.append("planner packet impact seeds are missing")
+    seed_validation = validate_impact_seeds(
+        seeds, registry or {"surfaces": surfaces}, selected_surface_ids=serialized_ids,
+    )
+    if not seed_validation.get("valid"):
+        errors.extend(seed_validation.get("errors", []))
+    if {
+        normalize_impact_id(item.get("impact_id")) for item in seeds
+    } != {
+        normalize_impact_id(item.get("impact_id")) for item in value.get("impact_seeds", []) or []
+    }:
+        errors.append("planner packet impact seeds were not serialized completely")
+    packet_chars = len(_compact_json(value))
+    if packet_chars > max(1, int(max_chars)):
+        errors.append("planner packet serialized-size bound exceeded")
+    if wrapper.get("packet_complete") is False or value.get("packet_complete") is False:
+        errors.append("planner packet is marked incomplete")
+    return {
+        "valid": not errors,
+        "errors": errors[:24],
+        "selected_surface_ids": selected_ids,
+        "serialized_surface_ids": serialized_ids,
+        "impact_seed_ids": [normalize_impact_id(item.get("impact_id")) for item in seeds],
+        "packet_chars": packet_chars,
+        "estimated_tokens": _estimated_tokens(_compact_json(value)),
+        "packet_complete": not errors,
+    }
+
+
+def build_planner_context(task_brain, requirements, evidence, project_invariants=None,
+                          surface_registry=None, impact_seeds=None):
+    """Backward-compatible compact context view over the new packet builder.
+
+    The production ImpactPlanner path uses ``build_canonical_planning_packet``
+    directly.  This compatibility view retains the historic evidence key used
+    by callers while keeping canonical surfaces and seeds intact.
+    """
+    result = build_canonical_planning_packet(
+        task_brain, requirements, evidence, project_invariants=project_invariants,
+        surface_registry=surface_registry,
+    )
+    packet = copy.deepcopy(result.get("packet", result))
+    # A caller-supplied seed list is accepted for compatibility only when it
+    # is already the same deterministic surface-bound set; it cannot replace
+    # packet authority.
+    if impact_seeds is not None:
+        supplied_ids = [normalize_impact_id(item.get("impact_id")) for item in list(impact_seeds or [])]
+        packet_ids = [normalize_impact_id(item.get("impact_id")) for item in packet.get("impact_seeds", [])]
+        if supplied_ids == packet_ids:
+            packet["impact_seeds"] = copy.deepcopy(list(impact_seeds or []))
+    packet["source_requirements"] = copy.deepcopy(packet.get("requirements", []))
+    packet["packet_observability"] = copy.deepcopy(result.get("observability", {}))
+    packet["packet_complete"] = bool(result.get("packet_complete"))
+    return packet
 
 
 def impact_map_schema():
     """Schema for the bounded planner response.
 
-    ``surface_id``/``disposition`` are the authoritative contract.  A few
-    legacy fields remain optional solely so a weak response can be captured
-    for research and rejected during canonical hydration; they never provide
-    repository identity.
+    The planner decides semantics for deterministic impact slots.  The
+    ``surface_id`` is intentionally optional for existing surfaces: surface
+    binding is supplied by the orchestrator's seed.  Repository identity is
+    not part of the model-facing decision contract.
     """
     entry = {
         "type": "object",
@@ -675,43 +1339,20 @@ def impact_map_schema():
             "new_surface_proposal_ids": {
                 "type": "array", "items": {"type": "string"}, "maxItems": 4,
             },
-            "component": {"type": "string"},
-            "path": {"type": "string"},
-            "symbols": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
-            "impact_kind": {"type": "string", "enum": list(IMPACT_KINDS)},
             "requirement_ids": {
                 "type": "array", "items": {"type": "string"},
                 "minItems": 1, "maxItems": MAX_REQUIREMENT_REFS_PER_IMPACT,
             },
-            "repository_evidence_ids": {
-                "type": "array", "items": {"type": "string"},
-                "minItems": 1, "maxItems": MAX_EVIDENCE_REFS_PER_IMPACT,
-            },
             "reason": {"type": "string"},
-            "existing_owner": {"type": "string"},
-            "existing_interfaces_to_reuse": {
-                "type": "array", "items": {"type": "string"}, "maxItems": 6,
-            },
             "preserve": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
-            "candidate_change": {"type": "string"},
-            "local_verification": {
+            "test_contract": {
                 "type": "array", "items": {"type": "string"}, "maxItems": 6,
             },
-            "necessity_status": {"type": "string", "enum": list(NECESSITY_STATUSES)},
         },
         "required": [
-            "impact_id", "disposition", "action", "interfaces_to_reuse",
-            "preserve", "verification", "requirement_ids",
+            "impact_id", "disposition", "requirement_ids",
         ],
-        "anyOf": [
-            {"required": ["surface_id"]},
-            {
-                "required": ["new_surface_proposal_ids"],
-                "properties": {
-                    "new_surface_proposal_ids": {"minItems": 1},
-                },
-            },
-        ],
+        "anyOf": [{"required": ["action"]}, {"required": ["reason"]}],
         "additionalProperties": False,
     }
     new_surface = {
@@ -731,25 +1372,39 @@ def impact_map_schema():
         ],
         "additionalProperties": False,
     }
+    root_properties = {
+        "task_goal": {"type": "string"},
+        "impacts": {
+            "type": "array", "items": entry, "minItems": 1,
+            "maxItems": MAX_IMPACT_ENTRIES,
+        },
+        "integration_verification": {
+            "type": "array", "items": {"type": "string"}, "maxItems": 10,
+        },
+        "insufficient_evidence": {
+            "type": "array", "items": {"type": "string"}, "maxItems": 6,
+        },
+        "new_surface_proposals": {
+            "type": "array", "items": new_surface, "maxItems": 4,
+        },
+    }
+    # Accept the single-decision shape seen in the v18.1 recovery artifact as
+    # well as the normal {"impacts": [...]} envelope.  The outer properties
+    # include the semantic entry fields so a provider-side JSON-schema
+    # validator can accept the bounded direct form without duplicating the
+    # repository-identity contract.
+    for key, value in entry["properties"].items():
+        root_properties.setdefault(key, value)
     return {
         "type": "object",
-        "properties": {
-            "task_goal": {"type": "string"},
-            "impacts": {
-                "type": "array", "items": entry, "minItems": 1,
-                "maxItems": MAX_IMPACT_ENTRIES,
+        "properties": root_properties,
+        "anyOf": [
+            {"required": ["impacts"]},
+            {
+                "required": ["impact_id", "disposition", "requirement_ids"],
+                "anyOf": [{"required": ["action"]}, {"required": ["reason"]}],
             },
-            "integration_verification": {
-                "type": "array", "items": {"type": "string"}, "maxItems": 10,
-            },
-            "insufficient_evidence": {
-                "type": "array", "items": {"type": "string"}, "maxItems": 6,
-            },
-            "new_surface_proposals": {
-                "type": "array", "items": new_surface, "maxItems": 4,
-            },
-        },
-        "required": ["task_goal", "impacts", "integration_verification", "insufficient_evidence"],
+        ],
         "additionalProperties": False,
     }
 
@@ -757,6 +1412,11 @@ def impact_map_schema():
 def _disposition_for_impact(item):
     raw = str(item.get("disposition", "")).upper().strip()
     if raw in DISPOSITIONS:
+        return raw
+    # An explicitly supplied unknown disposition is invalid.  Do not silently
+    # reinterpret it as MUST_CHANGE from a legacy impact kind; per-decision
+    # validation needs to be able to reject just this decision.
+    if "disposition" in item and raw:
         return raw
     kind = str(item.get("impact_kind", "")).upper().strip()
     necessity = str(item.get("necessity_status", "")).upper().strip()
@@ -813,8 +1473,24 @@ def normalize_new_surface_proposals(values):
 
 def normalize_impact_map(candidate, authoritative=False):
     candidate = candidate if isinstance(candidate, dict) else {}
+    # A provider may return one decision object before it learns the enclosing
+    # map envelope.  Treat that as a one-decision candidate so the normal
+    # per-decision validator can decide whether it is usable.
+    if "impacts" not in candidate and candidate.get("impact_id"):
+        candidate = {"impacts": [candidate], **{
+            key: candidate[key] for key in (
+                "task_goal", "integration_verification", "insufficient_evidence",
+                "new_surface_proposals",
+            ) if key in candidate
+        }}
+    goal = candidate.get("task_goal", "")
+    if isinstance(goal, dict):
+        goal = goal.get("text", "")
     impacts = []
-    for index, item in enumerate(list(candidate.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES], 1):
+    raw_impacts = candidate.get("impacts", [])
+    if not isinstance(raw_impacts, (list, tuple)):
+        raw_impacts = []
+    for index, item in enumerate(list(raw_impacts)[:MAX_IMPACT_ENTRIES], 1):
         if not isinstance(item, dict):
             continue
         disposition = _disposition_for_impact(item)
@@ -827,45 +1503,60 @@ def normalize_impact_map(candidate, authoritative=False):
             "PRESERVATION_ONLY": "PRESERVATION_ONLY",
             "VERIFY_ONLY": "CANDIDATE",
             "INSUFFICIENT_EVIDENCE": "INSUFFICIENT_EVIDENCE",
-        }[disposition]
+        }.get(disposition, str(item.get("necessity_status", "")).upper() or "CANDIDATE")
         if legacy_necessity in NECESSITY_STATUSES and "disposition" not in item:
             necessity = legacy_necessity
         path = _compact(item.get("path"), 240)
-        symbols = _bounded_strings(item.get("symbols"), 6, 160)
+        symbols = _bounded_strings(_list_value(item.get("symbols")), 6, 160)
         interfaces = _bounded_strings(
-            item.get("existing_interfaces_to_reuse"), 6, 180,
+            _list_value(item.get("existing_interfaces_to_reuse")), 6, 180,
         )
         interface_surface_ids = _bounded_ids(
-            item.get("interfaces_to_reuse") or item.get("interface_surface_ids"), 6,
+            _list_value(item.get("interfaces_to_reuse") or item.get("interface_surface_ids")), 6,
         )
-        action = _compact(item.get("action") or item.get("candidate_change"), MAX_TEXT_CHARS)
+        action = _compact(
+            item.get("action") or item.get("candidate_change") or item.get("reason"),
+            MAX_TEXT_CHARS,
+        )
         verification = _bounded_strings(
-            item.get("verification") or item.get("local_verification"), 6, 300,
+            _list_value(item.get("verification") or item.get("local_verification")
+                        or item.get("test_contract") or item.get("local_test_contract")),
+            6, 300,
         )
+        preserve = _bounded_strings(_list_value(item.get("preserve")), 6, 300)
+        requirement_ids = _bounded_ids(
+            _list_value(item.get("requirement_ids")), MAX_REQUIREMENT_REFS_PER_IMPACT,
+        )
+        evidence_ids = _bounded_ids(
+            _list_value(item.get("repository_evidence_ids")), MAX_EVIDENCE_REFS_PER_IMPACT,
+        )
+        proposal_ids = _bounded_ids(_list_value(item.get("new_surface_proposal_ids")), 4)
+        model_surface_id = _compact(item.get("surface_id"), 80)
         value = {
             "impact_id": _compact(item.get("impact_id") or f"IMP-{index:03d}", 80),
-            "surface_id": _compact(item.get("surface_id"), 80),
+            "surface_id": model_surface_id,
+            "model_surface_id": model_surface_id,
             "disposition": disposition,
             "component": _compact(item.get("component") or item.get("path") or "project surface", 180),
             "path": path,
             "symbols": symbols,
             "impact_kind": kind,
-            "requirement_ids": _bounded_ids(item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
-            "repository_evidence_ids": _bounded_ids(
-                item.get("repository_evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT,
-            ),
+            "requirement_ids": requirement_ids,
+            "repository_evidence_ids": evidence_ids,
             "reason": _compact(item.get("reason") or item.get("action"), MAX_TEXT_CHARS),
             "existing_owner": _compact(item.get("existing_owner"), 180),
             "existing_interfaces_to_reuse": interfaces,
             "interfaces_to_reuse": interface_surface_ids,
             "interface_surface_ids": interface_surface_ids,
-            "preserve": _bounded_strings(item.get("preserve"), 6, 300),
+            "preserve": preserve,
             "candidate_change": action,
             "action": action,
             "local_verification": verification,
             "verification": verification,
+            "test_contract": verification,
+            "local_test_contract": verification,
             "necessity_status": necessity,
-            "new_surface_proposal_ids": _bounded_ids(item.get("new_surface_proposal_ids"), 4),
+            "new_surface_proposal_ids": proposal_ids,
             "provenance": DERIVED_PLAN_DECISION,
         }
         # Keep model-authored identity only in explicitly non-authoritative
@@ -875,14 +1566,18 @@ def normalize_impact_map(candidate, authoritative=False):
             value["model_component"] = _compact(item.get("component"), 180)
             value["model_symbols"] = symbols
             value["model_existing_owner"] = _compact(item.get("existing_owner"), 180)
-            value["model_repository_evidence_ids"] = list(value["repository_evidence_ids"])
+            value["model_repository_evidence_ids"] = list(evidence_ids)
         impacts.append(value)
     return {
         "version": 1,
-        "task_goal": _compact(candidate.get("task_goal"), 1000),
+        "task_goal": _compact(goal, 1000),
         "impacts": impacts,
-        "integration_verification": _bounded_strings(candidate.get("integration_verification"), 10, 320),
-        "insufficient_evidence": _bounded_strings(candidate.get("insufficient_evidence"), 6, 320),
+        "integration_verification": _bounded_strings(
+            _list_value(candidate.get("integration_verification")), 10, 320,
+        ),
+        "insufficient_evidence": _bounded_strings(
+            _list_value(candidate.get("insufficient_evidence")), 6, 320,
+        ),
         "new_surface_proposals": normalize_new_surface_proposals(
             candidate.get("new_surface_proposals"),
         ),
@@ -1104,8 +1799,115 @@ def validate_new_surface_proposals(proposals, requirements, registry):
     return {"validated": accepted, "rejected": rejected}
 
 
+def bind_impact_decisions_to_seeds(candidate, impact_seeds, registry=None,
+                                   allow_legacy_exact=False):
+    """Bind semantic decisions to deterministic impact slots.
+
+    The seed, not the model, owns the existing surface identity.  The only
+    normalization performed here is the safe ``IMPACT[-_]NNN`` orchestration
+    ID normalization.  A legacy injected test response may be associated by
+    its already-canonical surface ID, but only under the explicit compatibility
+    flag and never by fuzzy path or symbol inference.
+    """
+    raw = normalize_impact_map(candidate)
+    seeds = [item for item in list(impact_seeds or []) if isinstance(item, dict)]
+    seed_by_id = {}
+    seed_by_surface = {}
+    for seed in seeds:
+        impact_id = normalize_impact_id(seed.get("impact_id"))
+        if impact_id:
+            seed_by_id[impact_id] = seed
+        if seed.get("surface_id"):
+            seed_by_surface.setdefault(str(seed.get("surface_id")), []).append(seed)
+    bound = []
+    rejected = []
+    warnings = []
+    unknown = 0
+    seen = set()
+    for item in list(raw.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES]:
+        value = copy.deepcopy(item)
+        original_id = str(value.get("impact_id") or "").strip()
+        impact_id = normalize_impact_id(original_id)
+        seed = seed_by_id.get(impact_id)
+        claimed_surface = str(value.get("model_surface_id") or value.get("surface_id") or "").strip()
+        # Existing visible architecture tests use IMP-### IDs.  This narrow
+        # compatibility path is based on an explicit canonical surface claim;
+        # normal weak-model inference never receives this escape hatch.
+        legacy_match = re.fullmatch(r"IMP[-_](\d+)", original_id, re.IGNORECASE)
+        if (
+            seed is None and allow_legacy_exact
+            and legacy_match
+        ):
+            legacy_id = f"IMPACT-{int(legacy_match.group(1)):03d}"
+            # Compatibility can translate an old IMP-### label only when the
+            # same deterministic ordinal already exists.  It must not turn an
+            # unknown impact label into a valid seed merely because a path or
+            # surface happens to look familiar.
+            if legacy_id in seed_by_id:
+                candidates = []
+                if registry:
+                    legacy_surface = _surface_for_legacy_identity(
+                        value, list(canonical_surface_by_id(registry).values()),
+                        _surface_evidence_by_id([]),
+                    )
+                    if legacy_surface:
+                        candidates = seed_by_surface.get(str(legacy_surface.get("surface_id")), [])
+                if not candidates and claimed_surface:
+                    candidates = seed_by_surface.get(claimed_surface, [])
+                if len(candidates) == 1:
+                    seed = candidates[0]
+                    impact_id = normalize_impact_id(seed.get("impact_id"))
+        if seed is None:
+            if value.get("new_surface_proposal_ids"):
+                # New-surface proposals intentionally do not need an existing
+                # seed.  Their explicit proposal contract is checked later.
+                value["impact_id"] = impact_id or original_id
+                bound.append(value)
+                continue
+            rejected.append({
+                "impact_id": impact_id or original_id,
+                "errors": ["unknown deterministic impact seed"],
+            })
+            unknown += 1
+            continue
+        if impact_id in seen:
+            rejected.append({
+                "impact_id": impact_id,
+                "errors": ["impact ID is duplicated after safe normalization"],
+            })
+            continue
+        seen.add(impact_id)
+        value["impact_id"] = impact_id
+        value["surface_id"] = str(seed.get("surface_id") or "")
+        value["seed_id"] = seed.get("seed_id")
+        value["seed_surface_id"] = str(seed.get("surface_id") or "")
+        if claimed_surface and claimed_surface != value["surface_id"]:
+            warnings.append({
+                "impact_id": impact_id,
+                "field": "surface_id",
+                "value": claimed_surface,
+                "reason": "model surface binding ignored; deterministic seed remains authoritative",
+            })
+        bound.append(value)
+    return {
+        "candidate": {
+            **raw,
+            "impacts": bound,
+        },
+        "rejected": rejected,
+        "unknown": unknown,
+        "warnings": warnings,
+        "seed_mode": bool(seeds),
+        "received": len(_candidate_impact_items(candidate)),
+        "bound": len(bound),
+    }
+
+
+bind_surface_bound_decisions = bind_impact_decisions_to_seeds
+
+
 def hydrate_impact_map(candidate, registry, requirements, evidence,
-                       allow_legacy_exact=False):
+                       allow_legacy_exact=False, impact_seeds=None):
     """Bind planner claims to canonical surfaces and drop model identity authority.
 
     The returned map contains only canonical existing-project identity.  Any
@@ -1117,42 +1919,124 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
     registry_check = validate_canonical_surface_registry(registry, evidence)
     by_id = canonical_surface_by_id(registry)
     evidence_by_id = _surface_evidence_by_id(evidence)
-    raw = normalize_impact_map(candidate)
+    seed_mode = impact_seeds is not None
+    binding = bind_impact_decisions_to_seeds(
+        candidate, impact_seeds if seed_mode else [], registry=registry,
+        allow_legacy_exact=allow_legacy_exact,
+    ) if seed_mode else {
+        "candidate": normalize_impact_map(candidate), "rejected": [], "warnings": [],
+        "seed_mode": False, "received": len(normalize_impact_map(candidate).get("impacts", [])),
+        "bound": len(normalize_impact_map(candidate).get("impacts", [])),
+    }
+    raw = binding["candidate"]
     errors = list(registry_check.get("errors", [])) if not registry_check.get("valid") else []
+    warnings = [
+        f"{item.get('impact_id')}: {item.get('field')} optional binding ignored"
+        for item in binding.get("warnings", [])
+    ]
+    rejected = list(binding.get("rejected", []))
+    malformed_count = sum(
+        1 for item in _candidate_impact_items(candidate) if not isinstance(item, dict)
+    )
+    rejected.extend({
+        "impact_id": "<malformed>",
+        "errors": ["impact decision must be an object"],
+    } for _ in range(malformed_count))
+    errors.extend(
+        f"{item.get('impact_id')}: {error}"
+        for item in rejected for error in item.get("errors", [])
+    )
     proposal_result = validate_new_surface_proposals(
         raw.get("new_surface_proposals", []), requirements, registry,
     )
     proposal_by_id = {
         str(item.get("proposal_id")): item for item in proposal_result.get("validated", [])
     }
-    if proposal_result.get("rejected"):
-        errors.extend(
-            f"{item.get('proposal_id')}: {error}"
-            for item in proposal_result["rejected"]
-            for error in item.get("validation_errors", [])
-        )
-    rejected = []
+    proposal_errors = [
+        f"{item.get('proposal_id')}: {error}"
+        for item in proposal_result.get("rejected", [])
+        for error in item.get("validation_errors", [])
+    ]
+    errors.extend(proposal_errors)
+    rejected_count_before_impacts = len(rejected)
     hydrated = []
+    req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     metrics = {
         "impact_unknown_surface_references": 0,
+        "impact_unknown_impact_seed_references": int(binding.get("unknown", 0) or 0),
         "impact_surface_evidence_mismatches": 0,
         "impact_invented_existing_paths_rejected": 0,
         "impact_invented_interfaces_rejected": 0,
+        "impact_invalid_optional_fields_rejected": 0,
+        "impact_invalid_requirement_references_rejected": 0,
+        "impact_seed_surface_binding_conflicts": len(binding.get("warnings", [])),
+        "impact_seed_decisions_received": binding.get("received", 0),
+        "impact_seed_decisions_validated": 0,
+        "impact_seed_decisions_rejected": len(binding.get("rejected", [])),
     }
     seen = set()
+
+    def add_optional_interface(interface_id, target_surface, interface_ids, interface_names,
+                                decision_errors=None):
+        interface = by_id.get(str(interface_id))
+        compatible = bool(interface and interface.get("kind") == "INTERFACE")
+        if compatible and target_surface:
+            if target_surface.get("kind") == "OWNER" and interface.get("owner_surface_id"):
+                compatible = interface.get("owner_surface_id") == target_surface.get("surface_id")
+            elif target_surface.get("kind") == "INTERFACE":
+                compatible = (
+                    interface.get("surface_id") == target_surface.get("surface_id")
+                    or interface.get("owner_surface_id") == target_surface.get("owner_surface_id")
+                )
+            else:
+                compatible = False
+        if not compatible:
+            metrics["impact_invented_interfaces_rejected"] += 1
+            metrics["impact_invalid_optional_fields_rejected"] += 1
+            if decision_errors is not None and not seed_mode:
+                decision_errors.append(f"invalid interface surface reference {interface_id}")
+            return
+        if not surface_evidence_supports(
+            interface, interface.get("evidence_ids", []), evidence,
+        ):
+            metrics["impact_invented_interfaces_rejected"] += 1
+            metrics["impact_invalid_optional_fields_rejected"] += 1
+            if decision_errors is not None and not seed_mode:
+                decision_errors.append(f"unsupported interface surface reference {interface_id}")
+            return
+        if interface["surface_id"] not in interface_ids:
+            interface_ids.append(interface["surface_id"])
+            interface_names.append(str(interface.get("symbol") or ""))
+
     for item in list(raw.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES]:
-        impact_id = str(item.get("impact_id", ""))
+        impact_id = str(item.get("impact_id", "")).strip()
         item_errors = []
         if not impact_id or impact_id in seen:
             item_errors.append("impact ID is missing or duplicated")
         seen.add(impact_id)
-        surface_id = str(item.get("surface_id", "")).strip()
-        proposal_ids = _bounded_ids(item.get("new_surface_proposal_ids"), 4)
+        disposition = str(item.get("disposition", "")).upper().strip()
+        if disposition not in DISPOSITIONS:
+            item_errors.append("invalid planner disposition")
+        action = _compact(item.get("action") or item.get("reason"), MAX_TEXT_CHARS)
+        if not action:
+            item_errors.append("impact action/reason is required")
+        raw_requirement_ids = _list_value(item.get("requirement_ids"))
+        requirement_ids = _bounded_ids(
+            [str(value) for value in raw_requirement_ids if str(value) in req_by_id],
+            MAX_REQUIREMENT_REFS_PER_IMPACT,
+        )
+        if len(requirement_ids) < len(set(str(value) for value in raw_requirement_ids)):
+            metrics["impact_invalid_requirement_references_rejected"] += 1
+            warnings.append(f"{impact_id}: unknown Source Requirement relationship removed")
+        if not requirement_ids:
+            item_errors.append("impact requires at least one valid Source Requirement relationship")
+        proposal_ids = _bounded_ids(_list_value(item.get("new_surface_proposal_ids")), 4)
+        surface_id = str(item.get("surface_id") or "").strip()
         surface = by_id.get(surface_id) if surface_id else None
-        if not surface and allow_legacy_exact and not surface_id:
+        if not surface and allow_legacy_exact and not surface_id and not seed_mode:
             surface = _surface_for_legacy_identity(item, list(by_id.values()), evidence_by_id)
             if surface:
-                surface_id = surface["surface_id"]
+                surface_id = str(surface.get("surface_id"))
         if surface_id and proposal_ids:
             item_errors.append("impact must use either canonical surface or new-surface proposal authority")
         if not surface and not surface_id and proposal_ids:
@@ -1169,23 +2053,13 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
             if item.get("model_repository_evidence_ids"):
                 metrics["impact_surface_evidence_mismatches"] += 1
                 item_errors.append("new-surface proposal cannot claim existing-surface evidence")
-            model_interfaces = list(item.get("existing_interfaces_to_reuse", []) or [])
-            if model_interfaces:
-                metrics["impact_invented_interfaces_rejected"] += 1
-                item_errors.append("new-surface interface reuse must use canonical interface IDs")
-            valid_interface_ids = []
+            interface_ids = []
             interface_names = []
-            for interface_id in item.get("interfaces_to_reuse", []) or []:
-                interface = by_id.get(str(interface_id))
-                if not interface or interface.get("kind") != "INTERFACE":
-                    metrics["impact_invented_interfaces_rejected"] += 1
-                    item_errors.append(f"invalid interface surface reference {interface_id}")
-                    continue
-                valid_interface_ids.append(interface["surface_id"])
-                interface_names.append(str(interface.get("symbol") or ""))
-            requirement_ids = _bounded_ids(
-                item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT,
-            )
+            if item.get("existing_interfaces_to_reuse"):
+                metrics["impact_invented_interfaces_rejected"] += 1
+                metrics["impact_invalid_optional_fields_rejected"] += 1
+            for interface_id in _list_value(item.get("interfaces_to_reuse")):
+                add_optional_interface(interface_id, None, interface_ids, interface_names)
             proposal_requirement_ids = {
                 str(requirement_id)
                 for proposal in selected_proposals
@@ -1193,9 +2067,6 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
             }
             if not set(requirement_ids).issubset(proposal_requirement_ids):
                 item_errors.append("impact requirements are not authorized by its new-surface proposal")
-            disposition = item.get("disposition")
-            if disposition not in DISPOSITIONS:
-                item_errors.append("invalid planner disposition")
             canonical = {
                 "impact_id": impact_id,
                 "surface_id": "",
@@ -1213,13 +2084,17 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
                 "reason": item.get("reason", ""),
                 "existing_owner": "",
                 "existing_interfaces_to_reuse": _bounded_strings(interface_names, 6, 180),
-                "interfaces_to_reuse": _bounded_ids(valid_interface_ids, 6),
-                "interface_surface_ids": _bounded_ids(valid_interface_ids, 6),
-                "preserve": list(item.get("preserve", []) or [])[:6],
-                "candidate_change": item.get("candidate_change", ""),
-                "action": item.get("action", ""),
-                "local_verification": list(item.get("local_verification", []) or [])[:6],
-                "verification": list(item.get("verification", []) or [])[:6],
+                "interfaces_to_reuse": _bounded_ids(interface_ids, 6),
+                "interface_surface_ids": _bounded_ids(interface_ids, 6),
+                "preserve": _bounded_strings(_list_value(item.get("preserve")), 6, 300),
+                "candidate_change": action,
+                "action": action,
+                "local_verification": _bounded_strings(
+                    _list_value(item.get("local_verification") or item.get("verification")), 6, 300,
+                ),
+                "verification": _bounded_strings(
+                    _list_value(item.get("verification") or item.get("local_verification")), 6, 300,
+                ),
                 "necessity_status": item.get("necessity_status"),
                 "new_surface_proposal_ids": proposal_ids,
                 "surface_kind": NEW_SURFACE_PROPOSAL,
@@ -1242,20 +2117,23 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
             model_path = _normal_path(item.get("model_path"))
             if model_path and model_path != _normal_path(surface.get("path")):
                 metrics["impact_invented_existing_paths_rejected"] += 1
-                item_errors.append("model path conflicts with canonical surface path")
-            symbols_supported = _surface_symbols_supported(
-                surface, item.get("model_symbols"), evidence_by_id,
-            )
-            if not symbols_supported and allow_legacy_exact:
-                symbols_supported = _path_symbols_supported(
-                    surface.get("path"), item.get("model_symbols"), evidence_by_id,
-                )
-            if not symbols_supported:
+                if seed_mode:
+                    warnings.append(f"{impact_id}: model path ignored; seed binding is authoritative")
+                else:
+                    item_errors.append("model path conflicts with canonical surface path")
+            if not _surface_symbols_supported(surface, item.get("model_symbols"), evidence_by_id):
                 metrics["impact_invented_existing_paths_rejected"] += 1
-                item_errors.append("model symbol conflicts with canonical surface symbol")
-            model_evidence = set(str(value) for value in item.get("model_repository_evidence_ids", []))
+                if seed_mode:
+                    warnings.append(f"{impact_id}: model symbol ignored; seed binding is authoritative")
+                elif allow_legacy_exact and _path_symbols_supported(
+                    surface.get("path"), item.get("model_symbols"), evidence_by_id,
+                ):
+                    pass
+                else:
+                    item_errors.append("model symbol conflicts with canonical surface symbol")
+            model_evidence = set(str(value) for value in _list_value(item.get("model_repository_evidence_ids")))
             evidence_supported = surface_evidence_supports(surface, model_evidence, evidence)
-            if model_evidence and allow_legacy_exact and not evidence_supported:
+            if model_evidence and not evidence_supported and allow_legacy_exact and not seed_mode:
                 evidence_supported = all(
                     evidence_by_id.get(evidence_id)
                     and _normal_path(evidence_by_id[evidence_id].get("path"))
@@ -1264,46 +2142,36 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
                 )
             if model_evidence and not evidence_supported:
                 metrics["impact_surface_evidence_mismatches"] += 1
-                item_errors.append("model evidence does not support canonical surface")
-            model_interfaces = list(item.get("existing_interfaces_to_reuse", []) or [])
-            interface_ids = list(item.get("interfaces_to_reuse", []) or [])
-            if model_interfaces and not interface_ids and allow_legacy_exact:
+                if seed_mode:
+                    warnings.append(f"{impact_id}: model evidence ignored; seed binding is authoritative")
+                else:
+                    item_errors.append("model evidence does not support canonical surface")
+            interface_ids = []
+            interface_names = []
+            model_interfaces = _list_value(item.get("existing_interfaces_to_reuse"))
+            if model_interfaces and not _list_value(item.get("interfaces_to_reuse")) and allow_legacy_exact:
                 for name in model_interfaces:
                     matches = [
-                        candidate_surface for candidate_surface in by_id.values()
-                        if candidate_surface.get("kind") == "INTERFACE"
-                        and str(candidate_surface.get("symbol")) == str(name)
+                        interface for interface in by_id.values()
+                        if interface.get("kind") == "INTERFACE"
+                        and str(interface.get("symbol")) == str(name)
                     ]
                     if len(matches) == 1:
-                        interface_ids.append(matches[0]["surface_id"])
+                        add_optional_interface(matches[0]["surface_id"], surface, interface_ids, interface_names)
                     else:
                         metrics["impact_invented_interfaces_rejected"] += 1
-                        item_errors.append("legacy interface name is not canonical")
-            valid_interface_ids = []
-            interface_names = []
-            for interface_id in interface_ids:
-                interface = by_id.get(str(interface_id))
-                if not interface or interface.get("kind") != "INTERFACE":
-                    metrics["impact_invented_interfaces_rejected"] += 1
-                    item_errors.append(f"invalid interface surface reference {interface_id}")
-                    continue
-                if (
-                    surface.get("kind") == "OWNER"
-                    and interface.get("owner_surface_id")
-                    and interface.get("owner_surface_id") != surface.get("surface_id")
-                ):
-                    metrics["impact_invented_interfaces_rejected"] += 1
-                    item_errors.append("interface owner does not match impacted owner surface")
-                    continue
-                valid_interface_ids.append(interface["surface_id"])
-                interface_names.append(str(interface.get("symbol") or ""))
-            if model_interfaces and interface_ids and set(str(item) for item in model_interfaces) != set(interface_names):
+                        metrics["impact_invalid_optional_fields_rejected"] += 1
+                        if not seed_mode:
+                            item_errors.append("legacy interface name is not canonical")
+            for interface_id in _list_value(item.get("interfaces_to_reuse")):
+                add_optional_interface(
+                    interface_id, surface, interface_ids, interface_names, item_errors,
+                )
+            if model_interfaces and interface_ids and set(str(value) for value in model_interfaces) != set(interface_names):
                 metrics["impact_invented_interfaces_rejected"] += 1
-                item_errors.append("model interface names conflict with canonical interface IDs")
-            disposition = item.get("disposition")
-            if disposition not in DISPOSITIONS:
-                item_errors.append("invalid planner disposition")
-            requirement_ids = _bounded_ids(item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT)
+                metrics["impact_invalid_optional_fields_rejected"] += 1
+                if not seed_mode:
+                    item_errors.append("model interface names conflict with canonical interface IDs")
             canonical = {
                 "impact_id": impact_id,
                 "surface_id": surface["surface_id"],
@@ -1322,15 +2190,25 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
                 "reason": item.get("reason", ""),
                 "existing_owner": str(surface.get("symbol") or ""),
                 "existing_interfaces_to_reuse": _bounded_strings(interface_names, 6, 180),
-                "interfaces_to_reuse": _bounded_ids(valid_interface_ids, 6),
-                "interface_surface_ids": _bounded_ids(valid_interface_ids, 6),
-                "preserve": list(item.get("preserve", []) or [])[:6],
-                "candidate_change": item.get("candidate_change", ""),
-                "action": item.get("action", ""),
-                "local_verification": list(item.get("local_verification", []) or [])[:6],
-                "verification": list(item.get("verification", []) or [])[:6],
+                "interfaces_to_reuse": _bounded_ids(interface_ids, 6),
+                "interface_surface_ids": _bounded_ids(interface_ids, 6),
+                "preserve": _bounded_strings(_list_value(item.get("preserve")), 6, 300),
+                "candidate_change": action,
+                "action": action,
+                "local_verification": _bounded_strings(
+                    _list_value(item.get("local_verification") or item.get("verification")), 6, 300,
+                ),
+                "verification": _bounded_strings(
+                    _list_value(item.get("verification") or item.get("local_verification")), 6, 300,
+                ),
+                "test_contract": _bounded_strings(
+                    _list_value(item.get("test_contract") or item.get("verification")), 6, 300,
+                ),
+                "local_test_contract": _bounded_strings(
+                    _list_value(item.get("local_test_contract") or item.get("verification")), 6, 300,
+                ),
                 "necessity_status": item.get("necessity_status"),
-                "new_surface_proposal_ids": _bounded_ids(item.get("new_surface_proposal_ids"), 4),
+                "new_surface_proposal_ids": proposal_ids,
                 "surface_kind": surface.get("kind"),
                 "surface_role": surface.get("role"),
                 "owner_surface_id": surface.get("owner_surface_id"),
@@ -1338,13 +2216,15 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
             }
             if item_errors:
                 rejected.append({"impact_id": impact_id, "errors": item_errors})
+                errors.extend(f"{impact_id}: {error}" for error in item_errors)
             else:
                 hydrated.append(canonical)
         else:
             rejected.append({"impact_id": impact_id, "errors": item_errors})
-        if item_errors:
             errors.extend(f"{impact_id}: {error}" for error in item_errors)
 
+    metrics["impact_seed_decisions_validated"] = len(hydrated)
+    metrics["impact_seed_decisions_rejected"] = len(rejected)
     result = {
         "version": 1,
         "task_goal": raw.get("task_goal", ""),
@@ -1355,9 +2235,15 @@ def hydrate_impact_map(candidate, registry, requirements, evidence,
         "canonical_surface_registry_version": registry.get("version"),
         "bounds": copy.deepcopy(raw.get("bounds", {})),
         "provenance": DERIVED_PLAN_DECISION,
-        "hydration_valid": not errors and bool(hydrated),
-        "hydration_errors": errors[:32],
+        # Seed-bound flow tolerates rejected individual decisions and optional
+        # fields as long as at least one accepted decision remains canonical.
+        "hydration_valid": bool(registry_check.get("valid")) and bool(hydrated)
+        and (seed_mode or not (errors or warnings)),
+        "hydration_errors": (errors + warnings)[:48],
         "hydration_rejected_impacts": rejected[:MAX_IMPACT_ENTRIES],
+        "impact_decisions_received": binding.get("received", 0),
+        "impact_decisions_validated": len(hydrated),
+        "impact_decisions_rejected": len(rejected),
         **metrics,
     }
     return result
@@ -1445,47 +2331,60 @@ def validate_surface_binding(impact, registry, evidence=None):
     return {"valid": not errors, "errors": errors[:8], "surface": copy.deepcopy(surface)}
 
 
-def validate_planner_output(candidate, requirements=None, allow_legacy=False):
-    """Validate only the bounded response shape before canonical hydration."""
+def validate_planner_output(candidate, requirements=None, allow_legacy=False,
+                            impact_seeds=None):
+    """Validate the response envelope while retaining usable decisions.
+
+    Optional-field and per-decision semantic validation happens during seed
+    binding/hydration.  This pre-call validator only needs one structurally
+    usable decision to keep a mixed response from triggering whole-response
+    brittleness.
+    """
     value = candidate if isinstance(candidate, dict) else {}
-    impacts = list(value.get("impacts", []) or [])
-    errors = []
-    if not impacts:
-        errors.append("at least one impact is required")
+    if "impacts" not in value and value.get("impact_id"):
+        impacts = [value]
+    else:
+        impacts = value.get("impacts", [])
+    if not isinstance(impacts, (list, tuple)) or not impacts:
+        return False
     if len(impacts) > MAX_IMPACT_ENTRIES:
-        errors.append("impact entry bound exceeded")
+        return False
     req_ids = {item["requirement_id"] for item in active_requirements(requirements or [])}
-    for item in impacts:
+    seed_ids = {
+        normalize_impact_id(item.get("impact_id"))
+        for item in list(impact_seeds or []) if isinstance(item, dict)
+    }
+    usable = 0
+    for item in list(impacts):
         if not isinstance(item, dict):
-            errors.append("impact entry must be an object")
             continue
-        if not item.get("impact_id"):
-            errors.append("impact ID is required")
-        refs = {str(ref) for ref in item.get("requirement_ids", [])}
-        if not refs or (req_ids and not refs.issubset(req_ids)):
-            errors.append("impact requires valid Source Requirement IDs")
-        if not allow_legacy:
-            has_surface = bool(_SURFACE_ID_RE.match(str(item.get("surface_id", ""))))
-            proposal_refs = list(item.get("new_surface_proposal_ids", []) or [])
-            has_proposal = bool(proposal_refs) and all(
-                _NEW_SURFACE_ID_RE.match(str(ref)) for ref in proposal_refs
-            )
-            if has_surface == has_proposal:
-                errors.append(
-                    "impact requires exactly one canonical surface_id or new-surface proposal authority"
-                )
-            if str(item.get("disposition", "")).upper() not in DISPOSITIONS:
-                errors.append("impact requires a bounded disposition")
-            if not isinstance(item.get("action"), str):
-                errors.append("impact action is required")
-            if not isinstance(item.get("interfaces_to_reuse", []), list):
-                errors.append("interfaces_to_reuse must be a bounded list")
-            if not isinstance(item.get("preserve", []), list) or not isinstance(item.get("verification", []), list):
-                errors.append("preserve and verification must be bounded lists")
-    forbidden = _forbidden_context_key(value)
-    if forbidden:
-        errors.append(f"raw context field is forbidden: {forbidden}")
-    return not errors
+        impact_id = str(item.get("impact_id") or "").strip()
+        if not impact_id:
+            continue
+        refs = _list_value(item.get("requirement_ids"))
+        if not refs:
+            continue
+        disposition = str(item.get("disposition", "")).upper().strip()
+        if not disposition and allow_legacy:
+            disposition = _disposition_for_impact(item)
+        if disposition not in DISPOSITIONS:
+            continue
+        action = item.get("action") or item.get("reason") or item.get("candidate_change")
+        if not isinstance(action, str) or not action.strip():
+            continue
+        normalized_id = normalize_impact_id(impact_id)
+        if seed_ids and not seed_ids.intersection({normalized_id}) and not _list_value(
+            item.get("new_surface_proposal_ids")
+        ):
+            continue
+        # Unknown requirement IDs are deliberately left for per-decision
+        # relationship validation, so a mixed response can still proceed.
+        if req_ids and not any(str(ref) for ref in refs):
+            continue
+        usable += 1
+    if _forbidden_context_key(value):
+        return False
+    return usable > 0
 
 
 def _forbidden_context_key(value):
@@ -1935,22 +2834,183 @@ def normalize_challenges(candidate, source="MODEL"):
     return result
 
 
+def _review_impact_packet(impact):
+    """Compact one canonical impact without allowing identity expansion."""
+    if not isinstance(impact, dict):
+        return None
+    return {
+        key: copy.deepcopy(impact.get(key)) for key in (
+            "impact_id", "surface_id", "canonical_surface_id", "disposition",
+            "impact_kind", "necessity_status", "requirement_ids",
+            "repository_evidence_ids", "action", "reason", "interfaces_to_reuse",
+            "existing_interfaces_to_reuse", "preserve", "verification",
+            "surface_kind", "surface_role", "owner_surface_id",
+        ) if impact.get(key) not in (None, "", [], {})
+    }
+
+
+def _review_surface_packet(surface):
+    return _planner_surface_packet(surface) if isinstance(surface, dict) else None
+
+
+def _trim_challenger_optional_payload(packet, max_chars):
+    value = copy.deepcopy(packet)
+
+    def size():
+        return len(_compact_json(value))
+
+    while size() > max_chars:
+        project = value.get("project_context")
+        if isinstance(project, list) and project:
+            project.pop()
+            continue
+        task_facts = value.get("task_facts")
+        removed = False
+        if isinstance(task_facts, dict):
+            for field in (
+                "known_non_goals", "acceptance_conditions", "relevant_dependencies",
+                "current_interfaces", "current_state_ownership", "current_owners",
+                "relevant_tests", "user_confirmed_decisions",
+            ):
+                values = task_facts.get(field)
+                if isinstance(values, list) and values:
+                    values.pop()
+                    removed = True
+                    break
+                if isinstance(values, list) and not values:
+                    task_facts.pop(field, None)
+            if not removed and task_facts:
+                value["task_facts"] = {}
+                removed = True
+        if removed:
+            continue
+        evidence = value.get("accepted_repository_evidence")
+        if isinstance(evidence, list) and evidence:
+            evidence.pop()
+            continue
+        break
+    return value
+
+
+def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
+                            surface_registry=None, max_chars=None):
+    """Build a complete, bounded review packet without dropping impacts."""
+    max_chars = MAX_CHALLENGER_CONTEXT_CHARS if max_chars is None else max_chars
+    max_chars = max(1, int(max_chars))
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    raw_impacts = list((impact_map or {}).get("impacts", []) or [])
+    impacts = [
+        compact for compact in (
+            _review_impact_packet(item)
+            for item in raw_impacts[:MAX_IMPACT_ENTRIES]
+        ) if compact is not None
+    ]
+    impact_ids = [
+        str(item.get("impact_id")) for item in raw_impacts
+        if isinstance(item, dict) and item.get("impact_id")
+    ]
+    surface_by_id = canonical_surface_by_id(surface_registry)
+    surface_ids = [
+        str(item.get("surface_id") or item.get("canonical_surface_id"))
+        for item in impacts
+        if item.get("surface_id") or item.get("canonical_surface_id")
+    ]
+    reviewed_surfaces = [
+        _review_surface_packet(surface_by_id[item]) for item in surface_ids if item in surface_by_id
+    ]
+    selected_surface_ids = [str(item.get("surface_id")) for item in reviewed_surfaces]
+    packet = {
+        "version": 1,
+        "candidate_impact_map": {
+            "version": 1,
+            "task_goal": _compact((impact_map or {}).get("task_goal"), 1000),
+            "impacts": impacts,
+            "integration_verification": _bounded_strings(
+                _list_value((impact_map or {}).get("integration_verification")), 10, 320,
+            ),
+            "insufficient_evidence": _bounded_strings(
+                _list_value((impact_map or {}).get("insufficient_evidence")), 6, 320,
+            ),
+        },
+        "requirements": _planner_requirement_projection(requirements),
+        "surfaces": reviewed_surfaces,
+        "preservation_constraints": _planner_preservation_projection(task_brain, requirements),
+        "accepted_repository_evidence": _planner_evidence_projection(
+            evidence, selected_surface_ids=selected_surface_ids, registry=surface_registry,
+        ),
+        "task_facts": _planner_task_fact_projection(task_brain),
+        "project_context": _bounded_strings(
+            [
+                item.get("text") for item in list(brain.get("relevant_project_brain_projection", []) or [])
+                if isinstance(item, dict)
+            ], 8, 360,
+        ),
+        "bounds": {"max_challenges": MAX_CHALLENGES, "challenge_rounds": MAX_CHALLENGE_ROUNDS,
+                   "max_serialized_chars": max_chars},
+    }
+    packet = _trim_challenger_optional_payload(packet, max_chars)
+    packet_chars = len(_compact_json(packet))
+    serialized_impact_ids = [
+        str(item.get("impact_id"))
+        for item in packet.get("candidate_impact_map", {}).get("impacts", [])
+        if item.get("impact_id")
+    ]
+    errors = []
+    if len(raw_impacts) > MAX_IMPACT_ENTRIES:
+        errors.append("challenger impact entry bound exceeded")
+    if packet_chars > max_chars:
+        errors.append("complete challenger review authority exceeds the serialized-size bound")
+    if serialized_impact_ids != impact_ids:
+        errors.append("challenger packet did not retain every reviewed impact")
+    complete = not errors
+    packet["packet_complete"] = complete
+    packet_chars = len(_compact_json(packet))
+    if packet_chars > max_chars and not errors:
+        errors.append(
+            f"complete challenger review authority exceeds {max_chars} serialized characters"
+        )
+        complete = False
+        packet["packet_complete"] = False
+        packet_chars = len(_compact_json(packet))
+    observability = {
+        "reviewed_impact_ids": impact_ids,
+        "serialized_impact_ids": serialized_impact_ids,
+        "dropped_impact_ids": [item for item in impact_ids if item not in serialized_impact_ids],
+        "reviewed_surface_ids": selected_surface_ids,
+        "packet_chars": packet_chars,
+        "estimated_tokens": _estimated_tokens(_compact_json(packet)),
+        "packet_complete": complete,
+    }
+    result = copy.deepcopy(packet)
+    result.update({
+        "packet": copy.deepcopy(packet),
+        "observability": observability,
+        "reviewed_impact_ids": impact_ids,
+        "serialized_impact_ids": serialized_impact_ids,
+        "dropped_impact_ids": list(observability["dropped_impact_ids"]),
+        "packet_chars": packet_chars,
+        "estimated_tokens": observability["estimated_tokens"],
+        "packet_complete": complete,
+        "status": "READY" if complete else IMPACT_CHALLENGER_CONTEXT_INCOMPLETE,
+        "errors": errors[:12],
+    })
+    return result
+
+
+build_complete_challenger_packet = build_challenger_packet
+
+
 def build_challenger_context(impact_map, requirements, evidence, task_brain=None,
                              surface_registry=None):
-    brain = _task_brain_slice(task_brain)
-    context = {
-        "candidate_impact_map": copy.deepcopy(impact_map),
-        "source_requirements": active_requirements(requirements),
-        "accepted_repository_evidence": bounded_evidence(evidence),
-        "preservation_constraints": copy.deepcopy(brain.get("preservation_constraints", [])),
-        "current_owners": copy.deepcopy(brain.get("current_owners", [])),
-        "current_interfaces": copy.deepcopy(brain.get("current_interfaces", [])),
-        "current_state_ownership": copy.deepcopy(brain.get("current_state_ownership", [])),
-        "relevant_tests": copy.deepcopy(brain.get("relevant_tests", [])),
-        "canonical_surface_registry": _planner_surface_registry_slice(surface_registry),
-        "bounds": {"max_challenges": MAX_CHALLENGES, "challenge_rounds": MAX_CHALLENGE_ROUNDS},
-    }
-    return _trim_context(context, MAX_CHALLENGER_CONTEXT_CHARS)
+    """Backward-compatible view of the complete challenger review packet."""
+    result = build_challenger_packet(
+        impact_map, requirements, evidence, task_brain=task_brain,
+        surface_registry=surface_registry,
+    )
+    context = copy.deepcopy(result.get("packet", result))
+    context["packet_observability"] = copy.deepcopy(result.get("observability", {}))
+    context["packet_complete"] = bool(result.get("packet_complete"))
+    return context
 
 
 def _impact_text(impact):
@@ -2292,7 +3352,7 @@ def merge_challenges(model_challenges, deterministic):
 
 
 def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
-                              surface_registry=None):
+                              surface_registry=None, impact_seeds=None):
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     facts = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
@@ -2312,6 +3372,10 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
     for item in selected:
         grouped.setdefault(item.get("path") or item.get("evidence_id"), []).append(item)
     impacts = []
+    seed_by_surface = {
+        str(item.get("surface_id")): item for item in list(impact_seeds or [])
+        if isinstance(item, dict) and item.get("surface_id")
+    }
     for path, records in grouped.items():
         categories = {item.get("category") for item in records}
         kind = "TEST_CHANGE" if "CURRENT_TEST" in categories else "INTEGRATION_CHANGE"
@@ -2325,8 +3389,9 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
             ), None)
             if not surface:
                 continue
+            seed = seed_by_surface.get(str(surface.get("surface_id")))
             impacts.append({
-                "impact_id": f"IMP-{start_index + len(impacts):03d}",
+                "impact_id": normalize_impact_id(seed.get("impact_id")) if seed else f"IMP-{start_index + len(impacts):03d}",
                 "surface_id": surface.get("surface_id"),
                 "disposition": "TEST_CHANGE" if kind == "TEST_CHANGE" else "MUST_CHANGE",
                 "requirement_ids": requirement_ids,
@@ -2363,7 +3428,7 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
 
 
 def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence,
-                         surface_registry=None):
+                         surface_registry=None, impact_seeds=None):
     """Apply one bounded deterministic revision; unresolved criticism stays blocking."""
     revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
     impacts = list(revised.get("impacts", []) or [])
@@ -2462,9 +3527,15 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
         elif challenge_type in {"TEST_GAP", "MISSING_IMPACT", "REQUIREMENT_GAP", "DEPENDENCY_GAP"}:
             additions = _evidence_impacts_for_gap(
                 challenge, requirements, evidence, len(impacts) + 1,
-                surface_registry=surface_registry,
+                surface_registry=surface_registry, impact_seeds=impact_seeds,
             )
             for addition in additions:
+                if any(
+                    str(existing.get("surface_id")) == str(addition.get("surface_id"))
+                    for existing in impacts
+                    if isinstance(existing, dict)
+                ):
+                    continue
                 if len(impacts) >= MAX_IMPACT_ENTRIES:
                     break
                 impacts.append(addition)
