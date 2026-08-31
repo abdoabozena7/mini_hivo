@@ -50,6 +50,22 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
             "source_contract": {"root_goal": self.goal},
         }
 
+    def mission_task(self, contract):
+        return mini.make_task(
+            contract["execution_contract_id"], contract["goal"], 1, "ROOT",
+            contract["done_when"], contract["allowed_mutation_paths"],
+            execution_contract_id=contract["execution_contract_id"],
+            execution_contract=contract,
+        )
+
+    def compile_advice(self, contract, advice, dependency_summaries=None):
+        return mini.compile_worker_mission(
+            self.mission_task(contract), {}, repo_snapshot={"files": []},
+            execution_contract=contract,
+            dependency_summaries=dependency_summaries,
+            structured_call=lambda _prompt, _validator, _label, _schema: advice,
+        )
+
     def test_snapshot_is_approved_bounded_immutable_and_hygienic(self):
         snapshot = self.snapshot()
         checked = execution.validate_snapshot(
@@ -387,6 +403,177 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
             self.assertNotIn(forbidden.casefold(), prompts[0].casefold())
         self.assertIn(contract["execution_contract_id"], prompts[0])
         self.assertIn(contract["plan_hash"], prompts[0])
+
+    def test_contract_hydrated_mission_uses_compact_advice_and_ignores_legacy_authority(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        prompts = []
+        schemas = []
+        raw = {
+            "goal_anchor": "Extend InputManager Escape handling using the existing pause interface.",
+            "mutation_targets": ["src/input.js", "src/game.js"],
+            "interfaces_to_reuse": ["InputManager.isPressed", "GameState.togglePause"],
+            "implementation_plan": [
+                "Inspect GameState.togglePause in src/game.js and reuse it.",
+                "Modify src/input.js.",
+            ],
+            "verification_plan": ["Verify Escape behavior without changing storage."],
+            # These are intentionally absent from the semantic response.
+        }
+
+        def structured(prompt, validator, _label, schema):
+            prompts.append(prompt)
+            schemas.append((validator, schema))
+            return raw
+
+        mission = mini.compile_worker_mission(
+            self.mission_task(contract),
+            {"full_project_brain": "must not enter the contract handoff"},
+            repo_snapshot={"files": []}, execution_contract=contract,
+            structured_call=structured,
+        )
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(schemas[0][1]["required"], [])
+        self.assertNotIn("targets", schemas[0][1]["properties"])
+        self.assertNotIn("requirements", schemas[0][1]["properties"])
+        self.assertTrue(schemas[0][0](raw))
+        self.assertIn("execution scope is already fixed", prompts[0].casefold())
+        self.assertIn("do not propose new mutation targets", prompts[0].casefold())
+        self.assertNotIn("approved_change_nodes", prompts[0])
+        self.assertNotIn("full_project_brain", prompts[0])
+        self.assertEqual(mission["allowed_mutation_paths"], ["src/input.js"])
+        self.assertEqual(mission["targets"], ["src/input.js"])
+        self.assertEqual(mission["allowed_inspection_paths"], contract["allowed_inspection_paths"])
+        self.assertEqual(mission["requirements"], contract["requirements"])
+        self.assertEqual(mission["interfaces_to_reuse"], contract["interfaces_to_reuse"])
+        self.assertEqual(mission["preservation"], contract["local_preservation_constraints"])
+        self.assertEqual(mission["prohibitions"], contract["structured_prohibitions"])
+        self.assertEqual(mission["do_not_touch"], contract["global_do_not_touch"])
+        self.assertEqual(mission["approved_plan_hash"], contract["plan_hash"])
+        self.assertEqual(mission["execution_contract_hash"], contract["contract_hash"])
+        self.assertTrue(execution.validate_hydrated_worker_mission(mission, contract, [])["valid"])
+        tampered = copy.deepcopy(mission)
+        tampered["allowed_mutation_paths"] = ["src/game.js"]
+        self.assertFalse(execution.validate_hydrated_worker_mission(tampered, contract, [])["valid"])
+        tampered = copy.deepcopy(mission)
+        tampered["mutation_targets"] = ["src/game.js"]
+        self.assertFalse(execution.validate_hydrated_worker_mission(tampered, contract, [])["valid"])
+        encoded = json.dumps(mission, ensure_ascii=False)
+        self.assertNotIn("mutation_targets", encoded)
+        self.assertIn("GameState.togglePause", encoded)
+        run_files = list((mini.WORKSPACE / mini.RUNS_DIR).glob("*.jsonl"))
+        run_log = "\n".join(path.read_text(encoding="utf-8") for path in run_files)
+        self.assertIn("raw_mission_compiler_output", run_log)
+        self.assertIn("rejected_non_authoritative_fields", run_log)
+        self.assertIn("hydrated_worker_mission", run_log)
+        self.assertGreaterEqual(mini.RUN["mission_advice_received"], 1)
+        self.assertGreaterEqual(mini.RUN["mission_advice_validated"], 1)
+        self.assertGreaterEqual(mini.RUN["mission_non_authoritative_fields_rejected"], 1)
+        self.assertGreaterEqual(mini.RUN["hydrated_worker_missions_created"], 1)
+
+    def test_semantic_conflict_blocks_but_safe_game_inspection_is_valid(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        with self.assertRaises(mini.MissionCompilationError) as raised:
+            self.compile_advice(contract, {
+                "objective": "Modify src/game.js and add a new paused state owned by InputManager.",
+            })
+        self.assertIn(execution.MISSION_CONTRACT_VIOLATION, str(raised.exception))
+        self.assertGreaterEqual(mini.RUN["mission_semantic_conflicts"], 1)
+        self.assertGreaterEqual(mini.RUN["mission_advice_rejected"], 1)
+        self.assertEqual(mini.RUN["hydrated_worker_missions_created"], 0)
+
+        safe = self.compile_advice(contract, {
+            "objective": "Extend InputManager Escape handling.",
+            "implementation_steps": [
+                "Inspect GameState.togglePause in src/game.js and reuse the existing interface.",
+                "Modify src/input.js.",
+            ],
+            "interface_usage": ["GameState.togglePause", "InventedPauseInterface"],
+        })
+        self.assertTrue(execution.validate_hydrated_worker_mission(safe, contract, [])["valid"])
+        self.assertEqual(safe["allowed_mutation_paths"], ["src/input.js"])
+        self.assertIn("src/game.js", safe["allowed_inspection_paths"])
+        self.assertEqual(safe["implementation_advice"]["interface_usage"], ["GameState.togglePause"])
+
+        verify_only = copy.deepcopy(contract)
+        verify_only["responsibility_type"] = execution.VERIFY_ONLY
+        wrong_responsibility = execution.sanitize_mission_advice({
+            "objective": "Modify src/input.js during verification.",
+        }, verify_only)
+        self.assertFalse(wrong_responsibility["valid"])
+        self.assertTrue(wrong_responsibility["semantic_conflicts"])
+
+    def test_hashes_dependencies_test_contract_and_child_scope_are_contract_bound(self):
+        _, compiled, _ = self.compiled()
+        mutation, test_contract = compiled["contracts"]
+        dependency = [{
+            "task_id": mutation["execution_contract_id"], "status": "done",
+            "summary": "verified input change", "changed_files": ["src/input.js"],
+        }]
+        test_mission = self.compile_advice(test_contract, {
+            "objective": "Update the existing focused input test.",
+            "implementation_steps": ["Modify tests/input.test.js."],
+            "test_file": "tests/pause.test.js",
+            "mutation_targets": ["tests/input.test.js", "tests/pause.test.js"],
+            "requirements": ["REQ-999"], "plan_hash": "bogus", "execution_contract_hash": "bogus",
+        }, dependency_summaries=dependency)
+        self.assertEqual(test_mission["allowed_mutation_paths"], ["tests/input.test.js"])
+        self.assertNotIn("tests/pause.test.js", test_mission["allowed_mutation_paths"])
+        self.assertEqual(test_mission["dependency_ids"], ["EXEC-001"])
+        self.assertEqual(test_mission["dependencies"][0]["task_id"], "EXEC-001")
+        self.assertTrue(execution.validate_hydrated_worker_mission(test_mission, test_contract, dependency)["valid"])
+        self.assertGreaterEqual(mini.RUN["mission_non_authoritative_fields_rejected"], 3)
+
+        with self.assertRaises(mini.MissionCompilationError):
+            self.compile_advice(test_contract, {
+                "objective": "Create tests/pause.test.js for the new behavior.",
+            }, dependency_summaries=dependency)
+
+        advice_a = {"objective": "Extend input handling.", "implementation_steps": ["Modify src/input.js."]}
+        advice_b = {"objective": "Extend input handling with Escape.", "implementation_steps": ["Modify src/input.js."]}
+        mission_a = self.compile_advice(mutation, advice_a)
+        mission_b = self.compile_advice(mutation, advice_b)
+        self.assertNotEqual(mission_a["mission_hash"], mission_b["mission_hash"])
+        changed_contract = copy.deepcopy(mutation)
+        changed_contract["goal"] += " with a changed approved responsibility"
+        changed_contract["contract_hash"] = execution.deterministic_hash(
+            execution._without(changed_contract, "contract_hash"),
+        )
+        changed_mission = execution.hydrate_worker_mission(changed_contract, advice_a, [])
+        self.assertNotEqual(mission_a["mission_hash"], changed_mission["mission_hash"])
+        child = execution.child_contract(
+            mutation, {"child_id": "CHILD-INPUT", "done_when": mutation["done_when"][:1],
+                       "scope_hint": ["src/input.js"]},
+        )
+        child_mission = execution.hydrate_worker_mission(
+            child, {"objective": "Modify src/input.js.", "implementation_steps": ["Update the input owner."]}, [],
+        )
+        self.assertTrue(execution.validate_hydrated_worker_mission(child_mission, child, [])["valid"])
+        self.assertEqual(child_mission["allowed_mutation_paths"], ["src/input.js"])
+        self.assertNotIn("src/game.js", child_mission["allowed_mutation_paths"])
+
+    def test_hydrated_worker_context_separates_authority_from_advice(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        mission = self.compile_advice(contract, {
+            "objective": "Extend InputManager Escape handling.",
+            "implementation_steps": ["Modify src/input.js."],
+            "inspection_order": ["Read src/game.js only to reuse GameState.togglePause."],
+        })
+        packet = mini.build_node_context(
+            self.mission_task(contract), {}, None, {"files": []},
+            brain_projection={"full_project_brain": "must not appear"},
+            worker_mission=mission, execution_contract=contract,
+        )
+        self.assertIn("AUTHORITATIVE EXECUTION CONTRACT", packet)
+        self.assertIn("IMPLEMENTATION ADVICE", packet)
+        self.assertIn(mission["mission_id"], packet)
+        self.assertIn("Extend InputManager Escape handling", packet)
+        self.assertNotIn("mutation_targets", packet)
+        self.assertNotIn("full_project_brain", packet)
+        self.assertIn("src/game.js", packet)
+        self.assertIn("src/input.js", packet)
 
     def test_worker_tool_guard_allows_inspection_but_rejects_mutation(self):
         root_contract = self.root_contract()
