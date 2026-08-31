@@ -151,6 +151,10 @@ CONTRACT_SCOPE_VIOLATION = stage4.CONTRACT_SCOPE_VIOLATION
 MISSION_CONTRACT_VIOLATION = stage4.MISSION_CONTRACT_VIOLATION
 EXECUTION_GRAPH_INVALID = stage4.EXECUTION_GRAPH_INVALID
 EXECUTION_DEPENDENCY_BLOCKED = stage4.EXECUTION_DEPENDENCY_BLOCKED
+HYDRATED_MISSION_TOO_LARGE = stage4.HYDRATED_MISSION_TOO_LARGE
+WORKER_CONTEXT_TOO_LARGE = stage4.WORKER_CONTEXT_TOO_LARGE
+WORKER_CONTEXT_AUTHORITY_TOO_LARGE = stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE
+WORKER_CONTEXT_ADVICE_UNAVAILABLE = stage4.WORKER_CONTEXT_ADVICE_UNAVAILABLE
 MAX_NODE_SUMMARY_CHARS = 700
 MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
@@ -169,6 +173,8 @@ MAX_PROJECT_SPECIFICATION_CHARS = 5200
 MAX_PROJECT_BRAIN_CHARS = 7600
 MAX_BRAIN_PROJECTION_CHARS = 3600
 MAX_WORKER_MISSION_CHARS = 4200
+MAX_HYDRATED_MISSION_CHARS = stage4.MAX_HYDRATED_MISSION_CHARS
+WORKER_CONTEXT_RENDERING_VERSION = stage4.WORKER_CONTEXT_RENDERING_VERSION
 MAX_MISSION_COMPILER_CONTEXT_CHARS = 5200
 MAX_BRAIN_ITEMS = 8
 MAX_SOURCE_LEDGER_CHARS = 26000
@@ -1571,6 +1577,14 @@ def new_metrics(mode):
         "contract_decompositions": 0,
         "contract_child_scope_rejections": 0,
         "worker_contract_contexts_created": 0,
+        "worker_context_projections_created": 0,
+        "worker_context_projection_failures": 0,
+        "worker_context_required_chars": 0,
+        "worker_context_optional_chars": 0,
+        "worker_context_rendered_chars": 0,
+        "worker_context_optional_items_dropped": 0,
+        "worker_context_authority_items_dropped": 0,
+        "worker_context_authority_overflows": 0,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
@@ -5625,7 +5639,28 @@ validate_mission_advice_shape = stage4.validate_mission_advice_shape
 sanitize_mission_advice = stage4.sanitize_mission_advice
 hydrate_worker_mission = stage4.hydrate_worker_mission
 validate_hydrated_worker_mission = stage4.validate_hydrated_worker_mission
+hydrated_worker_mission_chars = stage4.hydrated_worker_mission_chars
 validate_child_contract = stage4.validate_child_contract
+
+
+def build_worker_context_projection(mission, contract, dependency_summaries=None,
+                                    max_chars=MAX_WORKER_MISSION_CHARS):
+    """Build a projection using the unchanged orchestrator Worker bound."""
+    return stage4.build_worker_context_projection(
+        mission, contract, dependency_summaries, max_chars=max_chars,
+    )
+
+
+def validate_worker_context_projection(projection, mission, contract,
+                                       dependency_summaries=None,
+                                       max_chars=MAX_WORKER_MISSION_CHARS):
+    return stage4.validate_worker_context_projection(
+        projection, mission, contract, dependency_summaries, max_chars=max_chars,
+    )
+
+
+def render_worker_context_projection(projection, max_chars=MAX_WORKER_MISSION_CHARS):
+    return stage4.render_worker_context_projection(projection, max_chars=max_chars)
 
 
 def _current_execution_contract(task=None):
@@ -6092,6 +6127,142 @@ def _compact_mission_compiler_context(context, max_chars=MAX_MISSION_COMPILER_CO
     return encoded
 
 
+def _worker_context_projection_key(mission, contract):
+    mission = mission if isinstance(mission, dict) else {}
+    contract = contract if isinstance(contract, dict) else {}
+    return ":".join(str(value or "") for value in (
+        mission.get("mission_id"), mission.get("mission_hash"),
+        contract.get("execution_contract_id"), contract.get("contract_hash"),
+    ))
+
+
+def _worker_context_projection_artifact(mission, contract, dependency_summaries=None,
+                                        task_id=None):
+    """Create/cache one exact model-facing context for a full mission."""
+    cache = RUN.setdefault("_worker_context_projections", {})
+    key = _worker_context_projection_key(mission, contract)
+    cached = cache.get(key) if isinstance(cache, dict) else None
+    if isinstance(cached, dict) and cached.get("rendered_worker_context") is not None:
+        return cached
+    try:
+        projection = stage4.build_worker_context_projection(
+            mission, contract, dependency_summaries,
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        validation = stage4.validate_worker_context_projection(
+            projection, mission, contract, dependency_summaries,
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        if not validation.get("valid"):
+            detail = "; ".join(validation.get("errors", [])) or "projection validation failed"
+            raise stage4.ExecutionContractError(
+                MISSION_CONTRACT_VIOLATION, detail,
+            )
+        rendered = stage4.render_worker_context_projection(
+            projection, max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+    except stage4.ExecutionContractError as exc:
+        RUN["worker_context_projection_failures"] = RUN.get(
+            "worker_context_projection_failures", 0,
+        ) + 1
+        if exc.code == stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE:
+            RUN["worker_context_authority_overflows"] = RUN.get(
+                "worker_context_authority_overflows", 0,
+            ) + 1
+        record_run_event(
+            "worker_context_projection_failure", task_id=task_id,
+            execution_contract_id=(contract or {}).get("execution_contract_id"),
+            mission_id=(mission or {}).get("mission_id"),
+            error=str(exc), error_code=exc.code, details=list(exc.details),
+        )
+        raise
+
+    audit = projection.get("projection_audit", {})
+    full_advice = mission.get("implementation_advice", {}) if isinstance(mission, dict) else {}
+    all_labels = [item[0] for item in stage4._worker_context_advice_items(full_advice)]
+    retained_labels = stage4._worker_context_advice_selection_labels(
+        projection.get("implementation_advice", {}), full_advice,
+    )
+    dropped_labels = [label for label in all_labels if label not in retained_labels]
+    projection_chars = len(json.dumps(projection, ensure_ascii=False, default=str))
+    rendered_chars = len(rendered)
+    artifact = {
+        "worker_context_projection": copy.deepcopy(projection),
+        "rendered_worker_context": rendered,
+        "validation": copy.deepcopy(validation),
+        "full_mission_chars": hydrated_worker_mission_chars(mission),
+        "projection_chars": projection_chars,
+        "rendered_context_chars": rendered_chars,
+        "context_limit": MAX_WORKER_MISSION_CHARS,
+        "included_sections": list(audit.get("included_sections", [])),
+        "excluded_internal_structures": list(audit.get("excluded_internal_structures", [])),
+        "optional_advice_items_retained": retained_labels,
+        "optional_advice_items_dropped": dropped_labels,
+        "authority_items_dropped": audit.get("authority_items_dropped", 0),
+        "authority_field_sources": {
+            field: "CONTRACT"
+            for field in (
+                "mission_id", "mission_hash",
+                "execution_contract_id", "execution_contract_hash", "approved_plan_id",
+                "approved_plan_hash", "goal", "responsibility_type",
+                "allowed_mutation_paths", "allowed_inspection_paths",
+                "interfaces_to_reuse", "requirements", "preservation", "prohibitions",
+                "do_not_touch", "test_contract", "done_when", "dependencies",
+                "relevant_repository_facts",
+            )
+        },
+        "advice_field_source": "MODEL",
+    }
+    if isinstance(cache, dict):
+        cache[key] = copy.deepcopy(artifact)
+    RUN["worker_context_projections_created"] = RUN.get(
+        "worker_context_projections_created", 0,
+    ) + 1
+    RUN["worker_contract_contexts_created"] = RUN.get(
+        "worker_contract_contexts_created", 0,
+    ) + 1
+    RUN["worker_context_required_chars"] = max(
+        RUN.get("worker_context_required_chars", 0),
+        int(audit.get("required_authority_chars", 0) or 0),
+    )
+    RUN["worker_context_optional_chars"] = max(
+        RUN.get("worker_context_optional_chars", 0),
+        int(audit.get("optional_advice_chars_retained", 0) or 0),
+    )
+    RUN["worker_context_rendered_chars"] = max(
+        RUN.get("worker_context_rendered_chars", 0), rendered_chars,
+    )
+    RUN["worker_context_optional_items_dropped"] = RUN.get(
+        "worker_context_optional_items_dropped", 0,
+    ) + len(dropped_labels)
+    RUN["worker_context_authority_items_dropped"] = RUN.get(
+        "worker_context_authority_items_dropped", 0,
+    ) + int(audit.get("authority_items_dropped", 0) or 0)
+    record_run_event(
+        "worker_context_projection_created", task_id=task_id,
+        execution_contract_id=(contract or {}).get("execution_contract_id"),
+        mission_id=(mission or {}).get("mission_id"),
+        approved_plan_hash=(mission or {}).get("approved_plan_hash"),
+        execution_contract_hash=(mission or {}).get("execution_contract_hash"),
+        mission_hash=(mission or {}).get("mission_hash"),
+        worker_context_projection_hash=projection.get("worker_context_projection_hash"),
+        worker_context_projection=copy.deepcopy(projection),
+        rendered_worker_context=rendered,
+        full_mission_chars=artifact["full_mission_chars"],
+        projection_chars=projection_chars,
+        rendered_context_chars=rendered_chars,
+        context_limit=MAX_WORKER_MISSION_CHARS,
+        included_sections=artifact["included_sections"],
+        excluded_internal_structures=artifact["excluded_internal_structures"],
+        optional_advice_items_retained=retained_labels,
+        optional_advice_items_dropped=dropped_labels,
+        authority_items_dropped=artifact["authority_items_dropped"],
+        authority_field_sources=artifact["authority_field_sources"],
+        advice_field_source=artifact["advice_field_source"],
+    )
+    return artifact
+
+
 def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
                            strategy_context=None, task_context=None, structured_call=None,
                            plan_node_contract=None, execution_contract=None):
@@ -6202,6 +6373,7 @@ BOUNDED COMPILER CONTEXT:
     advice_validated = False
     hydration_started = False
     hydration_failure_recorded = False
+    projection_failure_recorded = False
     try:
         if structured_call is None:
             data = structured_model_call(
@@ -6267,6 +6439,21 @@ BOUNDED COMPILER CONTEXT:
                 mission, execution_contract, dependencies,
             )
             if not final_check.get("valid"):
+                if any(
+                    str(item).startswith(stage4.HYDRATED_MISSION_TOO_LARGE)
+                    for item in final_check.get("errors", [])
+                ):
+                    RUN["mission_contract_validation_failures"] = RUN.get(
+                        "mission_contract_validation_failures", 0,
+                    ) + 1
+                    RUN["hydrated_worker_mission_failures"] = RUN.get(
+                        "hydrated_worker_mission_failures", 0,
+                    ) + 1
+                    hydration_failure_recorded = True
+                    raise stage4.ExecutionContractError(
+                        stage4.HYDRATED_MISSION_TOO_LARGE,
+                        "; ".join(final_check.get("errors", [])),
+                    )
                 RUN["mission_contract_validation_failures"] = RUN.get(
                     "mission_contract_validation_failures", 0,
                 ) + 1
@@ -6278,7 +6465,8 @@ BOUNDED COMPILER CONTEXT:
                     MISSION_CONTRACT_VIOLATION + ": "
                     + "; ".join(final_check.get("errors", []))
                 )
-            if len(json.dumps(mission, ensure_ascii=False, default=str)) > MAX_WORKER_MISSION_CHARS:
+            mission_chars = hydrated_worker_mission_chars(mission)
+            if mission_chars > stage4.MAX_HYDRATED_MISSION_CHARS:
                 RUN["mission_contract_validation_failures"] = RUN.get(
                     "mission_contract_validation_failures", 0,
                 ) + 1
@@ -6286,20 +6474,31 @@ BOUNDED COMPILER CONTEXT:
                     "hydrated_worker_mission_failures", 0,
                 ) + 1
                 hydration_failure_recorded = True
-                raise StructuredOutputError(
-                    MISSION_CONTRACT_VIOLATION + ": hydrated mission exceeds the Worker context limit"
+                raise stage4.ExecutionContractError(
+                    stage4.HYDRATED_MISSION_TOO_LARGE,
+                    f"hydrated mission exceeds its internal artifact bound ({mission_chars} > "
+                    f"{stage4.MAX_HYDRATED_MISSION_CHARS})",
                 )
             RUN["hydrated_worker_missions_created"] = RUN.get(
                 "hydrated_worker_missions_created", 0,
-            ) + 1
-            RUN["worker_contract_contexts_created"] = RUN.get(
-                "worker_contract_contexts_created", 0,
             ) + 1
             record_run_event(
                 "hydrated_worker_mission_created", task_id=task.get("id"),
                 execution_contract_id=execution_contract.get("execution_contract_id"),
                 hydrated_worker_mission=copy.deepcopy(mission),
             )
+            try:
+                _worker_context_projection_artifact(
+                    mission, execution_contract, dependencies,
+                    task_id=task.get("id"),
+                )
+            except stage4.ExecutionContractError:
+                projection_failure_recorded = True
+                hydration_failure_recorded = True
+                RUN["mission_contract_validation_failures"] = RUN.get(
+                    "mission_contract_validation_failures", 0,
+                ) + 1
+                raise
         else:
             if not validator(data):
                 raise StructuredOutputError("mission compiler returned an invalid response")
@@ -6318,7 +6517,11 @@ BOUNDED COMPILER CONTEXT:
             RUN["mission_contract_failures"] = RUN.get("mission_contract_failures", 0) + 1
             if not advice_validated and not advice_rejection_recorded:
                 RUN["mission_advice_rejected"] = RUN.get("mission_advice_rejected", 0) + 1
-            if hydration_started and not hydration_failure_recorded:
+            if (
+                hydration_started
+                and not hydration_failure_recorded
+                and not projection_failure_recorded
+            ):
                 RUN["mission_contract_validation_failures"] = RUN.get(
                     "mission_contract_validation_failures", 0,
                 ) + 1
@@ -7641,6 +7844,20 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
                        brain_projection=None, worker_mission=None, execution_contract=None):
     dependency_summaries = dependency_summaries or []
     failure_evidence = failure_evidence or task.get("failure_evidence", [])
+    if (
+        isinstance(execution_contract, dict)
+        and isinstance(worker_mission, dict)
+        and worker_mission.get("mission_hash")
+    ):
+        # Contract-backed Workers receive the deterministic compact rendering,
+        # while the full mission remains in the internal cache/evidence and
+        # the tool guard continues to use the full contract below the prompt.
+        worker_context = _worker_context_projection_artifact(
+            worker_mission, execution_contract,
+            dependency_summaries if dependency_summaries else None,
+            task_id=task.get("id"),
+        )
+        return worker_context["rendered_worker_context"]
     if isinstance(execution_contract, dict):
         # A direct caller may provide the old broad projection. The Stage 4A
         # packet is still fresh and contract-scoped at this boundary.
@@ -14737,6 +14954,86 @@ def run_self_test(install_browser=False):
             v191_task, {}, None, {"files": []},
             worker_mission=v191_live_mission, execution_contract=v19_mutation_contract,
         )
+        # v19.3 separates the rich internal mission from the deterministic
+        # model-facing projection.  The exact v19.2 response is intentionally
+        # used here; no model or Worker retry is involved.
+        v193_exact_artifact = _worker_context_projection_artifact(
+            v191_live_mission, v19_mutation_contract, [], task_id="EXEC-001",
+        )
+        v193_exact_projection = v193_exact_artifact["worker_context_projection"]
+        v193_exact_projection_check = stage4.validate_worker_context_projection(
+            v193_exact_projection, v191_live_mission, v19_mutation_contract, [],
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        v193_exact_rendered = v193_exact_artifact["rendered_worker_context"]
+        v193_exact_mission_chars = hydrated_worker_mission_chars(v191_live_mission)
+        v193_exact_projection_chars = len(json.dumps(
+            v193_exact_projection, ensure_ascii=False, default=str,
+        ))
+        v193_exact_rendered_chars = len(v193_exact_rendered)
+        v193_projection_hash = v193_exact_projection.get("worker_context_projection_hash")
+        v193_budget_advice_check = stage4.sanitize_mission_advice({
+            "objective": "Implement the approved input behavior.",
+            "implementation_steps": [
+                f"Apply the verified responsibility detail {index} " + ("carefully " * 24)
+                for index in range(stage4.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "interface_usage": ["Use the approved interface " + ("without duplication " * 10)],
+            "verification_notes": [
+                f"Run the bounded verification detail {index} " + ("without broadening scope " * 10)
+                for index in range(stage4.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "implementation_notes": [
+                f"Keep the implementation detail bounded {index} " + ("and contract-local " * 10)
+                for index in range(stage4.MISSION_ADVICE_MAX_ITEMS)
+            ],
+            "inspection_order": [
+                f"Inspect the relevant approved boundary {index} " + ("before editing " * 10)
+                for index in range(stage4.MISSION_ADVICE_MAX_ITEMS)
+            ],
+        }, v19_mutation_contract)
+        v193_budget_mission = stage4.hydrate_worker_mission(
+            v19_mutation_contract, v193_budget_advice_check.get("advice", {}), [],
+        )
+        v193_budget_artifact = _worker_context_projection_artifact(
+            v193_budget_mission, v19_mutation_contract, [], task_id="EXEC-001-budget",
+        )
+        v193_authority_overflow = None
+        v193_oversized_contract = copy.deepcopy(v19_mutation_contract)
+        v193_oversized_contract["local_preservation_constraints"] = [
+            f"Preserve required invariant {index}: " + ("critical-" * 90)
+            for index in range(12)
+        ]
+        v193_oversized_contract["contract_hash"] = stage4.deterministic_hash(
+            stage4._without(v193_oversized_contract, "contract_hash"),
+        )
+        v193_oversized_mission = stage4.hydrate_worker_mission(
+            v193_oversized_contract,
+            {"objective": "Implement the approved input behavior."}, [],
+        )
+        try:
+            stage4.build_worker_context_projection(
+                v193_oversized_mission, v193_oversized_contract, [],
+                max_chars=MAX_WORKER_MISSION_CHARS,
+            )
+        except stage4.ExecutionContractError as exc:
+            v193_authority_overflow = exc.code
+        v193_projection_worker_messages = []
+        original_projection_worker = globals()["ask_ollama"]
+
+        def fake_projection_worker(messages, **_kwargs):
+            v193_projection_worker_messages.append(copy.deepcopy(messages))
+            return {"role": "assistant", "content": "mock projection Worker reached"}
+
+        globals()["ask_ollama"] = fake_projection_worker
+        try:
+            execute_agent_task(
+                v19_mutation_contract.get("goal", "approved mutation"), {},
+                role="Builder", task_id="v19.3-projection-probe",
+                extra_context=v193_exact_rendered, max_steps=1,
+            )
+        finally:
+            globals()["ask_ollama"] = original_projection_worker
         v191_conflict = stage4.sanitize_mission_advice({
             "objective": "Modify src/game.js and add a new paused state owned by InputManager.",
         }, v19_mutation_contract)
@@ -14784,6 +15081,10 @@ def run_self_test(install_browser=False):
                 "implementation_steps": ["Modify tests/input.test.js."],
                 "test_file": "tests/pause.test.js",
             },
+        )
+        v193_test_projection = stage4.build_worker_context_projection(
+            v191_test_mission, v19_test_contract, v191_test_dependency,
+            max_chars=MAX_WORKER_MISSION_CHARS,
         )
         v191_test_conflict = stage4.sanitize_mission_advice({
             "objective": "Create tests/pause.test.js for the new behavior.",
@@ -15291,6 +15592,89 @@ def run_self_test(install_browser=False):
                 and RUN.get("mission_advice_validated", 0) >= 2
                 and RUN.get("mission_non_authoritative_fields_rejected", 0) >= 1
                 and RUN.get("hydrated_worker_missions_created", 0) >= 2
+            ),
+            "v19.3 full mission bound": (
+                v193_exact_mission_chars > MAX_WORKER_MISSION_CHARS
+                and v193_exact_mission_chars <= stage4.MAX_HYDRATED_MISSION_CHARS
+                and stage4.validate_hydrated_worker_mission(
+                    v191_live_mission, v19_mutation_contract, [],
+                ).get("valid")
+            ),
+            "v19.3 compact projection": (
+                v193_exact_projection_check.get("valid")
+                and v193_exact_projection_chars > MAX_WORKER_MISSION_CHARS
+                and v193_exact_rendered_chars <= MAX_WORKER_MISSION_CHARS
+                and v193_exact_projection.get("mission_hash") == v191_live_mission.get("mission_hash")
+                and v193_exact_projection.get("execution_contract_hash") == v19_mutation_contract.get("contract_hash")
+                and v193_exact_projection.get("approved_plan_hash") == v19_mutation_contract.get("plan_hash")
+            ),
+            "v19.3 authority hydration": (
+                v193_exact_projection.get("allowed_mutation_paths") == ["src/input.js"]
+                and v193_exact_projection.get("allowed_inspection_paths") == ["src/input.js", "src/game.js"]
+                and v193_exact_projection.get("do_not_touch") == v19_mutation_contract.get("global_do_not_touch")
+                and set(v19_mutation_contract.get("local_preservation_constraints", [])).issubset(
+                    set(v193_exact_projection.get("preservation", []))
+                )
+                and set(v19_mutation_contract.get("structured_prohibitions", [])).issubset(
+                    set(v193_exact_projection.get("prohibitions", []))
+                )
+                and v193_exact_projection.get("projection_audit", {}).get("authority_items_dropped") == 0
+            ),
+            "v19.3 advice budgeting": (
+                v193_budget_advice_check.get("valid")
+                and v193_budget_artifact.get("optional_advice_items_retained")
+                and v193_budget_artifact.get("optional_advice_items_dropped")
+                and v193_budget_artifact.get("authority_items_dropped") == 0
+                and v193_budget_artifact.get("worker_context_projection", {}).get(
+                    "projection_audit", {},
+                ).get("optional_items_dropped", 0) > 0
+            ),
+            "v19.3 projection exclusions": (
+                all(
+                    token not in json.dumps(v193_exact_projection, ensure_ascii=False, default=str).casefold()
+                    for token in (
+                        "file_sha256", "line_start", "approved_plan_snapshot", "execution_graph",
+                        "full_project_brain", "full_task_brain", "source_ledger",
+                        "raw_mission_compiler_output",
+                    )
+                )
+                and all(
+                    token not in v193_exact_rendered.casefold()
+                    for token in (
+                        "approved plan snapshot", "execution graph", "full project brain",
+                        "full task brain", "source ledger", "raw missioncompiler",
+                    )
+                )
+            ),
+            "v19.3 projection hash": (
+                v193_projection_hash
+                and v193_projection_hash != v191_live_mission.get("mission_hash")
+                and v193_projection_hash == stage4.deterministic_hash(
+                    stage4._without(v193_exact_projection, "worker_context_projection_hash"),
+                )
+            ),
+            "v19.3 authority overflow": (
+                v193_authority_overflow == stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE
+            ),
+            "v19.3 test projection": (
+                v193_test_projection.get("allowed_mutation_paths") == ["tests/input.test.js"]
+                and "src/input.js" not in v193_test_projection.get("allowed_mutation_paths", [])
+                and "EXEC-001" in json.dumps(v193_test_projection, ensure_ascii=False)
+                and stage4.validate_worker_context_projection(
+                    v193_test_projection, v191_test_mission, v19_test_contract,
+                    v191_test_dependency, MAX_WORKER_MISSION_CHARS,
+                ).get("valid")
+            ),
+            "v19.3 mock Worker reachable": (
+                len(v193_projection_worker_messages) == 1
+                and v193_exact_rendered in v193_projection_worker_messages[0][1].get("content", "")
+                and len(v193_exact_rendered) <= MAX_WORKER_MISSION_CHARS
+            ),
+            "v19.3 projection metrics": (
+                RUN.get("worker_context_projections_created", 0) >= 4
+                and RUN.get("worker_context_projection_failures", 0) == 0
+                and RUN.get("worker_context_authority_items_dropped", 0) == 0
+                and RUN.get("worker_context_rendered_chars", 0) <= MAX_WORKER_MISSION_CHARS
             ),
         }
         for name, ok in checks.items():
