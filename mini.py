@@ -1174,6 +1174,10 @@ def new_metrics(mode):
         "impact_candidates": 0,
         "impact_supported": 0,
         "impact_preservation_only": 0,
+        "impact_unknown_surface_references": 0,
+        "impact_surface_evidence_mismatches": 0,
+        "impact_invented_existing_paths_rejected": 0,
+        "impact_invented_interfaces_rejected": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -4061,6 +4065,12 @@ def prepare_stage2_context(raw_goal, contract, repo_snapshot=None, interactive=T
 
 impact_map_schema = stage3.impact_map_schema
 impact_challenge_schema = stage3.challenge_schema
+canonical_surface_registry_schema = stage3.canonical_surface_registry_schema
+build_canonical_surface_registry = stage3.build_canonical_surface_registry
+build_impact_seeds = stage3.build_impact_seeds
+hydrate_impact_map = stage3.hydrate_impact_map
+audit_impact_surfaces = stage3.audit_impact_surfaces
+derive_do_not_touch_surface_ids = stage3.derive_do_not_touch_surface_ids
 validate_impact_map = stage3.validate_impact_map
 validate_impact_challenges = stage3.validate_challenges
 validate_change_plan = stage3.validate_change_plan
@@ -4097,13 +4107,20 @@ def _impact_project_invariants(task_brain):
 
 def _impact_planner_prompt(context):
     return f"""You are IMPACT PLANNER, a narrow read-only role in a weak-model coding orchestrator.
-Propose one COMPLETE bounded Impact Map for the current existing-project task. Identify current owners,
-behavior/integration/test responsibilities, verified interfaces to reuse, preservation-only surfaces, and
-fan-in verification. Relevant does not mean MUST_CHANGE. A preservation surface should remain unmodified
-unless the supplied requirements and repository evidence prove mutation is necessary. Every concrete impact
-must cite valid Source Requirement IDs and accepted REPO evidence IDs from this context. Prefer
-INSUFFICIENT_EVIDENCE over invention. Do not write code, execute tests, decompose Workers, call tools,
-invent files, or reproduce raw source. Return only the requested structured map.
+Propose one COMPLETE bounded Impact Map for the current existing-project task. The canonical surface registry
+below is the ONLY authority for existing repository identity. For every existing impact output a valid
+surface_id from that registry and one bounded disposition: MUST_CHANGE, INTERFACE_REUSE, TEST_CHANGE,
+PRESERVATION_ONLY, VERIFY_ONLY, or INSUFFICIENT_EVIDENCE. Output requirement IDs, actions, interface surface
+IDs, preservation promises, and verification only. Do not author or infer paths, symbols, owners, or
+interface names: they are hydrated later from surface IDs. Never use a path or symbol that is not represented
+by a supplied surface ID. Relevant does not mean MUST_CHANGE. A preservation surface remains unmodified
+unless requirements and evidence prove mutation necessary. Every impact must cite valid Source Requirement
+IDs; evidence IDs are optional in the response and are checked against the selected surface. If no existing
+surface can safely represent a responsibility, emit a separate justified NEW_SURFACE_PROPOSAL rather than
+inventing an existing path, and bind its impact through new_surface_proposal_ids with no surface_id. Each
+impact must use exactly one target authority: an existing surface_id or validated new-surface proposal IDs.
+Do not write code, execute tests, decompose Workers, call tools, or reproduce
+raw source. Return only the requested structured map.
 
 BOUNDED TASK/REPOSITORY FACT CONTEXT:
 {compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_PLANNER_CONTEXT_CHARS)}"""
@@ -4114,9 +4131,25 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     if RUN.get("impact_planner_calls", 0) >= 1:
         raise ImpactPlanningError("only one top-level ImpactPlanner invocation is allowed")
     requirements = _active_stage3_requirements(contract)
+    RUN["task_brain"] = copy.deepcopy(task_brain or {})
+    registry = stage3.build_canonical_surface_registry(task_brain, repository_evidence)
+    seeds = stage3.build_impact_seeds(task_brain, requirements, repository_evidence, registry)
+    registry_validation = stage3.validate_canonical_surface_registry(registry, repository_evidence)
+    if not registry_validation.get("valid"):
+        raise ImpactPlanningError(
+            "IMPACT_MAP_INVALID: canonical surface registry is invalid: "
+            + "; ".join(registry_validation.get("errors", []))
+        )
+    RUN["canonical_surface_registry"] = registry
+    RUN["impact_seeds"] = seeds
+    record_run_event(
+        "canonical_surface_registry_created", surface_count=len(registry.get("surfaces", [])),
+        evidence_count=len(registry.get("evidence_ids", [])), registry=registry,
+    )
     context = stage3.build_planner_context(
         task_brain, requirements, repository_evidence,
         project_invariants=_impact_project_invariants(task_brain),
+        surface_registry=registry, impact_seeds=seeds,
     )
     RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
     RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
@@ -4124,8 +4157,8 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     prompt_text = _impact_planner_prompt(context)
 
     def validator(data):
-        return stage3.impact_map_is_valid(
-            data, requirements, repository_evidence, EXISTING_PROJECT,
+        return stage3.validate_planner_output(
+            data, requirements, allow_legacy=structured_call is not None,
         )
 
     try:
@@ -4138,26 +4171,43 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
             candidate = structured_call(
                 prompt_text, validator, "impact-map", stage3.impact_map_schema(),
             )
-        impact_map = stage3.normalize_impact_map(candidate)
+        raw_artifact = stage3.normalize_impact_map(candidate)
+        RUN["raw_impact_planner_output"] = copy.deepcopy(raw_artifact)
+        RUN["raw_impact_map"] = copy.deepcopy(raw_artifact)
+        record_run_event("impact_planner_output_captured", raw_impact_map=raw_artifact)
+        impact_map = stage3.hydrate_impact_map(
+            candidate, registry, requirements, repository_evidence,
+            allow_legacy_exact=structured_call is not None,
+        )
+        RUN["impact_map_hydration"] = impact_map
+        for metric in (
+            "impact_unknown_surface_references", "impact_surface_evidence_mismatches",
+            "impact_invented_existing_paths_rejected", "impact_invented_interfaces_rejected",
+        ):
+            RUN[metric] = RUN.get(metric, 0) + int(impact_map.get(metric, 0) or 0)
+        if not impact_map.get("hydration_valid"):
+            RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+            raise ImpactPlanningError(
+                "IMPACT_MAP_INVALID: " + "; ".join(impact_map.get("hydration_errors", []))
+            )
         validation = stage3.validate_impact_map(
             impact_map, requirements, repository_evidence, EXISTING_PROJECT,
+            surface_registry=registry,
         )
         if not validation.get("valid"):
-            raise StructuredOutputError("; ".join(validation.get("errors", [])))
+            RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+            raise ImpactPlanningError(
+                "IMPACT_MAP_INVALID: " + "; ".join(validation.get("errors", []))
+            )
     except StructuredOutputError as exc:
         RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
-        record_run_event("impact_planner_fallback", error=str(exc))
-        impact_map = stage3.deterministic_impact_map(
-            (task_brain or {}).get("task_goal", {}).get("text", "coding task"),
-            requirements, repository_evidence,
-        )
-        validation = stage3.validate_impact_map(
-            impact_map, requirements, repository_evidence, EXISTING_PROJECT,
-        )
+        record_run_event("impact_planner_invalid", error=str(exc))
+        raise ImpactPlanningError("IMPACT_MAP_INVALID: " + str(exc)) from exc
     if not validation.get("valid"):
         raise ImpactPlanningError("IMPACT_MAP_INCOMPLETE: " + "; ".join(validation.get("errors", [])))
     RUN.setdefault("control_flow", []).append("IMPACT_MAP")
     RUN["impact_map"] = impact_map
+    RUN["canonical_impact_map"] = impact_map
     RUN["impact_map_validation"] = validation
     RUN["impact_maps_created"] = RUN.get("impact_maps_created", 0) + 1
     RUN["impact_candidates"] = RUN.get("impact_candidates", 0) + validation.get("impact_candidates", 0)
@@ -4193,9 +4243,12 @@ Try to falsify the candidate Impact Map using only the bounded requirements, acc
 ownership, interfaces, tests, and preservation constraints below. Ask whether each MUST_CHANGE surface is
 actually necessary, whether ownership is duplicated or wrong, whether a verified interface was missed,
 whether a required surface/test/dependency is absent, and whether unrelated scope was introduced.
-Every challenge must cite its impact IDs (except a true missing-impact gap), Source Requirement IDs, and
-applicable REPO evidence IDs. Unsupported criticism is not authoritative. Do not review code, write code,
-call tools, inspect the full repository, or claim perfect correctness. Return only structured challenges.
+Use only canonical impact/surface IDs from the supplied map and registry; do not invent paths, symbols,
+owners, interfaces, or evidence. Every challenge must cite its impact IDs (except a true missing-impact gap),
+Source Requirement IDs, and applicable REPO evidence IDs. Unsupported criticism is not authoritative.
+Deterministically evaluate unsupported necessity, wrong owner, duplicate ownership, missing impact, unrelated
+change, preservation risk, missed interface reuse, test/dependency/requirement gaps. Do not review code, write
+code, call tools, inspect the full repository, or claim perfect correctness. Return only structured challenges.
 
 BOUNDED FALSIFICATION CONTEXT:
 {compact_text(json.dumps(context, ensure_ascii=False, default=str), stage3.MAX_CHALLENGER_CONTEXT_CHARS)}"""
@@ -4207,8 +4260,12 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     if RUN.get("impact_challenger_calls", 0) >= MAX_IMPACT_CHALLENGE_ROUNDS:
         raise ImpactPlanningError("only one top-level ImpactChallenger round is allowed")
     requirements = _active_stage3_requirements(contract)
+    registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
+        task_brain, repository_evidence,
+    )
     context = stage3.build_challenger_context(
         impact_map, requirements, repository_evidence, task_brain,
+        surface_registry=registry,
     )
     RUN.setdefault("control_flow", []).append("IMPACT_CHALLENGER")
     RUN["impact_challenger_calls"] = RUN.get("impact_challenger_calls", 0) + 1
@@ -4226,15 +4283,19 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
                 stage3.challenge_schema(),
             )
         model_challenges = stage3.normalize_challenges(data, source="MODEL")
+        RUN["raw_impact_challenger_output"] = copy.deepcopy(model_challenges)
+        record_run_event("impact_challenger_output_captured", raw_challenges=model_challenges)
     except StructuredOutputError as exc:
         model_challenges = []
+        RUN["raw_impact_challenger_output"] = []
         record_run_event("impact_challenger_structured_fallback", error=str(exc))
     deterministic = stage3.deterministic_challenges(
-        impact_map, requirements, repository_evidence,
+        impact_map, requirements, repository_evidence, surface_registry=registry,
     )
     challenges = stage3.merge_challenges(model_challenges, deterministic)
     validation = stage3.validate_challenges(
         challenges, impact_map, requirements, repository_evidence,
+        surface_registry=registry,
     )
     RUN["impact_challenges"] = RUN.get("impact_challenges", 0) + len(challenges)
     RUN["impact_challenges_validated"] = RUN.get("impact_challenges_validated", 0) + len(
@@ -4246,6 +4307,8 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     RUN["impact_challenge_rounds"] = 1
     RUN["impact_challenges_output"] = challenges
     RUN["impact_challenge_validation"] = validation
+    RUN["validated_impact_challenges"] = validation.get("validated", [])
+    RUN["rejected_impact_challenges"] = validation.get("rejected", [])
     record_run_event(
         "impact_challenges_validated", challenge_count=len(challenges),
         validated_count=len(validation.get("validated", [])),
@@ -4271,9 +4334,14 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
     if RUN.get("impact_plan_revision_calls", 0) >= MAX_IMPACT_PLAN_REVISION_ROUNDS:
         raise ImpactPlanningError("the bounded Impact Plan revision round is already exhausted")
     requirements = _active_stage3_requirements(contract)
+    registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
+        task_brain, repository_evidence,
+    )
     planner_context = stage3.build_planner_context(
         task_brain, requirements, repository_evidence,
         project_invariants=_impact_project_invariants(task_brain),
+        surface_registry=registry,
+        impact_seeds=RUN.get("impact_seeds", []),
     )
     context = {
         "candidate_impact_map": impact_map,
@@ -4291,7 +4359,9 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
     prompt_text = _impact_revision_prompt(context)
 
     def validator(data):
-        return stage3.impact_map_is_valid(data, requirements, repository_evidence, EXISTING_PROJECT)
+        return stage3.validate_planner_output(
+            data, requirements, allow_legacy=structured_call is not None,
+        )
 
     try:
         if structured_call is None:
@@ -4303,9 +4373,15 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
             data = structured_call(
                 prompt_text, validator, "impact-plan-revision", stage3.impact_map_schema(),
             )
-        revised = stage3.normalize_impact_map(data)
+        revised = stage3.hydrate_impact_map(
+            data, registry, requirements, repository_evidence,
+            allow_legacy_exact=structured_call is not None,
+        )
+        if not revised.get("hydration_valid"):
+            raise StructuredOutputError("; ".join(revised.get("hydration_errors", [])))
         validation = stage3.validate_impact_map(
             revised, requirements, repository_evidence, EXISTING_PROJECT,
+            surface_registry=registry,
         )
         if not validation.get("valid"):
             raise StructuredOutputError("; ".join(validation.get("errors", [])))
@@ -4313,7 +4389,7 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         record_run_event("impact_plan_revision_fallback", error=str(exc))
         revised = stage3.deterministic_impact_map(
             (task_brain or {}).get("task_goal", {}).get("text", "coding task"),
-            requirements, repository_evidence,
+            requirements, repository_evidence, registry=registry,
         )
     return revised
 
@@ -4321,20 +4397,26 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
 def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
                                   repository_evidence):
     requirements = _active_stage3_requirements(contract)
+    task_brain = RUN.get("task_brain") or {}
+    registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
+        task_brain, repository_evidence,
+    )
     RUN.setdefault("control_flow", []).append("PLAN_RECONCILIATION")
     reconciled, resolved, unresolved = stage3.reconcile_impact_map(
         impact_map, challenge_validation.get("validated", []),
-        requirements, repository_evidence,
+        requirements, repository_evidence, surface_registry=registry,
     )
     RUN.setdefault("control_flow", []).append("MINIMAL_EFFECTIVE_CHANGE_PLAN")
     plan = stage3.build_minimal_change_plan(
         reconciled, requirements, repository_evidence,
         resolved_challenges=resolved, unresolved_challenges=unresolved,
         project_mode=EXISTING_PROJECT,
+        surface_registry=registry,
     )
     RUN.setdefault("control_flow", []).append("PLAN_GATE")
     gate = stage3.validate_change_plan(
         plan, requirements, repository_evidence, EXISTING_PROJECT,
+        surface_registry=registry,
     )
     RUN["change_plans_created"] = RUN.get("change_plans_created", 0) + 1
     RUN["plan_nodes"] = RUN.get("plan_nodes", 0) + gate.get("plan_nodes", 0)
@@ -4347,8 +4429,11 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
     if not gate.get("valid"):
         RUN["change_plan_gate_failures"] = RUN.get("change_plan_gate_failures", 0) + 1
     RUN["reconciled_impact_map"] = reconciled
+    RUN["resolved_impact_challenges"] = resolved
+    RUN["unresolved_impact_challenges"] = unresolved
     RUN["minimal_effective_change_plan"] = plan
     RUN["change_plan_gate"] = gate
+    RUN["plan_gate"] = gate
     record_run_event(
         "minimal_effective_change_plan", plan_id=plan.get("plan_id"),
         plan_hash=plan.get("plan_hash"), gate=gate, plan=plan,
@@ -4584,6 +4669,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
     RUN["impact_planning_required"] = True
     fingerprint_before = _stage3_workspace_fingerprint()
     task_brain = understanding.get("task_brain") or RUN.get("task_brain") or {}
+    RUN["task_brain"] = copy.deepcopy(task_brain)
     repository_evidence = list(
         (understanding.get("reconnaissance") or {}).get("evidence", [])
         or RUN.get("repository_evidence", []) or []
@@ -4634,10 +4720,12 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             # falsification still checks the revised map against the same facts.
             revised_challenges = stage3.deterministic_challenges(
                 impact_map, _active_stage3_requirements(contract), repository_evidence,
+                surface_registry=RUN.get("canonical_surface_registry"),
             )
             revised_validation = stage3.validate_challenges(
                 revised_challenges, impact_map, _active_stage3_requirements(contract),
                 repository_evidence,
+                surface_registry=RUN.get("canonical_surface_registry"),
             )
             plan, gate = reconcile_minimal_change_plan(
                 impact_map, revised_validation, contract, repository_evidence,
@@ -4884,11 +4972,25 @@ def _compact_approved_plan_node_contract(contract, max_chars=2400):
         "node_responsibilities": [{
             "node_id": node.get("node_id"),
             "goal": compact_text(node.get("goal", ""), 180),
+            "objective": compact_text(node.get("objective") or node.get("goal", ""), 180),
             "current_owner": compact_text(node.get("current_owner", ""), 100),
+            "surface_ids": _bounded_brain_strings(node.get("surface_ids"), 8, 80),
+            "target_surface_ids": _bounded_brain_strings(node.get("target_surface_ids"), 8, 80),
+            "inspect_surface_ids": _bounded_brain_strings(node.get("inspect_surface_ids"), 8, 80),
+            "new_surface_proposal_ids": _bounded_brain_strings(
+                node.get("new_surface_proposal_ids"), 4, 80,
+            ),
+            "target_new_surface_proposal_ids": _bounded_brain_strings(
+                node.get("target_new_surface_proposal_ids"), 4, 80,
+            ),
+            "parent_scopes": _bounded_brain_strings(node.get("parent_scopes"), 4, 140),
+            "interface_surface_ids": _bounded_brain_strings(node.get("interface_surface_ids"), 8, 80),
             "candidate_targets": _bounded_brain_strings(node.get("candidate_targets"), 2, 140),
+            "target_paths": _bounded_brain_strings(node.get("target_paths", node.get("candidate_targets")), 2, 140),
             "inspect_targets": _bounded_brain_strings(node.get("inspect_targets"), 2, 140),
             "mutation_required": bool(node.get("mutation_required")),
             "verification_only": bool(node.get("verification_only")),
+            "test_contract": _bounded_brain_strings(node.get("test_contract"), 4, 160),
         } for node in nodes],
         "requirement_ids": _bounded_brain_strings([
             item for node in nodes for item in node.get("requirement_ids", [])
@@ -4902,6 +5004,9 @@ def _compact_approved_plan_node_contract(contract, max_chars=2400):
         "interfaces_to_reuse": _bounded_brain_strings([
             item for node in nodes for item in node.get("interfaces_to_reuse", [])
         ], 8, 140),
+        "interface_surface_ids": _bounded_brain_strings([
+            item for node in nodes for item in node.get("interface_surface_ids", [])
+        ], 8, 80),
         "preservation_constraints": _bounded_brain_strings([
             item for node in nodes for item in node.get("preservation_constraints", [])
         ], 8, 180),
@@ -12627,6 +12732,54 @@ def run_self_test(install_browser=False):
             v18_requirements, v17_existing_evidence,
         )
 
+        # v18.1 canonical-surface checks are deterministic and use the same
+        # accepted Stage 2 evidence; no model, approval, or Worker is needed.
+        v18_registry = stage3.build_canonical_surface_registry(
+            v17_existing_task_brain, v17_existing_evidence,
+        )
+        v18_registry_validation = stage3.validate_canonical_surface_registry(
+            v18_registry, v17_existing_evidence,
+        )
+        v18_canonical = stage3.hydrate_impact_map(
+            v18_candidate, v18_registry, v18_requirements, v17_existing_evidence,
+            allow_legacy_exact=True,
+        )
+        v18_bad_surface = copy.deepcopy(v18_candidate)
+        v18_bad_surface["impacts"][0]["path"] = "src/input/InputHandler.cpp"
+        v18_bad_surface_hydration = stage3.hydrate_impact_map(
+            v18_bad_surface, v18_registry, v18_requirements, v17_existing_evidence,
+        )
+        v18_same_surface = copy.deepcopy(v18_canonical)
+        v18_same_surface["impacts"].append({
+            **copy.deepcopy(v18_same_surface["impacts"][0]),
+            "impact_id": "IMP-SAME-PRESERVE", "disposition": "PRESERVATION_ONLY",
+            "impact_kind": "PRESERVATION_ONLY", "necessity_status": "PRESERVATION_ONLY",
+            "preserve": ["existing input behavior remains intact"],
+        })
+        v18_canonical_challenges = stage3.deterministic_challenges(
+            v18_canonical, v18_requirements, v17_existing_evidence,
+        )
+        v18_canonical_challenge_validation = stage3.validate_challenges(
+            v18_canonical_challenges, v18_canonical, v18_requirements,
+            v17_existing_evidence, surface_registry=v18_registry,
+        )
+        v18_canonical_reconciled, v18_canonical_resolved, v18_canonical_unresolved = stage3.reconcile_impact_map(
+            v18_same_surface, v18_canonical_challenge_validation.get("validated", []),
+            v18_requirements, v17_existing_evidence, surface_registry=v18_registry,
+        )
+        v18_canonical_plan = stage3.build_minimal_change_plan(
+            v18_canonical_reconciled, v18_requirements, v17_existing_evidence,
+            v18_canonical_resolved, v18_canonical_unresolved,
+            surface_registry=v18_registry,
+        )
+        v18_canonical_gate = stage3.validate_change_plan(
+            v18_canonical_plan, v18_requirements, v17_existing_evidence,
+            surface_registry=v18_registry,
+        )
+        v18_canonical_noninteractive = request_plan_approval(
+            v18_canonical_plan, interactive=False, terminal_available=False,
+        )
+
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
         (v17_auth_root / "src" / "legacy-auth.js").write_text(
@@ -12809,6 +12962,32 @@ def run_self_test(install_browser=False):
             "v18 noninteractive approval": (
                 v18_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
                 and v18_noninteractive.get("status") == "plan_approval_required"
+            ),
+            "v18.1 canonical surface registry": (
+                v18_registry_validation.get("valid")
+                and len(v18_registry.get("surfaces", [])) >= 6
+                and all(item.get("surface_id", "").startswith("SURF-") for item in v18_registry.get("surfaces", []))
+            ),
+            "v18.1 canonical hydration": (
+                v18_canonical.get("hydration_valid")
+                and all(item.get("surface_id") in v18_registry.get("surface_ids", [])
+                        for item in v18_canonical.get("impacts", []))
+                and all(item.get("path") in {surface.get("path") for surface in v18_registry.get("surfaces", [])}
+                        for item in v18_canonical.get("impacts", []))
+            ),
+            "v18.1 hallucination rejected": (
+                not v18_bad_surface_hydration.get("hydration_valid")
+                and v18_bad_surface_hydration.get("impact_invented_existing_paths_rejected", 0) >= 1
+                and "InputHandler.cpp" not in json.dumps(v18_bad_surface_hydration.get("impacts", []))
+            ),
+            "v18.1 self-conflict normalization": (
+                v18_canonical_gate.get("valid")
+                and "SURF-001" in v18_canonical_plan.get("mutation_surface_ids", [])
+                and "SURF-001" not in v18_canonical_plan.get("do_not_touch_surface_ids", [])
+            ),
+            "v18.1 canonical noninteractive approval": (
+                v18_canonical_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
+                and v18_canonical_noninteractive.get("status") == "plan_approval_required"
             ),
         }
         for name, ok in checks.items():

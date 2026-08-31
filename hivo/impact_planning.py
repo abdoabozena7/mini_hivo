@@ -23,6 +23,25 @@ PROJECT_BRAIN = "PROJECT_BRAIN"
 REPOSITORY_EVIDENCE = "REPOSITORY_EVIDENCE"
 DERIVED_PLAN_DECISION = "DERIVED_PLAN_DECISION"
 
+# Canonical Stage 3 identity is deliberately smaller than a repository
+# ontology.  It is a task-scoped index over the semantic Stage 2 facts that
+# are already accepted by the repository-evidence boundary.
+CANONICAL_SURFACE_KINDS = (
+    "OWNER", "INTERFACE", "PERSISTENCE", "TEST", "ENTRYPOINT", "OTHER",
+)
+CANONICAL_SURFACE_ROLES = (
+    "INPUT_OWNER", "STATE_OWNER", "OWNER", "INTERFACE", "PERSISTENCE_OWNER",
+    "CURRENT_TEST", "ENTRYPOINT", "REPOSITORY_SURFACE",
+)
+DISPOSITIONS = (
+    "MUST_CHANGE", "INTERFACE_REUSE", "TEST_CHANGE", "PRESERVATION_ONLY",
+    "VERIFY_ONLY", "INSUFFICIENT_EVIDENCE",
+)
+NEW_SURFACE_PROPOSAL = "NEW_SURFACE_PROPOSAL"
+MAX_CANONICAL_SURFACES = 32
+MAX_SURFACE_EVIDENCE_IDS = 8
+MAX_IMPACT_SEEDS = 32
+
 IMPACT_KINDS = (
     "BEHAVIOR_CHANGE",
     "INTEGRATION_CHANGE",
@@ -91,6 +110,8 @@ _RAW_CONTEXT_KEYS = frozenset({
     "file_contents", "full_file_contents", "raw_repository", "repository_snapshot",
     "transcript", "messages", "conversation", "chain_of_thought", "reasoning", "support",
 })
+_SURFACE_ID_RE = re.compile(r"^SURF-[0-9]{3,}$", re.IGNORECASE)
+_NEW_SURFACE_ID_RE = re.compile(r"^NEW-[A-Z0-9][A-Z0-9_.-]*$", re.IGNORECASE)
 
 
 def _compact(value, limit=MAX_TEXT_CHARS):
@@ -172,6 +193,331 @@ def bounded_evidence(evidence, max_items=12):
     return result
 
 
+def _surface_symbol_base(symbol):
+    """Return the owner symbol portion of a verified symbol."""
+    text = str(symbol or "").strip()
+    if not text:
+        return ""
+    return re.split(r"::|[.#:]", text, maxsplit=1)[0]
+
+
+def _surface_role(category, symbol="", fact=""):
+    category = str(category or "").upper()
+    text = f"{symbol} {fact}".casefold()
+    if category == "CURRENT_TEST":
+        return "CURRENT_TEST"
+    if category == "CURRENT_PERSISTENCE":
+        return "PERSISTENCE_OWNER"
+    if category == "CURRENT_INTERFACE":
+        return "INTERFACE"
+    if category == "CURRENT_ENTRYPOINT":
+        return "ENTRYPOINT"
+    if category in {"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_BEHAVIOR"}:
+        if "input" in text or "keyboard" in text or "key state" in text:
+            return "INPUT_OWNER"
+        if "game" in text or "pause" in text or "state" in text:
+            return "STATE_OWNER"
+        return "OWNER"
+    return "REPOSITORY_SURFACE"
+
+
+def _surface_kind(category):
+    category = str(category or "").upper()
+    return {
+        "CURRENT_OWNER": "OWNER",
+        "CURRENT_STATE_OWNER": "OWNER",
+        "CURRENT_BEHAVIOR": "OWNER",
+        "CURRENT_INTERFACE": "INTERFACE",
+        "CURRENT_PERSISTENCE": "PERSISTENCE",
+        "CURRENT_TEST": "TEST",
+        "CURRENT_ENTRYPOINT": "ENTRYPOINT",
+    }.get(category, "OTHER")
+
+
+def _surface_group_key(item, owner=False):
+    path = str(item.get("path") or "").replace("\\", "/").strip()
+    symbol = str(item.get("symbol") or "").strip()
+    if owner:
+        symbol = _surface_symbol_base(symbol)
+    return path.casefold(), symbol.casefold()
+
+
+def _surface_group_sort_key(group):
+    role = group.get("role", "REPOSITORY_SURFACE")
+    role_order = {
+        "INPUT_OWNER": 0,
+        "STATE_OWNER": 1,
+        "OWNER": 2,
+        "INTERFACE": 3,
+        "PERSISTENCE_OWNER": 4,
+        "CURRENT_TEST": 5,
+        "ENTRYPOINT": 6,
+        "REPOSITORY_SURFACE": 7,
+    }
+    return (
+        role_order.get(role, 9),
+        str(group.get("path") or "").casefold(),
+        str(group.get("symbol") or "").casefold(),
+        str(group.get("first_evidence_id") or "").casefold(),
+    )
+
+
+def canonical_surface_registry_schema():
+    """Return the compact, model-facing canonical surface schema."""
+    surface = {
+        "type": "object",
+        "properties": {
+            "surface_id": {"type": "string"},
+            "kind": {"type": "string", "enum": list(CANONICAL_SURFACE_KINDS)},
+            "role": {"type": "string", "enum": list(CANONICAL_SURFACE_ROLES)},
+            "path": {"type": "string"},
+            "symbol": {"type": "string"},
+            "verified_fact": {"type": "string"},
+            "evidence_ids": {"type": "array", "items": {"type": "string"}},
+            "owner_surface_id": {"type": ["string", "null"]},
+        },
+        "required": [
+            "surface_id", "kind", "role", "path", "symbol", "verified_fact", "evidence_ids",
+        ],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "version": {"type": "integer"},
+            "surfaces": {"type": "array", "items": surface, "maxItems": MAX_CANONICAL_SURFACES},
+            "bounds": {"type": "object"},
+            "provenance": {"type": "string"},
+        },
+        "required": ["version", "surfaces", "bounds", "provenance"],
+        "additionalProperties": False,
+    }
+
+
+def build_canonical_surface_registry(task_brain=None, evidence=None,
+                                     max_surfaces=MAX_CANONICAL_SURFACES):
+    """Derive authoritative existing-project identities from accepted evidence.
+
+    The registry intentionally consumes only compact Stage 2 evidence.  Task
+    Brain facts can make a role relevant, but cannot create a path or symbol
+    that is absent from accepted evidence.
+    """
+    max_surfaces = min(MAX_CANONICAL_SURFACES, max(1, int(max_surfaces)))
+    facts = bounded_evidence(evidence, max(MAX_CANONICAL_SURFACES * 2, 16))
+    # Compatibility with Task Brain projections that carry accepted evidence
+    # records inline.  Existing evidence remains authoritative and wins ties.
+    seen_evidence = {str(item.get("evidence_id")) for item in facts}
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    for field in ("current_owners", "current_interfaces", "current_state_ownership",
+                  "relevant_tests", "relevant_dependencies"):
+        for item in list(brain.get(field, []) or []):
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            evidence_ids = list(item.get("evidence_ids", []) or [])
+            for evidence_id in evidence_ids:
+                evidence_id = str(evidence_id)
+                if evidence_id in seen_evidence:
+                    continue
+                facts.append({
+                    "evidence_id": evidence_id,
+                    "category": item.get("category", "CURRENT_BEHAVIOR"),
+                    "fact": item.get("fact") or item.get("text", ""),
+                    "path": item.get("path"), "symbol": item.get("symbol", ""),
+                    "line_start": item.get("line_start"), "line_end": item.get("line_end"),
+                    "file_sha256": item.get("file_sha256"),
+                    "provenance": REPOSITORY_EVIDENCE,
+                })
+                seen_evidence.add(evidence_id)
+                if len(facts) >= max(MAX_CANONICAL_SURFACES * 2, 16):
+                    break
+            if len(facts) >= max(MAX_CANONICAL_SURFACES * 2, 16):
+                break
+    groups = []
+    owner_groups = {}
+    interface_groups = {}
+    simple_groups = {}
+    for fact in facts:
+        path = str(fact.get("path") or "").replace("\\", "/").strip()
+        symbol = str(fact.get("symbol") or "").strip()
+        category = str(fact.get("category") or "").upper()
+        if not path:
+            continue
+        if category in {"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_BEHAVIOR"}:
+            key = _surface_group_key(fact, owner=True)
+            owner_groups.setdefault(key, []).append(fact)
+        elif category == "CURRENT_INTERFACE":
+            key = _surface_group_key(fact)
+            interface_groups.setdefault(key, []).append(fact)
+        elif category in {
+            "CURRENT_PERSISTENCE", "CURRENT_TEST", "CURRENT_ENTRYPOINT",
+        }:
+            key = (_surface_kind(category),) + _surface_group_key(fact)
+            simple_groups.setdefault(key, []).append(fact)
+        else:
+            # Preserve generic accepted repository roles without allowing
+            # arbitrary model-created surfaces into the registry.
+            key = (category,) + _surface_group_key(fact)
+            simple_groups.setdefault(key, []).append(fact)
+
+    for records in owner_groups.values():
+        first = records[0]
+        groups.append({
+            "kind": "OWNER",
+            "role": _surface_role(first.get("category"), first.get("symbol"), first.get("fact")),
+            "path": str(first.get("path") or "").replace("\\", "/"),
+            "symbol": _surface_symbol_base(first.get("symbol")),
+            "verified_fact": _compact(" ".join(item.get("fact", "") for item in records), 360),
+            "evidence_ids": _bounded_ids(
+                [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
+            ),
+            "first_evidence_id": records[0].get("evidence_id"),
+        })
+    for records in interface_groups.values():
+        first = records[0]
+        groups.append({
+            "kind": "INTERFACE",
+            "role": "INTERFACE",
+            "path": str(first.get("path") or "").replace("\\", "/"),
+            "symbol": str(first.get("symbol") or ""),
+            "verified_fact": _compact(" ".join(item.get("fact", "") for item in records), 360),
+            "evidence_ids": _bounded_ids(
+                [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
+            ),
+            "first_evidence_id": records[0].get("evidence_id"),
+        })
+    for records in simple_groups.values():
+        first = records[0]
+        category = str(first.get("category") or "").upper()
+        groups.append({
+            "kind": _surface_kind(category),
+            "role": _surface_role(category, first.get("symbol"), first.get("fact")),
+            "path": str(first.get("path") or "").replace("\\", "/"),
+            "symbol": str(first.get("symbol") or ""),
+            "verified_fact": _compact(" ".join(item.get("fact", "") for item in records), 360),
+            "evidence_ids": _bounded_ids(
+                [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
+            ),
+            "first_evidence_id": records[0].get("evidence_id"),
+        })
+
+    groups.sort(key=_surface_group_sort_key)
+    groups = groups[:max_surfaces]
+    surfaces = []
+    for index, group in enumerate(groups, 1):
+        value = {
+            "surface_id": f"SURF-{index:03d}",
+            "kind": group["kind"],
+            "role": group["role"],
+            "path": group["path"],
+            "symbol": group["symbol"],
+            "verified_path": group["path"],
+            "verified_symbol": group["symbol"],
+            "verified_fact": group["verified_fact"],
+            "fact": group["verified_fact"],
+            "evidence_ids": list(group["evidence_ids"]),
+            "task_relevance_role": group["role"],
+            "provenance": REPOSITORY_EVIDENCE,
+        }
+        surfaces.append(value)
+    by_owner = {
+        (str(item.get("path")).casefold(), str(item.get("symbol")).casefold()): item["surface_id"]
+        for item in surfaces if item.get("kind") == "OWNER"
+    }
+    for item in surfaces:
+        if item.get("kind") != "INTERFACE":
+            continue
+        owner_key = (
+            str(item.get("path")).casefold(),
+            _surface_symbol_base(item.get("symbol")).casefold(),
+        )
+        owner_id = by_owner.get(owner_key)
+        if owner_id:
+            item["owner_surface_id"] = owner_id
+            item["owner_surface"] = owner_id
+    registry = {
+        "version": 1,
+        "surfaces": surfaces,
+        "surface_ids": [item["surface_id"] for item in surfaces],
+        "evidence_ids": sorted({
+            evidence_id for item in surfaces for evidence_id in item.get("evidence_ids", [])
+        }),
+        "bounds": {
+            "max_surfaces": max_surfaces,
+            "max_evidence_ids_per_surface": MAX_SURFACE_EVIDENCE_IDS,
+        },
+        "provenance": REPOSITORY_EVIDENCE,
+    }
+    return registry
+
+
+canonical_impact_surface_registry = build_canonical_surface_registry
+build_surface_registry = build_canonical_surface_registry
+
+
+def canonical_surface_by_id(registry):
+    value = registry if isinstance(registry, dict) else {}
+    return {
+        str(item.get("surface_id")): item
+        for item in list(value.get("surfaces", []) or [])
+        if isinstance(item, dict) and item.get("surface_id")
+    }
+
+
+def _task_brain_evidence_ids(task_brain):
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    result = []
+    for field in (
+        "repository_evidence_ids", "current_owners", "current_interfaces",
+        "current_state_ownership", "relevant_tests", "preservation_constraints",
+        "relevant_dependencies", "acceptance_conditions",
+    ):
+        values = brain.get(field, [])
+        if isinstance(values, (list, tuple, set)):
+            for item in values:
+                if isinstance(item, dict):
+                    values_to_add = item.get("evidence_ids", [])
+                else:
+                    values_to_add = [item]
+                result.extend(str(value) for value in list(values_to_add or []))
+    return list(dict.fromkeys(result))
+
+
+def build_impact_seeds(task_brain, requirements, evidence, registry=None):
+    """Create eligible, non-authoritative impact seeds from verified facts."""
+    registry = registry or build_canonical_surface_registry(task_brain, evidence)
+    by_id = canonical_surface_by_id(registry)
+    brain_ids = set(_task_brain_evidence_ids(task_brain))
+    reqs = active_requirements(requirements)
+    seeds = []
+    for surface in list(registry.get("surfaces", []) or [])[:MAX_IMPACT_SEEDS]:
+        evidence_ids = list(surface.get("evidence_ids", []) or [])
+        relevant = bool(brain_ids.intersection(evidence_ids)) if brain_ids else True
+        terms = _tokens(
+            " ".join([surface.get("verified_fact", ""), surface.get("symbol", ""), surface.get("role", "")])
+        )
+        req_ids = []
+        for requirement in reqs:
+            if terms.intersection(_tokens(requirement.get("text"))):
+                req_ids.append(requirement["requirement_id"])
+        seeds.append({
+            "seed_id": f"SEED-{len(seeds) + 1:03d}",
+            "surface_id": surface.get("surface_id"),
+            "kind": surface.get("kind"),
+            "role": surface.get("task_relevance_role") or surface.get("role"),
+            "requirement_ids": _bounded_ids(req_ids, MAX_REQUIREMENT_REFS_PER_IMPACT),
+            "evidence_ids": _bounded_ids(evidence_ids, MAX_SURFACE_EVIDENCE_IDS),
+            "eligible": relevant,
+            "verified_path": surface.get("path"),
+            "verified_symbol": surface.get("symbol"),
+            "verified_fact": surface.get("verified_fact"),
+            "provenance": REPOSITORY_EVIDENCE,
+        })
+    return seeds
+
+
+canonical_impact_seeds = build_impact_seeds
+
+
 def _task_brain_slice(task_brain):
     brain = task_brain if isinstance(task_brain, dict) else {}
     result = {
@@ -224,6 +570,21 @@ def _trim_context(context, max_chars):
                 removed = True
                 break
         if not removed:
+            registry = context.get("canonical_surface_registry")
+            if isinstance(registry, dict) and isinstance(registry.get("surfaces"), list) and len(registry["surfaces"]) > 1:
+                registry["surfaces"].pop()
+                removed = True
+        if not removed:
+            seeds = context.get("impact_seeds")
+            if isinstance(seeds, list) and len(seeds) > 1:
+                seeds.pop()
+                removed = True
+        if not removed:
+            candidate_map = context.get("candidate_impact_map")
+            if isinstance(candidate_map, dict) and isinstance(candidate_map.get("impacts"), list) and len(candidate_map["impacts"]) > 1:
+                candidate_map["impacts"].pop()
+                removed = True
+        if not removed:
             slice_value = context.get("task_brain_slice", {})
             if isinstance(slice_value, dict):
                 for field in (
@@ -240,7 +601,30 @@ def _trim_context(context, max_chars):
     return context
 
 
-def build_planner_context(task_brain, requirements, evidence, project_invariants=None):
+def _planner_surface_registry_slice(registry):
+    value = registry if isinstance(registry, dict) else {}
+    result = []
+    for surface in list(value.get("surfaces", []) or [])[:MAX_CANONICAL_SURFACES]:
+        result.append({
+            "surface_id": surface.get("surface_id"),
+            "kind": surface.get("kind"),
+            "role": surface.get("role"),
+            "path": _normal_path(surface.get("path")),
+            "symbol": str(surface.get("symbol") or ""),
+            "verified_fact": _compact(surface.get("verified_fact"), 280),
+            "evidence_ids": _bounded_ids(surface.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
+            "owner_surface_id": surface.get("owner_surface_id"),
+        })
+    return {
+        "version": value.get("version"),
+        "surfaces": result,
+        "bounds": copy.deepcopy(value.get("bounds", {})),
+        "provenance": value.get("provenance", REPOSITORY_EVIDENCE),
+    }
+
+
+def build_planner_context(task_brain, requirements, evidence, project_invariants=None,
+                          surface_registry=None, impact_seeds=None):
     """Build the only context the ImpactPlanner may see."""
     reqs = active_requirements(requirements)
     facts = bounded_evidence(evidence)
@@ -257,21 +641,40 @@ def build_planner_context(task_brain, requirements, evidence, project_invariants
         "current_state_ownership": copy.deepcopy(slice_value.get("current_state_ownership", [])),
         "relevant_tests": copy.deepcopy(slice_value.get("relevant_tests", [])),
         "preservation_constraints": copy.deepcopy(slice_value.get("preservation_constraints", [])),
+        "canonical_surface_registry": _planner_surface_registry_slice(surface_registry),
+        "impact_seeds": copy.deepcopy(list(impact_seeds or [])[:MAX_IMPACT_SEEDS]),
         "bounds": {
             "max_impact_entries": MAX_IMPACT_ENTRIES,
             "max_requirement_refs_per_impact": MAX_REQUIREMENT_REFS_PER_IMPACT,
             "max_evidence_refs_per_impact": MAX_EVIDENCE_REFS_PER_IMPACT,
             "max_serialized_chars": MAX_PLANNER_CONTEXT_CHARS,
+            "max_canonical_surfaces": MAX_CANONICAL_SURFACES,
+            "max_impact_seeds": MAX_IMPACT_SEEDS,
         },
     }
     return _trim_context(context, MAX_PLANNER_CONTEXT_CHARS)
 
 
 def impact_map_schema():
+    """Schema for the bounded planner response.
+
+    ``surface_id``/``disposition`` are the authoritative contract.  A few
+    legacy fields remain optional solely so a weak response can be captured
+    for research and rejected during canonical hydration; they never provide
+    repository identity.
+    """
     entry = {
         "type": "object",
         "properties": {
             "impact_id": {"type": "string"},
+            "surface_id": {"type": "string"},
+            "disposition": {"type": "string", "enum": list(DISPOSITIONS)},
+            "action": {"type": "string"},
+            "interfaces_to_reuse": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+            "verification": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+            "new_surface_proposal_ids": {
+                "type": "array", "items": {"type": "string"}, "maxItems": 4,
+            },
             "component": {"type": "string"},
             "path": {"type": "string"},
             "symbols": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
@@ -297,10 +700,34 @@ def impact_map_schema():
             "necessity_status": {"type": "string", "enum": list(NECESSITY_STATUSES)},
         },
         "required": [
-            "impact_id", "component", "path", "symbols", "impact_kind", "requirement_ids",
-            "repository_evidence_ids", "reason", "existing_owner",
-            "existing_interfaces_to_reuse", "preserve", "candidate_change",
-            "local_verification", "necessity_status",
+            "impact_id", "disposition", "action", "interfaces_to_reuse",
+            "preserve", "verification", "requirement_ids",
+        ],
+        "anyOf": [
+            {"required": ["surface_id"]},
+            {
+                "required": ["new_surface_proposal_ids"],
+                "properties": {
+                    "new_surface_proposal_ids": {"minItems": 1},
+                },
+            },
+        ],
+        "additionalProperties": False,
+    }
+    new_surface = {
+        "type": "object",
+        "properties": {
+            "proposal_id": {"type": "string"},
+            "kind": {"type": "string"},
+            "requirement_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+            "reason_existing_surfaces_insufficient": {"type": "string"},
+            "parent_scope": {"type": "string"},
+            "intended_responsibility": {"type": "string"},
+            "verification_responsibility": {"type": "string"},
+        },
+        "required": [
+            "proposal_id", "kind", "requirement_ids", "reason_existing_surfaces_insufficient",
+            "parent_scope", "intended_responsibility", "verification_responsibility",
         ],
         "additionalProperties": False,
     }
@@ -318,53 +745,147 @@ def impact_map_schema():
             "insufficient_evidence": {
                 "type": "array", "items": {"type": "string"}, "maxItems": 6,
             },
+            "new_surface_proposals": {
+                "type": "array", "items": new_surface, "maxItems": 4,
+            },
         },
         "required": ["task_goal", "impacts", "integration_verification", "insufficient_evidence"],
         "additionalProperties": False,
     }
 
 
-def normalize_impact_map(candidate):
+def _disposition_for_impact(item):
+    raw = str(item.get("disposition", "")).upper().strip()
+    if raw in DISPOSITIONS:
+        return raw
+    kind = str(item.get("impact_kind", "")).upper().strip()
+    necessity = str(item.get("necessity_status", "")).upper().strip()
+    if necessity == "PRESERVATION_ONLY" or kind == "PRESERVATION_ONLY":
+        return "PRESERVATION_ONLY"
+    if kind == "TEST_CHANGE":
+        return "TEST_CHANGE"
+    if kind == "INTERFACE_REUSE":
+        return "INTERFACE_REUSE"
+    if kind == "CROSS_CUTTING_VERIFICATION":
+        return "VERIFY_ONLY"
+    if necessity == "MUST_CHANGE":
+        return "MUST_CHANGE"
+    if necessity == "INSUFFICIENT_EVIDENCE":
+        return "INSUFFICIENT_EVIDENCE"
+    return "MUST_CHANGE" if kind in {"BEHAVIOR_CHANGE", "INTEGRATION_CHANGE"} else "VERIFY_ONLY"
+
+
+def _impact_kind_for_disposition(disposition, legacy_kind=""):
+    return {
+        "MUST_CHANGE": str(legacy_kind or "BEHAVIOR_CHANGE").upper()
+        if str(legacy_kind or "").upper() in IMPACT_KINDS
+        and str(legacy_kind or "").upper() not in {"PRESERVATION_ONLY", "INTERFACE_REUSE", "TEST_CHANGE"}
+        else "BEHAVIOR_CHANGE",
+        "INTERFACE_REUSE": "INTERFACE_REUSE",
+        "TEST_CHANGE": "TEST_CHANGE",
+        "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+        "VERIFY_ONLY": "CROSS_CUTTING_VERIFICATION",
+        "INSUFFICIENT_EVIDENCE": "INTEGRATION_CHANGE",
+    }.get(disposition, "INTEGRATION_CHANGE")
+
+
+def normalize_new_surface_proposals(values):
+    result = []
+    for index, item in enumerate(list(values or [])[:4], 1):
+        if not isinstance(item, dict):
+            continue
+        result.append({
+            "proposal_id": _compact(item.get("proposal_id") or f"NEW-{index:03d}", 80),
+            "kind": _compact(item.get("kind") or "NEW_SURFACE", 80),
+            "requirement_ids": _bounded_ids(item.get("requirement_ids"), 6),
+            "reason_existing_surfaces_insufficient": _compact(
+                item.get("reason_existing_surfaces_insufficient"), MAX_TEXT_CHARS,
+            ),
+            "parent_scope": _compact(item.get("parent_scope"), 240),
+            "intended_responsibility": _compact(item.get("intended_responsibility"), MAX_TEXT_CHARS),
+            "verification_responsibility": _compact(
+                item.get("verification_responsibility"), MAX_TEXT_CHARS,
+            ),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+    return result
+
+
+def normalize_impact_map(candidate, authoritative=False):
     candidate = candidate if isinstance(candidate, dict) else {}
     impacts = []
     for index, item in enumerate(list(candidate.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES], 1):
         if not isinstance(item, dict):
             continue
-        kind = str(item.get("impact_kind", "")).upper()
-        necessity = str(item.get("necessity_status", "CANDIDATE")).upper()
-        if kind not in IMPACT_KINDS:
-            kind = "INTEGRATION_CHANGE"
-        if necessity not in NECESSITY_STATUSES:
-            necessity = "CANDIDATE"
-        if kind == "PRESERVATION_ONLY":
-            necessity = "PRESERVATION_ONLY"
-        impacts.append({
+        disposition = _disposition_for_impact(item)
+        kind = _impact_kind_for_disposition(disposition, item.get("impact_kind"))
+        legacy_necessity = str(item.get("necessity_status", "")).upper()
+        necessity = {
+            "MUST_CHANGE": "MUST_CHANGE",
+            "INTERFACE_REUSE": "CANDIDATE",
+            "TEST_CHANGE": "CANDIDATE",
+            "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+            "VERIFY_ONLY": "CANDIDATE",
+            "INSUFFICIENT_EVIDENCE": "INSUFFICIENT_EVIDENCE",
+        }[disposition]
+        if legacy_necessity in NECESSITY_STATUSES and "disposition" not in item:
+            necessity = legacy_necessity
+        path = _compact(item.get("path"), 240)
+        symbols = _bounded_strings(item.get("symbols"), 6, 160)
+        interfaces = _bounded_strings(
+            item.get("existing_interfaces_to_reuse"), 6, 180,
+        )
+        interface_surface_ids = _bounded_ids(
+            item.get("interfaces_to_reuse") or item.get("interface_surface_ids"), 6,
+        )
+        action = _compact(item.get("action") or item.get("candidate_change"), MAX_TEXT_CHARS)
+        verification = _bounded_strings(
+            item.get("verification") or item.get("local_verification"), 6, 300,
+        )
+        value = {
             "impact_id": _compact(item.get("impact_id") or f"IMP-{index:03d}", 80),
+            "surface_id": _compact(item.get("surface_id"), 80),
+            "disposition": disposition,
             "component": _compact(item.get("component") or item.get("path") or "project surface", 180),
-            "path": _compact(item.get("path"), 240),
-            "symbols": _bounded_strings(item.get("symbols"), 6, 160),
+            "path": path,
+            "symbols": symbols,
             "impact_kind": kind,
             "requirement_ids": _bounded_ids(item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
             "repository_evidence_ids": _bounded_ids(
                 item.get("repository_evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT,
             ),
-            "reason": _compact(item.get("reason"), MAX_TEXT_CHARS),
+            "reason": _compact(item.get("reason") or item.get("action"), MAX_TEXT_CHARS),
             "existing_owner": _compact(item.get("existing_owner"), 180),
-            "existing_interfaces_to_reuse": _bounded_strings(
-                item.get("existing_interfaces_to_reuse"), 6, 180,
-            ),
+            "existing_interfaces_to_reuse": interfaces,
+            "interfaces_to_reuse": interface_surface_ids,
+            "interface_surface_ids": interface_surface_ids,
             "preserve": _bounded_strings(item.get("preserve"), 6, 300),
-            "candidate_change": _compact(item.get("candidate_change"), MAX_TEXT_CHARS),
-            "local_verification": _bounded_strings(item.get("local_verification"), 6, 300),
+            "candidate_change": action,
+            "action": action,
+            "local_verification": verification,
+            "verification": verification,
             "necessity_status": necessity,
+            "new_surface_proposal_ids": _bounded_ids(item.get("new_surface_proposal_ids"), 4),
             "provenance": DERIVED_PLAN_DECISION,
-        })
+        }
+        # Keep model-authored identity only in explicitly non-authoritative
+        # audit fields.  Hydrated maps replace the ordinary identity fields.
+        if not authoritative:
+            value["model_path"] = path
+            value["model_component"] = _compact(item.get("component"), 180)
+            value["model_symbols"] = symbols
+            value["model_existing_owner"] = _compact(item.get("existing_owner"), 180)
+            value["model_repository_evidence_ids"] = list(value["repository_evidence_ids"])
+        impacts.append(value)
     return {
         "version": 1,
         "task_goal": _compact(candidate.get("task_goal"), 1000),
         "impacts": impacts,
         "integration_verification": _bounded_strings(candidate.get("integration_verification"), 10, 320),
         "insufficient_evidence": _bounded_strings(candidate.get("insufficient_evidence"), 6, 320),
+        "new_surface_proposals": normalize_new_surface_proposals(
+            candidate.get("new_surface_proposals"),
+        ),
         "bounds": {
             "max_impact_entries": MAX_IMPACT_ENTRIES,
             "max_requirement_refs_per_impact": MAX_REQUIREMENT_REFS_PER_IMPACT,
@@ -372,6 +893,599 @@ def normalize_impact_map(candidate):
         },
         "provenance": DERIVED_PLAN_DECISION,
     }
+
+
+def _normal_path(value):
+    return str(value or "").replace("\\", "/").strip()
+
+
+def _surface_evidence_by_id(evidence):
+    return {
+        item["evidence_id"]: item
+        for item in bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2)
+        if item.get("evidence_id")
+    }
+
+
+def validate_canonical_surface_registry(registry, evidence=None):
+    """Validate registry shape and prove that every surface is evidence-backed."""
+    value = registry if isinstance(registry, dict) else {}
+    errors = []
+    surfaces = list(value.get("surfaces", []) or [])
+    if value.get("version") != 1:
+        errors.append("canonical surface registry version is unsupported")
+    if len(surfaces) > MAX_CANONICAL_SURFACES:
+        errors.append("canonical surface registry bound exceeded")
+    evidence_by_id = _surface_evidence_by_id(evidence or [])
+    seen = set()
+    for surface in surfaces:
+        if not isinstance(surface, dict):
+            errors.append("surface entry must be an object")
+            continue
+        surface_id = str(surface.get("surface_id", ""))
+        if not _SURFACE_ID_RE.match(surface_id) or surface_id in seen:
+            errors.append(f"{surface_id or '<missing>'}: invalid or duplicate surface ID")
+        seen.add(surface_id)
+        if surface.get("kind") not in CANONICAL_SURFACE_KINDS:
+            errors.append(f"{surface_id}: invalid surface kind")
+        if surface.get("role") not in CANONICAL_SURFACE_ROLES:
+            errors.append(f"{surface_id}: invalid surface role")
+        path = _normal_path(surface.get("path"))
+        if not path:
+            errors.append(f"{surface_id}: verified path is required")
+        if _normal_path(surface.get("verified_path", path)) != path:
+            errors.append(f"{surface_id}: verified_path is not canonical")
+        if str(surface.get("verified_symbol", surface.get("symbol", ""))) != str(surface.get("symbol", "")):
+            errors.append(f"{surface_id}: verified_symbol is not canonical")
+        refs = list(surface.get("evidence_ids", []) or [])
+        if not refs or len(refs) > MAX_SURFACE_EVIDENCE_IDS:
+            errors.append(f"{surface_id}: bounded evidence references are required")
+        if evidence_by_id:
+            for evidence_id in refs:
+                fact = evidence_by_id.get(str(evidence_id))
+                if not fact:
+                    errors.append(f"{surface_id}: unknown evidence reference {evidence_id}")
+                    continue
+                if _normal_path(fact.get("path")) != path:
+                    errors.append(f"{surface_id}: evidence path does not match verified path")
+        if surface.get("provenance") != REPOSITORY_EVIDENCE:
+            errors.append(f"{surface_id}: repository provenance is required")
+    by_id = canonical_surface_by_id(value)
+    for surface in surfaces:
+        owner_id = surface.get("owner_surface_id")
+        if owner_id and (
+            owner_id not in by_id or by_id[owner_id].get("kind") != "OWNER"
+        ):
+            errors.append(f"{surface.get('surface_id')}: invalid owner surface relation")
+    expected_ids = [str(item.get("surface_id")) for item in surfaces if item.get("surface_id")]
+    if list(value.get("surface_ids", expected_ids) or []) != expected_ids:
+        errors.append("surface_ids index is not canonical")
+    return {
+        "valid": not errors,
+        "errors": errors[:24],
+        "surface_count": len(surfaces),
+        "evidence_count": sum(len(item.get("evidence_ids", []) or []) for item in surfaces),
+    }
+
+
+def _surface_symbols_supported(surface, model_symbols, evidence_by_id):
+    """Check an optional model identity claim without giving it authority."""
+    symbols = [str(item).strip() for item in list(model_symbols or []) if str(item).strip()]
+    if not symbols:
+        return True
+    canonical = str(surface.get("symbol") or "").strip()
+    allowed = {canonical} if canonical else set()
+    for evidence_id in surface.get("evidence_ids", []) or []:
+        fact = evidence_by_id.get(str(evidence_id))
+        if fact and fact.get("symbol"):
+            allowed.add(str(fact.get("symbol")).strip())
+    if surface.get("kind") == "OWNER" and canonical:
+        prefix = canonical + "."
+        return all(item in allowed or item.startswith(prefix) for item in symbols)
+    return all(item in allowed for item in symbols)
+
+
+def _path_symbols_supported(path, model_symbols, evidence_by_id):
+    symbols = {str(item.get("symbol") or "").strip() for item in evidence_by_id.values()
+               if _normal_path(item.get("path")) == _normal_path(path) and item.get("symbol")}
+    if not symbols:
+        return False
+    owner_bases = {_surface_symbol_base(item) for item in symbols}
+    return all(
+        str(item).strip() in symbols
+        or any(str(item).strip().startswith(base + ".") for base in owner_bases if base)
+        for item in list(model_symbols or [])
+    )
+
+
+def surface_evidence_supports(surface, evidence_ids, evidence=None):
+    """Return whether evidence IDs belong to and semantically support a surface."""
+    if not isinstance(surface, dict):
+        return False
+    refs = {str(item) for item in list(evidence_ids or [])}
+    owned = {str(item) for item in list(surface.get("evidence_ids", []) or [])}
+    if not refs or not refs.issubset(owned):
+        return False
+    evidence_by_id = _surface_evidence_by_id(evidence or [])
+    path = _normal_path(surface.get("path"))
+    canonical_symbol = str(surface.get("symbol") or "").strip()
+    for evidence_id in refs:
+        fact = evidence_by_id.get(evidence_id)
+        if not fact or _normal_path(fact.get("path")) != path:
+            return False
+        symbol = str(fact.get("symbol") or "").strip()
+        if canonical_symbol:
+            if surface.get("kind") == "OWNER":
+                if _surface_symbol_base(symbol) != _surface_symbol_base(canonical_symbol):
+                    return False
+            elif symbol and symbol != canonical_symbol:
+                return False
+    return True
+
+
+def _surface_for_legacy_identity(item, surfaces, evidence_by_id=None):
+    """Map an old exact path/symbol claim only for deterministic compatibility."""
+    model_path = _normal_path(item.get("model_path") or item.get("path"))
+    if not model_path:
+        return None
+    model_symbols = list(item.get("model_symbols") or item.get("symbols") or [])
+    candidates = [
+        surface for surface in surfaces
+        if _normal_path(surface.get("path")) == model_path
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    model_component = str(item.get("model_component") or item.get("component") or "").strip()
+    scored = []
+    for surface in candidates:
+        evidence_index = evidence_by_id or {}
+        if not (
+            _surface_symbols_supported(surface, model_symbols, evidence_index)
+            or _path_symbols_supported(surface.get("path"), model_symbols, evidence_index)
+        ):
+            continue
+        score = sum(
+            1 for symbol in model_symbols
+            if str(symbol) == str(surface.get("symbol") or "")
+        )
+        if model_component and model_component.casefold() == str(surface.get("symbol") or "").casefold():
+            score += 3
+        if surface.get("kind") == "OWNER" and model_component:
+            score += 1
+        scored.append((score, str(surface.get("surface_id")), surface))
+    if not scored:
+        return None
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None
+    return scored[0][2]
+
+
+def _new_surface_proposal_justified(proposal):
+    text = str(proposal.get("reason_existing_surfaces_insufficient") or "").casefold()
+    return bool(text) and bool(re.search(
+        r"insufficient|not represented|no existing|missing|cannot .* existing|cannot safely",
+        text,
+    ))
+
+
+def validate_new_surface_proposals(proposals, requirements, registry):
+    req_ids = {item["requirement_id"] for item in active_requirements(requirements)}
+    existing = canonical_surface_by_id(registry)
+    accepted, rejected = [], []
+    seen = set()
+    for proposal in list(proposals or [])[:4]:
+        value = copy.deepcopy(proposal)
+        errors = []
+        proposal_id = str(value.get("proposal_id", ""))
+        if not _NEW_SURFACE_ID_RE.match(proposal_id) or proposal_id in seen:
+            errors.append("invalid or duplicate proposal ID")
+        seen.add(proposal_id)
+        refs = {str(item) for item in value.get("requirement_ids", [])}
+        if not refs or not refs.issubset(req_ids):
+            errors.append("proposal must cite active Source Requirement IDs")
+        if not value.get("kind") or not value.get("parent_scope"):
+            errors.append("proposal kind and parent_scope are required")
+        if not value.get("intended_responsibility") or not value.get("verification_responsibility"):
+            errors.append("proposal responsibilities are required")
+        if not _new_surface_proposal_justified(value):
+            errors.append("existing-surface insufficiency justification is required")
+        # A proposal must not masquerade as an already verified surface.
+        if proposal_id in existing:
+            errors.append("proposal ID conflicts with an existing surface")
+        if errors:
+            value["validation_status"] = "REJECTED"
+            value["validation_errors"] = errors
+            rejected.append(value)
+        else:
+            value["validation_status"] = "VALIDATED"
+            value["provenance"] = DERIVED_PLAN_DECISION
+            accepted.append(value)
+    return {"validated": accepted, "rejected": rejected}
+
+
+def hydrate_impact_map(candidate, registry, requirements, evidence,
+                       allow_legacy_exact=False):
+    """Bind planner claims to canonical surfaces and drop model identity authority.
+
+    The returned map contains only canonical existing-project identity.  Any
+    inconsistent model-authored path, symbol, evidence, or interface is
+    reported in ``hydration_errors`` and never survives as an actionable
+    surface.
+    """
+    registry = registry if isinstance(registry, dict) else {}
+    registry_check = validate_canonical_surface_registry(registry, evidence)
+    by_id = canonical_surface_by_id(registry)
+    evidence_by_id = _surface_evidence_by_id(evidence)
+    raw = normalize_impact_map(candidate)
+    errors = list(registry_check.get("errors", [])) if not registry_check.get("valid") else []
+    proposal_result = validate_new_surface_proposals(
+        raw.get("new_surface_proposals", []), requirements, registry,
+    )
+    proposal_by_id = {
+        str(item.get("proposal_id")): item for item in proposal_result.get("validated", [])
+    }
+    if proposal_result.get("rejected"):
+        errors.extend(
+            f"{item.get('proposal_id')}: {error}"
+            for item in proposal_result["rejected"]
+            for error in item.get("validation_errors", [])
+        )
+    rejected = []
+    hydrated = []
+    metrics = {
+        "impact_unknown_surface_references": 0,
+        "impact_surface_evidence_mismatches": 0,
+        "impact_invented_existing_paths_rejected": 0,
+        "impact_invented_interfaces_rejected": 0,
+    }
+    seen = set()
+    for item in list(raw.get("impacts", []) or [])[:MAX_IMPACT_ENTRIES]:
+        impact_id = str(item.get("impact_id", ""))
+        item_errors = []
+        if not impact_id or impact_id in seen:
+            item_errors.append("impact ID is missing or duplicated")
+        seen.add(impact_id)
+        surface_id = str(item.get("surface_id", "")).strip()
+        proposal_ids = _bounded_ids(item.get("new_surface_proposal_ids"), 4)
+        surface = by_id.get(surface_id) if surface_id else None
+        if not surface and allow_legacy_exact and not surface_id:
+            surface = _surface_for_legacy_identity(item, list(by_id.values()), evidence_by_id)
+            if surface:
+                surface_id = surface["surface_id"]
+        if surface_id and proposal_ids:
+            item_errors.append("impact must use either canonical surface or new-surface proposal authority")
+        if not surface and not surface_id and proposal_ids:
+            selected_proposals = [proposal_by_id[item_id] for item_id in proposal_ids if item_id in proposal_by_id]
+            if len(selected_proposals) != len(proposal_ids):
+                item_errors.append("unknown or rejected new-surface proposal reference")
+            model_path = _normal_path(item.get("model_path"))
+            if model_path:
+                metrics["impact_invented_existing_paths_rejected"] += 1
+                item_errors.append("new-surface impact cannot author an existing repository path")
+            if item.get("model_symbols") or item.get("model_existing_owner"):
+                metrics["impact_invented_existing_paths_rejected"] += 1
+                item_errors.append("new-surface impact cannot claim verified existing identity")
+            if item.get("model_repository_evidence_ids"):
+                metrics["impact_surface_evidence_mismatches"] += 1
+                item_errors.append("new-surface proposal cannot claim existing-surface evidence")
+            model_interfaces = list(item.get("existing_interfaces_to_reuse", []) or [])
+            if model_interfaces:
+                metrics["impact_invented_interfaces_rejected"] += 1
+                item_errors.append("new-surface interface reuse must use canonical interface IDs")
+            valid_interface_ids = []
+            interface_names = []
+            for interface_id in item.get("interfaces_to_reuse", []) or []:
+                interface = by_id.get(str(interface_id))
+                if not interface or interface.get("kind") != "INTERFACE":
+                    metrics["impact_invented_interfaces_rejected"] += 1
+                    item_errors.append(f"invalid interface surface reference {interface_id}")
+                    continue
+                valid_interface_ids.append(interface["surface_id"])
+                interface_names.append(str(interface.get("symbol") or ""))
+            requirement_ids = _bounded_ids(
+                item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT,
+            )
+            proposal_requirement_ids = {
+                str(requirement_id)
+                for proposal in selected_proposals
+                for requirement_id in proposal.get("requirement_ids", [])
+            }
+            if not set(requirement_ids).issubset(proposal_requirement_ids):
+                item_errors.append("impact requirements are not authorized by its new-surface proposal")
+            disposition = item.get("disposition")
+            if disposition not in DISPOSITIONS:
+                item_errors.append("invalid planner disposition")
+            canonical = {
+                "impact_id": impact_id,
+                "surface_id": "",
+                "canonical_surface_id": "",
+                "disposition": disposition,
+                "component": "; ".join(
+                    str(proposal.get("intended_responsibility") or proposal.get("proposal_id"))
+                    for proposal in selected_proposals
+                ),
+                "path": "",
+                "symbols": [],
+                "impact_kind": _impact_kind_for_disposition(disposition, item.get("impact_kind")),
+                "requirement_ids": requirement_ids,
+                "repository_evidence_ids": [],
+                "reason": item.get("reason", ""),
+                "existing_owner": "",
+                "existing_interfaces_to_reuse": _bounded_strings(interface_names, 6, 180),
+                "interfaces_to_reuse": _bounded_ids(valid_interface_ids, 6),
+                "interface_surface_ids": _bounded_ids(valid_interface_ids, 6),
+                "preserve": list(item.get("preserve", []) or [])[:6],
+                "candidate_change": item.get("candidate_change", ""),
+                "action": item.get("action", ""),
+                "local_verification": list(item.get("local_verification", []) or [])[:6],
+                "verification": list(item.get("verification", []) or [])[:6],
+                "necessity_status": item.get("necessity_status"),
+                "new_surface_proposal_ids": proposal_ids,
+                "surface_kind": NEW_SURFACE_PROPOSAL,
+                "surface_role": "NEW_SURFACE",
+                "owner_surface_id": None,
+                "provenance": DERIVED_PLAN_DECISION,
+            }
+            if item_errors:
+                rejected.append({"impact_id": impact_id, "errors": item_errors})
+                errors.extend(f"{impact_id}: {error}" for error in item_errors)
+            else:
+                hydrated.append(canonical)
+            continue
+        if not surface:
+            metrics["impact_unknown_surface_references"] += 1
+            if item.get("model_path") or item.get("path"):
+                metrics["impact_invented_existing_paths_rejected"] += 1
+            item_errors.append("unknown canonical surface reference")
+        if surface:
+            model_path = _normal_path(item.get("model_path"))
+            if model_path and model_path != _normal_path(surface.get("path")):
+                metrics["impact_invented_existing_paths_rejected"] += 1
+                item_errors.append("model path conflicts with canonical surface path")
+            symbols_supported = _surface_symbols_supported(
+                surface, item.get("model_symbols"), evidence_by_id,
+            )
+            if not symbols_supported and allow_legacy_exact:
+                symbols_supported = _path_symbols_supported(
+                    surface.get("path"), item.get("model_symbols"), evidence_by_id,
+                )
+            if not symbols_supported:
+                metrics["impact_invented_existing_paths_rejected"] += 1
+                item_errors.append("model symbol conflicts with canonical surface symbol")
+            model_evidence = set(str(value) for value in item.get("model_repository_evidence_ids", []))
+            evidence_supported = surface_evidence_supports(surface, model_evidence, evidence)
+            if model_evidence and allow_legacy_exact and not evidence_supported:
+                evidence_supported = all(
+                    evidence_by_id.get(evidence_id)
+                    and _normal_path(evidence_by_id[evidence_id].get("path"))
+                    == _normal_path(surface.get("path"))
+                    for evidence_id in model_evidence
+                )
+            if model_evidence and not evidence_supported:
+                metrics["impact_surface_evidence_mismatches"] += 1
+                item_errors.append("model evidence does not support canonical surface")
+            model_interfaces = list(item.get("existing_interfaces_to_reuse", []) or [])
+            interface_ids = list(item.get("interfaces_to_reuse", []) or [])
+            if model_interfaces and not interface_ids and allow_legacy_exact:
+                for name in model_interfaces:
+                    matches = [
+                        candidate_surface for candidate_surface in by_id.values()
+                        if candidate_surface.get("kind") == "INTERFACE"
+                        and str(candidate_surface.get("symbol")) == str(name)
+                    ]
+                    if len(matches) == 1:
+                        interface_ids.append(matches[0]["surface_id"])
+                    else:
+                        metrics["impact_invented_interfaces_rejected"] += 1
+                        item_errors.append("legacy interface name is not canonical")
+            valid_interface_ids = []
+            interface_names = []
+            for interface_id in interface_ids:
+                interface = by_id.get(str(interface_id))
+                if not interface or interface.get("kind") != "INTERFACE":
+                    metrics["impact_invented_interfaces_rejected"] += 1
+                    item_errors.append(f"invalid interface surface reference {interface_id}")
+                    continue
+                if (
+                    surface.get("kind") == "OWNER"
+                    and interface.get("owner_surface_id")
+                    and interface.get("owner_surface_id") != surface.get("surface_id")
+                ):
+                    metrics["impact_invented_interfaces_rejected"] += 1
+                    item_errors.append("interface owner does not match impacted owner surface")
+                    continue
+                valid_interface_ids.append(interface["surface_id"])
+                interface_names.append(str(interface.get("symbol") or ""))
+            if model_interfaces and interface_ids and set(str(item) for item in model_interfaces) != set(interface_names):
+                metrics["impact_invented_interfaces_rejected"] += 1
+                item_errors.append("model interface names conflict with canonical interface IDs")
+            disposition = item.get("disposition")
+            if disposition not in DISPOSITIONS:
+                item_errors.append("invalid planner disposition")
+            requirement_ids = _bounded_ids(item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT)
+            canonical = {
+                "impact_id": impact_id,
+                "surface_id": surface["surface_id"],
+                "canonical_surface_id": surface["surface_id"],
+                "disposition": disposition,
+                "component": str(surface.get("symbol") or surface.get("role") or surface.get("path")),
+                "path": _normal_path(surface.get("path")),
+                "symbols": _bounded_strings(
+                    [surface.get("symbol")] if surface.get("symbol") else [], 6, 160,
+                ),
+                "impact_kind": _impact_kind_for_disposition(disposition, item.get("impact_kind")),
+                "requirement_ids": requirement_ids,
+                "repository_evidence_ids": _bounded_ids(
+                    surface.get("evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT,
+                ),
+                "reason": item.get("reason", ""),
+                "existing_owner": str(surface.get("symbol") or ""),
+                "existing_interfaces_to_reuse": _bounded_strings(interface_names, 6, 180),
+                "interfaces_to_reuse": _bounded_ids(valid_interface_ids, 6),
+                "interface_surface_ids": _bounded_ids(valid_interface_ids, 6),
+                "preserve": list(item.get("preserve", []) or [])[:6],
+                "candidate_change": item.get("candidate_change", ""),
+                "action": item.get("action", ""),
+                "local_verification": list(item.get("local_verification", []) or [])[:6],
+                "verification": list(item.get("verification", []) or [])[:6],
+                "necessity_status": item.get("necessity_status"),
+                "new_surface_proposal_ids": _bounded_ids(item.get("new_surface_proposal_ids"), 4),
+                "surface_kind": surface.get("kind"),
+                "surface_role": surface.get("role"),
+                "owner_surface_id": surface.get("owner_surface_id"),
+                "provenance": DERIVED_PLAN_DECISION,
+            }
+            if item_errors:
+                rejected.append({"impact_id": impact_id, "errors": item_errors})
+            else:
+                hydrated.append(canonical)
+        else:
+            rejected.append({"impact_id": impact_id, "errors": item_errors})
+        if item_errors:
+            errors.extend(f"{impact_id}: {error}" for error in item_errors)
+
+    result = {
+        "version": 1,
+        "task_goal": raw.get("task_goal", ""),
+        "impacts": hydrated,
+        "integration_verification": list(raw.get("integration_verification", []) or []),
+        "insufficient_evidence": list(raw.get("insufficient_evidence", []) or []),
+        "new_surface_proposals": proposal_result.get("validated", []),
+        "canonical_surface_registry_version": registry.get("version"),
+        "bounds": copy.deepcopy(raw.get("bounds", {})),
+        "provenance": DERIVED_PLAN_DECISION,
+        "hydration_valid": not errors and bool(hydrated),
+        "hydration_errors": errors[:32],
+        "hydration_rejected_impacts": rejected[:MAX_IMPACT_ENTRIES],
+        **metrics,
+    }
+    return result
+
+
+canonicalize_impact_map = hydrate_impact_map
+
+
+def audit_impact_surfaces(candidate, registry, requirements=None, evidence=None):
+    """Independently classify every raw candidate surface claim.
+
+    This is an audit view only; its labels never become planner authority.
+    """
+    raw = normalize_impact_map(candidate)
+    by_id = canonical_surface_by_id(registry)
+    evidence_by_id = _surface_evidence_by_id(evidence)
+    result = []
+    seen = set()
+    for item in raw.get("impacts", [])[:MAX_IMPACT_ENTRIES]:
+        surface_id = str(item.get("surface_id") or "")
+        surface = by_id.get(surface_id)
+        if not surface and item.get("model_path"):
+            classification = "UNSUPPORTED_CHANGE"
+            reason = "model-authored existing path is not a canonical surface"
+        elif not surface:
+            classification = "MISSING_REQUIRED_SURFACE"
+            reason = "candidate did not bind to an existing canonical surface"
+        else:
+            seen.add(surface_id)
+            model_evidence = set(str(value) for value in item.get("model_repository_evidence_ids", []))
+            evidence_ok = not model_evidence or surface_evidence_supports(surface, model_evidence, evidence)
+            disposition = item.get("disposition")
+            if not evidence_ok:
+                classification = "UNSUPPORTED_CHANGE"
+                reason = "selected evidence does not support the canonical surface"
+            elif disposition in {"MUST_CHANGE", "TEST_CHANGE"}:
+                classification = "REQUIRED_CHANGE"
+                reason = "bounded mutation/test disposition with canonical evidence"
+            elif disposition in {"INTERFACE_REUSE", "PRESERVATION_ONLY", "VERIFY_ONLY"}:
+                classification = "PRESERVATION_ONLY"
+                reason = "reuse, verification, or preservation disposition"
+            else:
+                classification = "POSSIBLY_REQUIRED"
+                reason = "candidate disposition is not a proven mutation"
+        result.append({
+            "impact_id": item.get("impact_id"), "surface_id": surface_id or None,
+            "path": _normal_path(surface.get("path")) if surface else _normal_path(item.get("model_path")),
+            "classification": classification, "reason": reason,
+        })
+    # A required current TEST surface is auditable as missing when the map
+    # omits explicit test responsibility.
+    reqs = active_requirements(requirements or [])
+    has_test_requirement = any(_TEST_RE.search(item["text"]) for item in reqs)
+    if has_test_requirement and not any(
+        item.get("surface_id") in by_id and by_id[item.get("surface_id")].get("kind") == "TEST"
+        for item in raw.get("impacts", [])
+    ):
+        tests = [item for item in by_id.values() if item.get("kind") == "TEST"]
+        if tests:
+            result.append({
+                "impact_id": None, "surface_id": tests[0].get("surface_id"),
+                "path": tests[0].get("path"), "classification": "MISSING_REQUIRED_SURFACE",
+                "reason": "active test requirement has no explicit TEST_CHANGE responsibility",
+            })
+    return result
+
+
+def validate_surface_binding(impact, registry, evidence=None):
+    """Return the deterministic semantic binding result for one impact."""
+    value = impact if isinstance(impact, dict) else {}
+    surface = canonical_surface_by_id(registry).get(
+        str(value.get("surface_id") or value.get("canonical_surface_id") or "")
+    )
+    errors = []
+    if not surface:
+        errors.append("unknown canonical surface")
+    else:
+        if _normal_path(value.get("path")) != _normal_path(surface.get("path")):
+            errors.append("path does not match canonical surface")
+        refs = set(str(item) for item in value.get("repository_evidence_ids", []))
+        if refs != set(str(item) for item in surface.get("evidence_ids", [])):
+            errors.append("evidence refs are not hydrated from canonical surface")
+        elif not surface_evidence_supports(surface, refs, evidence):
+            errors.append("surface/evidence relation is unsupported")
+    return {"valid": not errors, "errors": errors[:8], "surface": copy.deepcopy(surface)}
+
+
+def validate_planner_output(candidate, requirements=None, allow_legacy=False):
+    """Validate only the bounded response shape before canonical hydration."""
+    value = candidate if isinstance(candidate, dict) else {}
+    impacts = list(value.get("impacts", []) or [])
+    errors = []
+    if not impacts:
+        errors.append("at least one impact is required")
+    if len(impacts) > MAX_IMPACT_ENTRIES:
+        errors.append("impact entry bound exceeded")
+    req_ids = {item["requirement_id"] for item in active_requirements(requirements or [])}
+    for item in impacts:
+        if not isinstance(item, dict):
+            errors.append("impact entry must be an object")
+            continue
+        if not item.get("impact_id"):
+            errors.append("impact ID is required")
+        refs = {str(ref) for ref in item.get("requirement_ids", [])}
+        if not refs or (req_ids and not refs.issubset(req_ids)):
+            errors.append("impact requires valid Source Requirement IDs")
+        if not allow_legacy:
+            has_surface = bool(_SURFACE_ID_RE.match(str(item.get("surface_id", ""))))
+            proposal_refs = list(item.get("new_surface_proposal_ids", []) or [])
+            has_proposal = bool(proposal_refs) and all(
+                _NEW_SURFACE_ID_RE.match(str(ref)) for ref in proposal_refs
+            )
+            if has_surface == has_proposal:
+                errors.append(
+                    "impact requires exactly one canonical surface_id or new-surface proposal authority"
+                )
+            if str(item.get("disposition", "")).upper() not in DISPOSITIONS:
+                errors.append("impact requires a bounded disposition")
+            if not isinstance(item.get("action"), str):
+                errors.append("impact action is required")
+            if not isinstance(item.get("interfaces_to_reuse", []), list):
+                errors.append("interfaces_to_reuse must be a bounded list")
+            if not isinstance(item.get("preserve", []), list) or not isinstance(item.get("verification", []), list):
+                errors.append("preserve and verification must be bounded lists")
+    forbidden = _forbidden_context_key(value)
+    if forbidden:
+        errors.append(f"raw context field is forbidden: {forbidden}")
+    return not errors
 
 
 def _forbidden_context_key(value):
@@ -390,7 +1504,8 @@ def _forbidden_context_key(value):
     return None
 
 
-def validate_impact_map(impact_map, requirements, evidence, project_mode=EXISTING_PROJECT):
+def validate_impact_map(impact_map, requirements, evidence, project_mode=EXISTING_PROJECT,
+                        surface_registry=None):
     errors = []
     value = impact_map if isinstance(impact_map, dict) else {}
     requirement_ids = {item["requirement_id"] for item in active_requirements(requirements)}
@@ -403,6 +1518,16 @@ def validate_impact_map(impact_map, requirements, evidence, project_mode=EXISTIN
     seen = set()
     supported = 0
     preservation = 0
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    strict_surface_binding = bool(surface_registry)
+    proposal_result = validate_new_surface_proposals(
+        value.get("new_surface_proposals", []), requirements, surface_registry or {},
+    ) if strict_surface_binding else {"validated": [], "rejected": []}
+    proposal_by_id = {
+        str(item.get("proposal_id")): item for item in proposal_result.get("validated", [])
+    }
+    if proposal_result.get("rejected"):
+        errors.append("new-surface proposal validation failed")
     for item in impacts:
         if not isinstance(item, dict):
             errors.append("impact entry must be an object")
@@ -413,27 +1538,97 @@ def validate_impact_map(impact_map, requirements, evidence, project_mode=EXISTIN
         seen.add(impact_id)
         kind = str(item.get("impact_kind", ""))
         necessity = str(item.get("necessity_status", ""))
+        disposition = str(item.get("disposition", ""))
         if kind not in IMPACT_KINDS:
             errors.append(f"{impact_id}: invalid impact kind")
         if necessity not in NECESSITY_STATUSES:
             errors.append(f"{impact_id}: invalid necessity status")
         req_refs = set(str(ref) for ref in item.get("requirement_ids", []))
         evidence_refs = set(str(ref) for ref in item.get("repository_evidence_ids", []))
+        surface_id = str(item.get("surface_id") or item.get("canonical_surface_id") or "")
+        proposal_refs = {
+            str(ref) for ref in item.get("new_surface_proposal_ids", []) if ref
+        }
+        new_surface_binding = bool(proposal_refs) and not surface_id
         if not req_refs or not req_refs.issubset(requirement_ids):
             errors.append(f"{impact_id}: concrete impact requires valid Source Requirement IDs")
         if project_mode == EXISTING_PROJECT and (
-            not evidence_refs or not evidence_refs.issubset(evidence_ids)
+            not new_surface_binding
+            and (not evidence_refs or not evidence_refs.issubset(evidence_ids))
         ):
             errors.append(f"{impact_id}: existing-project impact requires accepted repository evidence")
         if len(req_refs) > MAX_REQUIREMENT_REFS_PER_IMPACT:
             errors.append(f"{impact_id}: requirement reference bound exceeded")
         if len(evidence_refs) > MAX_EVIDENCE_REFS_PER_IMPACT:
             errors.append(f"{impact_id}: evidence reference bound exceeded")
-        if necessity == "MUST_CHANGE" and (not req_refs or not evidence_refs):
+        if necessity == "MUST_CHANGE" and (
+            not req_refs or (not evidence_refs and not new_surface_binding)
+        ):
             errors.append(f"{impact_id}: unsupported MUST_CHANGE")
         if kind == "PRESERVATION_ONLY" and necessity != "PRESERVATION_ONLY":
             errors.append(f"{impact_id}: preservation-only surface cannot be MUST_CHANGE")
-        if req_refs and (project_mode != EXISTING_PROJECT or evidence_refs):
+        if strict_surface_binding and disposition not in DISPOSITIONS:
+            errors.append(f"{impact_id}: canonical disposition is required")
+        if strict_surface_binding and disposition == "PRESERVATION_ONLY" and necessity != "PRESERVATION_ONLY":
+            errors.append(f"{impact_id}: preservation disposition has invalid necessity")
+        semantic_surface_valid = True
+        if strict_surface_binding:
+            surface = surface_by_id.get(surface_id)
+            if surface and proposal_refs:
+                errors.append(f"{impact_id}: impact has conflicting target authorities")
+                semantic_surface_valid = False
+            elif not surface and new_surface_binding:
+                selected_proposals = [
+                    proposal_by_id[item_id] for item_id in proposal_refs
+                    if item_id in proposal_by_id
+                ]
+                if len(selected_proposals) != len(proposal_refs):
+                    errors.append(f"{impact_id}: new-surface proposal binding is invalid")
+                    semantic_surface_valid = False
+                authorized_requirements = {
+                    str(requirement_id)
+                    for proposal in selected_proposals
+                    for requirement_id in proposal.get("requirement_ids", [])
+                }
+                if not req_refs.issubset(authorized_requirements):
+                    errors.append(f"{impact_id}: new-surface proposal does not authorize its requirements")
+                    semantic_surface_valid = False
+                if evidence_refs or _normal_path(item.get("path")):
+                    errors.append(f"{impact_id}: new-surface binding cannot claim existing identity")
+                    semantic_surface_valid = False
+                for interface_id in item.get("interfaces_to_reuse", []) or []:
+                    interface = surface_by_id.get(str(interface_id))
+                    if not interface or interface.get("kind") != "INTERFACE":
+                        errors.append(f"{impact_id}: interface reuse must reference an INTERFACE surface")
+                        semantic_surface_valid = False
+                    elif str(interface.get("symbol")) not in item.get("existing_interfaces_to_reuse", []):
+                        errors.append(f"{impact_id}: hydrated interface identity is inconsistent")
+                        semantic_surface_valid = False
+            elif not surface:
+                errors.append(f"{impact_id}: canonical surface binding is required")
+                semantic_surface_valid = False
+            else:
+                if _normal_path(item.get("path")) != _normal_path(surface.get("path")):
+                    errors.append(f"{impact_id}: path is not derived from canonical surface")
+                    semantic_surface_valid = False
+                expected_evidence = set(str(ref) for ref in surface.get("evidence_ids", []))
+                if evidence_refs != expected_evidence:
+                    errors.append(f"{impact_id}: evidence refs must be hydrated from canonical surface")
+                    semantic_surface_valid = False
+                elif not surface_evidence_supports(surface, evidence_refs, evidence):
+                    errors.append(f"{impact_id}: surface/evidence relationship is invalid")
+                    semantic_surface_valid = False
+                for interface_id in item.get("interfaces_to_reuse", []) or []:
+                    interface = surface_by_id.get(str(interface_id))
+                    if not interface or interface.get("kind") != "INTERFACE":
+                        errors.append(f"{impact_id}: interface reuse must reference an INTERFACE surface")
+                        semantic_surface_valid = False
+                    elif str(interface.get("symbol")) not in item.get("existing_interfaces_to_reuse", []):
+                        errors.append(f"{impact_id}: hydrated interface identity is inconsistent")
+                        semantic_surface_valid = False
+        if req_refs and (
+            project_mode != EXISTING_PROJECT or evidence_refs or new_surface_binding
+        ) and semantic_surface_valid:
             supported += 1
         if necessity == "PRESERVATION_ONLY":
             preservation += 1
@@ -450,9 +1645,11 @@ def validate_impact_map(impact_map, requirements, evidence, project_mode=EXISTIN
     }
 
 
-def impact_map_is_valid(candidate, requirements=None, evidence=None, project_mode=EXISTING_PROJECT):
+def impact_map_is_valid(candidate, requirements=None, evidence=None, project_mode=EXISTING_PROJECT,
+                        surface_registry=None):
     return validate_impact_map(
         normalize_impact_map(candidate), requirements or [], evidence or [], project_mode,
+        surface_registry=surface_registry,
     )["valid"]
 
 
@@ -470,8 +1667,136 @@ def _rank_requirement_ids(requirements, value, fallback_count=4):
     return [item["requirement_id"] for item in active_requirements(requirements)[:fallback_count]]
 
 
-def deterministic_impact_map(task_goal, requirements, evidence):
+def _deterministic_canonical_impact_map(task_goal, requirements, evidence, registry):
+    reqs = active_requirements(requirements)
+    by_id = canonical_surface_by_id(registry)
+    interfaces_by_path = {}
+    for surface in by_id.values():
+        if surface.get("kind") == "INTERFACE":
+            interfaces_by_path.setdefault(_normal_path(surface.get("path")), []).append(surface)
+    impacts = []
+    for surface in list(registry.get("surfaces", []) or [])[:MAX_IMPACT_ENTRIES]:
+        encoded = " ".join([
+            str(surface.get("verified_fact", "")), str(surface.get("symbol", "")),
+            str(surface.get("role", "")), str(task_goal or ""),
+        ])
+        requirement_ids = _rank_requirement_ids(reqs, encoded)
+        role = surface.get("role")
+        kind = surface.get("kind")
+        preserve = [
+            item["text"] for item in reqs
+            if _PRESERVE_RE.search(item["text"])
+            and _tokens(item["text"]) & _tokens(encoded)
+        ]
+        if kind == "PERSISTENCE":
+            disposition = "PRESERVATION_ONLY"
+        elif kind == "TEST":
+            disposition = "TEST_CHANGE"
+        elif kind == "INTERFACE":
+            disposition = "INTERFACE_REUSE"
+        elif kind == "ENTRYPOINT":
+            disposition = "VERIFY_ONLY"
+        elif kind == "OWNER":
+            disposition = "MUST_CHANGE" if _requirement_change_required(
+                requirement_ids, {item["requirement_id"]: item for item in reqs},
+            ) else "VERIFY_ONLY"
+        else:
+            disposition = "VERIFY_ONLY"
+        related_interfaces = [
+            item for item in interfaces_by_path.get(_normal_path(surface.get("path")), [])
+            if surface.get("kind") == "OWNER"
+            and _surface_symbol_base(item.get("symbol")) == _surface_symbol_base(surface.get("symbol"))
+        ]
+        interface_ids = [item["surface_id"] for item in related_interfaces]
+        interface_names = [str(item.get("symbol") or "") for item in related_interfaces]
+        action = {
+            "MUST_CHANGE": "Implement the linked behavior through the verified current owner.",
+            "TEST_CHANGE": "Update or add focused coverage at the verified test boundary.",
+            "INTERFACE_REUSE": "Reuse the verified current interface without creating a duplicate.",
+            "PRESERVATION_ONLY": "No mutation planned; preserve the verified current behavior.",
+            "VERIFY_ONLY": "Verify the linked responsibility without mutating this surface.",
+        }.get(disposition, "Insufficient evidence for a mutation claim.")
+        necessity = {
+            "MUST_CHANGE": "MUST_CHANGE", "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+            "INSUFFICIENT_EVIDENCE": "INSUFFICIENT_EVIDENCE",
+        }.get(disposition, "CANDIDATE")
+        impacts.append({
+            "impact_id": f"IMP-{len(impacts) + 1:03d}",
+            "surface_id": surface.get("surface_id"),
+            "disposition": disposition,
+            "requirement_ids": requirement_ids[:MAX_REQUIREMENT_REFS_PER_IMPACT],
+            "repository_evidence_ids": list(surface.get("evidence_ids", [])),
+            "interfaces_to_reuse": interface_ids[:6],
+            "action": action,
+            "verification": [item["text"] for item in reqs[:4]],
+            "preserve": _bounded_strings(preserve, 6, 300),
+            "reason": surface.get("verified_fact", ""),
+            "necessity_status": necessity,
+            "candidate_change": action,
+            "local_verification": [item["text"] for item in reqs[:4]],
+            "existing_interfaces_to_reuse": interface_names[:6],
+        })
+    return _canonicalize_deterministic_map(
+        {
+            "task_goal": task_goal,
+            "impacts": impacts,
+            "integration_verification": [item["text"] for item in reqs[:8]],
+            "insufficient_evidence": [],
+        }, registry, requirements, evidence,
+    )
+
+
+def _canonicalize_deterministic_map(candidate, registry, requirements, evidence):
+    """Canonicalize trusted deterministic seeds without a model round."""
+    raw = normalize_impact_map(candidate)
+    by_id = canonical_surface_by_id(registry)
+    canonical_impacts = []
+    for item in raw.get("impacts", []):
+        surface = by_id.get(str(item.get("surface_id")))
+        if not surface:
+            continue
+        canonical_impacts.append({
+            "impact_id": item.get("impact_id"),
+            "surface_id": surface.get("surface_id"),
+            "canonical_surface_id": surface.get("surface_id"),
+            "disposition": item.get("disposition"),
+            "component": surface.get("symbol") or surface.get("role") or surface.get("path"),
+            "path": _normal_path(surface.get("path")),
+            "symbols": _bounded_strings([surface.get("symbol")] if surface.get("symbol") else [], 6, 160),
+            "impact_kind": _impact_kind_for_disposition(item.get("disposition"), item.get("impact_kind")),
+            "requirement_ids": _bounded_ids(item.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
+            "repository_evidence_ids": _bounded_ids(surface.get("evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT),
+            "reason": item.get("reason", ""),
+            "existing_owner": surface.get("symbol", ""),
+            "existing_interfaces_to_reuse": _bounded_strings(item.get("existing_interfaces_to_reuse"), 6, 180),
+            "interfaces_to_reuse": _bounded_ids(item.get("interfaces_to_reuse"), 6),
+            "interface_surface_ids": _bounded_ids(item.get("interfaces_to_reuse"), 6),
+            "preserve": _bounded_strings(item.get("preserve"), 6, 300),
+            "candidate_change": item.get("candidate_change", ""),
+            "action": item.get("action", ""),
+            "local_verification": _bounded_strings(item.get("local_verification"), 6, 300),
+            "verification": _bounded_strings(item.get("verification"), 6, 300),
+            "necessity_status": item.get("necessity_status"),
+            "surface_kind": surface.get("kind"), "surface_role": surface.get("role"),
+            "owner_surface_id": surface.get("owner_surface_id"),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+    return {
+        "version": 1, "task_goal": _compact(raw.get("task_goal"), 1000),
+        "impacts": canonical_impacts,
+        "integration_verification": _bounded_strings(raw.get("integration_verification"), 10, 320),
+        "insufficient_evidence": _bounded_strings(raw.get("insufficient_evidence"), 6, 320),
+        "new_surface_proposals": [],
+        "canonical_surface_registry_version": registry.get("version"),
+        "bounds": copy.deepcopy(raw.get("bounds", {})),
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+
+
+def deterministic_impact_map(task_goal, requirements, evidence, registry=None):
     """Source/evidence-only fallback when the bounded planner output is invalid."""
+    if registry:
+        return _deterministic_canonical_impact_map(task_goal, requirements, evidence, registry)
     facts = bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
     reqs = active_requirements(requirements)
     preserve_requirements = [item for item in reqs if _PRESERVE_RE.search(item["text"])]
@@ -558,6 +1883,7 @@ def challenge_schema():
             "challenge_id": {"type": "string"},
             "challenge_type": {"type": "string", "enum": list(CHALLENGE_TYPES)},
             "impact_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+            "surface_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
             "requirement_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
             "repository_evidence_ids": {
                 "type": "array", "items": {"type": "string"}, "maxItems": 6,
@@ -597,6 +1923,7 @@ def normalize_challenges(candidate, source="MODEL"):
             "challenge_id": _compact(item.get("challenge_id") or f"CH-{index:03d}", 80),
             "challenge_type": challenge_type,
             "impact_ids": _bounded_ids(item.get("impact_ids"), 4),
+            "surface_ids": _bounded_ids(item.get("surface_ids"), 6),
             "requirement_ids": _bounded_ids(item.get("requirement_ids"), 6),
             "repository_evidence_ids": _bounded_ids(item.get("repository_evidence_ids"), 6),
             "claim": _compact(item.get("claim"), MAX_TEXT_CHARS),
@@ -608,7 +1935,8 @@ def normalize_challenges(candidate, source="MODEL"):
     return result
 
 
-def build_challenger_context(impact_map, requirements, evidence, task_brain=None):
+def build_challenger_context(impact_map, requirements, evidence, task_brain=None,
+                             surface_registry=None):
     brain = _task_brain_slice(task_brain)
     context = {
         "candidate_impact_map": copy.deepcopy(impact_map),
@@ -619,6 +1947,7 @@ def build_challenger_context(impact_map, requirements, evidence, task_brain=None
         "current_interfaces": copy.deepcopy(brain.get("current_interfaces", [])),
         "current_state_ownership": copy.deepcopy(brain.get("current_state_ownership", [])),
         "relevant_tests": copy.deepcopy(brain.get("relevant_tests", [])),
+        "canonical_surface_registry": _planner_surface_registry_slice(surface_registry),
         "bounds": {"max_challenges": MAX_CHALLENGES, "challenge_rounds": MAX_CHALLENGE_ROUNDS},
     }
     return _trim_context(context, MAX_CHALLENGER_CONTEXT_CHARS)
@@ -635,6 +1964,9 @@ def _make_challenge(challenge_type, impacts, requirements, evidence, claim, reso
     return {
         "challenge_type": challenge_type,
         "impact_ids": _bounded_ids([item.get("impact_id") for item in impacts], 4),
+        "surface_ids": _bounded_ids([
+            item.get("surface_id") or item.get("canonical_surface_id") for item in impacts
+        ], 6),
         "requirement_ids": _bounded_ids(requirements, 6),
         "repository_evidence_ids": _bounded_ids(evidence, 6),
         "claim": claim,
@@ -643,7 +1975,7 @@ def _make_challenge(challenge_type, impacts, requirements, evidence, claim, reso
     }
 
 
-def deterministic_challenges(impact_map, requirements, evidence):
+def deterministic_challenges(impact_map, requirements, evidence, surface_registry=None):
     """Add bounded deterministic falsification pressure around the model round."""
     impacts = list((impact_map or {}).get("impacts", []) or [])
     reqs = active_requirements(requirements)
@@ -673,15 +2005,21 @@ def deterministic_challenges(impact_map, requirements, evidence):
         linked_requirements = [req_by_id[item] for item in req_refs if item in req_by_id]
         linked_evidence = [evidence_by_id[item] for item in evidence_refs if item in evidence_by_id]
         text = _impact_text(impact)
-        if impact.get("necessity_status") == "MUST_CHANGE" and (not linked_requirements or not linked_evidence):
+        if impact.get("necessity_status") == "MUST_CHANGE" and (
+            not linked_requirements
+            or (not linked_evidence and not impact.get("new_surface_proposal_ids"))
+        ):
             add(_make_challenge(
                 "UNSUPPORTED_NECESSITY", [impact], req_refs, evidence_refs,
                 "The MUST_CHANGE claim is not supported by valid requirement and repository evidence references.",
                 "Remove the mutation claim or classify the surface as insufficient evidence.",
             ))
-        preservation_link = any(_PRESERVE_RE.search(item["text"]) for item in linked_requirements)
         persistence_link = any(item.get("category") == "CURRENT_PERSISTENCE" for item in linked_evidence)
-        if impact.get("necessity_status") == "MUST_CHANGE" and preservation_link and persistence_link:
+        if (
+            persistence_link
+            and impact.get("disposition") != "PRESERVATION_ONLY"
+            and impact.get("impact_kind") != "PRESERVATION_ONLY"
+        ):
             add(_make_challenge(
                 "UNSUPPORTED_NECESSITY", [impact], req_refs, evidence_refs,
                 "The evidence establishes a preservation surface, not a necessary mutation.",
@@ -704,13 +2042,20 @@ def deterministic_challenges(impact_map, requirements, evidence):
                 "Exclude the unrelated surface from the mutation plan.",
             ))
         state_facts = [item for item in linked_evidence if item.get("category") == "CURRENT_STATE_OWNER"]
-        if state_facts and _NEW_OWNER_RE.search(text):
+        duplicate_state_claim = _NEW_OWNER_RE.search(text) and bool(re.search(
+            r"\b(?:pause|paused|state|owner)\b", text, re.IGNORECASE,
+        ))
+        if state_facts and duplicate_state_claim:
             verified_owners = {
                 str(item.get("symbol", "")).split(".", 1)[0]
                 for item in state_facts if item.get("symbol")
             }
             proposed_owner = str(impact.get("component") or impact.get("existing_owner") or "")
-            if verified_owners and proposed_owner not in verified_owners:
+            explicit_duplicate = bool(re.search(
+                r"\b(?:add|create|introduce)\b.{0,60}\b(?:paused?|pause state|state)\b",
+                text, re.IGNORECASE,
+            ))
+            if verified_owners and (proposed_owner not in verified_owners or explicit_duplicate):
                 add(_make_challenge(
                     "DUPLICATE_OWNERSHIP_RISK", [impact], req_refs, evidence_refs,
                     "The candidate introduces state outside the verified authoritative state owner.",
@@ -723,9 +2068,26 @@ def deterministic_challenges(impact_map, requirements, evidence):
                 ))
         interface_facts = [item for item in linked_evidence if item.get("category") == "CURRENT_INTERFACE"]
         reuse = list(impact.get("existing_interfaces_to_reuse", []) or [])
-        if interface_facts and (_NEW_INTERFACE_RE.search(text) or not reuse):
+        registry_interfaces = []
+        if surface_registry and impact.get("surface_id"):
+            target_surface = canonical_surface_by_id(surface_registry).get(str(impact.get("surface_id")))
+            if target_surface:
+                registry_interfaces = [
+                    item for item in surface_registry.get("surfaces", [])
+                    if item.get("kind") == "INTERFACE"
+                    and item.get("owner_surface_id") == target_surface.get("surface_id")
+                ]
+        if (interface_facts or registry_interfaces) and impact.get("disposition") != "INTERFACE_REUSE" and (
+            _NEW_INTERFACE_RE.search(text) or not reuse
+        ):
+            challenge_evidence = list(dict.fromkeys(
+                evidence_refs + [
+                    evidence_id for item in registry_interfaces
+                    for evidence_id in item.get("evidence_ids", [])
+                ]
+            ))
             add(_make_challenge(
-                "INTERFACE_REUSE_MISSED", [impact], req_refs, evidence_refs,
+                "INTERFACE_REUSE_MISSED", [impact], req_refs, challenge_evidence,
                 "A verified current interface is available but the candidate does not clearly reuse it.",
                 "Reuse the cited verified interface unless evidence demonstrates it is insufficient.",
             ))
@@ -794,11 +2156,16 @@ def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by
         if not impact_refs:
             return False
         return any(
-            item.get("necessity_status") == "MUST_CHANGE"
+            item.get("necessity_status") in {"MUST_CHANGE", "CANDIDATE"}
             and (
                 not item.get("requirement_ids")
-                or not item.get("repository_evidence_ids")
+                or (
+                    not item.get("repository_evidence_ids")
+                    and not item.get("new_surface_proposal_ids")
+                )
                 or any(_PRESERVE_RE.search(req["text"]) for req in requirement_refs)
+                or item.get("impact_kind") == "PERSISTENCE_ONLY"
+                or item.get("surface_kind") == "PERSISTENCE"
             )
             for item in impact_refs
         )
@@ -826,7 +2193,7 @@ def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by
     return True
 
 
-def validate_challenges(challenges, impact_map, requirements, evidence):
+def validate_challenges(challenges, impact_map, requirements, evidence, surface_registry=None):
     impacts = {
         str(item.get("impact_id")): item for item in list((impact_map or {}).get("impacts", []) or [])
         if isinstance(item, dict) and item.get("impact_id")
@@ -853,6 +2220,43 @@ def validate_challenges(challenges, impact_map, requirements, evidence):
             errors.append("unknown requirement reference")
         if unknown_evidence:
             errors.append("unknown or stale repository evidence reference")
+        if surface_registry:
+            by_surface = canonical_surface_by_id(surface_registry)
+            surface_refs = {str(item) for item in challenge.get("surface_ids", [])}
+            impact_surfaces = {
+                str(impacts[item].get("surface_id"))
+                for item in challenge.get("impact_ids", []) if item in impacts
+            }
+            if surface_refs - set(by_surface):
+                errors.append("unknown canonical surface reference")
+            if surface_refs and impact_surfaces and not surface_refs.issubset(impact_surfaces):
+                errors.append("challenge surface does not match impact surface")
+            for impact_id in challenge.get("impact_ids", []):
+                impact = impacts.get(impact_id)
+                surface = by_surface.get(str(impact.get("surface_id"))) if impact else None
+                if surface and challenge.get("repository_evidence_ids"):
+                    supported_evidence = set(str(item) for item in surface.get("evidence_ids", []))
+                    supported_evidence.update(
+                        str(evidence_id)
+                        for interface in by_surface.values()
+                        if interface.get("kind") == "INTERFACE"
+                        and interface.get("owner_surface_id") == surface.get("surface_id")
+                        for evidence_id in interface.get("evidence_ids", [])
+                    )
+                    if not set(str(item) for item in challenge.get("repository_evidence_ids", [])).intersection(supported_evidence):
+                        errors.append("challenge evidence does not support the impacted surface")
+        if not errors and challenge.get("source") == "MODEL":
+            relationship_text = " ".join(
+                [_impact_text(impacts[item]) for item in challenge.get("impact_ids", []) if item in impacts]
+                + [req_by_id[item]["text"] for item in challenge.get("requirement_ids", []) if item in req_by_id]
+                + [
+                    str(evidence_by_id[item].get(key, ""))
+                    for item in challenge.get("repository_evidence_ids", []) if item in evidence_by_id
+                    for key in ("fact", "path", "symbol")
+                ]
+            )
+            if challenge.get("claim") and not (_tokens(challenge.get("claim")) & _tokens(relationship_text)):
+                errors.append("model criticism is not semantically grounded in cited facts")
         if not errors and not _challenge_relationship_supported(
             challenge, impacts, req_by_id, evidence_by_id,
         ):
@@ -887,12 +2291,23 @@ def merge_challenges(model_challenges, deterministic):
     return result
 
 
-def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index):
+def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
+                              surface_registry=None):
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     facts = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
     }
     selected = [facts[item] for item in challenge.get("repository_evidence_ids", []) if item in facts]
+    if surface_registry:
+        by_surface = canonical_surface_by_id(surface_registry)
+        selected_surfaces = [
+            by_surface[item] for item in challenge.get("surface_ids", []) if item in by_surface
+        ]
+        if selected_surfaces:
+            selected = [
+                facts[evidence_id] for surface in selected_surfaces
+                for evidence_id in surface.get("evidence_ids", []) if evidence_id in facts
+            ]
     grouped = {}
     for item in selected:
         grouped.setdefault(item.get("path") or item.get("evidence_id"), []).append(item)
@@ -903,6 +2318,29 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index):
         symbols = _bounded_strings([item.get("symbol") for item in records], 6, 160)
         component = next((item.split(".", 1)[0] for item in symbols if item), path)
         requirement_ids = [item for item in challenge.get("requirement_ids", []) if item in req_by_id]
+        if surface_registry:
+            surface = next((
+                item for item in surface_registry.get("surfaces", [])
+                if _normal_path(item.get("path")) == _normal_path(path)
+            ), None)
+            if not surface:
+                continue
+            impacts.append({
+                "impact_id": f"IMP-{start_index + len(impacts):03d}",
+                "surface_id": surface.get("surface_id"),
+                "disposition": "TEST_CHANGE" if kind == "TEST_CHANGE" else "MUST_CHANGE",
+                "requirement_ids": requirement_ids,
+                "repository_evidence_ids": list(surface.get("evidence_ids", [])),
+                "interfaces_to_reuse": [
+                    item.get("surface_id") for item in surface_registry.get("surfaces", [])
+                    if item.get("kind") == "INTERFACE"
+                    and _normal_path(item.get("path")) == _normal_path(surface.get("path"))
+                ][:6],
+                "action": challenge.get("proposed_resolution", "Cover the validated missing responsibility."),
+                "verification": [req_by_id[item]["text"] for item in requirement_ids],
+                "preserve": [],
+            })
+            continue
         impacts.append({
             "impact_id": f"IMP-{start_index + len(impacts):03d}",
             "component": component,
@@ -924,7 +2362,8 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index):
     return impacts
 
 
-def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence):
+def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence,
+                         surface_registry=None):
     """Apply one bounded deterministic revision; unresolved criticism stays blocking."""
     revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
     impacts = list(revised.get("impacts", []) or [])
@@ -933,6 +2372,7 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
     }
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
     resolved, unresolved = [], []
     for challenge in list(validated_challenges or [])[:MAX_CHALLENGES]:
         challenge_type = challenge.get("challenge_type")
@@ -940,6 +2380,9 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
         applied = False
         if challenge_type in {"UNSUPPORTED_NECESSITY", "UNRELATED_CHANGE"}:
             for target in targets:
+                if challenge_type == "UNRELATED_CHANGE" and target.get("disposition") == "PRESERVATION_ONLY":
+                    applied = True
+                    continue
                 linked = [
                     evidence_by_id[item] for item in target.get("repository_evidence_ids", [])
                     if item in evidence_by_id
@@ -947,18 +2390,13 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                 preservation = (
                     target.get("impact_kind") == "PRESERVATION_ONLY"
                     or any(item.get("category") == "CURRENT_PERSISTENCE" for item in linked)
-                    and (
-                        bool(target.get("preserve"))
-                        or any(
-                            item in req_by_id and _PRESERVE_RE.search(req_by_id[item]["text"])
-                            for item in challenge.get("requirement_ids", [])
-                        )
-                    )
                 )
                 if preservation:
                     target["impact_kind"] = "PRESERVATION_ONLY"
+                    target["disposition"] = "PRESERVATION_ONLY"
                     target["necessity_status"] = "PRESERVATION_ONLY"
                     target["candidate_change"] = "No mutation planned; retain this verified preservation surface."
+                    target["action"] = target["candidate_change"]
                     target["preserve"] = _bounded_strings(
                         list(target.get("preserve", [])) + [
                             req_by_id[item]["text"] for item in challenge.get("requirement_ids", [])
@@ -967,6 +2405,7 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                         6, 300,
                     )
                 else:
+                    target["disposition"] = "INSUFFICIENT_EVIDENCE"
                     target["necessity_status"] = "INSUFFICIENT_EVIDENCE"
                 applied = True
         elif challenge_type in {"WRONG_OWNER", "DUPLICATE_OWNERSHIP_RISK"}:
@@ -979,33 +2418,51 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                 owner = next((item.get("symbol", "").split(".", 1)[0] for item in owner_facts if item.get("symbol")), "")
                 if owner:
                     target["existing_owner"] = owner
+                    if surface_registry:
+                        target_surface = surface_by_id.get(str(target.get("surface_id")))
+                        if target_surface:
+                            target["existing_owner"] = target_surface.get("symbol", owner)
                     target["candidate_change"] = _compact(
                         challenge.get("proposed_resolution")
                         or "Use the verified owner; do not introduce duplicate state ownership.",
                     )
+                    target["action"] = target["candidate_change"]
                     target["preserve"] = _bounded_strings(
                         list(target.get("preserve", [])) + [f"authoritative state ownership remains with {owner}"],
                         6, 300,
                     )
                     applied = True
         elif challenge_type == "INTERFACE_REUSE_MISSED":
+            challenge_evidence_ids = list(challenge.get("repository_evidence_ids", []))
             for target in targets:
                 interfaces = [
                     evidence_by_id[item].get("symbol")
-                    for item in target.get("repository_evidence_ids", [])
+                    for item in list(target.get("repository_evidence_ids", [])) + challenge_evidence_ids
                     if item in evidence_by_id and evidence_by_id[item].get("category") == "CURRENT_INTERFACE"
                 ]
                 if interfaces:
                     target["existing_interfaces_to_reuse"] = _bounded_strings(
                         list(target.get("existing_interfaces_to_reuse", [])) + interfaces, 6, 180,
                     )
+                    if surface_registry:
+                        interface_ids = [
+                            item.get("surface_id") for item in surface_by_id.values()
+                            if item.get("kind") == "INTERFACE"
+                            and str(item.get("symbol")) in interfaces
+                        ]
+                        target["interfaces_to_reuse"] = _bounded_ids(
+                            list(target.get("interfaces_to_reuse", [])) + interface_ids, 6,
+                        )
+                        target["interface_surface_ids"] = list(target["interfaces_to_reuse"])
                     target["candidate_change"] = _compact(
                         challenge.get("proposed_resolution") or "Reuse the verified current interface.",
                     )
+                    target["action"] = target["candidate_change"]
                     applied = True
         elif challenge_type in {"TEST_GAP", "MISSING_IMPACT", "REQUIREMENT_GAP", "DEPENDENCY_GAP"}:
             additions = _evidence_impacts_for_gap(
                 challenge, requirements, evidence, len(impacts) + 1,
+                surface_registry=surface_registry,
             )
             for addition in additions:
                 if len(impacts) >= MAX_IMPACT_ENTRIES:
@@ -1025,24 +2482,78 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     revised["impacts"] = impacts[:MAX_IMPACT_ENTRIES]
     revised["challenge_rounds"] = 1
     revised["revision_rounds"] = 1 if validated_challenges else 0
-    return normalize_impact_map(revised), resolved, unresolved
+    return normalize_impact_map(revised, authoritative=bool(surface_registry)), resolved, unresolved
 
 
 def _requirement_change_required(requirement_ids, req_by_id):
     return any(_CHANGE_RE.search(req_by_id[item]["text"]) for item in requirement_ids if item in req_by_id)
 
 
-def _surface_record(impact):
+def _surface_record(impact, surface_registry=None):
+    surface = canonical_surface_by_id(surface_registry).get(
+        str(impact.get("surface_id")),
+    ) if surface_registry else None
+    path = _normal_path((surface or impact).get("path"))
+    symbol = (surface or impact).get("symbol")
     return {
-        "component": impact.get("component"),
-        "path": impact.get("path"),
-        "symbols": list(impact.get("symbols", [])),
+        "surface_id": (surface or impact).get("surface_id") or impact.get("canonical_surface_id"),
+        "canonical_surface_id": (surface or impact).get("surface_id") or impact.get("canonical_surface_id"),
+        "kind": (surface or {}).get("kind") or impact.get("surface_kind"),
+        "role": (surface or {}).get("role") or impact.get("surface_role"),
+        "component": symbol or impact.get("component"),
+        "path": path,
+        "symbols": _bounded_strings(
+            [symbol] if symbol else list(impact.get("symbols", [])), 6, 160,
+        ),
         "requirement_ids": list(impact.get("requirement_ids", [])),
-        "evidence_ids": list(impact.get("repository_evidence_ids", [])),
+        "evidence_ids": list((surface or {}).get("evidence_ids", []) or impact.get("repository_evidence_ids", [])),
         "reason": impact.get("reason"),
         "mutation_planned": False,
         "provenance": DERIVED_PLAN_DECISION,
     }
+
+
+def derive_do_not_touch_surface_ids(impact_map, surface_registry=None):
+    """Derive pure preservation surfaces and disjoint canonical paths."""
+    impacts = list((impact_map or {}).get("impacts", []) or [])
+    by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    mutation_ids = {
+        str(item.get("surface_id")) for item in impacts
+        if item.get("surface_id") and (
+            item.get("necessity_status") == "MUST_CHANGE"
+            or item.get("disposition") in {"MUST_CHANGE", "TEST_CHANGE"}
+        )
+    }
+    mutation_paths = {
+        _normal_path(by_id[item].get("path")) for item in mutation_ids if item in by_id
+    }
+    preservation_ids = set()
+    for item in impacts:
+        surface_id = str(item.get("surface_id") or "")
+        is_preservation = (
+            item.get("disposition") == "PRESERVATION_ONLY"
+            or item.get("necessity_status") == "PRESERVATION_ONLY"
+            or item.get("impact_kind") == "PRESERVATION_ONLY"
+        )
+        if not is_preservation or not surface_id or surface_id in mutation_ids:
+            continue
+        path = _normal_path(by_id.get(surface_id, item).get("path"))
+        if path and path not in mutation_paths:
+            preservation_ids.add(surface_id)
+    records = [
+        by_id[item] for item in sorted(preservation_ids)
+        if item in by_id
+    ]
+    paths = _bounded_strings([item.get("path") for item in records], MAX_PLAN_NODES, 240)
+    return {
+        "surface_ids": sorted(preservation_ids),
+        "paths": paths,
+        "mutation_surface_ids": sorted(mutation_ids),
+        "mutation_paths": sorted(mutation_paths),
+    }
+
+
+derive_do_not_touch = derive_do_not_touch_surface_ids
 
 
 def _canonical_plan_payload(plan):
@@ -1072,45 +2583,93 @@ def finalize_plan_identity(plan):
 
 
 def build_minimal_change_plan(impact_map, requirements, evidence, resolved_challenges=None,
-                              unresolved_challenges=None, project_mode=EXISTING_PROJECT):
+                              unresolved_challenges=None, project_mode=EXISTING_PROJECT,
+                              surface_registry=None):
     reqs = active_requirements(requirements)
     req_by_id = {item["requirement_id"]: item for item in reqs}
     evidence_by_id = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
     }
     impacts = list((impact_map or {}).get("impacts", []) or [])
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
     preservation, nodes, tests = [], [], []
     interface_reuse = []
+    interface_surface_ids = []
+    strict_surface_binding = bool(surface_registry)
+    proposal_by_id = {
+        str(item.get("proposal_id")): item
+        for item in (impact_map or {}).get("new_surface_proposals", [])
+        if isinstance(item, dict) and item.get("proposal_id")
+    }
     for impact in impacts:
         req_ids = [item for item in impact.get("requirement_ids", []) if item in req_by_id]
         evidence_ids = [item for item in impact.get("repository_evidence_ids", []) if item in evidence_by_id]
-        if impact.get("necessity_status") == "INSUFFICIENT_EVIDENCE":
+        surface = surface_by_id.get(str(impact.get("surface_id"))) if strict_surface_binding else None
+        proposal_ids = [
+            item for item in _bounded_ids(impact.get("new_surface_proposal_ids"), 4)
+            if item in proposal_by_id
+        ]
+        new_surface_binding = bool(proposal_ids) and not surface
+        if strict_surface_binding and not surface and not new_surface_binding:
             continue
-        if impact.get("impact_kind") == "PRESERVATION_ONLY" or impact.get("necessity_status") == "PRESERVATION_ONLY":
-            preservation.append(_surface_record(impact))
+        disposition = str(impact.get("disposition") or "").upper()
+        if impact.get("necessity_status") == "INSUFFICIENT_EVIDENCE" or disposition == "INSUFFICIENT_EVIDENCE":
             continue
-        if not req_ids or (project_mode == EXISTING_PROJECT and not evidence_ids):
+        if impact.get("impact_kind") == "PRESERVATION_ONLY" or impact.get("necessity_status") == "PRESERVATION_ONLY" or disposition == "PRESERVATION_ONLY":
+            preservation.append(_surface_record(impact, surface_registry))
+            continue
+        if not req_ids or (
+            project_mode == EXISTING_PROJECT and not evidence_ids and not new_surface_binding
+        ):
             continue
         kind = impact.get("impact_kind")
-        mutation_required = impact.get("necessity_status") == "MUST_CHANGE"
+        mutation_required = impact.get("necessity_status") == "MUST_CHANGE" or disposition in {"MUST_CHANGE", "TEST_CHANGE"}
         if impact.get("necessity_status") == "CANDIDATE":
             mutation_required = (
                 kind in {"BEHAVIOR_CHANGE", "INTEGRATION_CHANGE", "TEST_CHANGE"}
                 and _requirement_change_required(req_ids, req_by_id)
             )
-        if kind in {"INTERFACE_REUSE", "CROSS_CUTTING_VERIFICATION"}:
+        if kind in {"INTERFACE_REUSE", "CROSS_CUTTING_VERIFICATION"} or disposition in {"INTERFACE_REUSE", "VERIFY_ONLY"}:
             mutation_required = False
         interfaces = _bounded_strings(impact.get("existing_interfaces_to_reuse"), 6, 180)
+        linked_interface_ids = _bounded_ids(
+            impact.get("interfaces_to_reuse") or impact.get("interface_surface_ids"), 6,
+        )
+        if strict_surface_binding:
+            linked_interface_ids = [
+                item for item in linked_interface_ids
+                if item in surface_by_id and surface_by_id[item].get("kind") == "INTERFACE"
+            ]
+            interfaces = _bounded_strings([
+                surface_by_id[item].get("symbol") for item in linked_interface_ids
+            ], 6, 180)
         interface_reuse.extend(interfaces)
-        path = str(impact.get("path", ""))
+        interface_surface_ids.extend(linked_interface_ids)
+        path = _normal_path((surface or impact).get("path", ""))
+        surface_id = (surface or impact).get("surface_id") or impact.get("canonical_surface_id")
+        canonical_evidence_ids = list((surface or {}).get("evidence_ids", []) or evidence_ids)
+        selected_proposals = [proposal_by_id[item] for item in proposal_ids]
         node = {
             "node_id": f"NODE-{len(nodes) + 1:03d}",
             "goal": _compact(impact.get("candidate_change") or impact.get("reason"), 700),
             "requirement_ids": req_ids,
             "impact_ids": [impact.get("impact_id")],
-            "evidence_ids": evidence_ids,
-            "current_owner": _compact(impact.get("existing_owner"), 180),
+            "evidence_ids": canonical_evidence_ids,
+            "surface_ids": [surface_id] if surface_id else [],
+            "target_surface_ids": [surface_id] if surface_id and mutation_required else [],
+            "inspect_surface_ids": [surface_id] if surface_id and not mutation_required else [],
+            "new_surface_proposal_ids": proposal_ids,
+            "target_new_surface_proposal_ids": proposal_ids if mutation_required else [],
+            "inspect_new_surface_proposal_ids": proposal_ids if not mutation_required else [],
+            "new_surface_proposals": copy.deepcopy(selected_proposals),
+            "parent_scopes": _bounded_strings(
+                [item.get("parent_scope") for item in selected_proposals], 4, 240,
+            ),
+            "current_owner": _compact(
+                (surface or {}).get("symbol") or impact.get("existing_owner"), 180,
+            ),
             "interfaces_to_reuse": interfaces,
+            "interface_surface_ids": linked_interface_ids,
             "candidate_targets": [path] if path and mutation_required else [],
             "inspect_targets": [path] if path and not mutation_required else [],
             "mutation_required": bool(mutation_required),
@@ -1125,29 +2684,43 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             "do_not_touch": [],
             "impact_kind": kind,
             "necessity_status": impact.get("necessity_status"),
+            "disposition": disposition,
             "provenance": DERIVED_PLAN_DECISION,
         }
+        node["objective"] = node["goal"]
+        node["target_paths"] = list(node["candidate_targets"])
+        node["test_contract"] = list(node["local_test_contract"])
         nodes.append(node)
         if kind == "TEST_CHANGE":
             tests.append({
-                "node_id": node["node_id"], "path": path,
-                "requirement_ids": req_ids, "evidence_ids": evidence_ids,
+                "node_id": node["node_id"], "surface_id": surface_id, "path": path,
+                "test_surface_ids": [surface_id] if surface_id else [],
+                "new_surface_proposal_ids": proposal_ids,
+                "requirement_ids": req_ids, "evidence_ids": canonical_evidence_ids,
                 "contract": list(node["local_test_contract"] or node["done_when"]),
                 "provenance": DERIVED_PLAN_DECISION,
             })
         if len(nodes) >= MAX_PLAN_NODES:
             break
 
-    do_not_touch = _bounded_strings(
-        [item.get("path") for item in preservation if item.get("path")], MAX_PLAN_NODES, 240,
-    )
+    if strict_surface_binding:
+        derived_do_not_touch = derive_do_not_touch_surface_ids(impact_map, surface_registry)
+        do_not_touch_surface_ids = list(derived_do_not_touch["surface_ids"])
+        do_not_touch = list(derived_do_not_touch["paths"])
+    else:
+        do_not_touch_surface_ids = []
+        do_not_touch = _bounded_strings(
+            [item.get("path") for item in preservation if item.get("path")], MAX_PLAN_NODES, 240,
+        )
     test_nodes = [item["node_id"] for item in nodes if item.get("impact_kind") == "TEST_CHANGE"]
     behavior_nodes = [item["node_id"] for item in nodes if item.get("impact_kind") != "TEST_CHANGE"]
     all_test_contracts = _bounded_strings(
         [value for item in tests for value in item.get("contract", [])], 6, 300,
     )
     for node in nodes:
-        node["do_not_touch"] = list(do_not_touch)
+        node["do_not_touch"] = [
+            path for path in do_not_touch if path not in set(node.get("candidate_targets", []))
+        ]
         if node.get("impact_kind") == "TEST_CHANGE":
             node["dependencies"] = behavior_nodes[:4]
         elif all_test_contracts:
@@ -1201,9 +2774,22 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
         "approved_change_nodes": nodes,
         "preservation_only_surfaces": preservation[:MAX_PLAN_NODES],
         "interfaces_to_reuse": _bounded_strings(interface_reuse, 10, 180),
+        "interface_surface_ids": _bounded_ids(interface_surface_ids, 10),
         "tests_to_update_or_add": tests[:MAX_PLAN_NODES],
         "integration_verification": integration,
         "do_not_touch": do_not_touch,
+        "do_not_touch_surface_ids": do_not_touch_surface_ids,
+        "mutation_surface_ids": sorted({
+            str(value) for node in nodes for value in node.get("target_surface_ids", []) if value
+        }),
+        "mutation_new_surface_proposal_ids": sorted({
+            str(value) for node in nodes
+            for value in node.get("target_new_surface_proposal_ids", []) if value
+        }),
+        "canonical_surface_registry_version": (
+            surface_registry.get("version") if surface_registry else None
+        ),
+        "new_surface_proposals": copy.deepcopy((impact_map or {}).get("new_surface_proposals", [])),
         "resolved_challenges": list(resolved_challenges or [])[:MAX_CHALLENGES],
         "unresolved_challenges": list(unresolved_challenges or [])[:MAX_CHALLENGES],
         "coverage": coverage,
@@ -1228,7 +2814,8 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
     return finalize_plan_identity(plan)
 
 
-def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PROJECT):
+def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PROJECT,
+                         surface_registry=None):
     value = plan if isinstance(plan, dict) else {}
     errors = []
     req_ids = {item["requirement_id"] for item in active_requirements(requirements)}
@@ -1236,6 +2823,16 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
     evidence_by_id = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
     }
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    strict_surface_binding = bool(surface_registry)
+    proposal_result = validate_new_surface_proposals(
+        value.get("new_surface_proposals", []), requirements, surface_registry or {},
+    ) if strict_surface_binding else {"validated": [], "rejected": []}
+    proposal_by_id = {
+        str(item.get("proposal_id")): item for item in proposal_result.get("validated", [])
+    }
+    if proposal_result.get("rejected"):
+        errors.append("plan contains an invalid new-surface proposal")
     nodes = list(value.get("approved_change_nodes", []) or [])
     if len(nodes) > MAX_PLAN_NODES:
         errors.append("plan node bound exceeded")
@@ -1244,22 +2841,103 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
     if value.get("plan_id") != f"PLAN-{str(value.get('plan_hash', ''))[:12].upper()}":
         errors.append("plan ID does not match plan hash")
     do_not_touch = set(str(item) for item in value.get("do_not_touch", []))
+    do_not_touch_surface_ids = {
+        str(item) for item in value.get("do_not_touch_surface_ids", [])
+    }
+    mutation_surface_ids = set()
+    mutation_paths = set()
     for node in nodes:
         node_id = str(node.get("node_id", ""))
         node_requirements = set(str(item) for item in node.get("requirement_ids", []))
         node_evidence = set(str(item) for item in node.get("evidence_ids", []))
+        target_new_surface_ids = {
+            str(item) for item in node.get("target_new_surface_proposal_ids", []) if item
+        }
+        inspect_new_surface_ids = {
+            str(item) for item in node.get("inspect_new_surface_proposal_ids", []) if item
+        }
+        node_new_surface_ids = target_new_surface_ids | inspect_new_surface_ids
         if not node_id:
             errors.append("every plan node requires a node_id")
         if not node.get("done_when"):
             errors.append(f"{node_id}: done_when is required")
         if not node_requirements or not node_requirements.issubset(req_ids):
             errors.append(f"{node_id}: valid requirement responsibility is required")
-        if project_mode == EXISTING_PROJECT and (not node_evidence or not node_evidence.issubset(evidence_ids)):
+        if project_mode == EXISTING_PROJECT and not node_new_surface_ids and (
+            not node_evidence or not node_evidence.issubset(evidence_ids)
+        ):
             errors.append(f"{node_id}: accepted repository evidence is required")
         targets = set(str(item) for item in node.get("candidate_targets", []))
+        target_surface_ids = {
+            str(item) for item in node.get("target_surface_ids", [])
+        }
+        if strict_surface_binding:
+            if node.get("mutation_required") and not (
+                target_surface_ids or target_new_surface_ids
+            ):
+                errors.append(f"{node_id}: canonical or validated new-surface mutation authority is required")
+            if (target_surface_ids or node.get("inspect_surface_ids")) and node_new_surface_ids:
+                errors.append(f"{node_id}: plan node has conflicting target authorities")
+            if node_new_surface_ids:
+                if not node_new_surface_ids.issubset(proposal_by_id):
+                    errors.append(f"{node_id}: unknown new-surface proposal authority")
+                proposal_requirements = {
+                    str(requirement_id)
+                    for proposal_id in node_new_surface_ids
+                    for requirement_id in proposal_by_id.get(proposal_id, {}).get("requirement_ids", [])
+                }
+                if not node_requirements.issubset(proposal_requirements):
+                    errors.append(f"{node_id}: new-surface proposal does not authorize node requirements")
+                if node_evidence or targets:
+                    errors.append(f"{node_id}: new-surface authority cannot claim an existing target")
+            for surface_id in target_surface_ids | {
+                str(item) for item in node.get("inspect_surface_ids", [])
+            }:
+                surface = surface_by_id.get(surface_id)
+                if not surface:
+                    errors.append(f"{node_id}: unknown canonical surface")
+                    continue
+                canonical_path = _normal_path(surface.get("path"))
+                if surface_id in target_surface_ids:
+                    mutation_surface_ids.add(surface_id)
+                    mutation_paths.add(canonical_path)
+                if canonical_path and canonical_path not in targets and node.get("mutation_required"):
+                    errors.append(f"{node_id}: target path is not derived from canonical surface")
+            if node.get("mutation_required"):
+                # A node may target more than one canonical surface in future;
+                # every target path still has to be a registry-derived path.
+                expected_paths = {
+                    _normal_path(surface_by_id[item].get("path"))
+                    for item in target_surface_ids if item in surface_by_id
+                }
+                if targets != expected_paths:
+                    errors.append(f"{node_id}: mutation targets are not canonical")
+            node_interfaces = list(node.get("interface_surface_ids", []) or [])
+            for interface_id in node_interfaces:
+                interface = surface_by_id.get(str(interface_id))
+                if not interface or interface.get("kind") != "INTERFACE":
+                    errors.append(f"{node_id}: invalid canonical interface reuse")
+                elif str(interface.get("symbol")) not in node.get("interfaces_to_reuse", []):
+                    errors.append(f"{node_id}: interface identity is not hydrated")
+                elif node.get("target_surface_ids") and any(
+                    interface.get("owner_surface_id")
+                    and interface.get("owner_surface_id") != str(target_surface_id)
+                    for target_surface_id in node.get("target_surface_ids", [])
+                ):
+                    errors.append(f"{node_id}: interface owner does not match target surface")
+            inspect_surface_ids = {
+                str(item) for item in node.get("inspect_surface_ids", [])
+            }
+            if node_evidence and (target_surface_ids or inspect_surface_ids):
+                allowed_evidence = {
+                    evidence_id for surface_id in target_surface_ids | inspect_surface_ids
+                    for evidence_id in surface_by_id.get(surface_id, {}).get("evidence_ids", [])
+                }
+                if not node_evidence.issubset(allowed_evidence):
+                    errors.append(f"{node_id}: evidence is not attached to target surface")
         if targets & do_not_touch:
             errors.append(f"{node_id}: mutation target conflicts with do_not_touch")
-        if node.get("mutation_required") and not targets:
+        if node.get("mutation_required") and not targets and not target_new_surface_ids:
             errors.append(f"{node_id}: mutation responsibility has no approved target")
         if node.get("verification_only") and targets:
             errors.append(f"{node_id}: verification-only responsibility cannot mutate")
@@ -1274,14 +2952,61 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
                 str(item.get("symbol", "")).split(".", 1)[0]
                 for item in state_facts if item.get("symbol")
             }
-            if owners and str(node.get("current_owner", "")) not in owners:
+            explicit_duplicate = bool(re.search(
+                r"\b(?:add|create|introduce)\b.{0,60}\b(?:paused?|pause state|state)\b",
+                str(node.get("goal", "")), re.IGNORECASE,
+            ))
+            if owners and (
+                str(node.get("current_owner", "")) not in owners or explicit_duplicate
+            ):
                 errors.append(f"{node_id}: ownership conflict is unresolved")
+    if strict_surface_binding:
+        preservation_ids = {
+            str(item.get("surface_id")) for item in value.get("preservation_only_surfaces", [])
+            if item.get("surface_id")
+        }
+        expected_do_not_touch = {
+            item for item in do_not_touch_surface_ids
+            if item not in mutation_surface_ids
+            and item in surface_by_id
+            and _normal_path(surface_by_id[item].get("path")) not in mutation_paths
+        }
+        if do_not_touch_surface_ids != expected_do_not_touch:
+            errors.append("do_not_touch surfaces are not deterministically derived")
+        expected_paths = {
+            _normal_path(surface_by_id[item].get("path"))
+            for item in expected_do_not_touch if item in surface_by_id
+        }
+        if do_not_touch != expected_paths:
+            errors.append("do_not_touch paths are not derived from canonical surfaces")
+        if mutation_surface_ids.intersection(do_not_touch_surface_ids):
+            errors.append("mutation and do_not_touch surface sets must be disjoint")
+        if mutation_paths.intersection(do_not_touch):
+            errors.append("mutation and do_not_touch paths must be disjoint")
+        for test in value.get("tests_to_update_or_add", []) or []:
+            test_ids = [str(item) for item in test.get("test_surface_ids", [])]
+            test_proposal_ids = {
+                str(item) for item in test.get("new_surface_proposal_ids", []) if item
+            }
+            if test_ids and test_proposal_ids:
+                errors.append("test responsibility has conflicting target authorities")
+            if test_proposal_ids and not test_proposal_ids.issubset(proposal_by_id):
+                errors.append("test responsibility references an invalid new-surface proposal")
+            for surface_id in test_ids:
+                surface = surface_by_id.get(surface_id)
+                if not surface or surface.get("kind") != "TEST":
+                    errors.append("test responsibility must reference a TEST surface")
+                elif _normal_path(test.get("path")) != _normal_path(surface.get("path")):
+                    errors.append("test path is not derived from canonical TEST surface")
     coverage = {str(item.get("requirement_id")): item for item in value.get("coverage", []) if isinstance(item, dict)}
+    known_node_ids = {str(item.get("node_id")) for item in nodes}
     for requirement_id in req_ids:
         if requirement_id not in coverage or coverage[requirement_id].get("status") not in COVERAGE_STATUSES:
             errors.append(f"{requirement_id}: coverage record is missing")
         elif coverage[requirement_id].get("status") == "UNASSIGNED":
             errors.append(f"{requirement_id}: active requirement is unassigned")
+        elif not set(str(item) for item in coverage[requirement_id].get("node_ids", [] )).issubset(known_node_ids):
+            errors.append(f"{requirement_id}: coverage references an unknown plan node")
     blocking = [
         item for item in value.get("unresolved_challenges", [])
         if isinstance(item, dict) and item.get("blocking", True)
@@ -1301,6 +3026,38 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         errors.append("integration verification contract is required")
     if _json_size(value) > MAX_PLAN_CHARS:
         errors.append("plan serialized-size bound exceeded")
+    semantic_requirement_ids = set()
+    if strict_surface_binding:
+        for node in nodes:
+            node_surface_ids = {
+                str(item) for item in node.get("target_surface_ids", [])
+            } | {
+                str(item) for item in node.get("inspect_surface_ids", [])
+            }
+            node_proposal_ids = {
+                str(item) for item in node.get("target_new_surface_proposal_ids", [])
+            } | {
+                str(item) for item in node.get("inspect_new_surface_proposal_ids", [])
+            }
+            existing_binding_valid = bool(node_surface_ids) and all(
+                item in surface_by_id for item in node_surface_ids
+            )
+            new_binding_valid = bool(node_proposal_ids) and all(
+                item in proposal_by_id for item in node_proposal_ids
+            )
+            if existing_binding_valid == new_binding_valid:
+                continue
+            semantic_requirement_ids.update(str(item) for item in node.get("requirement_ids", []))
+        for surface in value.get("preservation_only_surfaces", []) or []:
+            if surface.get("surface_id") in surface_by_id:
+                semantic_requirement_ids.update(str(item) for item in surface.get("requirement_ids", []))
+    semantic_coverage = sum(
+        1 for item in coverage.values()
+        if item.get("status") != "UNASSIGNED"
+        and (not strict_surface_binding or str(item.get("requirement_id")) in semantic_requirement_ids)
+    )
+    if strict_surface_binding and semantic_coverage < len(req_ids):
+        errors.append("semantic requirement assignment is incomplete")
     return {
         "valid": not errors,
         "errors": errors[:20],
@@ -1310,6 +3067,10 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         ),
         "requirements_unassigned": sum(
             1 for item in coverage.values() if item.get("status") == "UNASSIGNED"
+        ),
+        "semantic_requirements_covered": semantic_coverage,
+        "structural_requirements_covered": sum(
+            1 for item in coverage.values() if item.get("status") != "UNASSIGNED"
         ),
         "serialized_chars": _json_size(value),
     }
@@ -1334,6 +3095,7 @@ def plan_summary(plan):
             "component": node.get("current_owner") or ", ".join(node.get("candidate_targets", []) or node.get("inspect_targets", [])),
             "behavior": _compact(node.get("goal"), 240),
             "mutation_required": bool(node.get("mutation_required")),
+            "surface_ids": list(node.get("surface_ids", []) or []),
         })
     return {
         "plan_id": value.get("plan_id"),
@@ -1363,15 +3125,19 @@ def approved_plan_node_contract(plan, node_ids=None):
         "plan_hash": value.get("plan_hash"),
         "nodes": [{
             key: copy.deepcopy(node.get(key)) for key in (
-                "node_id", "goal", "requirement_ids", "impact_ids", "evidence_ids",
+                "node_id", "goal", "objective", "requirement_ids", "impact_ids", "evidence_ids",
+                "surface_ids", "target_surface_ids", "inspect_surface_ids", "interface_surface_ids",
+                "new_surface_proposal_ids", "target_new_surface_proposal_ids",
+                "inspect_new_surface_proposal_ids", "new_surface_proposals", "parent_scopes",
                 "current_owner", "interfaces_to_reuse", "candidate_targets", "inspect_targets",
-                "mutation_required", "verification_only", "preservation_constraints",
+                "mutation_required", "verification_only", "preservation_constraints", "test_contract", "target_paths",
                 "local_test_contract", "done_when", "dependencies", "do_not_touch", "provenance",
                 "necessity_status",
             )
         } for node in nodes[:MAX_PLAN_NODES]],
         "integration_verification": _bounded_strings(value.get("integration_verification"), 8, 300),
         "do_not_touch": _bounded_strings(value.get("do_not_touch"), 8, 220),
+        "do_not_touch_surface_ids": _bounded_ids(value.get("do_not_touch_surface_ids"), 24),
     }
 
 
@@ -1383,16 +3149,27 @@ def decomposition_plan_packet(plan):
         "nodes": [{
             "node_id": item.get("node_id"),
             "goal": _compact(item.get("goal"), 360),
+            "objective": _compact(item.get("objective") or item.get("goal"), 360),
             "requirement_ids": list(item.get("requirement_ids", [])),
             "impact_ids": list(item.get("impact_ids", [])),
             "evidence_ids": list(item.get("evidence_ids", [])),
+            "surface_ids": list(item.get("surface_ids", [])),
+            "target_surface_ids": list(item.get("target_surface_ids", [])),
+            "inspect_surface_ids": list(item.get("inspect_surface_ids", [])),
+            "new_surface_proposal_ids": list(item.get("new_surface_proposal_ids", [])),
+            "target_new_surface_proposal_ids": list(item.get("target_new_surface_proposal_ids", [])),
+            "inspect_new_surface_proposal_ids": list(item.get("inspect_new_surface_proposal_ids", [])),
+            "parent_scopes": list(item.get("parent_scopes", [])),
+            "interface_surface_ids": list(item.get("interface_surface_ids", [])),
             "candidate_targets": list(item.get("candidate_targets", [])),
+            "target_paths": list(item.get("target_paths", item.get("candidate_targets", []))),
             "inspect_targets": list(item.get("inspect_targets", [])),
             "mutation_required": bool(item.get("mutation_required")),
             "local_test_contract": _bounded_strings(item.get("local_test_contract"), 4, 220),
             "done_when": _bounded_strings(item.get("done_when"), 4, 220),
         } for item in value.get("approved_change_nodes", []) or []],
         "do_not_touch": list(value.get("do_not_touch", [])),
+        "do_not_touch_surface_ids": list(value.get("do_not_touch_surface_ids", [])),
         "integration_verification": _bounded_strings(value.get("integration_verification"), 8, 260),
     }
 
@@ -1422,7 +3199,11 @@ def _path_hint(value):
 def plan_node_child_specs(plan):
     specs = []
     for node in list((plan or {}).get("approved_change_nodes", []) or [])[:MAX_PLAN_NODES]:
-        scope = list(node.get("candidate_targets", []) or node.get("inspect_targets", []))
+        scope = list(
+            node.get("candidate_targets", [])
+            or node.get("inspect_targets", [])
+            or node.get("parent_scopes", [])
+        )
         specs.append({
             "goal": node.get("goal"),
             "done_when": list(node.get("done_when", [])),
@@ -1431,6 +3212,7 @@ def plan_node_child_specs(plan):
             "requirement_ids": list(node.get("requirement_ids", [])),
             "impact_ids": list(node.get("impact_ids", [])),
             "evidence_ids": list(node.get("evidence_ids", [])),
+            "new_surface_proposal_ids": list(node.get("new_surface_proposal_ids", [])),
             "verification_only": bool(node.get("verification_only")),
         })
     return specs
@@ -1442,7 +3224,11 @@ def bind_decomposition_to_plan(specs, plan):
     nodes = list((plan or {}).get("approved_change_nodes", []) or [])
     allowed_paths = {
         str(path).replace("\\", "/") for node in nodes
-        for path in list(node.get("candidate_targets", [])) + list(node.get("inspect_targets", []))
+        for path in (
+            list(node.get("candidate_targets", []))
+            + list(node.get("inspect_targets", []))
+            + list(node.get("parent_scopes", []))
+        )
     }
     do_not_touch = {str(item).replace("\\", "/") for item in (plan or {}).get("do_not_touch", [])}
     scope_expansions = []
@@ -1498,10 +3284,17 @@ def bind_decomposition_to_plan(specs, plan):
         spec["evidence_ids"] = _bounded_ids([
             value for node in selected for value in node.get("evidence_ids", [])
         ], 16)
+        spec["new_surface_proposal_ids"] = _bounded_ids([
+            value for node in selected for value in node.get("new_surface_proposal_ids", [])
+        ], 8)
         spec["verification_only"] = bool(selected) and all(node.get("verification_only") for node in selected)
         approved_scope = _bounded_strings([
             value for node in selected
-            for value in list(node.get("candidate_targets", [])) + list(node.get("inspect_targets", []))
+            for value in (
+                list(node.get("candidate_targets", []))
+                + list(node.get("inspect_targets", []))
+                + list(node.get("parent_scopes", []))
+            )
         ], 10, 240)
         spec["scope_hint"] = approved_scope
     covered = {
@@ -1527,5 +3320,18 @@ def mutation_scope(plan_contract):
             item for node in nodes for item in node.get("inspect_targets", [])
         ], 16, 240),
         "do_not_touch": _bounded_strings(contract.get("do_not_touch"), 16, 240),
+        "approved_surface_ids": _bounded_ids([
+            item for node in nodes for item in node.get("target_surface_ids", [])
+            if node.get("mutation_required")
+        ], 24),
+        "approved_new_surface_proposal_ids": _bounded_ids([
+            item for node in nodes for item in node.get("target_new_surface_proposal_ids", [])
+            if node.get("mutation_required")
+        ], 12),
+        "approved_new_surface_parent_scopes": _bounded_strings([
+            item for node in nodes for item in node.get("parent_scopes", [])
+            if node.get("mutation_required") and node.get("target_new_surface_proposal_ids")
+        ], 12, 240),
+        "do_not_touch_surface_ids": _bounded_ids(contract.get("do_not_touch_surface_ids"), 24),
         "verification_only": bool(nodes) and all(node.get("verification_only") for node in nodes),
     }
