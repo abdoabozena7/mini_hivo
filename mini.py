@@ -1454,6 +1454,10 @@ def new_metrics(mode):
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
+        "impact_challenges_applicable": 0,
+        "impact_challenges_non_applicable": 0,
+        "challenge_effects_applied": 0,
+        "challenge_effects_suppressed": 0,
         "change_plans_created": 0,
         "change_plan_gate_failures": 0,
         "plan_nodes": 0,
@@ -1464,6 +1468,11 @@ def new_metrics(mode):
         "behavior_obligations_covered": 0,
         "behavior_obligations_uncovered": 0,
         "deterministic_behavior_anchor_promotions": 0,
+        "obligation_impacts_synthesized": 0,
+        "preservation_obligations_closed": 0,
+        "reuse_obligations_closed": 0,
+        "test_obligations_closed": 0,
+        "prohibition_obligations_closed": 0,
         "challenges_resolved_post_reconciliation": 0,
         "challenges_remaining_open": 0,
         "plan_approval_required": 0,
@@ -4364,6 +4373,7 @@ audit_impact_surfaces = stage3.audit_impact_surfaces
 derive_do_not_touch_surface_ids = stage3.derive_do_not_touch_surface_ids
 validate_impact_map = stage3.validate_impact_map
 validate_impact_challenges = stage3.validate_challenges
+evaluate_challenge_applicability = stage3.evaluate_challenge_applicability
 validate_change_plan = stage3.validate_change_plan
 plan_content_hash = stage3.plan_content_hash
 approval_is_current = stage3.approval_is_current
@@ -4390,13 +4400,18 @@ def _active_stage3_requirements(contract):
 
 def _authoritative_stage3_task_goal(contract, task_brain=None):
     value = contract if isinstance(contract, dict) else {}
+    source_contract = value.get("source_contract")
+    if isinstance(source_contract, dict):
+        source_goal = source_contract.get("root_goal")
+        if isinstance(source_goal, str) and source_goal:
+            return source_goal
     for candidate in (value.get("original_goal"), value.get("goal")):
         if isinstance(candidate, str) and candidate.strip():
-            return candidate
+            return candidate.strip()
     brain_goal = (task_brain or {}).get("task_goal", "")
     if isinstance(brain_goal, dict):
         brain_goal = brain_goal.get("text", "")
-    return str(brain_goal or "")
+    return str(brain_goal or "").strip()
 
 
 def _impact_project_invariants(task_brain):
@@ -4676,6 +4691,12 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     RUN["impact_challenges_rejected"] = RUN.get("impact_challenges_rejected", 0) + len(
         validation.get("rejected", []),
     )
+    RUN["impact_challenges_applicable"] = RUN.get("impact_challenges_applicable", 0) + len(
+        validation.get("applicable", []),
+    )
+    RUN["impact_challenges_non_applicable"] = RUN.get("impact_challenges_non_applicable", 0) + len(
+        validation.get("non_applicable", []),
+    )
     RUN["impact_challenge_rounds"] = 1
     RUN["impact_challenges_output"] = challenges
     RUN["impact_challenge_validation"] = validation
@@ -4883,6 +4904,26 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         obligation_ledger=obligation_ledger,
         task_goal=authoritative_task_goal,
     )
+    # Recompute challenge lifecycle against the actual final plan payload.
+    # The impact map is retained as the canonical target lookup so omitted
+    # preservation/interface surfaces remain auditable even when they are
+    # represented in plan-level sections rather than mutation nodes.
+    final_lifecycle, resolved, unresolved = stage3.re_evaluate_challenge_lifecycle(
+        challenge_validation.get("validated", []), plan, requirements,
+        repository_evidence, surface_registry=registry,
+        obligation_ledger=obligation_ledger, impact_map=reconciled,
+        closure_actions=reconciled.get("behavior_anchor_closure_actions", []),
+    )
+    plan["resolved_challenges"] = [
+        stage3.compact_challenge_record(item) for item in resolved[:stage3.MAX_CHALLENGES]
+    ]
+    plan["unresolved_challenges"] = [
+        stage3.compact_challenge_record(item) for item in unresolved[:stage3.MAX_CHALLENGES]
+    ]
+    plan = stage3.finalize_plan_identity(plan)
+    reconciled["challenge_lifecycle"] = final_lifecycle
+    reconciled["challenges_resolved_post_reconciliation"] = len(resolved)
+    reconciled["challenges_remaining_open"] = len(unresolved)
     RUN.setdefault("control_flow", []).append("PLAN_GATE")
     gate = stage3.validate_change_plan(
         plan, requirements, repository_evidence, EXISTING_PROJECT,
@@ -4908,6 +4949,14 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
     RUN["deterministic_behavior_anchor_promotions"] = int(
         reconciled.get("deterministic_behavior_anchor_promotions", 0) or 0
     )
+    for metric in (
+        "impact_challenges_applicable", "impact_challenges_non_applicable",
+        "challenge_effects_applied", "challenge_effects_suppressed",
+        "obligation_impacts_synthesized", "preservation_obligations_closed",
+        "reuse_obligations_closed", "test_obligations_closed",
+        "prohibition_obligations_closed",
+    ):
+        RUN[metric] = int(reconciled.get(metric, RUN.get(metric, 0)) or 0)
     RUN["challenges_resolved_post_reconciliation"] = int(
         reconciled.get("challenges_resolved_post_reconciliation", len(resolved)) or 0
     )
@@ -13431,6 +13480,65 @@ def run_self_test(install_browser=False):
             if item.get("target_surface_ids") == [v183_input_owner.get("surface_id")]
         )
 
+        # v18.4 obligation-conserving checks intentionally omit the storage,
+        # test, and input-query decisions and inject the original weak
+        # INTERFACE_REUSE + UNSUPPORTED_NECESSITY regression. The source-root
+        # contract carries the authoritative goal while the runtime prompt
+        # carries a trailing newline, so the latter must not reach the plan.
+        v184_source_goal = v17_pause_raw
+        v184_runtime_contract = {
+            "source_contract": {"root_goal": v184_source_goal},
+            "goal": v184_source_goal + "\n",
+            "original_goal": "wrong runtime fallback",
+        }
+        v184_authoritative_goal = _authoritative_stage3_task_goal(v184_runtime_contract)
+        v184_partial_output = {
+            "impacts": copy.deepcopy(v183_weak_output["impacts"][:3]),
+        }
+        v184_partial_hydrated = stage3.hydrate_impact_map(
+            v184_partial_output, v18_registry, v18_requirements,
+            v17_existing_evidence, impact_seeds=v183_seeds,
+        )
+        v184_ch001 = {
+            "challenge_id": "CH-001",
+            "challenge_type": "UNSUPPORTED_NECESSITY",
+            "impact_ids": [v183_impact_id(v183_input_owner)],
+            "surface_ids": [v183_input_owner.get("surface_id")],
+            "requirement_ids": [v18_req_by_prefix["Reuse "]],
+            "repository_evidence_ids": [v18_input_owner],
+            "claim": "The reused input interface does not require mutation.",
+            "proposed_resolution": "Leave the non-mutating responsibility unchanged.",
+            "blocking": False,
+        }
+        v184_challenge_validation = stage3.validate_challenges(
+            [v184_ch001], v184_partial_hydrated, v18_requirements,
+            v17_existing_evidence, v18_registry,
+        )
+        v184_reconciled, v184_resolved, v184_unresolved = stage3.reconcile_impact_map(
+            v184_partial_hydrated, v184_challenge_validation.get("validated", []),
+            v18_requirements, v17_existing_evidence, v18_registry, v183_seeds,
+            task_goal=v184_authoritative_goal,
+        )
+        v184_plan = stage3.build_minimal_change_plan(
+            v184_reconciled, v18_requirements, v17_existing_evidence,
+            v184_resolved, v184_unresolved, surface_registry=v18_registry,
+            task_goal=v184_authoritative_goal,
+        )
+        v184_gate = stage3.validate_change_plan(
+            v184_plan, v18_requirements, v17_existing_evidence,
+            surface_registry=v18_registry, authoritative_task_goal=v184_source_goal,
+        )
+        v184_noninteractive = request_plan_approval(
+            v184_plan, interactive=False, terminal_available=False,
+        )
+        v184_by_surface = {
+            item.get("surface_id"): item for item in v184_reconciled.get("impacts", [])
+        }
+        v184_input_node = next(
+            item for item in v184_plan.get("approved_change_nodes", [])
+            if item.get("target_surface_ids") == [v183_input_owner.get("surface_id")]
+        )
+
         v17_auth_root = v17_root / "repo_conflict"
         (v17_auth_root / "src").mkdir(parents=True)
         (v17_auth_root / "src" / "legacy-auth.js").write_text(
@@ -13726,6 +13834,43 @@ def run_self_test(install_browser=False):
                     "src/game.js" in node.get("candidate_targets", [])
                     for node in v183_plan.get("approved_change_nodes", [])
                 )
+            ),
+            "v18.4 nonapplicable challenge": (
+                len(v184_challenge_validation.get("applicable", [])) == 0
+                and len(v184_challenge_validation.get("non_applicable", [])) == 1
+                and v184_challenge_validation["validated"][0].get("effect_status") == "NOT_APPLICABLE"
+                and v184_reconciled.get("challenge_effects_suppressed") == 1
+            ),
+            "v18.4 behavior closure": (
+                v184_by_surface.get(v183_input_owner.get("surface_id"), {}).get("disposition") == "MUST_CHANGE"
+                and v184_reconciled.get("deterministic_behavior_anchor_promotions") == 1
+                and v184_reconciled.get("semantic_obligation_coverage", {}).get("behavior_obligations_uncovered") == 0
+            ),
+            "v18.4 omitted preservation": (
+                v184_by_surface.get(v183_storage_surface.get("surface_id"), {}).get("disposition") == "PRESERVATION_ONLY"
+                and v183_storage_surface.get("surface_id") in v184_plan.get("do_not_touch_surface_ids", [])
+            ),
+            "v18.4 omitted test": (
+                v184_by_surface.get("SURF-006", {}).get("disposition") == "TEST_CHANGE"
+                and any(item.get("surface_id") == "SURF-006" for item in v184_plan.get("tests_to_update_or_add", []))
+            ),
+            "v18.4 exact task goal": (
+                v184_authoritative_goal == v184_source_goal
+                and v184_plan.get("task_goal") == v184_source_goal
+                and v184_plan.get("plan_hash") == stage3.plan_content_hash(v184_plan)
+            ),
+            "v18.4 final valid approval": (
+                v184_gate.get("valid")
+                and not v184_unresolved
+                and v184_noninteractive.get("terminal_state") == PLAN_APPROVAL_REQUIRED
+                and v184_noninteractive.get("status") == "plan_approval_required"
+                and RUN.get("worker_missions_executed", 0) == 0
+                and RUN.get("mutations_applied", 0) == 0
+                and "Escape" in format_plan_approval_summary(v184_plan)
+                and "src/game.js" not in {
+                    path for node in v184_plan.get("approved_change_nodes", [])
+                    for path in node.get("candidate_targets", [])
+                }
             ),
         }
         for name, ok in checks.items():
