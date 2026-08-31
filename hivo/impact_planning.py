@@ -60,6 +60,16 @@ COVERAGE_STATUSES = (
     "CROSS_CUTTING",
     "UNASSIGNED",
 )
+REQUIREMENT_OBLIGATION_TYPES = (
+    "BEHAVIOR_CHANGE",
+    "ARCHITECTURE_REUSE",
+    "PRESERVATION",
+    "TEST",
+    "PROHIBITION",
+    "CROSS_CUTTING",
+)
+OBLIGATION_COVERAGE_STATES = ("COVERED", "UNCOVERED")
+CHALLENGE_LIFECYCLE_STATES = ("OPEN", "RESOLVED", "SUPERSEDED", "REJECTED")
 CHALLENGE_TYPES = (
     "UNSUPPORTED_NECESSITY",
     "WRONG_OWNER",
@@ -92,10 +102,24 @@ _CHANGE_RE = re.compile(
     r"replace|support|update)\b", re.IGNORECASE,
 )
 _PRESERVE_RE = re.compile(
-    r"\b(?:do not change|keep|preserve|remain|retain|unchanged|without breaking)\b",
+    r"\b(?:do not change|keep|preserv(?:e|es|ed|ing)|remain|retain|unchanged|without breaking)\b",
     re.IGNORECASE,
 )
-_TEST_RE = re.compile(r"\b(?:assert|spec|test|tests|verification|verify)\b", re.IGNORECASE)
+_TEST_RE = re.compile(r"\b(?:assert|coverage|spec|test|tests|verification|verify)\b", re.IGNORECASE)
+_REUSE_RE = re.compile(
+    r"\b(?:reuse|use (?:the )?(?:current|existing)|keep using|existing (?:owner|interface|service|architecture)|"
+    r"current (?:owner|interface|service|architecture))\b",
+    re.IGNORECASE,
+)
+_PROHIBITION_RE = re.compile(
+    r"\b(?:do not|don't|must not|never|no duplicate|no second (?:owner|service|state)|avoid(?:ing)? duplicate|"
+    r"(?:without|instead of) (?:adding|creating|introducing|changing|breaking))\b",
+    re.IGNORECASE,
+)
+_CROSS_CUTTING_RE = re.compile(
+    r"\b(?:cross[- ]cutting|end[- ]to[- ]end|integration|across (?:the )?(?:project|system|application))\b",
+    re.IGNORECASE,
+)
 _NEW_OWNER_RE = re.compile(
     r"\b(?:add|create|introduce|move)\b.{0,80}\b(?:field|flag|owner|state|store|controller)\b",
     re.IGNORECASE,
@@ -212,6 +236,109 @@ def active_requirements(requirements):
             "status": "active",
         })
     return result
+
+
+def _domain_tokens(value):
+    """Return stable semantic tokens for requirement/surface relationships.
+
+    Hyphenated source phrases are retained by ``_tokens`` for compatibility,
+    while this projection also exposes their parts (``pause-state`` ->
+    ``pause``, ``state``).  The projection is deliberately lexical and does
+    not infer repository identities.
+    """
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value or "")).casefold()
+    text = re.sub(r"[-_/]", " ", text)
+    stop = {
+        "add", "another", "behavior", "change", "current", "existing", "for",
+        "from", "instead", "into", "must", "project", "relevant", "should",
+        "support", "task", "that", "the", "this", "through", "update", "using",
+        "with", "without",
+    }
+    result = set()
+    for raw in re.findall(r"[a-z0-9_$]{3,}", text):
+        if raw not in stop:
+            result.add(raw)
+        if raw.endswith("s") and len(raw) > 4 and raw[:-1] not in stop:
+            result.add(raw[:-1])
+    return result
+
+
+def build_requirement_obligation_ledger(requirements):
+    """Classify active source requirements into deterministic obligations."""
+    records = []
+    for requirement in active_requirements(requirements):
+        text = requirement["text"]
+        obligation_types = []
+        is_test = bool(_TEST_RE.search(text))
+        is_preservation = bool(_PRESERVE_RE.search(text))
+        is_reuse = bool(_REUSE_RE.search(text))
+        is_prohibition = bool(_PROHIBITION_RE.search(text))
+        # A test-only sentence is not a product behavior mutation merely
+        # because it contains "add" or "update".  A compound sentence such
+        # as "add export and tests" retains both obligations.
+        non_test_terms = _domain_tokens(text) - {
+            "assert", "coverage", "spec", "test", "tests", "verification", "verify",
+        }
+        behavior = bool(_CHANGE_RE.search(text)) and not (is_test and not non_test_terms)
+        if behavior:
+            obligation_types.append("BEHAVIOR_CHANGE")
+        if is_reuse:
+            obligation_types.append("ARCHITECTURE_REUSE")
+        if is_preservation:
+            obligation_types.append("PRESERVATION")
+        if is_test:
+            obligation_types.append("TEST")
+        if is_prohibition:
+            obligation_types.append("PROHIBITION")
+        if _CROSS_CUTTING_RE.search(text):
+            obligation_types.append("CROSS_CUTTING")
+        if not obligation_types:
+            # An active declarative requirement still needs a concrete
+            # semantic home.  Treat it as behavior unless it is explicitly a
+            # non-mutating constraint.
+            obligation_types.append("BEHAVIOR_CHANGE")
+        records.append({
+            "requirement_id": requirement["requirement_id"],
+            "text": text,
+            "obligation_types": [
+                item for item in REQUIREMENT_OBLIGATION_TYPES if item in obligation_types
+            ],
+            "source_provenance": requirement.get("provenance", USER_STATED),
+            "classification_provenance": DERIVED_PLAN_DECISION,
+        })
+    return {
+        "version": 1,
+        "requirements": records,
+        "obligation_count": sum(len(item["obligation_types"]) for item in records),
+        "bounds": {"max_requirements": len(records), "allowed_types": list(REQUIREMENT_OBLIGATION_TYPES)},
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+
+
+requirement_obligation_ledger = build_requirement_obligation_ledger
+
+
+def _obligation_records(ledger_or_requirements):
+    if isinstance(ledger_or_requirements, dict) and isinstance(
+        ledger_or_requirements.get("requirements"), list
+    ):
+        return list(ledger_or_requirements.get("requirements", []))
+    return build_requirement_obligation_ledger(ledger_or_requirements).get("requirements", [])
+
+
+def compact_requirement_obligation_ledger(ledger_or_requirements):
+    records = _obligation_records(ledger_or_requirements)
+    return {
+        "version": 1,
+        "requirements": [{
+            "requirement_id": item.get("requirement_id"),
+            "obligation_types": list(item.get("obligation_types", [])),
+            "source_provenance": item.get("source_provenance", USER_STATED),
+            "classification_provenance": DERIVED_PLAN_DECISION,
+        } for item in records],
+        "obligation_count": sum(len(item.get("obligation_types", [])) for item in records),
+        "provenance": DERIVED_PLAN_DECISION,
+    }
 
 
 def bounded_evidence(evidence, max_items=12):
@@ -753,6 +880,49 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None,
             "surface_role": surface.get("role"),
             "provenance": REPOSITORY_EVIDENCE,
         })
+    # A behavior requirement and an architecture-reuse requirement may be
+    # two clauses of one responsibility.  If they share domain language, an
+    # existing OWNER already anchored by the reuse clause receives the
+    # behavior hint as a companion relationship.  This changes hints only;
+    # canonical identity and mutation authority remain untouched.
+    obligation_by_id = {
+        item["requirement_id"]: item
+        for item in _obligation_records(build_requirement_obligation_ledger(reqs))
+    }
+    req_by_id = {item["requirement_id"]: item for item in reqs}
+    companion_pairs = []
+    for behavior_id, behavior in obligation_by_id.items():
+        if "BEHAVIOR_CHANGE" not in behavior.get("obligation_types", []):
+            continue
+        for reuse_id, reuse in obligation_by_id.items():
+            if behavior_id == reuse_id or "ARCHITECTURE_REUSE" not in reuse.get("obligation_types", []):
+                continue
+            shared = sorted(
+                _domain_tokens(req_by_id[behavior_id]["text"])
+                & _domain_tokens(req_by_id[reuse_id]["text"])
+            )
+            if shared:
+                companion_pairs.append((behavior_id, reuse_id, shared[:4]))
+    for seed in seeds:
+        relationships = []
+        original_ids = list(seed.get("requirement_ids", []))
+        for behavior_id, reuse_id, shared in companion_pairs:
+            if reuse_id not in original_ids or behavior_id in seed.get("requirement_ids", []):
+                continue
+            if seed.get("surface_kind") != "OWNER":
+                continue
+            seed["requirement_ids"] = _bounded_ids(
+                list(seed.get("requirement_ids", [])) + [behavior_id],
+                MAX_REQUIREMENT_REFS_PER_IMPACT,
+            )
+            relationships.append({
+                "requirement_id": behavior_id,
+                "companion_requirement_id": reuse_id,
+                "relationship": "BEHAVIOR_REUSE_COMPANION",
+                "shared_terms": shared,
+                "provenance": DERIVED_PLAN_DECISION,
+            })
+        seed["requirement_relationships"] = relationships[:4]
     return seeds
 
 
@@ -1016,7 +1186,7 @@ def _planner_surface_packet(surface):
 
 
 def _planner_seed_packet(seed):
-    return {
+    value = {
         "impact_id": normalize_impact_id(seed.get("impact_id")),
         "surface_id": str(seed.get("surface_id") or ""),
         "kind": seed.get("kind"),
@@ -1029,6 +1199,14 @@ def _planner_seed_packet(seed):
         "verified_fact": _compact(seed.get("verified_fact"), 240),
         "eligible": bool(seed.get("eligible", True)),
     }
+    relationships = list(seed.get("requirement_relationships", []) or [])[:4]
+    if relationships:
+        value["requirement_relationships"] = [{
+            "requirement_id": item.get("requirement_id"),
+            "companion_requirement_id": item.get("companion_requirement_id"),
+            "relationship": "COMPANION",
+        } for item in relationships]
+    return value
 
 
 def _trim_planner_optional_payload(packet, max_chars):
@@ -1524,6 +1702,12 @@ def normalize_impact_map(candidate, authoritative=False):
             6, 300,
         )
         preserve = _bounded_strings(_list_value(item.get("preserve")), 6, 300)
+        local_preservation = _bounded_strings(
+            _list_value(item.get("local_preservation_constraints")), 8, 300,
+        )
+        prohibitions = _bounded_strings(
+            _list_value(item.get("prohibition_constraints")), 6, 320,
+        )
         requirement_ids = _bounded_ids(
             _list_value(item.get("requirement_ids")), MAX_REQUIREMENT_REFS_PER_IMPACT,
         )
@@ -1549,6 +1733,8 @@ def normalize_impact_map(candidate, authoritative=False):
             "interfaces_to_reuse": interface_surface_ids,
             "interface_surface_ids": interface_surface_ids,
             "preserve": preserve,
+            "local_preservation_constraints": local_preservation,
+            "prohibition_constraints": prohibitions,
             "candidate_change": action,
             "action": action,
             "local_verification": verification,
@@ -1559,6 +1745,14 @@ def normalize_impact_map(candidate, authoritative=False):
             "new_surface_proposal_ids": proposal_ids,
             "provenance": DERIVED_PLAN_DECISION,
         }
+        if isinstance(item.get("closure_metadata"), dict):
+            value["closure_metadata"] = {
+                "closure_type": _compact(item["closure_metadata"].get("closure_type"), 80),
+                "requirement_ids": _bounded_ids(item["closure_metadata"].get("requirement_ids"), 6),
+                "surface_id": _compact(item["closure_metadata"].get("surface_id"), 80),
+                "seed_id": _compact(item["closure_metadata"].get("seed_id"), 80),
+                "provenance": DERIVED_PLAN_DECISION,
+            }
         # Keep model-authored identity only in explicitly non-authoritative
         # audit fields.  Hydrated maps replace the ordinary identity fields.
         if not authoritative:
@@ -1568,7 +1762,7 @@ def normalize_impact_map(candidate, authoritative=False):
             value["model_existing_owner"] = _compact(item.get("existing_owner"), 180)
             value["model_repository_evidence_ids"] = list(evidence_ids)
         impacts.append(value)
-    return {
+    normalized = {
         "version": 1,
         "task_goal": _compact(goal, 1000),
         "impacts": impacts,
@@ -1588,6 +1782,16 @@ def normalize_impact_map(candidate, authoritative=False):
         },
         "provenance": DERIVED_PLAN_DECISION,
     }
+    for key in (
+        "requirement_obligation_ledger", "semantic_obligation_coverage",
+        "behavior_anchor_closure_actions", "challenge_lifecycle",
+    ):
+        if key in candidate:
+            normalized[key] = copy.deepcopy(candidate.get(key))
+    normalized["deterministic_behavior_anchor_promotions"] = int(
+        candidate.get("deterministic_behavior_anchor_promotions", 0) or 0
+    )
+    return normalized
 
 
 def _normal_path(value):
@@ -3035,6 +3239,468 @@ def _make_challenge(challenge_type, impacts, requirements, evidence, claim, reso
     }
 
 
+def _verified_behavior_exists(requirement, evidence):
+    requirement_terms = _domain_tokens((requirement or {}).get("text"))
+    for item in bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2):
+        if item.get("category") != "CURRENT_BEHAVIOR":
+            continue
+        fact = " ".join(str(item.get(key, "")) for key in ("fact", "symbol", "path"))
+        if requirement_terms.intersection(_domain_tokens(fact)) and re.search(
+            r"\b(?:already|current|currently|implements?|provides?|supports?|exists?)\b",
+            fact, re.IGNORECASE,
+        ):
+            return True, item.get("evidence_id")
+    return False, None
+
+
+def evaluate_requirement_obligations(source, requirements, evidence,
+                                     surface_registry=None, obligation_ledger=None):
+    """Evaluate semantic coverage by obligation type, never by ID presence alone."""
+    value = source if isinstance(source, dict) else {}
+    ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    obligation_records = _obligation_records(ledger)
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    evidence_by_id = {
+        item["evidence_id"]: item
+        for item in bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2)
+    }
+    is_plan = isinstance(value.get("approved_change_nodes"), list)
+    entries = list(value.get("approved_change_nodes", []) or []) if is_plan else list(
+        value.get("impacts", []) or []
+    )
+    preservation_entries = list(value.get("preservation_only_surfaces", []) or []) if is_plan else [
+        item for item in entries
+        if item.get("disposition") == "PRESERVATION_ONLY"
+        or item.get("necessity_status") == "PRESERVATION_ONLY"
+        or item.get("impact_kind") == "PRESERVATION_ONLY"
+    ]
+    global_prohibitions = _bounded_strings(value.get("prohibition_constraints"), 8, 320)
+    integration = _bounded_strings(value.get("integration_verification"), 12, 320)
+    result = []
+    for obligation in obligation_records:
+        requirement_id = str(obligation.get("requirement_id"))
+        linked = [
+            item for item in entries
+            if requirement_id in {str(value) for value in item.get("requirement_ids", [])}
+        ]
+        linked_preservation = [
+            item for item in preservation_entries
+            if requirement_id in {str(value) for value in item.get("requirement_ids", [])}
+        ]
+        type_records = []
+        for obligation_type in obligation.get("obligation_types", []):
+            covered = False
+            support = []
+            if obligation_type == "BEHAVIOR_CHANGE":
+                for item in linked:
+                    if is_plan:
+                        mutation = bool(item.get("mutation_required"))
+                        surface_ids = [str(value) for value in item.get("target_surface_ids", [])]
+                        valid_owner = any(
+                            surface_by_id.get(surface_id, {}).get("kind") == "OWNER"
+                            for surface_id in surface_ids
+                        ) if surface_by_id else bool(surface_ids or item.get("candidate_targets"))
+                        valid_new = bool(item.get("target_new_surface_proposal_ids"))
+                    else:
+                        mutation = (
+                            item.get("disposition") == "MUST_CHANGE"
+                            or item.get("necessity_status") == "MUST_CHANGE"
+                        )
+                        surface = surface_by_id.get(str(item.get("surface_id"))) or {} if surface_by_id else {}
+                        kind = surface.get("kind") or item.get("surface_kind")
+                        valid_owner = kind == "OWNER" or (not surface_by_id and item.get("impact_kind") == "BEHAVIOR_CHANGE")
+                        valid_new = bool(item.get("new_surface_proposal_ids"))
+                    if mutation and (valid_owner or valid_new):
+                        covered = True
+                        support.append(str(item.get("node_id") or item.get("impact_id")))
+                if not covered:
+                    exists, evidence_id = _verified_behavior_exists(obligation, evidence)
+                    if exists:
+                        covered = True
+                        support.append(str(evidence_id))
+            elif obligation_type == "TEST":
+                for item in linked:
+                    if is_plan:
+                        disposition = item.get("disposition")
+                        kind = item.get("impact_kind")
+                        target_ids = item.get("target_surface_ids", [])
+                        valid_test = any(
+                            surface_by_id.get(str(surface_id), {}).get("kind") == "TEST"
+                            for surface_id in target_ids
+                        ) if surface_by_id else bool(target_ids or item.get("candidate_targets"))
+                        covered_here = bool(item.get("mutation_required")) and (
+                            disposition == "TEST_CHANGE" or kind == "TEST_CHANGE"
+                        ) and (valid_test or bool(item.get("target_new_surface_proposal_ids")))
+                    else:
+                        surface = surface_by_id.get(str(item.get("surface_id"))) or {} if surface_by_id else {}
+                        valid_test = (surface.get("kind") or item.get("surface_kind")) == "TEST"
+                        covered_here = (
+                            item.get("disposition") == "TEST_CHANGE"
+                            or item.get("impact_kind") == "TEST_CHANGE"
+                        ) and (valid_test or not surface_by_id or bool(item.get("new_surface_proposal_ids")))
+                    if covered_here:
+                        covered = True
+                        support.append(str(item.get("node_id") or item.get("impact_id")))
+            elif obligation_type == "PRESERVATION":
+                candidates = linked + linked_preservation
+                for item in candidates:
+                    constraints = (
+                        list(item.get("local_preservation_constraints", []) or [])
+                        + list(item.get("preservation_constraints", []) or [])
+                        + list(item.get("preserve", []) or [])
+                    )
+                    explicit_surface = (
+                        item.get("disposition") == "PRESERVATION_ONLY"
+                        or item.get("necessity_status") == "PRESERVATION_ONLY"
+                        or item.get("impact_kind") == "PRESERVATION_ONLY"
+                        or item in linked_preservation
+                    )
+                    if constraints or explicit_surface:
+                        covered = True
+                        support.append(str(item.get("node_id") or item.get("impact_id") or item.get("surface_id")))
+            elif obligation_type == "ARCHITECTURE_REUSE":
+                for item in linked:
+                    interface_ids = [str(value) for value in item.get("interface_surface_ids", [])]
+                    interfaces_valid = bool(interface_ids) and (
+                        not surface_by_id or all(
+                            surface_by_id.get(surface_id, {}).get("kind") == "INTERFACE"
+                            for surface_id in interface_ids
+                        )
+                    )
+                    surface_ids = [str(value) for value in (
+                        item.get("surface_ids", []) if is_plan else [item.get("surface_id")]
+                    ) if value]
+                    owner_valid = (bool(surface_ids) or (not surface_by_id and bool(item.get("current_owner")))) and (
+                        not surface_by_id or all(
+                            surface_by_id.get(surface_id, {}).get("kind") in {"OWNER", "INTERFACE"}
+                            for surface_id in surface_ids
+                        )
+                    )
+                    explicit_reuse = (
+                        item.get("disposition") == "INTERFACE_REUSE"
+                        or bool(item.get("interfaces_to_reuse"))
+                        or bool(item.get("existing_interfaces_to_reuse"))
+                    )
+                    verified_architecture = any(
+                        evidence_by_id.get(str(evidence_id), {}).get("category")
+                        in {"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_INTERFACE"}
+                        for evidence_id in item.get(
+                            "evidence_ids" if is_plan else "repository_evidence_ids", []
+                        )
+                    )
+                    if interfaces_valid or (owner_valid and explicit_reuse) or (
+                        not surface_by_id and explicit_reuse and verified_architecture
+                    ):
+                        covered = True
+                        support.append(str(item.get("node_id") or item.get("impact_id")))
+            elif obligation_type == "PROHIBITION":
+                constraints = list(global_prohibitions)
+                constraints.extend(
+                    text for item in linked
+                    for text in (
+                        list(item.get("prohibition_constraints", []) or [])
+                        + list(item.get("local_preservation_constraints", []) or [])
+                        + list(item.get("preservation_constraints", []) or [])
+                        + list(item.get("preserve", []) or [])
+                    )
+                )
+                covered = any(_PROHIBITION_RE.search(str(item)) for item in constraints)
+                if covered:
+                    support.extend(_bounded_strings(constraints, 3, 120))
+            elif obligation_type == "CROSS_CUTTING":
+                covered = bool(linked and integration)
+                if covered:
+                    support.extend(integration[:2])
+            type_records.append({
+                "obligation_type": obligation_type,
+                "state": "COVERED" if covered else "UNCOVERED",
+                "support": _bounded_strings(support, 6, 180),
+            })
+        result.append({
+            "requirement_id": requirement_id,
+            "obligation_types": list(obligation.get("obligation_types", [])),
+            "obligations": type_records,
+            "state": "COVERED" if type_records and all(
+                item["state"] == "COVERED" for item in type_records
+            ) else "UNCOVERED",
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+    return {
+        "requirements": result,
+        "requirements_covered": sum(item["state"] == "COVERED" for item in result),
+        "requirements_uncovered": sum(item["state"] != "COVERED" for item in result),
+        "behavior_obligations": sum(
+            item["obligation_type"] == "BEHAVIOR_CHANGE"
+            for record in result for item in record["obligations"]
+        ),
+        "behavior_obligations_covered": sum(
+            item["obligation_type"] == "BEHAVIOR_CHANGE" and item["state"] == "COVERED"
+            for record in result for item in record["obligations"]
+        ),
+        "behavior_obligations_uncovered": sum(
+            item["obligation_type"] == "BEHAVIOR_CHANGE" and item["state"] != "COVERED"
+            for record in result for item in record["obligations"]
+        ),
+    }
+
+
+semantic_obligation_coverage = evaluate_requirement_obligations
+
+
+def _preservation_fragments(text):
+    value = _compact(text, 700)
+    body = re.sub(r"^\s*(?:preserve|keep|retain)\s+(?:the\s+)?", "", value, flags=re.IGNORECASE)
+    parts = [item.strip(" .,;") for item in re.split(r"\s+and\s+|;", body) if item.strip(" .,;")]
+    result = []
+    for part in parts:
+        slash = re.match(r"^([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)\s+(.+)$", part)
+        if slash:
+            result.extend([
+                f"Preserve existing {slash.group(1)} {slash.group(3)}.",
+                f"Preserve existing {slash.group(2)} {slash.group(3)}.",
+            ])
+        else:
+            result.append(f"Preserve {part}.")
+    return _bounded_strings(result or [f"Preserve {body}."], 8, 260)
+
+
+def _prohibition_constraints(text):
+    if not _PROHIBITION_RE.search(str(text or "")):
+        return []
+    return [f"Do not violate this source constraint: {_compact(text, 300)}"]
+
+
+def _integration_check_for_obligation(obligation):
+    text = str(obligation.get("text", ""))
+    types = set(obligation.get("obligation_types", []))
+    if "BEHAVIOR_CHANGE" in types and re.search(r"\b[\w-]+/[\w-]+\b", text):
+        return f"Verify the requested transition in both directions: {text}"
+    if "TEST" in types:
+        return f"Run and pass the relevant test obligation: {text}"
+    if "PRESERVATION" in types:
+        return f"Verify preserved behavior after integration: {text}"
+    if "PROHIBITION" in types:
+        return f"Verify ownership and prohibition constraints: {text}"
+    return (
+        f"Verify {obligation.get('requirement_id')} "
+        f"({', '.join(obligation.get('obligation_types', []))}): {text}"
+    )
+
+
+def _behavior_object(text):
+    return _compact(re.sub(
+        r"^\s*(?:add|change|create|edit|extend|fix|implement|introduce|migrate|modify|"
+        r"remove|replace|support|update)\s+",
+        "", str(text or ""), flags=re.IGNORECASE,
+    ), 260)
+
+
+def _apply_obligation_constraints(impact_map, requirements, surface_registry=None,
+                                  impact_seeds=None, obligation_ledger=None):
+    revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
+    impacts = list(revised.get("impacts", []) or [])
+    ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    obligation_by_id = {item["requirement_id"]: item for item in _obligation_records(ledger)}
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    seed_by_surface = {
+        str(item.get("surface_id")): item for item in list(impact_seeds or [])
+        if isinstance(item, dict) and item.get("surface_id")
+    }
+    for impact in impacts:
+        surface = surface_by_id.get(str(impact.get("surface_id")), {})
+        seed = seed_by_surface.get(str(impact.get("surface_id")), {})
+        req_ids = list(impact.get("requirement_ids", []))
+        for requirement_id in seed.get("requirement_ids", []):
+            types = obligation_by_id.get(requirement_id, {}).get("obligation_types", [])
+            compatible = (
+                ("PRESERVATION" in types and impact.get("disposition") == "PRESERVATION_ONLY")
+                or ("TEST" in types and impact.get("disposition") == "TEST_CHANGE")
+                or ("ARCHITECTURE_REUSE" in types and impact.get("disposition") == "INTERFACE_REUSE")
+                or (
+                    "PRESERVATION" in types
+                    and (impact.get("disposition") == "MUST_CHANGE" or impact.get("necessity_status") == "MUST_CHANGE")
+                    and (surface.get("kind") or impact.get("surface_kind")) == "OWNER"
+                )
+            )
+            if compatible and requirement_id not in req_ids:
+                req_ids.append(requirement_id)
+        impact["requirement_ids"] = _bounded_ids(req_ids, MAX_REQUIREMENT_REFS_PER_IMPACT)
+        local_constraints = list(impact.get("local_preservation_constraints", []) or [])
+        prohibitions = list(impact.get("prohibition_constraints", []) or [])
+        is_changed_owner = (
+            (impact.get("disposition") == "MUST_CHANGE" or impact.get("necessity_status") == "MUST_CHANGE")
+            and (surface.get("kind") or impact.get("surface_kind")) == "OWNER"
+        )
+        specialized_surface_terms = set()
+        for known_surface in surface_by_id.values():
+            if known_surface.get("kind") not in {"PERSISTENCE", "TEST", "ENTRYPOINT"}:
+                continue
+            specialized_surface_terms.update(_domain_tokens(" ".join([
+                str(known_surface.get("verified_fact", "")),
+                str(known_surface.get("symbol", "")),
+                str(known_surface.get("role", "")),
+            ])))
+        for requirement_id in impact["requirement_ids"]:
+            obligation = obligation_by_id.get(requirement_id, {})
+            text = obligation.get("text", "")
+            if "PRESERVATION" in obligation.get("obligation_types", []):
+                fragments = _preservation_fragments(text)
+                role = str(surface.get("role") or impact.get("surface_role") or "")
+                surface_terms = _domain_tokens(" ".join([
+                    str(surface.get("verified_fact", "")), str(surface.get("symbol", "")), role,
+                ]))
+                for fragment in fragments:
+                    fragment_terms = _domain_tokens(fragment)
+                    if (
+                        fragment_terms.intersection(surface_terms)
+                        or (
+                            is_changed_owner
+                            and not fragment_terms.intersection(specialized_surface_terms)
+                        )
+                    ):
+                        local_constraints.append(fragment)
+            prohibitions.extend(_prohibition_constraints(text))
+        if is_changed_owner and surface:
+            role_label = str(surface.get("role") or "owner").replace("_OWNER", "").replace("_", " ").casefold()
+            local_constraints.append(
+                f"Preserve current {role_label} ownership in {surface.get('symbol')}."
+            )
+        impact["local_preservation_constraints"] = _bounded_strings(local_constraints, 8, 300)
+        impact["preserve"] = _bounded_strings(
+            list(impact.get("preserve", [])) + impact["local_preservation_constraints"], 8, 300,
+        )
+        impact["prohibition_constraints"] = _bounded_strings(prohibitions, 6, 320)
+    revised["impacts"] = impacts
+    revised["requirement_obligation_ledger"] = copy.deepcopy(ledger)
+    return revised
+
+
+def close_behavior_obligation_gaps(impact_map, requirements, evidence,
+                                   surface_registry=None, impact_seeds=None,
+                                   obligation_ledger=None):
+    """Promote exactly one safe canonical owner for each open behavior duty."""
+    revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
+    ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    coverage = evaluate_requirement_obligations(
+        revised, requirements, evidence, surface_registry, ledger,
+    )
+    open_behavior = {
+        record["requirement_id"] for record in coverage["requirements"]
+        if any(
+            item["obligation_type"] == "BEHAVIOR_CHANGE" and item["state"] == "UNCOVERED"
+            for item in record["obligations"]
+        )
+    }
+    surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
+    impact_by_id = {
+        normalize_impact_id(item.get("impact_id")): item
+        for item in revised.get("impacts", []) if isinstance(item, dict)
+    }
+    impact_by_surface = {
+        str(item.get("surface_id")): item
+        for item in revised.get("impacts", []) if isinstance(item, dict) and item.get("surface_id")
+    }
+    req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
+    actions = []
+    for requirement_id in sorted(open_behavior):
+        exists, _ = _verified_behavior_exists(req_by_id.get(requirement_id, {}), evidence)
+        if exists:
+            continue
+        candidates = []
+        for seed in list(impact_seeds or []):
+            if requirement_id not in seed.get("requirement_ids", []):
+                continue
+            surface = surface_by_id.get(str(seed.get("surface_id"))) if surface_by_id else None
+            if not surface or surface.get("kind") != "OWNER":
+                continue
+            target = impact_by_id.get(normalize_impact_id(seed.get("impact_id"))) or impact_by_surface.get(
+                str(seed.get("surface_id"))
+            )
+            if not target or target.get("disposition") in {
+                "PRESERVATION_ONLY", "TEST_CHANGE", "INSUFFICIENT_EVIDENCE",
+            }:
+                continue
+            if target.get("surface_kind") in {"TEST", "PERSISTENCE", "ENTRYPOINT", "INTERFACE"}:
+                continue
+            candidates.append((seed, surface, target))
+        # An owner whose existing interface already accounts for all of the
+        # requirement terms visible on that owner is a reuse surface, not the
+        # missing mutation anchor, when another owner candidate exists.
+        if len(candidates) > 1:
+            filtered = []
+            requirement_terms = _domain_tokens(req_by_id.get(requirement_id, {}).get("text"))
+            for seed, surface, target in candidates:
+                owner_terms = requirement_terms.intersection(_domain_tokens(
+                    " ".join([str(surface.get("verified_fact", "")), str(surface.get("symbol", ""))])
+                ))
+                interface_terms = set()
+                for interface in surface_by_id.values():
+                    if interface.get("kind") == "INTERFACE" and interface.get("owner_surface_id") == surface.get("surface_id"):
+                        interface_terms.update(_domain_tokens(
+                            " ".join([str(interface.get("verified_fact", "")), str(interface.get("symbol", ""))])
+                        ))
+                if owner_terms and owner_terms.issubset(interface_terms):
+                    continue
+                filtered.append((seed, surface, target))
+            if filtered:
+                candidates = filtered
+        unique = {
+            str(surface.get("surface_id")): (seed, surface, target)
+            for seed, surface, target in candidates
+        }
+        if len(unique) != 1:
+            continue
+        seed, surface, target = next(iter(unique.values()))
+        target["disposition"] = "MUST_CHANGE"
+        target["impact_kind"] = "BEHAVIOR_CHANGE"
+        target["necessity_status"] = "MUST_CHANGE"
+        target["requirement_ids"] = _bounded_ids(
+            list(target.get("requirement_ids", [])) + [requirement_id],
+            MAX_REQUIREMENT_REFS_PER_IMPACT,
+        )
+        related_ids = {requirement_id}
+        for relationship in seed.get("requirement_relationships", []):
+            if relationship.get("requirement_id") == requirement_id:
+                related_ids.add(str(relationship.get("companion_requirement_id")))
+        interface_ids = list(target.get("interfaces_to_reuse", []))
+        for interface in surface_by_id.values():
+            if interface.get("kind") != "INTERFACE":
+                continue
+            same_owner = interface.get("owner_surface_id") == surface.get("surface_id")
+            linked_interface_impact = impact_by_surface.get(str(interface.get("surface_id")), {})
+            linked_requirements = {str(item) for item in linked_interface_impact.get("requirement_ids", [])}
+            if same_owner or related_ids.intersection(linked_requirements):
+                interface_ids.append(str(interface.get("surface_id")))
+        target["interfaces_to_reuse"] = _bounded_ids(interface_ids, 6)
+        target["interface_surface_ids"] = list(target["interfaces_to_reuse"])
+        target["existing_interfaces_to_reuse"] = _bounded_strings([
+            surface_by_id[item].get("symbol") for item in target["interfaces_to_reuse"]
+            if item in surface_by_id
+        ], 6, 180)
+        action = (
+            f"Extend verified existing owner {surface.get('symbol')} for "
+            f"{_behavior_object(req_by_id[requirement_id]['text'])} "
+            f"({requirement_id}), reusing canonical interfaces."
+        )
+        target["candidate_change"] = _compact(action, MAX_TEXT_CHARS)
+        target["action"] = target["candidate_change"]
+        target["local_verification"] = _bounded_strings(
+            list(target.get("local_verification", [])) + [req_by_id[requirement_id]["text"]], 6, 300,
+        )
+        target["closure_metadata"] = {
+            "closure_type": "UNIQUE_SAFE_OWNER_PROMOTION",
+            "requirement_ids": [requirement_id],
+            "surface_id": surface.get("surface_id"),
+            "seed_id": seed.get("seed_id"),
+            "provenance": DERIVED_PLAN_DECISION,
+        }
+        actions.append(copy.deepcopy(target["closure_metadata"]))
+    revised["impacts"] = list(revised.get("impacts", []))[:MAX_IMPACT_ENTRIES]
+    revised["deterministic_behavior_anchor_promotions"] = len(actions)
+    revised["behavior_anchor_closure_actions"] = actions
+    return revised, actions
+
+
 def deterministic_challenges(impact_map, requirements, evidence, surface_registry=None):
     """Add bounded deterministic falsification pressure around the model round."""
     impacts = list((impact_map or {}).get("impacts", []) or [])
@@ -3152,7 +3818,20 @@ def deterministic_challenges(impact_map, requirements, evidence, surface_registr
                 "Reuse the cited verified interface unless evidence demonstrates it is insufficient.",
             ))
 
-    test_requirements = [item for item in reqs if _TEST_RE.search(item["text"])]
+    obligation_ledger = build_requirement_obligation_ledger(reqs)
+    semantic = evaluate_requirement_obligations(
+        impact_map, reqs, evidence, surface_registry, obligation_ledger,
+    )
+    semantic_by_id = {
+        item["requirement_id"]: item for item in semantic.get("requirements", [])
+    }
+    test_requirements = [
+        item for item in reqs
+        if "TEST" in next(
+            (record.get("obligation_types", []) for record in _obligation_records(obligation_ledger)
+             if record.get("requirement_id") == item["requirement_id"]), []
+        )
+    ]
     test_facts = [item for item in facts if item.get("category") == "CURRENT_TEST"]
     test_impacts = [item for item in impacts if item.get("impact_kind") == "TEST_CHANGE"]
     if test_requirements and test_facts and not test_impacts:
@@ -3163,11 +3842,9 @@ def deterministic_challenges(impact_map, requirements, evidence, surface_registr
             "Add a focused TEST_CHANGE responsibility using the verified test surface.",
         ))
 
-    covered = {
-        str(requirement_id) for item in impacts for requirement_id in item.get("requirement_ids", [])
-    }
     for requirement in reqs:
-        if requirement["requirement_id"] in covered:
+        requirement_semantic = semantic_by_id.get(requirement["requirement_id"], {})
+        if requirement_semantic.get("state") == "COVERED":
             continue
         related = [
             item for item in facts
@@ -3178,13 +3855,14 @@ def deterministic_challenges(impact_map, requirements, evidence, surface_registr
         add(_make_challenge(
             "REQUIREMENT_GAP", [], [requirement["requirement_id"]],
             [item["evidence_id"] for item in related[:6]],
-            "An active Source Requirement has no impact responsibility.",
-            "Add an evidence-supported impact or leave the plan incomplete.",
+            "An active Source Requirement has an uncovered semantic obligation.",
+            "Add type-correct evidence-supported coverage or leave the plan incomplete.",
         ))
     return normalize_challenges({"challenges": challenges}, source="DETERMINISTIC")
 
 
-def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by_id):
+def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by_id,
+                                      surface_registry=None):
     challenge_type = challenge.get("challenge_type")
     impact_refs = [impacts[item] for item in challenge.get("impact_ids", []) if item in impacts]
     requirement_refs = [req_by_id[item] for item in challenge.get("requirement_ids", []) if item in req_by_id]
@@ -3230,10 +3908,11 @@ def _challenge_relationship_supported(challenge, impacts, req_by_id, evidence_by
             for item in impact_refs
         )
     if challenge_type == "REQUIREMENT_GAP":
-        covered = {
-            str(value) for item in impacts.values() for value in item.get("requirement_ids", [])
-        }
-        return any(item["requirement_id"] not in covered for item in requirement_refs)
+        semantic = evaluate_requirement_obligations(
+            {"impacts": list(impacts.values())}, requirement_refs,
+            list(evidence_by_id.values()), surface_registry,
+        )
+        return any(item.get("state") == "UNCOVERED" for item in semantic["requirements"])
     if challenge_type == "UNRELATED_CHANGE":
         if not impact_refs or not requirement_refs or not evidence_refs:
             return False
@@ -3318,15 +3997,19 @@ def validate_challenges(challenges, impact_map, requirements, evidence, surface_
             if challenge.get("claim") and not (_tokens(challenge.get("claim")) & _tokens(relationship_text)):
                 errors.append("model criticism is not semantically grounded in cited facts")
         if not errors and not _challenge_relationship_supported(
-            challenge, impacts, req_by_id, evidence_by_id,
+            challenge, impacts, req_by_id, evidence_by_id, surface_registry,
         ):
             errors.append("claimed relationship is not supported by the cited evidence")
         if errors:
             challenge["validation_status"] = "REJECTED"
             challenge["validation_errors"] = errors
+            challenge["lifecycle_state"] = "REJECTED"
+            challenge["resolution_status"] = "REJECTED"
             rejected.append(challenge)
         else:
             challenge["validation_status"] = "VALIDATED"
+            challenge["lifecycle_state"] = "OPEN"
+            challenge["resolution_status"] = "OPEN"
             accepted.append(challenge)
     return {"validated": accepted, "rejected": rejected}
 
@@ -3428,7 +4111,8 @@ def _evidence_impacts_for_gap(challenge, requirements, evidence, start_index,
 
 
 def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence,
-                         surface_registry=None, impact_seeds=None):
+                         surface_registry=None, impact_seeds=None,
+                         obligation_ledger=None, task_goal=None, task_brain=None):
     """Apply one bounded deterministic revision; unresolved criticism stays blocking."""
     revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
     impacts = list(revised.get("impacts", []) or [])
@@ -3438,7 +4122,8 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     }
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
-    resolved, unresolved = [], []
+    obligation_ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    application_by_id = {}
     for challenge in list(validated_challenges or [])[:MAX_CHALLENGES]:
         challenge_type = challenge.get("challenge_type")
         targets = [by_id[item] for item in challenge.get("impact_ids", []) if item in by_id]
@@ -3492,6 +4177,7 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                         or "Use the verified owner; do not introduce duplicate state ownership.",
                     )
                     target["action"] = target["candidate_change"]
+                    target["reason"] = target["candidate_change"]
                     target["preserve"] = _bounded_strings(
                         list(target.get("preserve", [])) + [f"authoritative state ownership remains with {owner}"],
                         6, 300,
@@ -3547,13 +4233,106 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
                     list(target.get("preserve", [])) + [challenge.get("proposed_resolution")], 6, 300,
                 )
                 applied = True
-        record = copy.deepcopy(challenge)
-        record["resolution_status"] = "RESOLVED" if applied else "UNRESOLVED"
-        (resolved if applied else unresolved).append(record)
+        application_by_id[str(challenge.get("challenge_id"))] = bool(applied)
     revised["impacts"] = impacts[:MAX_IMPACT_ENTRIES]
     revised["challenge_rounds"] = 1
     revised["revision_rounds"] = 1 if validated_challenges else 0
-    return normalize_impact_map(revised, authoritative=bool(surface_registry)), resolved, unresolved
+    if task_goal is not None:
+        revised["task_goal"] = _compact(task_goal, 1000)
+    revised = _apply_obligation_constraints(
+        revised, requirements, surface_registry, impact_seeds, obligation_ledger,
+    )
+    revised, closure_actions = close_behavior_obligation_gaps(
+        revised, requirements, evidence, surface_registry, impact_seeds,
+        obligation_ledger,
+    )
+    revised = _apply_obligation_constraints(
+        revised, requirements, surface_registry, impact_seeds, obligation_ledger,
+    )
+    normalized = normalize_impact_map(revised, authoritative=bool(surface_registry))
+    semantic = evaluate_requirement_obligations(
+        normalized, requirements, evidence, surface_registry, obligation_ledger,
+    )
+    normalized["requirement_obligation_ledger"] = copy.deepcopy(obligation_ledger)
+    normalized["semantic_obligation_coverage"] = semantic
+    normalized["deterministic_behavior_anchor_promotions"] = len(closure_actions)
+    normalized["behavior_anchor_closure_actions"] = closure_actions
+
+    semantic_by_id = {
+        item["requirement_id"]: item for item in semantic.get("requirements", [])
+    }
+    normalized_impacts = {
+        str(item.get("impact_id")): item for item in normalized.get("impacts", [])
+    }
+    resolved, unresolved = [], []
+    lifecycle = []
+    for challenge in list(validated_challenges or [])[:MAX_CHALLENGES]:
+        challenge_type = challenge.get("challenge_type")
+        challenge_id = str(challenge.get("challenge_id"))
+        applied = application_by_id.get(challenge_id, False)
+        target_records = [
+            normalized_impacts[item] for item in challenge.get("impact_ids", [])
+            if item in normalized_impacts
+        ]
+        if challenge_type in {"REQUIREMENT_GAP", "MISSING_IMPACT", "DEPENDENCY_GAP"}:
+            is_open = any(
+                semantic_by_id.get(str(requirement_id), {}).get("state") != "COVERED"
+                for requirement_id in challenge.get("requirement_ids", [])
+            )
+        elif challenge_type == "TEST_GAP":
+            is_open = any(
+                any(
+                    item.get("obligation_type") == "TEST" and item.get("state") != "COVERED"
+                    for item in semantic_by_id.get(str(requirement_id), {}).get("obligations", [])
+                )
+                for requirement_id in challenge.get("requirement_ids", [])
+            )
+        elif challenge_type == "INTERFACE_REUSE_MISSED":
+            is_open = any(not (
+                item.get("interfaces_to_reuse") or item.get("existing_interfaces_to_reuse")
+            ) for item in target_records)
+        elif challenge_type == "PRESERVATION_RISK":
+            is_open = any(not (
+                item.get("preserve") or item.get("local_preservation_constraints")
+            ) for item in target_records)
+        elif challenge_type in {"WRONG_OWNER", "DUPLICATE_OWNERSHIP_RISK"}:
+            is_open = any(_NEW_OWNER_RE.search(_impact_text(item)) for item in target_records)
+        elif challenge_type == "UNSUPPORTED_NECESSITY":
+            is_open = any(
+                item.get("necessity_status") == "MUST_CHANGE"
+                and (
+                    not item.get("requirement_ids")
+                    or (
+                        not item.get("repository_evidence_ids")
+                        and not item.get("new_surface_proposal_ids")
+                    )
+                    or item.get("surface_kind") == "PERSISTENCE"
+                )
+                for item in target_records
+            )
+        elif challenge_type == "UNRELATED_CHANGE":
+            is_open = any(
+                item.get("necessity_status") not in {"INSUFFICIENT_EVIDENCE", "PRESERVATION_ONLY"}
+                for item in target_records
+            ) and not applied
+        else:
+            is_open = not applied
+        record = copy.deepcopy(challenge)
+        if is_open:
+            state = "OPEN"
+        elif applied or closure_actions:
+            state = "RESOLVED" if applied else "SUPERSEDED"
+        else:
+            state = "SUPERSEDED"
+        record["lifecycle_state"] = state
+        record["resolution_status"] = state
+        record["post_reconciliation_evaluation"] = True
+        lifecycle.append(record)
+        (unresolved if state == "OPEN" else resolved).append(record)
+    normalized["challenge_lifecycle"] = lifecycle
+    normalized["challenges_resolved_post_reconciliation"] = len(resolved)
+    normalized["challenges_remaining_open"] = len(unresolved)
+    return normalized, resolved, unresolved
 
 
 def _requirement_change_required(requirement_ids, req_by_id):
@@ -3579,6 +4358,13 @@ def _surface_record(impact, surface_registry=None):
         "requirement_ids": list(impact.get("requirement_ids", [])),
         "evidence_ids": list((surface or {}).get("evidence_ids", []) or impact.get("repository_evidence_ids", [])),
         "reason": impact.get("reason"),
+        "preservation_constraints": _bounded_strings(
+            list(impact.get("local_preservation_constraints", []) or [])
+            + list(impact.get("preserve", []) or []), 8, 300,
+        ),
+        "prohibition_constraints": _bounded_strings(
+            impact.get("prohibition_constraints"), 6, 320,
+        ),
         "mutation_planned": False,
         "provenance": DERIVED_PLAN_DECISION,
     }
@@ -3655,8 +4441,13 @@ def finalize_plan_identity(plan):
 
 def build_minimal_change_plan(impact_map, requirements, evidence, resolved_challenges=None,
                               unresolved_challenges=None, project_mode=EXISTING_PROJECT,
-                              surface_registry=None):
+                              surface_registry=None, obligation_ledger=None,
+                              task_goal=None):
     reqs = active_requirements(requirements)
+    obligation_ledger = obligation_ledger or (
+        (impact_map or {}).get("requirement_obligation_ledger")
+        or build_requirement_obligation_ledger(reqs)
+    )
     req_by_id = {item["requirement_id"]: item for item in reqs}
     evidence_by_id = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
@@ -3745,7 +4536,15 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             "inspect_targets": [path] if path and not mutation_required else [],
             "mutation_required": bool(mutation_required),
             "verification_only": not mutation_required,
-            "preservation_constraints": _bounded_strings(impact.get("preserve"), 6, 300),
+            "local_preservation_constraints": _bounded_strings(
+                impact.get("local_preservation_constraints") or impact.get("preserve"), 8, 300,
+            ),
+            "preservation_constraints": _bounded_strings(
+                impact.get("local_preservation_constraints") or impact.get("preserve"), 8, 300,
+            ),
+            "prohibition_constraints": _bounded_strings(
+                impact.get("prohibition_constraints"), 6, 320,
+            ),
             "local_test_contract": _bounded_strings(impact.get("local_verification"), 6, 300),
             "done_when": _bounded_strings(
                 impact.get("local_verification")
@@ -3758,6 +4557,8 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             "disposition": disposition,
             "provenance": DERIVED_PLAN_DECISION,
         }
+        if isinstance(impact.get("closure_metadata"), dict):
+            node["closure_metadata"] = copy.deepcopy(impact.get("closure_metadata"))
         node["objective"] = node["goal"]
         node["target_paths"] = list(node["candidate_targets"])
         node["test_contract"] = list(node["local_test_contract"])
@@ -3799,33 +4600,6 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
                 list(node.get("local_test_contract", [])) + all_test_contracts, 6, 300,
             )
 
-    coverage = []
-    for requirement in reqs:
-        requirement_id = requirement["requirement_id"]
-        linked_nodes = [item for item in nodes if requirement_id in item.get("requirement_ids", [])]
-        linked_preservation = [
-            item for item in preservation if requirement_id in item.get("requirement_ids", [])
-        ]
-        if any(item.get("impact_kind") == "TEST_CHANGE" for item in linked_nodes):
-            status = "COVERED_BY_TEST"
-        elif any(item.get("mutation_required") for item in linked_nodes):
-            status = "COVERED_BY_CHANGE"
-        elif linked_preservation:
-            status = "COVERED_BY_PRESERVATION"
-        elif linked_nodes:
-            status = "CROSS_CUTTING"
-        else:
-            status = "UNASSIGNED"
-        coverage.append({
-            "requirement_id": requirement_id,
-            "status": status,
-            "node_ids": [item["node_id"] for item in linked_nodes],
-            "impact_ids": _bounded_ids([
-                value for item in linked_nodes for value in item.get("impact_ids", [])
-            ], 6),
-            "provenance": DERIVED_PLAN_DECISION,
-        })
-
     integration = _bounded_strings((impact_map or {}).get("integration_verification"), 10, 320)
     for item in preservation:
         if item.get("reason"):
@@ -3834,12 +4608,68 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             )
     if tests:
         integration = _bounded_strings(integration + ["Run the approved relevant test contracts."], 10, 320)
+    for obligation in _obligation_records(obligation_ledger):
+        integration = _bounded_strings(
+            integration + [_integration_check_for_obligation(obligation)], 12, 360,
+        )
     if not integration:
         integration = ["Verify every approved responsibility and preservation constraint after fan-in."]
 
+    prohibition_constraints = _bounded_strings([
+        constraint
+        for obligation in _obligation_records(obligation_ledger)
+        for constraint in _prohibition_constraints(obligation.get("text"))
+    ], 8, 320)
+    semantic = evaluate_requirement_obligations({
+        "approved_change_nodes": nodes,
+        "preservation_only_surfaces": preservation,
+        "integration_verification": integration,
+        "prohibition_constraints": prohibition_constraints,
+    }, reqs, evidence, surface_registry, obligation_ledger)
+    semantic_by_id = {
+        item["requirement_id"]: item for item in semantic.get("requirements", [])
+    }
+    coverage = []
+    for requirement in reqs:
+        requirement_id = requirement["requirement_id"]
+        linked_nodes = [item for item in nodes if requirement_id in item.get("requirement_ids", [])]
+        linked_preservation = [
+            item for item in preservation if requirement_id in item.get("requirement_ids", [])
+        ]
+        semantic_record = semantic_by_id.get(requirement_id, {})
+        types = set(semantic_record.get("obligation_types", []))
+        if semantic_record.get("state") != "COVERED":
+            status = "UNASSIGNED"
+        elif "BEHAVIOR_CHANGE" in types:
+            status = "COVERED_BY_CHANGE"
+        elif "TEST" in types:
+            status = "COVERED_BY_TEST"
+        elif "PRESERVATION" in types:
+            status = "COVERED_BY_PRESERVATION"
+        else:
+            status = "CROSS_CUTTING"
+        coverage.append({
+            "requirement_id": requirement_id,
+            "status": status,
+            "node_ids": [item["node_id"] for item in linked_nodes],
+            "impact_ids": _bounded_ids([
+                value for item in linked_nodes for value in item.get("impact_ids", [])
+            ], 6),
+            "preservation_surface_ids": _bounded_ids([
+                item.get("surface_id") for item in linked_preservation
+            ], 6),
+            "obligation_types": list(semantic_record.get("obligation_types", [])),
+            "semantic_state": semantic_record.get("state", "UNCOVERED"),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+
     plan = {
         "version": 1,
-        "task_goal": _compact((impact_map or {}).get("task_goal"), 1000),
+        "task_goal": (
+            str(task_goal) if task_goal is not None
+            else _compact((impact_map or {}).get("task_goal"), 1000)
+            or (f"Fulfill active requirement: {reqs[0]['text']}" if reqs else "")
+        ),
         "project_mode": project_mode,
         "requirements": reqs,
         "approved_change_nodes": nodes,
@@ -3848,6 +4678,7 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
         "interface_surface_ids": _bounded_ids(interface_surface_ids, 10),
         "tests_to_update_or_add": tests[:MAX_PLAN_NODES],
         "integration_verification": integration,
+        "prohibition_constraints": prohibition_constraints,
         "do_not_touch": do_not_touch,
         "do_not_touch_surface_ids": do_not_touch_surface_ids,
         "mutation_surface_ids": sorted({
@@ -3864,6 +4695,11 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
         "resolved_challenges": list(resolved_challenges or [])[:MAX_CHALLENGES],
         "unresolved_challenges": list(unresolved_challenges or [])[:MAX_CHALLENGES],
         "coverage": coverage,
+        "requirement_obligation_ledger": compact_requirement_obligation_ledger(obligation_ledger),
+        "semantic_obligation_coverage": semantic,
+        "behavior_anchor_closure_actions": copy.deepcopy(
+            (impact_map or {}).get("behavior_anchor_closure_actions", [])
+        ),
         "evidence_refs": _bounded_ids([
             item for node in nodes for item in node.get("evidence_ids", [])
         ] + [item for surface in preservation for item in surface.get("evidence_ids", [])], 24),
@@ -3886,9 +4722,11 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
 
 
 def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PROJECT,
-                         surface_registry=None):
+                         surface_registry=None, obligation_ledger=None,
+                         authoritative_task_goal=None):
     value = plan if isinstance(plan, dict) else {}
     errors = []
+    expected_obligation_ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
     req_ids = {item["requirement_id"] for item in active_requirements(requirements)}
     evidence_ids = {item["evidence_id"] for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)}
     evidence_by_id = {
@@ -3911,6 +4749,14 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         errors.append("plan hash does not match plan content")
     if value.get("plan_id") != f"PLAN-{str(value.get('plan_hash', ''))[:12].upper()}":
         errors.append("plan ID does not match plan hash")
+    if not str(value.get("task_goal", "")).strip():
+        errors.append("authoritative task goal is required")
+    if authoritative_task_goal is not None and value.get("task_goal") != authoritative_task_goal:
+        errors.append("task goal does not match the authoritative root goal")
+    if value.get("requirement_obligation_ledger") != compact_requirement_obligation_ledger(
+        expected_obligation_ledger
+    ):
+        errors.append("requirement obligation ledger is missing or not authoritative")
     do_not_touch = set(str(item) for item in value.get("do_not_touch", []))
     do_not_touch_surface_ids = {
         str(item) for item in value.get("do_not_touch_surface_ids", [])
@@ -3990,12 +4836,6 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
                     errors.append(f"{node_id}: invalid canonical interface reuse")
                 elif str(interface.get("symbol")) not in node.get("interfaces_to_reuse", []):
                     errors.append(f"{node_id}: interface identity is not hydrated")
-                elif node.get("target_surface_ids") and any(
-                    interface.get("owner_surface_id")
-                    and interface.get("owner_surface_id") != str(target_surface_id)
-                    for target_surface_id in node.get("target_surface_ids", [])
-                ):
-                    errors.append(f"{node_id}: interface owner does not match target surface")
             inspect_surface_ids = {
                 str(item) for item in node.get("inspect_surface_ids", [])
             }
@@ -4081,6 +4921,7 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
     blocking = [
         item for item in value.get("unresolved_challenges", [])
         if isinstance(item, dict) and item.get("blocking", True)
+        and item.get("lifecycle_state") in {None, "OPEN"}
     ]
     if blocking:
         errors.append("unresolved blocking challenge")
@@ -4097,38 +4938,25 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         errors.append("integration verification contract is required")
     if _json_size(value) > MAX_PLAN_CHARS:
         errors.append("plan serialized-size bound exceeded")
-    semantic_requirement_ids = set()
-    if strict_surface_binding:
-        for node in nodes:
-            node_surface_ids = {
-                str(item) for item in node.get("target_surface_ids", [])
-            } | {
-                str(item) for item in node.get("inspect_surface_ids", [])
-            }
-            node_proposal_ids = {
-                str(item) for item in node.get("target_new_surface_proposal_ids", [])
-            } | {
-                str(item) for item in node.get("inspect_new_surface_proposal_ids", [])
-            }
-            existing_binding_valid = bool(node_surface_ids) and all(
-                item in surface_by_id for item in node_surface_ids
-            )
-            new_binding_valid = bool(node_proposal_ids) and all(
-                item in proposal_by_id for item in node_proposal_ids
-            )
-            if existing_binding_valid == new_binding_valid:
-                continue
-            semantic_requirement_ids.update(str(item) for item in node.get("requirement_ids", []))
-        for surface in value.get("preservation_only_surfaces", []) or []:
-            if surface.get("surface_id") in surface_by_id:
-                semantic_requirement_ids.update(str(item) for item in surface.get("requirement_ids", []))
-    semantic_coverage = sum(
-        1 for item in coverage.values()
-        if item.get("status") != "UNASSIGNED"
-        and (not strict_surface_binding or str(item.get("requirement_id")) in semantic_requirement_ids)
+    semantic_result = evaluate_requirement_obligations(
+        value, requirements, evidence, surface_registry, expected_obligation_ledger,
     )
-    if strict_surface_binding and semantic_coverage < len(req_ids):
-        errors.append("semantic requirement assignment is incomplete")
+    semantic_by_id = {
+        item["requirement_id"]: item for item in semantic_result.get("requirements", [])
+    }
+    semantic_coverage = semantic_result.get("requirements_covered", 0)
+    for requirement_id in sorted(req_ids):
+        semantic_record = semantic_by_id.get(requirement_id, {})
+        if semantic_record.get("state") != "COVERED":
+            uncovered_types = [
+                item.get("obligation_type") for item in semantic_record.get("obligations", [])
+                if item.get("state") != "COVERED"
+            ]
+            errors.append(
+                f"{requirement_id}: semantic obligations are incomplete ({', '.join(uncovered_types)})"
+            )
+        if coverage.get(requirement_id, {}).get("semantic_state") not in {None, semantic_record.get("state")}:
+            errors.append(f"{requirement_id}: coverage record contradicts semantic evaluation")
     return {
         "valid": not errors,
         "errors": errors[:20],
@@ -4144,6 +4972,11 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
             1 for item in coverage.values() if item.get("status") != "UNASSIGNED"
         ),
         "serialized_chars": _json_size(value),
+        "requirement_obligations_created": expected_obligation_ledger.get("obligation_count", 0),
+        "behavior_obligations": semantic_result.get("behavior_obligations", 0),
+        "behavior_obligations_covered": semantic_result.get("behavior_obligations_covered", 0),
+        "behavior_obligations_uncovered": semantic_result.get("behavior_obligations_uncovered", 0),
+        "semantic_obligation_coverage": semantic_result,
     }
 
 
@@ -4201,7 +5034,8 @@ def approved_plan_node_contract(plan, node_ids=None):
                 "new_surface_proposal_ids", "target_new_surface_proposal_ids",
                 "inspect_new_surface_proposal_ids", "new_surface_proposals", "parent_scopes",
                 "current_owner", "interfaces_to_reuse", "candidate_targets", "inspect_targets",
-                "mutation_required", "verification_only", "preservation_constraints", "test_contract", "target_paths",
+                "mutation_required", "verification_only", "local_preservation_constraints",
+                "preservation_constraints", "prohibition_constraints", "test_contract", "target_paths",
                 "local_test_contract", "done_when", "dependencies", "do_not_touch", "provenance",
                 "necessity_status",
             )
