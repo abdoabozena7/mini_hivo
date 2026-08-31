@@ -1578,6 +1578,10 @@ def new_metrics(mode):
         "mission_advice_rejected": 0,
         "mission_non_authoritative_fields_rejected": 0,
         "mission_semantic_conflicts": 0,
+        "semantic_path_candidates": 0,
+        "semantic_path_candidates_rejected": 0,
+        "semantic_path_false_positive_avoided": 0,
+        "semantic_mutation_conflicts": 0,
         "hydrated_worker_missions_created": 0,
         "hydrated_worker_mission_failures": 0,
         "control_flow": [],
@@ -6217,6 +6221,18 @@ BOUNDED COMPILER CONTEXT:
             RUN["mission_semantic_conflicts"] = RUN.get(
                 "mission_semantic_conflicts", 0,
             ) + len(conflicts)
+            path_candidates = advice_check.get("semantic_path_candidates", [])
+            path_candidates_rejected = advice_check.get("semantic_path_candidates_rejected", [])
+            RUN["semantic_path_candidates"] = RUN.get("semantic_path_candidates", 0) + len(path_candidates)
+            RUN["semantic_path_candidates_rejected"] = RUN.get(
+                "semantic_path_candidates_rejected", 0,
+            ) + len(path_candidates_rejected)
+            RUN["semantic_path_false_positive_avoided"] = RUN.get(
+                "semantic_path_false_positive_avoided", 0,
+            ) + int(advice_check.get("semantic_path_false_positive_avoided", 0) or 0)
+            RUN["semantic_mutation_conflicts"] = RUN.get(
+                "semantic_mutation_conflicts", 0,
+            ) + len(conflicts)
             record_run_event(
                 "mission_advice_received", task_id=task.get("id"),
                 execution_contract_id=execution_contract.get("execution_contract_id"),
@@ -6224,6 +6240,14 @@ BOUNDED COMPILER CONTEXT:
                 rejected_non_authoritative_fields=copy.deepcopy(rejected_fields),
                 accepted_semantic_advice=copy.deepcopy(advice_check.get("advice", {})),
                 semantic_conflicts=copy.deepcopy(conflicts),
+                semantic_path_candidates=copy.deepcopy(path_candidates),
+                semantic_path_candidates_rejected=copy.deepcopy(path_candidates_rejected),
+                semantic_path_false_positive_avoided=advice_check.get(
+                    "semantic_path_false_positive_avoided", 0,
+                ),
+                semantic_mutation_conflicts=copy.deepcopy(
+                    advice_check.get("semantic_mutation_conflicts", []),
+                ),
             )
             if not validator(data) or not advice_check.get("valid"):
                 advice_rejection_recorded = True
@@ -14650,30 +14674,94 @@ def run_self_test(install_browser=False):
             execution_contract_id="EXEC-001", execution_contract=v19_mutation_contract,
         )
         v191_live_raw = {
-            "goal_anchor": "Extend InputManager Escape handling using the existing pause interface.",
-            "mutation_targets": ["src/input.js", "src/game.js"],
-            "interfaces_to_reuse": list(v19_mutation_contract.get("interfaces_to_reuse", [])),
-            "implementation_plan": [
+            "implementation_notes": [
+                "Do not introduce new state variables for pause status; rely entirely on the state managed by GameState or the existing input flow.",
+                "The pause logic must integrate seamlessly with the existing game loop/update cycle to halt/resume correctly.",
+                "The primary focus is wiring the key event to the existing state toggle function.",
+            ],
+            "implementation_steps": [
+                "Modify InputManager (src/input.js) to listen for the Escape key press.",
+                "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
+                "Ensure that the pause state correctly halts game logic updates and input processing when active, and resumes them when unpaused.",
+                "Verify that WASD/arrow controls and best-score persistence remain unaffected by this addition.",
+            ],
+            "inspection_order": [
+                "Read src/input.js to understand current input event handling.",
+                "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
+                "Review existing test files to identify necessary additions for Escape key testing.",
+            ],
+            "interface_usage": [
+                "Use the existing input event listener mechanism within InputManager.",
+                "Call GameState.togglePause() to manage the game's pause state.",
+                "Rely on the existing GameState object for pause status checks.",
+            ],
+            "objective": "Implement Escape-key handling within InputManager to trigger the game's pause/resume functionality, strictly reusing existing state management and input handling mechanisms.",
+            "verification_notes": [
+                "Thoroughly test pausing and unpausing via Escape key while ensuring WASD movement and score persistence are maintained.",
+                "Confirm that the input system correctly ignores movement inputs when the game is paused.",
+            ],
+        }
+        v191_live_advice_check = stage4.sanitize_mission_advice(
+            v191_live_raw, v19_mutation_contract,
+        )
+        v191_live_mission = stage4.hydrate_worker_mission(
+            v19_mutation_contract, v191_live_advice_check.get("advice", {}), [],
+        )
+        # Keep one compact mocked compiler call for the existing self-test
+        # observability counters.  The exact full live response is validated
+        # and hydrated above without changing the Worker mission size budget.
+        v191_compiler_raw = {
+            "objective": "Extend InputManager Escape handling using the existing pause interface.",
+            "implementation_steps": [
                 "Inspect GameState.togglePause in src/game.js and reuse it.",
                 "Modify src/input.js.",
             ],
-            "verification_plan": ["Verify the bounded Escape behavior."],
+            "inspection_order": ["Read src/game.js."],
+            "interface_usage": ["Call GameState.togglePause()."],
+            "implementation_notes": ["Do not create a second pause owner."],
+            "verification_notes": ["Verify the bounded Escape behavior."],
         }
         v191_prompts = []
-        v191_live_mission = compile_worker_mission(
+        v191_compiled_mission = compile_worker_mission(
             v191_task, {}, repo_snapshot={"files": []},
             execution_contract=v19_mutation_contract,
             structured_call=lambda prompt, _validator, _label, _schema: (
-                v191_prompts.append(prompt) or v191_live_raw
+                v191_prompts.append(prompt) or v191_compiler_raw
             ),
         )
         v191_packet = build_node_context(
+            v191_task, {}, None, {"files": []},
+            worker_mission=v191_compiled_mission, execution_contract=v19_mutation_contract,
+        )
+        v191_exact_packet = build_node_context(
             v191_task, {}, None, {"files": []},
             worker_mission=v191_live_mission, execution_contract=v19_mutation_contract,
         )
         v191_conflict = stage4.sanitize_mission_advice({
             "objective": "Modify src/game.js and add a new paused state owned by InputManager.",
         }, v19_mutation_contract)
+        v191_classifier_checks = {
+            value: stage4.classify_code_location_reference(value, v19_mutation_contract)
+            for value in (
+                "pause/resume", "halt/resume", "loop/update", "WASD/arrow",
+                "src/game.js", "src/generated", "foo/bar.py", "./src/input.js",
+                "../config.json", r"C:\project\file.py", "/home/user/file.ts",
+            )
+        }
+        v191_safe_intent_checks = [
+            stage4._advice_path_references(
+                "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
+                v19_mutation_contract,
+            ),
+            stage4._advice_path_references(
+                "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
+                v19_mutation_contract,
+            ),
+            stage4._advice_path_references(
+                "Modify src/input.js after inspecting src/game.js.",
+                v19_mutation_contract,
+            ),
+        ]
         v19_test_contract = next(
             item for item in v19_compiled.get("contracts", [])
             if item.get("responsibility_type") == stage4.TEST_MUTATION
@@ -14700,6 +14788,38 @@ def run_self_test(install_browser=False):
         v191_test_conflict = stage4.sanitize_mission_advice({
             "objective": "Create tests/pause.test.js for the new behavior.",
         }, v19_test_contract)
+        v191_unapproved_mutation = stage4.sanitize_mission_advice(
+            {"objective": "Modify src/game.js to add a new pause state."},
+            v19_mutation_contract,
+        )
+        v191_dnt_mutation = stage4.sanitize_mission_advice(
+            {"objective": "Rewrite src/storage.js."}, v19_mutation_contract,
+        )
+        v191_new_file = stage4.sanitize_mission_advice(
+            {"objective": "Create tests/pause.test.js."}, v19_mutation_contract,
+        )
+        v191_directory_mutation = stage4.sanitize_mission_advice(
+            {"objective": "Write files into src/generated."}, v19_mutation_contract,
+        )
+        v191_duplicate_state = stage4.sanitize_mission_advice(
+            {"objective": "Add a new paused state inside InputManager."},
+            v19_mutation_contract,
+        )
+        v191_owner_change = stage4.sanitize_mission_advice(
+            {"objective": "Move pause-state ownership from GameState to InputManager."},
+            v19_mutation_contract,
+        )
+        v191_negated_mutation = stage4.sanitize_mission_advice(
+            {"objective": "Do not modify src/game.js."}, v19_mutation_contract,
+        )
+        v191_clause_local_negation = stage4.sanitize_mission_advice(
+            {"objective": "Do not modify src/game.js. Modify src/input.js."},
+            v19_mutation_contract,
+        )
+        v191_clause_local_conflict = stage4.sanitize_mission_advice(
+            {"objective": "Do not modify src/game.js. Modify src/storage.js."},
+            v19_mutation_contract,
+        )
         v19_unapproved = stage4.validate_approved_plan(
             v184_plan, dict(v19_approval, approval_status="PENDING"),
             v184_source_goal, current_plan=v184_plan,
@@ -15076,6 +15196,53 @@ def run_self_test(install_browser=False):
                 and not v19_stale.get("valid")
                 and v19_stale.get("code") == stage4.APPROVED_PLAN_STALE
             ),
+            "v19.2 slash language": (
+                all(
+                    v191_classifier_checks[value].get("classification") == "AMBIGUOUS_TEXT"
+                    for value in ("pause/resume", "halt/resume", "loop/update", "WASD/arrow")
+                )
+                and all(
+                    v191_classifier_checks[value].get("confidence_basis") == "BARE_SLASH_COMPOUND"
+                    for value in ("pause/resume", "halt/resume", "loop/update", "WASD/arrow")
+                )
+            ),
+            "v19.2 strong path evidence": (
+                v191_classifier_checks["src/game.js"].get("classification") == "CODE_PATH"
+                and v191_classifier_checks["src/game.js"].get("confidence_basis") == "CANONICAL_PATH"
+                and v191_classifier_checks["src/generated"].get("confidence_basis") == "KNOWN_REPOSITORY_ROOT"
+                and v191_classifier_checks["foo/bar.py"].get("confidence_basis") == "FILE_EXTENSION"
+                and v191_classifier_checks["./src/input.js"].get("classification") == "CODE_PATH"
+                and v191_classifier_checks["../config.json"].get("classification") == "CODE_PATH"
+                and v191_classifier_checks[r"C:\project\file.py"].get("classification") == "CODE_PATH"
+                and v191_classifier_checks["/home/user/file.ts"].get("classification") == "CODE_PATH"
+            ),
+            "v19.2 local semantic intent": (
+                v191_safe_intent_checks[0][0].get("intent") == "INSPECTION"
+                and v191_safe_intent_checks[1][0].get("intent") == "REUSE"
+                and {
+                    item.get("path"): item.get("intent")
+                    for item in v191_safe_intent_checks[2]
+                } == {"src/input.js": "MUTATION", "src/game.js": "INSPECTION"}
+                and v191_negated_mutation.get("valid")
+                and v191_clause_local_negation.get("valid")
+                and not v191_clause_local_conflict.get("valid")
+            ),
+            "v19.2 semantic conflict regressions": (
+                not v191_unapproved_mutation.get("valid")
+                and not v191_dnt_mutation.get("valid")
+                and not v191_new_file.get("valid")
+                and not v191_directory_mutation.get("valid")
+                and not v191_duplicate_state.get("valid")
+                and not v191_owner_change.get("valid")
+            ),
+            "v19.2 exact live advice": (
+                v191_live_advice_check.get("valid")
+                and not v191_live_advice_check.get("semantic_conflicts")
+                and v191_live_advice_check.get("semantic_path_false_positive_avoided", 0) >= 4
+                and v191_live_mission.get("mission_id") in v191_exact_packet
+                and "AUTHORITATIVE EXECUTION CONTRACT" in v191_exact_packet
+                and "IMPLEMENTATION ADVICE" in v191_exact_packet
+            ),
             "v19.1 live mission regression": (
                 len(v191_prompts) == 1
                 and stage4.validate_hydrated_worker_mission(
@@ -15095,10 +15262,10 @@ def run_self_test(install_browser=False):
                 and "src/game.js" not in v191_live_mission.get("allowed_mutation_paths", [])
             ),
             "v19.1 worker handoff": (
-                v191_live_mission.get("mission_id") in v191_packet
+                v191_compiled_mission.get("mission_id") in v191_packet
                 and "AUTHORITATIVE EXECUTION CONTRACT" in v191_packet
                 and "IMPLEMENTATION ADVICE" in v191_packet
-                and "Extend InputManager Escape handling" in v191_packet
+                and "GameState.togglePause" in v191_packet
             ),
             "v19.1 clean authority": (
                 "mutation_targets" not in v191_packet
