@@ -504,6 +504,200 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
         self.assertFalse(wrong_responsibility["valid"])
         self.assertTrue(wrong_responsibility["semantic_conflicts"])
 
+    def test_code_location_classifier_requires_evidence_for_slash_compounds(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        for value in (
+            "pause/resume", "halt/resume", "start/stop", "read/write",
+            "input/output", "WASD/arrow", "client/server", "request/response",
+            "on/off", "loop/update", "foo/bar",
+        ):
+            with self.subTest(value=value):
+                reference = execution.classify_code_location_reference(value, contract)
+                self.assertEqual(reference["classification"], "AMBIGUOUS_TEXT")
+                self.assertEqual(reference["confidence_basis"], "BARE_SLASH_COMPOUND")
+
+    def test_code_location_classifier_recognizes_generic_path_evidence(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        expected = {
+            "src/game.js": "CANONICAL_PATH",
+            "tests/input.test.js": "FILE_EXTENSION",
+            "./src/input.js": "CANONICAL_PATH",
+            "../config.json": "EXPLICIT_RELATIVE_PATH",
+            "foo/bar.py": "FILE_EXTENSION",
+            r"C:\project\file.py": "WINDOWS_PATH",
+            "/home/user/file.ts": "ABSOLUTE_PATH",
+            "src/generated": "KNOWN_REPOSITORY_ROOT",
+            "services/pause_handler.py": "FILE_EXTENSION",
+        }
+        for value, basis in expected.items():
+            with self.subTest(value=value):
+                reference = execution.classify_code_location_reference(value, contract)
+                self.assertEqual(reference["classification"], "CODE_PATH")
+                self.assertEqual(reference["confidence_basis"], basis)
+
+    def test_semantic_path_intent_is_local_and_distinguishes_safe_reuse(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+
+        def intents(text):
+            return {
+                item["path"]: item["intent"]
+                for item in execution._advice_path_references(text, contract)
+            }
+
+        self.assertEqual(
+            intents("Read src/game.js to confirm the signature and effect of GameState.togglePause()."),
+            {"src/game.js": "INSPECTION"},
+        )
+        self.assertEqual(
+            intents("On Escape key press, call the existing GameState.togglePause() method (src/game.js)."),
+            {"src/game.js": "REUSE"},
+        )
+        self.assertEqual(
+            intents("Modify InputManager (src/input.js) to listen for Escape."),
+            {"src/input.js": "MUTATION"},
+        )
+        self.assertEqual(
+            intents("Modify src/input.js after inspecting src/game.js."),
+            {"src/input.js": "MUTATION", "src/game.js": "INSPECTION"},
+        )
+        self.assertEqual(
+            intents("Read src/game.js and then update src/input.js."),
+            {"src/game.js": "INSPECTION", "src/input.js": "MUTATION"},
+        )
+        self.assertEqual(
+            intents("Confirm src/game.js remains the verified implementation."),
+            {"src/game.js": "INSPECTION"},
+        )
+        self.assertEqual(
+            intents("add verification that reads src/game.js"),
+            {"src/game.js": "INSPECTION"},
+        )
+
+        for text in ("Do not modify src/game.js.", "Never write src/storage.js."):
+            with self.subTest(text=text):
+                checked = execution.sanitize_mission_advice({"objective": text}, contract)
+                self.assertTrue(checked["valid"], checked)
+                self.assertFalse(checked["semantic_conflicts"], checked)
+
+        later_allowed = execution.sanitize_mission_advice(
+            {"objective": "Do not modify src/game.js. Modify src/input.js."}, contract,
+        )
+        self.assertTrue(later_allowed["valid"], later_allowed)
+        later_dnt = execution.sanitize_mission_advice(
+            {"objective": "Do not modify src/game.js. Modify src/storage.js."}, contract,
+        )
+        self.assertFalse(later_dnt["valid"], later_dnt)
+        self.assertTrue(later_dnt["semantic_conflicts"], later_dnt)
+
+    def test_exact_live_advice_is_accepted_and_hydrated_deterministically(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        raw = {
+            "implementation_notes": [
+                "Do not introduce new state variables for pause status; rely entirely on the state managed by GameState or the existing input flow.",
+                "The pause logic must integrate seamlessly with the existing game loop/update cycle to halt/resume correctly.",
+                "The primary focus is wiring the key event to the existing state toggle function.",
+            ],
+            "implementation_steps": [
+                "Modify InputManager (src/input.js) to listen for the Escape key press.",
+                "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
+                "Ensure that the pause state correctly halts game logic updates and input processing when active, and resumes them when unpaused.",
+                "Verify that WASD/arrow controls and best-score persistence remain unaffected by this addition.",
+            ],
+            "inspection_order": [
+                "Read src/input.js to understand current input event handling.",
+                "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
+                "Review existing test files to identify necessary additions for Escape key testing.",
+            ],
+            "interface_usage": [
+                "Use the existing input event listener mechanism within InputManager.",
+                "Call GameState.togglePause() to manage the game's pause state.",
+                "Rely on the existing GameState object for pause status checks.",
+            ],
+            "objective": "Implement Escape-key handling within InputManager to trigger the game's pause/resume functionality, strictly reusing existing state management and input handling mechanisms.",
+            "verification_notes": [
+                "Thoroughly test pausing and unpausing via Escape key while ensuring WASD movement and score persistence are maintained.",
+                "Confirm that the input system correctly ignores movement inputs when the game is paused.",
+            ],
+        }
+        checked = execution.sanitize_mission_advice(raw, contract)
+        self.assertTrue(checked["valid"], checked)
+        self.assertFalse(checked["semantic_conflicts"], checked)
+        self.assertGreaterEqual(checked["semantic_path_false_positive_avoided"], 4)
+        by_text = {
+            item["text"]: item for item in checked["semantic_path_candidates"]
+        }
+        for value in ("pause/resume", "halt/resume", "loop/update", "WASD/arrow"):
+            self.assertEqual(by_text[value]["classification"], "AMBIGUOUS_TEXT")
+
+        mission = execution.hydrate_worker_mission(contract, checked["advice"], [])
+        self.assertTrue(execution.validate_hydrated_worker_mission(mission, contract, [])[
+            "valid"
+        ])
+        self.assertEqual(mission["allowed_mutation_paths"], ["src/input.js"])
+        self.assertEqual(mission["allowed_inspection_paths"], ["src/input.js", "src/game.js"])
+        self.assertEqual(
+            mission["interfaces_to_reuse"], ["InputManager.isPressed", "GameState.togglePause"],
+        )
+        self.assertNotIn("src/game.js", mission["targets"])
+        self.assertNotIn("mutation_targets", mission)
+        self.assertEqual(
+            mission["implementation_advice"]["interface_usage"], ["GameState.togglePause"],
+        )
+        packet = mini.build_node_context(
+            self.mission_task(contract), {}, None, {"files": []},
+            worker_mission=mission, execution_contract=contract,
+        )
+        self.assertIn(mission["mission_id"], packet)
+        self.assertIn("AUTHORITATIVE EXECUTION CONTRACT", packet)
+        self.assertIn("IMPLEMENTATION ADVICE", packet)
+        self.assertNotIn("mutation_targets", packet)
+
+    def test_real_paths_and_contract_local_scope_still_conflict(self):
+        _, compiled, _ = self.compiled()
+        mutation = compiled["contracts"][0]
+        for objective in (
+            "Modify src/game.js to add a new pause state.",
+            "Refactor src/game.js.",
+            "Rewrite src/storage.js.",
+            "Modify services/pause_handler.py.",
+            "Create tests/pause.test.js.",
+            "Write files into src/generated.",
+            "Modify tests/input.test.js.",
+        ):
+            with self.subTest(objective=objective):
+                checked = execution.sanitize_mission_advice({"objective": objective}, mutation)
+                self.assertFalse(checked["valid"], checked)
+                self.assertTrue(checked["semantic_conflicts"], checked)
+
+    def test_duplicate_state_and_ownership_conflicts_are_path_independent(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        for objective in (
+            "Add a new paused state inside InputManager.",
+            "Move pause-state ownership from GameState to InputManager.",
+        ):
+            with self.subTest(objective=objective):
+                checked = execution.sanitize_mission_advice({"objective": objective}, contract)
+                self.assertFalse(checked["valid"], checked)
+                self.assertTrue(checked["semantic_conflicts"], checked)
+
+    def test_safe_interface_and_test_review_advice_remain_non_mutating(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        for objective in (
+            "Inspect src/game.js.",
+            "Use GameState.togglePause() from src/game.js.",
+            "Review existing test files to identify necessary additions.",
+        ):
+            with self.subTest(objective=objective):
+                checked = execution.sanitize_mission_advice({"objective": objective}, contract)
+                self.assertTrue(checked["valid"], checked)
+                self.assertFalse(checked["semantic_conflicts"], checked)
+
     def test_hashes_dependencies_test_contract_and_child_scope_are_contract_bound(self):
         _, compiled, _ = self.compiled()
         mutation, test_contract = compiled["contracts"]
@@ -603,6 +797,12 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
             "edit_file", {"path": "src/game.js", "old": "false", "new": "true"}, role="Builder",
         )
         self.assertIn(execution.CONTRACT_SCOPE_VIOLATION, mutation_result)
+        for path in ("src/storage.js", "tests/pause.test.js"):
+            with self.subTest(path=path):
+                mutation_result = mini.run_tool(
+                    "edit_file", {"path": path, "old": "false", "new": "true"}, role="Builder",
+                )
+                self.assertIn(execution.CONTRACT_SCOPE_VIOLATION, mutation_result)
 
     def test_mini_gate_and_graph_execute_only_approved_contracts_in_order(self):
         root_contract = self.root_contract()

@@ -78,6 +78,18 @@ _PATH_RE = re.compile(
     r"[^\s'\"`()\[\]{},:;]+\.(?:py|pyi|js|mjs|cjs|jsx|ts|tsx|html|htm|css|scss|json|toml|yaml|yml|go|rs|java|c|cpp|h|md|txt))"
 )
 
+# ``_PATH_RE`` is intentionally only a lexical candidate extractor.  A slash
+# is common in ordinary prose (for example ``pause/resume``), so candidates
+# must pass ``classify_code_location_reference`` before they can influence
+# semantic scope validation.
+_CODE_PATH_EXTENSIONS = frozenset({
+    "py", "pyi", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm",
+    "css", "scss", "json", "toml", "yaml", "yml", "go", "rs", "java", "c",
+    "cpp", "h", "md", "txt",
+})
+_WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:/")
+_EXPLICIT_RELATIVE_PATH_RE = re.compile(r"^\.\.?/")
+
 
 class ExecutionContractError(RuntimeError):
     """A deterministic Stage 4A validation or compilation failure."""
@@ -1889,11 +1901,11 @@ MISSION_ADVICE_ALIASES = {
 }
 
 _ADVICE_MUTATION_VERBS = re.compile(
-    r"\b(?:add|change|create|delete|edit|implement|modify|move|mutate|patch|remove|rename|replace|set|store|touch|update|write)\w*\b",
+    r"\b(?:add|change|create|delete|edit|implement|modify|move|mutate|patch|refactor|remove|rename|replace|rewrite|set|store|touch|update|write)\w*\b",
     re.IGNORECASE,
 )
 _ADVICE_SAFE_VERBS = re.compile(
-    r"\b(?:call|check|inspect|invoke|look\s+at|read|reference|review|reuse|use|verify)\b",
+    r"\b(?:call|check|confirm|inspect|invoke|look\s+at|read|reference|review|reuse|use|verify)\w*\b",
     re.IGNORECASE,
 )
 _ADVICE_NEGATION = re.compile(
@@ -1909,6 +1921,12 @@ _ADVICE_NEW_FILE = re.compile(
     r"\b(?:create|add|generate|write)\b[^.!?;]{0,50}\b(?:a\s+)?(?:new\s+)?file\b",
     re.IGNORECASE,
 )
+_ADVICE_OWNER_CHANGE = re.compile(
+    r"\b(?:change|move|replace|shift|transfer)\b[^.!?;]{0,120}\b(?:owner|ownership)\b"
+    r"|\b(?:owner|ownership)\b[^.!?;]{0,120}\b(?:change|move|replace|shift|transfer)\b",
+    re.IGNORECASE,
+)
+_ADVICE_CLAUSE_BOUNDARY = re.compile(r"[!?;,]|\.(?=\s|$)")
 
 
 def mission_advice_schema():
@@ -1983,53 +2001,176 @@ def _advice_rejected_field(key, value, reason, *, category="non_authoritative"):
 
 def _advice_negated(text, position):
     prefix = str(text or "")[max(0, int(position) - 70):int(position)]
+    # Negation is clause-local.  A prior sentence such as ``Do not modify
+    # game.js.`` must not negate a later sentence that modifies another path.
+    boundaries = list(_ADVICE_CLAUSE_BOUNDARY.finditer(prefix))
+    if boundaries:
+        prefix = prefix[boundaries[-1].end():]
     return bool(_ADVICE_NEGATION.search(prefix))
 
 
 def _advice_mutation_allowed(contract, path):
-    return _mutation_path_allowed(contract, path)
+    normalized = _advice_clean_path(path)
+    # Do not let the legacy path normalizer turn a traversal reference into a
+    # workspace-relative path before semantic advice is checked.
+    if normalized in {"..", ""} or normalized.startswith("../") or "/../" in normalized:
+        return False
+    return _mutation_path_allowed(contract, normalized)
 
 
 def _advice_clean_path(path):
-    return _path(str(path or "").rstrip(".,;:!?)]}"))
+    value = str(path or "").strip().rstrip(".,;:!?)]}")
+    value = value.replace("\\", "/")
+    # ``./src/file`` is a workspace-relative spelling of ``src/file``.  Keep
+    # ``../`` intact so a traversal reference cannot become authorized by
+    # normalization.
+    while value.startswith("./"):
+        value = value[2:]
+    return value
 
 
-def _advice_path_mutation_states(text):
-    """Associate an obvious mutation verb with its nearby path."""
+def _advice_known_repository_paths(contract):
+    """Collect path evidence already present in the current contract."""
+    authority = contract if isinstance(contract, dict) else {}
+    values = []
+    for field in (
+        "allowed_mutation_paths", "allowed_inspection_paths", "global_do_not_touch",
+        "approved_new_surface_parent_scopes",
+    ):
+        values.extend(authority.get(field, []) or [])
+    values.extend(
+        item.get("path") for item in authority.get("relevant_repository_facts", []) or []
+        if isinstance(item, dict)
+    )
+    return {
+        _advice_clean_path(item).casefold()
+        for item in values
+        if _advice_clean_path(item)
+    }
+
+
+def _advice_known_repository_roots(contract):
+    """Return top-level repository directories implied by contract evidence."""
+    roots = set()
+    for value in _advice_known_repository_paths(contract):
+        if value.startswith("/") or _WINDOWS_PATH_RE.match(value) or value.startswith("../"):
+            continue
+        first = value.split("/", 1)[0].strip()
+        if first and first not in {".", ".."}:
+            roots.add(first)
+    return roots
+
+
+def _advice_path_is_under_root(path, root):
+    target = str(path or "").casefold().rstrip("/")
+    parent = str(root or "").casefold().rstrip("/")
+    return bool(target and parent and (target == parent or target.startswith(parent + "/")))
+
+
+def classify_code_location_reference(value, contract=None):
+    """Classify one lexical candidate using repository/path evidence.
+
+    A slash alone is intentionally insufficient.  The result is diagnostic
+    data only; it never grants mutation authority.
+    """
+    raw_token = str(value or "").strip().rstrip(".,;:!?)]}")
+    token = _advice_clean_path(raw_token)
+    if not token:
+        return None
+    normalized = token.casefold()
+    known_paths = _advice_known_repository_paths(contract)
+    known_roots = _advice_known_repository_roots(contract)
+    suffix = normalized.rsplit("/", 1)[-1]
+    extension = suffix.rsplit(".", 1)[-1] if "." in suffix else ""
+    basis = None
+    if normalized.rstrip("/") in {item.rstrip("/") for item in known_paths}:
+        basis = "CANONICAL_PATH"
+    elif _WINDOWS_PATH_RE.match(normalized):
+        basis = "WINDOWS_PATH"
+    elif normalized.startswith("/"):
+        basis = "ABSOLUTE_PATH"
+    elif _EXPLICIT_RELATIVE_PATH_RE.match(raw_token.replace("\\", "/")):
+        basis = "EXPLICIT_RELATIVE_PATH"
+    elif extension in _CODE_PATH_EXTENSIONS:
+        basis = "FILE_EXTENSION"
+    elif any(_advice_path_is_under_root(normalized, root) for root in known_roots):
+        basis = "KNOWN_REPOSITORY_ROOT"
+    return {
+        "text": raw_token,
+        "path": token,
+        "classification": "CODE_PATH" if basis else "AMBIGUOUS_TEXT",
+        "confidence_basis": basis or "BARE_SLASH_COMPOUND",
+    }
+
+
+def _advice_safe_intent(verb):
+    value = str(verb or "").casefold()
+    if value.startswith(("call", "invoke", "reference", "reuse", "use")):
+        return "REUSE"
+    return "INSPECTION"
+
+
+def _advice_action_events(text):
     actions = []
     for match in _ADVICE_MUTATION_VERBS.finditer(text):
-        actions.append((match.start(), match.end(), "mutation", match))
+        if not _advice_negated(text, match.start()):
+            actions.append((match.start(), match.end(), "MUTATION", match.group(0)))
     for match in _ADVICE_SAFE_VERBS.finditer(text):
-        actions.append((match.start(), match.end(), "safe", match))
-    actions.sort(key=lambda item: (item[0], item[1]))
-    paths = []
-    for path_match in _PATH_RE.finditer(text):
-        previous = [item for item in actions if item[1] <= path_match.start()]
-        if previous:
-            between = text[previous[-1][1]:path_match.start()]
-            if re.search(r"[.;!?]", between):
-                previous = []
-        candidate = previous[-1] if previous else None
-        if candidate is None:
-            next_actions = [item for item in actions if item[0] >= path_match.end()]
-            if next_actions:
-                next_candidate = next_actions[0]
-                between = text[path_match.end():next_candidate[0]]
-                if next_candidate[0] - path_match.end() <= 70 and not re.search(r"[.;!?]", between):
-                    candidate = next_candidate
-        is_mutation = bool(
-            candidate
-            and candidate[2] == "mutation"
-            and not _advice_negated(text, candidate[3].start())
+        actions.append((match.start(), match.end(), _advice_safe_intent(match.group(0)), match.group(0)))
+    return sorted(actions, key=lambda item: (item[0], item[1]))
+
+
+def _advice_local_intent(text, start, end, actions=None):
+    """Find intent only in the clause local to one detected candidate."""
+    actions = list(actions if actions is not None else _advice_action_events(text))
+    previous = [item for item in actions if item[1] <= start]
+    candidate = previous[-1] if previous else None
+    if candidate is not None:
+        between = text[candidate[1]:start]
+        if _ADVICE_CLAUSE_BOUNDARY.search(between):
+            candidate = None
+    if candidate is None:
+        following = [item for item in actions if item[0] >= end]
+        if following:
+            next_candidate = following[0]
+            between = text[end:next_candidate[0]]
+            if next_candidate[0] - end <= 70 and not _ADVICE_CLAUSE_BOUNDARY.search(between):
+                candidate = next_candidate
+    return candidate[2] if candidate is not None else "UNKNOWN"
+
+
+def _advice_path_references(text, contract=None):
+    """Return classified path candidates with clause-local semantic intent."""
+    source = str(text or "")
+    actions = _advice_action_events(source)
+    references = []
+    for path_match in _PATH_RE.finditer(source):
+        reference = classify_code_location_reference(path_match.group(1), contract)
+        if reference is None:
+            continue
+        reference_end = path_match.start(1) + len(reference.get("text", ""))
+        reference["intent"] = _advice_local_intent(
+            source, path_match.start(1), reference_end, actions,
         )
-        paths.append((_advice_clean_path(path_match.group(1)), is_mutation))
-    return paths
+        references.append(reference)
+    return references
 
 
-def _advice_conflicts(advice, contract):
-    """Reject only obvious unsafe semantic implementation directions."""
+def _advice_path_mutation_states(text, contract=None):
+    """Preserve the legacy tuple shape for callers while using local intent."""
+    return [
+        (item["path"], item.get("intent") == "MUTATION")
+        for item in _advice_path_references(text, contract)
+        if item.get("classification") == "CODE_PATH"
+    ]
+
+
+def _advice_conflict_analysis(advice, contract):
+    """Analyze bounded advice without treating prose slash compounds as paths."""
     authority = contract if isinstance(contract, dict) else {}
     errors = []
+    path_candidates = []
+    path_candidates_rejected = []
     mutation_paths = {
         _path(item).casefold().rstrip("/")
         for item in authority.get("allowed_mutation_paths", []) or []
@@ -2059,22 +2200,33 @@ def _advice_conflicts(advice, contract):
                 continue
             mutation_matches = [match for match in _ADVICE_MUTATION_VERBS.finditer(text) if not _advice_negated(text, match.start())]
             if mutation_matches:
-                path_states = _advice_path_mutation_states(text)
-                for clean_path, is_mutation in path_states:
-                    if not is_mutation:
+                path_states = _advice_path_references(text, authority)
+                path_candidates.extend(path_states)
+                for reference in path_states:
+                    if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
                         continue
+                    clean_path = reference.get("path", "")
                     normalized_path = clean_path.casefold().rstrip("/")
                     if not normalized_path:
                         continue
                     if normalized_path in dnt_paths:
+                        rejected = _copy(reference)
+                        rejected["rejection_reason"] = "DNT_PATH_MUTATION"
+                        path_candidates_rejected.append(rejected)
                         errors.append(
                             f"{field}: do_not_touch path {clean_path} was given mutation instructions"
                         )
                     elif not _advice_mutation_allowed(authority, clean_path):
+                        rejected = _copy(reference)
+                        rejected["rejection_reason"] = "UNAPPROVED_PATH_MUTATION"
+                        path_candidates_rejected.append(rejected)
                         errors.append(
                             f"{field}: explicit mutation of unapproved path {clean_path}"
                         )
                     elif normalized_path not in mutation_paths and normalized_path in inspection_paths:
+                        rejected = _copy(reference)
+                        rejected["rejection_reason"] = "INSPECTION_ONLY_PATH_MUTATION"
+                        path_candidates_rejected.append(rejected)
                         errors.append(
                             f"{field}: inspection-only path {clean_path} was given mutation instructions"
                         )
@@ -2088,19 +2240,33 @@ def _advice_conflicts(advice, contract):
                     errors.append(
                         f"{field}: TEST_MUTATION advice cannot direct source implementation changes"
                     )
+            else:
+                path_candidates.extend(_advice_path_references(text, authority))
             for match in _ADVICE_DUPLICATE_STATE.finditer(text):
                 context_window = text[max(0, match.start() - 70):match.end() + 1]
                 if not _advice_negated(text, match.start()) and not _ADVICE_NEGATION.search(context_window):
                     errors.append(
                         f"{field}: advice proposes duplicate or new state/owner creation"
                     )
+            for match in _ADVICE_OWNER_CHANGE.finditer(text):
+                if not _advice_negated(text, match.start()):
+                    errors.append(f"{field}: advice changes verified ownership")
             if _ADVICE_NEW_FILE.search(text) and not authority.get("target_new_surface_proposal_ids"):
                 errors.append(f"{field}: advice proposes an unapproved new file")
             if responsibility == TEST_MUTATION and re.search(
                 r"\b(?:src/|source\s+file|implementation)\b", text, re.IGNORECASE,
             ) and mutation_matches:
                 errors.append(f"{field}: advice conflicts with TEST_MUTATION responsibility")
-    return _unique(errors, limit=30, text_limit=MAX_TEXT_CHARS)
+    return (
+        _unique(errors, limit=30, text_limit=MAX_TEXT_CHARS),
+        path_candidates,
+        path_candidates_rejected,
+    )
+
+
+def _advice_conflicts(advice, contract):
+    """Compatibility wrapper returning only semantic conflict messages."""
+    return _advice_conflict_analysis(advice, contract)[0]
 
 
 def sanitize_mission_advice(raw, contract):
@@ -2175,13 +2341,22 @@ def sanitize_mission_advice(raw, contract):
                 key, value.get(key), "legacy authority-shaped alias retained only as advice",
                 category="non_authoritative",
             ))
-    conflicts = _advice_conflicts(advice, contract) if isinstance(contract, dict) and contract else []
+    if isinstance(contract, dict) and contract:
+        conflicts, path_candidates, path_candidates_rejected = _advice_conflict_analysis(advice, contract)
+    else:
+        conflicts, path_candidates, path_candidates_rejected = [], [], []
     return {
         "valid": bool(isinstance(raw, dict) and not errors and not conflicts),
         "advice": advice,
         "rejected_fields": rejected,
         "semantic_conflicts": conflicts,
         "errors": _unique(errors, limit=30, text_limit=MAX_TEXT_CHARS),
+        "semantic_path_candidates": path_candidates,
+        "semantic_path_candidates_rejected": path_candidates_rejected,
+        "semantic_path_false_positive_avoided": sum(
+            1 for item in path_candidates if item.get("classification") != "CODE_PATH"
+        ),
+        "semantic_mutation_conflicts": conflicts,
     }
 
 
