@@ -79,6 +79,25 @@ supersession, while state-bound records can be marked stale without automatic
 re-verification. Promotion and Task Brain completion compaction use zero model
 calls, and raw Worker/model transcripts never enter Project Brain.
 
+V23 Stage 6A adds an explicit, read-only verified-state re-entry boundary for
+new tasks in an existing project. It validates project identity, reads the
+verified Project Brain, observes only bounded current repository evidence, and
+deterministically reconciles durable authority, state-bound freshness,
+supersession, relevance, and conflicts. Durable authority remains current
+across unrelated implementation changes; a state-bound fact becomes stale
+when its bound dependency or subject fingerprint changes. Stale facts remain
+history and warnings, are never silently promoted to current truth, and are
+never automatically re-verified. New user authority has precedence and an
+incompatible request is surfaced as an explicit conflict.
+
+The reconciliation is hashed as a bounded `ReentryContext`. Each new task
+receives a fresh bounded Task Brain containing only relevant current state,
+bounded direct repository observations, authority, stale/superseded warnings,
+and continuation provenance. The previous Task Brain is not hydrated, Project
+Brain is read-only, and Stage 6A stops before planning, Worker execution, or
+any later-stage mechanism. Re-entry, freshness, relevance, and bootstrap use
+zero model calls.
+
 Recursive mode completes Stage 1 request ingestion, classifies the workspace as
 `NEW_PROJECT` or `EXISTING_PROJECT`, and performs targeted repository
 reconnaissance only for existing-project tasks. It then prepares the bounded

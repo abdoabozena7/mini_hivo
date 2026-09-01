@@ -36,6 +36,7 @@ from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
+from hivo import reentry as stage6a
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -1435,6 +1436,67 @@ def get_memory_store():
     return MEMORY_STORE
 
 
+def run_verified_state_reentry(
+    project_id,
+    new_task_id,
+    task_goal="",
+    *,
+    store=None,
+    workspace=None,
+    new_requirements=None,
+    current_repository_evidence=None,
+    current_authority=None,
+    relevant_paths=None,
+    previous_task_id=None,
+    previous_task_completion=None,
+    promotion_provenance=None,
+):
+    """Start V23 Stage 6A and stop after a fresh Task Brain.
+
+    This is intentionally an explicit preparation API.  Normal task
+    execution never calls it implicitly: Stage 6A is a read-only re-entry
+    boundary and does not continue into planning, a Worker, or verification.
+    """
+    active_store = store if store is not None else get_memory_store()
+    active_workspace = workspace
+    if active_workspace is None:
+        active_workspace = WORKSPACE or getattr(active_store, "workspace", None)
+    result = stage6a.run_verified_state_reentry(
+        active_store, project_id, new_task_id, task_goal,
+        new_requirements=new_requirements, workspace=active_workspace,
+        current_repository_evidence=current_repository_evidence,
+        current_authority=current_authority, relevant_paths=relevant_paths,
+        previous_task_id=previous_task_id,
+        previous_task_completion=previous_task_completion,
+        promotion_provenance=promotion_provenance,
+    )
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    if isinstance(RUN, dict):
+        for key in (
+            "verified_reentry_attempts", "project_brain_records_considered",
+            "project_brain_records_current", "project_brain_records_stale",
+            "project_brain_records_superseded", "project_brain_records_relevant",
+            "project_brain_records_excluded", "reentry_conflicts", "task_brain_bootstraps",
+            "reentry_model_calls", "freshness_model_calls", "relevance_model_calls",
+            "task_brain_bootstrap_model_calls", "automatic_reverification_attempts",
+        ):
+            if key in metrics:
+                # Re-entry is an explicit boundary and may be used for more
+                # than one new task in a process; keep its counters
+                # cumulative like the existing run metrics.
+                RUN[key] = int(RUN.get(key, 0) or 0) + int(metrics[key] or 0)
+    return result
+
+
+prepare_verified_state_reentry = run_verified_state_reentry
+run_stage6a_reentry = run_verified_state_reentry
+
+
+def run_verified_state_reentry_self_test():
+    """Expose the deterministic V23 architecture self-test without Gemma."""
+    return stage6a.run_verified_state_reentry_self_test()
+
+
 def load_memory():
     store = get_memory_store()
     return {
@@ -1834,6 +1896,23 @@ def new_metrics(mode):
         "promotion_receipt": None,
         "task_brain_completion": None,
         "child_receipts": {},
+        # V23 Stage 6A deterministic verified-state re-entry.  These counters
+        # describe read-only reconciliation/bootstrap and are separate from
+        # V22 promotion and all execution/model counters.
+        "verified_reentry_attempts": 0,
+        "project_brain_records_considered": 0,
+        "project_brain_records_current": 0,
+        "project_brain_records_stale": 0,
+        "project_brain_records_superseded": 0,
+        "project_brain_records_relevant": 0,
+        "project_brain_records_excluded": 0,
+        "reentry_conflicts": 0,
+        "task_brain_bootstraps": 0,
+        "reentry_model_calls": 0,
+        "freshness_model_calls": 0,
+        "relevance_model_calls": 0,
+        "task_brain_bootstrap_model_calls": 0,
+        "automatic_reverification_attempts": 0,
         "verification_failures": 0, "task_too_broad_count": 0,
         "mutation_failures_recorded": 0, "mutation_recovery_packets_emitted": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
@@ -17605,6 +17684,9 @@ def run_self_test(install_browser=False):
         v225c_verified_state_self_test = run_verified_state_promotion_self_test()
         for name, ok in v225c_verified_state_self_test.get("checks", {}).items():
             print(f"{('v22.5C ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v236a_verified_state_reentry_self_test = run_verified_state_reentry_self_test()
+        for name, ok in v236a_verified_state_reentry_self_test.get("checks", {}).items():
+            print(f"{('v23.6A ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -18195,6 +18277,9 @@ def run_self_test(install_browser=False):
             ),
             "v22.5C verified-state promotion self-test": (
                 v225c_verified_state_self_test.get("passed") is True
+            ),
+            "v23.6A verified-state re-entry self-test": (
+                v236a_verified_state_reentry_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
