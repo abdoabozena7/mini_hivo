@@ -103,6 +103,19 @@ MAX_CHALLENGE_ROUNDS = 1
 MAX_REVISION_ROUNDS = 1
 MAX_TEXT_CHARS = 520
 
+# Planning-role limits are hard model-facing character limits.  They apply to
+# the complete string produced by the role renderer, including its fixed
+# instructions, headings, separators, and canonical serialization.  The
+# structured-output schema is sent through the provider's format transport,
+# not appended after packet validation.  Keep these values separate from the larger
+# structured-artifact bounds above: a complete artifact is not automatically a
+# complete provider packet.
+PLANNING_ROLE_LIMITS = {
+    "ImpactPlanner": MAX_PLANNER_CONTEXT_CHARS,
+    "ImpactChallenger": MAX_CHALLENGER_CONTEXT_CHARS,
+    "ImpactPlanReviser": MAX_REVISION_CONTEXT_CHARS,
+}
+
 _CHANGE_RE = re.compile(
     r"\b(?:add|change|create|edit|extend|fix|implement|introduce|migrate|modify|remove|"
     r"replace|support|update)\b", re.IGNORECASE,
@@ -149,11 +162,314 @@ _IMPACT_ID_RE = re.compile(r"^IMPACT[-_](\d+)$", re.IGNORECASE)
 # model decision without adding another inference attempt.
 IMPACT_PLANNING_CONTEXT_INCOMPLETE = "IMPACT_PLANNING_CONTEXT_INCOMPLETE"
 IMPACT_CHALLENGER_CONTEXT_INCOMPLETE = "IMPACT_CHALLENGER_CONTEXT_INCOMPLETE"
+IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE = "IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE"
+PLANNING_PACKET_MANDATORY_OVERFLOW = "PLANNING_PACKET_MANDATORY_OVERFLOW"
+PLANNING_PACKET_PROVIDER_OVERFLOW = "PLANNING_PACKET_PROVIDER_OVERFLOW"
 
 
 def _compact_json(value):
     """Serialize a planning packet deterministically and without whitespace."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def planning_role_limit(role):
+    """Return the frozen hard limit for a model-facing planning role."""
+    name = str(role or "").strip()
+    for known, limit in PLANNING_ROLE_LIMITS.items():
+        if name.casefold() == known.casefold():
+            return int(limit)
+    return None
+
+
+def _role_item_id(item, index):
+    value = item if isinstance(item, dict) else {}
+    return str(value.get("item_id") or value.get("id") or f"OPTIONAL-{index:03d}")
+
+
+def _role_item_metadata(item, index):
+    """Keep audit metadata while excluding executable/callback values."""
+    value = item if isinstance(item, dict) else {"value": item}
+    result = {
+        "item_id": _role_item_id(value, index),
+        "priority": int(value.get("priority", 0) or 0),
+        "category": str(value.get("category") or "optional"),
+    }
+    for key in ("reason", "source_ids", "semantic_key", "path", "index"):
+        if key not in value or callable(value.get(key)):
+            continue
+        raw = value.get(key)
+        if isinstance(raw, tuple):
+            raw = list(raw)
+        result[key] = copy.deepcopy(raw)
+    return result
+
+
+def _role_payload_factory(mandatory_payload, selected_items):
+    """Apply complete optional semantic units to a mandatory payload.
+
+    An optional item is a list element or a complete field value.  There is no
+    string-level truncation here: the smallest unit that can be removed is the
+    semantic value supplied by the caller.
+    """
+    payload = copy.deepcopy(mandatory_payload if isinstance(mandatory_payload, dict) else {})
+
+    def assign_path(path, value, index=None):
+        if not path:
+            return False
+        cursor = payload
+        for key in path[:-1]:
+            if not isinstance(cursor, dict):
+                return False
+            if key not in cursor or not isinstance(cursor.get(key), (dict, list)):
+                cursor[key] = {}
+            cursor = cursor[key]
+        key = path[-1]
+        if isinstance(cursor, dict):
+            existing = cursor.get(key)
+            if isinstance(existing, list):
+                position = index if index is not None else len(existing)
+                position = max(0, min(int(position), len(existing)))
+                existing.insert(position, copy.deepcopy(value))
+            elif existing is None and index is not None:
+                # A removed optional container is rebuilt as a list.  Do not
+                # collapse the first selected semantic unit to a bare dict:
+                # later units in the same field must remain independently
+                # removable complete items.
+                rebuilt = []
+                position = max(0, min(int(index), len(rebuilt)))
+                rebuilt.insert(position, copy.deepcopy(value))
+                cursor[key] = rebuilt
+            else:
+                cursor[key] = copy.deepcopy(value)
+            return True
+        if isinstance(cursor, list):
+            try:
+                position = int(key)
+            except (TypeError, ValueError):
+                return False
+            position = max(0, min(position, len(cursor)))
+            cursor.insert(position, copy.deepcopy(value))
+            return True
+        return False
+
+    for item in selected_items or []:
+        value = item if isinstance(item, dict) else {"value": item}
+        callback = value.get("apply")
+        if callable(callback):
+            callback(payload, copy.deepcopy(value.get("value")))
+            continue
+        path = value.get("path") or value.get("target_path")
+        if isinstance(path, str):
+            path = (path,)
+        if not isinstance(path, (list, tuple)):
+            field = value.get("field") or value.get("key")
+            path = (field,) if field else ()
+        if path:
+            assign_path(tuple(path), value.get("value"), value.get("index"))
+    return payload
+
+
+def _role_packet_hash(material):
+    encoded = _compact_json(material).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_planning_role_packet(
+    role,
+    mandatory_payload,
+    optional_items=None,
+    *,
+    hard_limit=None,
+    render=None,
+    base_render=None,
+    source_planning_context_hash=None,
+    mandatory_items=None,
+    payload_factory=None,
+    packet_complete_override=None,
+):
+    """Compile one exact, deterministic model-facing planning packet.
+
+    The compiler first renders the mandatory projection, then greedily adds
+    complete optional semantic units in descending priority order.  Every fit
+    decision is made with the exact supplied renderer, so fixed role
+    instructions and serialization separators are part of the same budget.
+    ``payload_factory`` is useful when optional units affect more than one
+    canonical field (for example a surface and its bound seed).
+    """
+    role = str(role or "PlanningRole")
+    hard_limit = planning_role_limit(role) if hard_limit is None else int(hard_limit)
+    hard_limit = max(1, int(hard_limit or 1))
+    renderer = render if callable(render) else _compact_json
+    base_renderer = base_render if callable(base_render) else renderer
+    optional = []
+    for index, item in enumerate(list(optional_items or []), 1):
+        value = copy.deepcopy(item) if isinstance(item, dict) else {"value": item}
+        value["item_id"] = _role_item_id(value, index)
+        value["_order"] = index
+        value["priority"] = int(value.get("priority", 0) or 0)
+        optional.append(value)
+    optional.sort(key=lambda item: (-item["priority"], item["_order"], item["item_id"]))
+
+    factory = payload_factory or (
+        lambda selected: _role_payload_factory(mandatory_payload, selected)
+    )
+
+    def make_payload(selected):
+        value = factory(copy.deepcopy(list(selected or [])))
+        return copy.deepcopy(value if isinstance(value, dict) else {})
+
+    def render_exact(value):
+        rendered = renderer(value)
+        if not isinstance(rendered, str):
+            rendered = str(rendered)
+        return rendered
+
+    def render_base(value):
+        rendered = base_renderer(value)
+        if not isinstance(rendered, str):
+            rendered = str(rendered)
+        return rendered
+
+    mandatory_value = make_payload([])
+    mandatory_serialized = _compact_json(mandatory_value)
+    mandatory_rendered = render_exact(mandatory_value)
+    # Renderers used by HIVO are envelope + canonical JSON.  Measuring the
+    # difference against the exact mandatory serialization makes the static
+    # role envelope and all headings/separators observable without guessing.
+    envelope_chars = len(mandatory_rendered) - len(mandatory_serialized)
+    mandatory_chars = len(mandatory_serialized)
+    mandatory_ids = []
+    for index, item in enumerate(list(mandatory_items or []), 1):
+        mandatory_ids.append(
+            str(item.get("item_id") or item.get("id") or f"MANDATORY-{index:03d}")
+            if isinstance(item, dict) else str(item)
+        )
+
+    selected = []
+    dropped = []
+    mandatory_overflow = len(mandatory_rendered) > hard_limit
+    if mandatory_overflow:
+        dropped = [
+            {
+                **_role_item_metadata(item, item["_order"]),
+                "reason": "MANDATORY_OVERFLOW",
+            }
+            for item in optional
+        ]
+    else:
+        # Phase B/C/D: the mandatory render establishes the exact remaining
+        # budget; optional units are then considered by stable priority.
+        for item in optional:
+            candidate_selected = selected + [item]
+            candidate = make_payload(candidate_selected)
+            candidate_rendered = render_exact(candidate)
+            if len(candidate_rendered) <= hard_limit:
+                selected.append(item)
+            else:
+                dropped.append({
+                    **_role_item_metadata(item, item["_order"]),
+                    "reason": "BUDGET",
+                })
+
+    payload = make_payload(selected)
+    rendered = render_exact(payload)
+    # Phase F is a final exact-render safety valve.  It only removes already
+    # selected optional units and is normally a no-op because Phase D tested
+    # each candidate with the same renderer.
+    while len(rendered) > hard_limit and selected:
+        remove = min(selected, key=lambda item: (item["priority"], -item["_order"], item["item_id"]))
+        selected.remove(remove)
+        dropped.append({
+            **_role_item_metadata(remove, remove["_order"]),
+            "reason": "FINAL_EXACT_RENDER",
+        })
+        payload = make_payload(selected)
+        rendered = render_exact(payload)
+
+    if mandatory_overflow:
+        status = PLANNING_PACKET_MANDATORY_OVERFLOW
+        errors = [
+            f"mandatory {role} packet exceeds {hard_limit} rendered characters",
+        ]
+    elif len(rendered) > hard_limit:
+        status = PLANNING_PACKET_PROVIDER_OVERFLOW
+        errors = [f"exact {role} packet exceeds {hard_limit} rendered characters"]
+    else:
+        status = "READY"
+        errors = []
+
+    selected_ids = [_role_item_id(item, item["_order"]) for item in selected]
+    dropped_ids = [str(item.get("item_id")) for item in dropped]
+    serialized_chars = len(_compact_json(payload))
+    separator_chars = len(rendered) - envelope_chars - serialized_chars
+    base_rendered_packet = render_base(payload)
+    base_mandatory_rendered = render_base(mandatory_value)
+    mandatory_drops = []
+    complete = (
+        len(rendered) <= hard_limit
+        and not mandatory_drops
+        and not mandatory_overflow
+    )
+    if packet_complete_override is False:
+        complete = False
+        if status == "READY":
+            status = "INCOMPLETE"
+            errors = ["planning packet was marked incomplete by deterministic validation"]
+    audit = {
+        "role": role,
+        "source_planning_context_hash": source_planning_context_hash,
+        "hard_limit_chars": hard_limit,
+        "mandatory_items": list(mandatory_ids),
+        "mandatory_items_included": list(mandatory_ids),
+        "mandatory_drops": list(mandatory_drops),
+        "optional_items_considered": [
+            _role_item_id(item, item["_order"]) for item in optional
+        ],
+        "optional_items_selected": selected_ids,
+        "optional_items_dropped": dropped,
+        "optional_items_dropped_ids": dropped_ids,
+        "envelope_chars": envelope_chars,
+        "mandatory_chars": mandatory_chars,
+        "optional_chars": serialized_chars - mandatory_chars,
+        "serialized_payload_chars": serialized_chars,
+        "separator_chars": separator_chars,
+        "rendered_chars": len(rendered),
+        "remaining_chars": hard_limit - len(rendered),
+        "mandatory_rendered_chars": len(mandatory_rendered),
+        "base_rendered_chars": len(base_rendered_packet),
+        "packet_complete": complete,
+        "status": status,
+        "errors": list(errors),
+        "accounting": {
+            "envelope_plus_payload_plus_separators": (
+                envelope_chars + serialized_chars + separator_chars
+            ),
+            "rendered_chars": len(rendered),
+            "matches_exact_render": (
+                envelope_chars + serialized_chars + separator_chars == len(rendered)
+            ),
+        },
+    }
+    hash_material = {
+        key: value for key, value in audit.items()
+        if key not in {"errors", "status"}
+    }
+    hash_material["rendered_packet"] = rendered
+    hash_material["payload"] = payload
+    audit["packet_hash"] = _role_packet_hash(hash_material)
+    # ``rendered_packet`` is the exact string later handed to the provider.
+    # Callers must retain this value rather than reconstructing the prompt.
+    audit["payload"] = copy.deepcopy(payload)
+    audit["rendered_packet"] = rendered
+    audit["exact_model_input"] = rendered
+    audit["base_rendered_packet"] = base_rendered_packet
+    audit["mandatory_rendered_packet"] = mandatory_rendered
+    audit["mandatory_serialized_payload"] = mandatory_serialized
+    audit["base_mandatory_rendered_chars"] = len(base_mandatory_rendered)
+    return audit
+
+
+compile_planning_role_packet = build_planning_role_packet
 
 
 def _estimated_tokens(value):
@@ -1127,8 +1443,7 @@ def _planner_task_fact_projection(task_brain):
     fields = (
         "user_confirmed_decisions", "current_owners", "current_state_ownership",
         "current_interfaces", "relevant_tests", "relevant_dependencies",
-        "acceptance_conditions", "known_non_goals", "confirmed_conflicts",
-        "stale_evidence_warnings",
+        "acceptance_conditions", "known_non_goals",
     )
     for field in fields:
         values = []
@@ -1149,33 +1464,283 @@ def _planner_task_fact_projection(task_brain):
     return result
 
 
-def _planner_preservation_projection(task_brain, requirements):
+def _planner_record_text(item):
+    """Extract descriptive text without copying a full structured record."""
+    value = item if isinstance(item, dict) else {}
+    fact = value.get("fact")
+    if isinstance(fact, dict):
+        fact = fact.get("fact") or fact.get("text") or fact.get("summary")
+    return _compact(
+        value.get("text") or fact or value.get("fact_summary")
+        or value.get("authority_fact") or value.get("resolution") or "",
+        520,
+    )
+
+
+def _planner_source_ids(item):
+    value = item if isinstance(item, dict) else {}
+    refs = []
+    for key in (
+        "record_id", "evidence_id", "fact_hash", "semantic_hash", "conflict_id",
+        "requirement_id", "authority_record_id",
+    ):
+        if value.get(key):
+            refs.append(str(value[key]))
+    refs.extend(str(ref) for ref in list(value.get("requirement_ids", []) or []))
+    refs.extend(str(ref) for ref in list(value.get("evidence_ids", []) or []))
+    refs.extend(str(ref) for ref in list(value.get("evidence_refs", []) or []))
+    refs.extend(str(ref) for ref in list(value.get("repository_evidence_ids", []) or []))
+    return list(dict.fromkeys(refs))[:12]
+
+
+def _planner_authority_projection(task_brain, requirements=None, verified_planning_context=None):
+    """Project current authority as compact references, not a second artifact."""
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    source = verified_planning_context if isinstance(verified_planning_context, dict) else brain
+    requirement_texts = {
+        _compact(item.get("text"), 520).casefold()
+        for item in active_requirements(requirements)
+        if isinstance(item, dict)
+    }
+    fields = (
+        ("current_authority", "CURRENT_AUTHORITY"),
+        ("current_durable_authority", "CURRENT_AUTHORITY"),
+        ("current_verified_facts", "CURRENT_VERIFIED"),
+        ("current_owners", "CURRENT_OWNER"),
+        ("current_state_ownership", "CURRENT_STATE_OWNER"),
+        ("current_interfaces", "CURRENT_INTERFACE"),
+        ("interfaces", "REQUIRED_INTERFACE"),
+    )
+    result = []
+    by_key = {}
+    for field, authority_type in fields:
+        for item in list(source.get(field, []) or [])[:32]:
+            if not isinstance(item, dict):
+                continue
+            text = _planner_record_text(item)
+            refs = _planner_source_ids(item)
+            path = _normal_path(item.get("path"))
+            symbol = _compact(item.get("symbol"), 180)
+            # A requirement record is already the mandatory user statement;
+            # retain its source identity only when it also carries a durable
+            # authority/evidence identity.
+            if not text and not refs and not path and not symbol:
+                continue
+            # A durable fact commonly appears in both ``current_authority``
+            # and ``current_verified_facts``.  Keep the distinct source refs
+            # and authority classes internally, but render one bounded
+            # model-facing statement for the shared semantic obligation.
+            key = (text.casefold(), path.casefold(), symbol.casefold())
+            if key in by_key:
+                existing = by_key[key]
+                existing["source_ids"] = _bounded_ids(
+                    list(existing.get("source_ids", [])) + refs, 12,
+                )
+                authority_types = list(existing.get("authority_types", []))
+                if not authority_types and existing.get("authority_type"):
+                    authority_types.append(existing["authority_type"])
+                if authority_type not in authority_types:
+                    authority_types.append(authority_type)
+                existing["authority_types"] = authority_types
+                continue
+            entry = {
+                "authority_type": authority_type,
+                "authority_types": [authority_type],
+                "source_ids": refs,
+                "text": text,
+                "path": path,
+                "symbol": symbol,
+            }
+            matching_requirement_ids = [
+                item.get("requirement_id") for item in active_requirements(requirements)
+                if _compact(item.get("text"), 520).casefold() == text.casefold()
+            ]
+            if text.casefold() in requirement_texts:
+                # The full user statement is already mandatory in
+                # ``requirements``.  Preserve the durable/interface source
+                # identities and authority class, but render one bounded
+                # semantic statement instead of repeating identical prose.
+                refs = list(dict.fromkeys(refs + [item for item in matching_requirement_ids if item]))
+                entry["source_ids"] = refs
+                entry["requirement_ids"] = [item for item in matching_requirement_ids if item]
+                entry.pop("text", None)
+            if not entry.get("source_ids") and not entry.get("requirement_ids"):
+                continue
+            entry = {key: value for key, value in entry.items() if value not in ("", [], None)}
+            if entry.get("authority_types") == [entry.get("authority_type")]:
+                entry.pop("authority_types", None)
+            by_key[key] = entry
+            result.append(entry)
+    return result[:32]
+
+
+def _planner_conflict_projection(task_brain, verified_planning_context=None):
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    result = []
+    for item in list(source.get("confirmed_conflicts", []) or [])[:16]:
+        if not isinstance(item, dict):
+            continue
+        relation = item.get("authority_relation") or item.get("repository_relation")
+        entry = {
+            "conflict_id": item.get("conflict_id"),
+            "kind": item.get("kind") or item.get("drift_classification"),
+            "drift_classification": item.get("drift_classification", "CONFIRMED_DRIFT"),
+            "authority_record_id": item.get("authority_record_id"),
+            "authority_fact": _compact(item.get("authority_fact") or item.get("text"), 320),
+            "authority_fact_hash": item.get("authority_fact_hash") or item.get("fact_hash"),
+            "repository_evidence_ids": _bounded_ids(
+                item.get("repository_evidence_ids") or item.get("evidence_ids"), 8,
+            ),
+            "repository_relation": copy.deepcopy(relation) if isinstance(relation, dict) else None,
+        }
+        entry = {key: value for key, value in entry.items() if value not in (None, "", [], {})}
+        if entry.get("conflict_id") or entry.get("authority_fact"):
+            result.append(entry)
+    return result
+
+
+def _planner_stale_projection(task_brain, verified_planning_context=None):
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    result = []
+    for item in list(source.get("stale_evidence_warnings", []) or [])[:16]:
+        if not isinstance(item, dict):
+            continue
+        value = {
+            "record_id": item.get("record_id"),
+            "fact_hash": item.get("fact_hash"),
+            "classification": "STALE_WARNING",
+            "warning": _compact(item.get("fact_summary") or item.get("stale_reason") or item.get("text"), 320),
+            "evidence_refs": _bounded_ids(
+                item.get("evidence_refs") or item.get("evidence_ids"), 8,
+            ),
+        }
+        result.append({key: value for key, value in value.items() if value not in (None, "", [], {})})
+    return result
+
+
+def _planner_not_evaluable_projection(task_brain, verified_planning_context=None):
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    audits = list(source.get("not_evaluable_audit", []) or [])
+    if not audits:
+        audits = [
+            item for item in list(source.get("authority_drift_audit", []) or [])
+            if isinstance(item, dict) and str(item.get("classification", "")).upper() == "NOT_EVALUABLE"
+        ]
+    result = []
+    for item in audits[:16]:
+        if not isinstance(item, dict):
+            continue
+        value = {
+            "authority_record_id": item.get("authority_record_id"),
+            "evidence_refs": _bounded_ids(item.get("evidence_refs"), 8),
+            "classification": "NOT_EVALUABLE",
+            "reason_code": _compact(item.get("reason_code"), 120),
+        }
+        result.append({key: value for key, value in value.items() if value not in (None, "", [], {})})
+    return result
+
+
+def _planner_source_metadata(task_brain, verified_planning_context=None):
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    return {
+        "planning_mode": source.get("planning_mode"),
+        "source_planning_context_hash": source.get("planning_context_hash")
+        or source.get("verified_planning_context_hash"),
+        "source_task_brain_hash": source.get("source_task_brain_hash")
+        or source.get("task_brain_hash"),
+        "source_reentry_hash": source.get("source_reentry_hash")
+        or source.get("reentry_hash"),
+    }
+
+
+def _planner_preservation_projection(task_brain, requirements, verified_planning_context=None):
     brain = task_brain if isinstance(task_brain, dict) else {}
     result = []
-    for item in list(brain.get("preservation_constraints", []) or [])[:8]:
+    source = verified_planning_context if isinstance(verified_planning_context, dict) else brain
+    requirement_ids_by_text = {}
+    for requirement in active_requirements(requirements):
+        text = _compact(requirement.get("text"), 520)
+        if text:
+            requirement_ids_by_text.setdefault(text.casefold(), []).append(
+                requirement.get("requirement_id")
+            )
+    source_items = [
+        (item, False) for item in list(brain.get("preservation_constraints", []) or [])
+    ]
+    source_items.extend(
+        (item, True) for item in list(source.get("prohibitions", []) or [])
+    )
+    source_items.extend(
+        (item, True) for item in list(source.get("dnt", []) or [])
+    )
+    seen = {}
+    for item, forced_dnt in source_items[:16]:
         if isinstance(item, dict):
             value = {
                 "text": _compact(item.get("text") or item.get("fact"), 520),
                 "requirement_ids": _bounded_ids(item.get("requirement_ids"), 8),
-                "evidence_ids": _bounded_ids(item.get("evidence_ids"), 8),
+                "evidence_ids": _bounded_ids(
+                    item.get("evidence_ids") or item.get("evidence_refs"), 8,
+                ),
                 "provenance": item.get("provenance", USER_STATED),
             }
         else:
             value = {"text": _compact(item, 520), "requirement_ids": [], "evidence_ids": [],
                      "provenance": USER_STATED}
         if value["text"]:
-            result.append(value)
-    existing_text = {str(item.get("text", "")).casefold() for item in result}
+            source_text = value["text"]
+            text_key = source_text.casefold()
+            matching_requirement_ids = [
+                item for item in requirement_ids_by_text.get(text_key, []) if item
+            ]
+            if matching_requirement_ids:
+                value["requirement_ids"] = _bounded_ids(
+                    list(value.get("requirement_ids", [])) + matching_requirement_ids, 8,
+                )
+                # The full user statement remains in ``requirements``.  The
+                # preservation projection keeps its provenance and source
+                # IDs, but does not render that same sentence a second time.
+                value.pop("text", None)
+            if text_key in seen:
+                seen[text_key]["requirement_ids"] = _bounded_ids(
+                    list(seen[text_key].get("requirement_ids", [])) + value["requirement_ids"], 8,
+                )
+                seen[text_key]["evidence_ids"] = _bounded_ids(
+                    list(seen[text_key].get("evidence_ids", [])) + value["evidence_ids"], 8,
+                )
+                if forced_dnt:
+                    seen[text_key]["constraint_type"] = "DNT"
+            else:
+                if _PROHIBITION_RE.search(source_text) or forced_dnt:
+                    value["constraint_type"] = "DNT"
+                seen[text_key] = value
+                result.append(value)
+    existing_text = set(seen)
     for requirement in active_requirements(requirements):
         text = requirement.get("text", "")
-        if _PRESERVE_RE.search(text) and text.casefold() not in existing_text:
-            result.append({
+        if (_PRESERVE_RE.search(text) or _PROHIBITION_RE.search(text)) and text.casefold() not in existing_text:
+            entry = {
                 "text": _compact(text, 520),
                 "requirement_ids": [requirement["requirement_id"]],
                 "evidence_ids": [],
                 "provenance": requirement.get("provenance", USER_STATED),
-            })
-    return result[:8]
+            }
+            if _PROHIBITION_RE.search(text):
+                entry["constraint_type"] = "DNT"
+            result.append(entry)
+    return result[:16]
 
 
 def _planner_surface_packet(surface):
@@ -1193,17 +1758,17 @@ def _planner_surface_packet(surface):
 
 
 def _planner_seed_packet(seed):
+    # The selected surface is the authoritative carrier for the verified
+    # fact and identity.  A seed repeats only the binding and reference data
+    # that the planner must return; duplicating path/symbol/fact fields in
+    # both records made the mandatory projection unnecessarily large.
     value = {
         "impact_id": normalize_impact_id(seed.get("impact_id")),
         "surface_id": str(seed.get("surface_id") or ""),
-        "kind": seed.get("kind"),
-        "role": seed.get("role"),
         "requirement_ids": _bounded_ids(seed.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
         "evidence_ids": _bounded_ids(seed.get("canonical_evidence_ids") or seed.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
-        "owner_surface_id": seed.get("owner_surface_id"),
-        "verified_path": _normal_path(seed.get("canonical_path") or seed.get("verified_path")),
-        "verified_symbol": str(seed.get("canonical_symbol") or seed.get("verified_symbol") or ""),
-        "verified_fact": _compact(seed.get("verified_fact"), 240),
+        "canonical_path": _normal_path(seed.get("canonical_path") or seed.get("verified_path")),
+        "canonical_symbol": str(seed.get("canonical_symbol") or seed.get("verified_symbol") or ""),
         "eligible": bool(seed.get("eligible", True)),
     }
     relationships = list(seed.get("requirement_relationships", []) or [])[:4]
@@ -1257,25 +1822,91 @@ def _trim_planner_optional_payload(packet, max_chars):
 
 
 def _planning_packet_payload(task_brain, requirements, evidence, surfaces, seeds,
-                             project_invariants=None, max_chars=MAX_PLANNER_CONTEXT_CHARS):
+                             project_invariants=None, max_chars=MAX_PLANNER_CONTEXT_CHARS,
+                             verified_planning_context=None,
+                             include_role_authority=True):
     brain = task_brain if isinstance(task_brain, dict) else {}
     goal = brain.get("task_goal", "")
     if isinstance(goal, dict):
         goal = goal.get("text", "")
     selected_ids = [str(item.get("surface_id")) for item in surfaces]
+    preservation = _planner_preservation_projection(
+        task_brain, requirements, verified_planning_context=verified_planning_context,
+    )
+    authority = _planner_authority_projection(
+        task_brain, requirements, verified_planning_context=verified_planning_context,
+    )
+    conflicts = _planner_conflict_projection(
+        task_brain, verified_planning_context=verified_planning_context,
+    )
+    stale_warnings = _planner_stale_projection(
+        task_brain, verified_planning_context=verified_planning_context,
+    )
+    not_evaluable = _planner_not_evaluable_projection(
+        task_brain, verified_planning_context=verified_planning_context,
+    )
+    source_metadata = _planner_source_metadata(
+        task_brain, verified_planning_context=verified_planning_context,
+    )
+    desired_requirement_ids = [
+        str(item.get("requirement_id")) for item in active_requirements(requirements)
+        if item.get("requirement_id")
+    ]
+    current_evidence_ids = _bounded_ids(
+        [item.get("evidence_id") for item in bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2)],
+        MAX_CANONICAL_SURFACES * 2,
+    )
+    authority_source_ids = _bounded_ids(
+        [ref for item in authority for ref in item.get("source_ids", [])], 32,
+    )
+    dnt_refs = []
+    for index, item in enumerate(preservation, 1):
+        # The complete DNT statement is already present in the mandatory
+        # preservation projection.  Repeat only its compact refs when they
+        # add identity that is not otherwise available; avoid rendering the
+        # same prohibition prose twice.
+        if item.get("constraint_type") == "DNT" and (
+            item.get("requirement_ids") or item.get("evidence_ids")
+        ):
+            dnt_refs.append({
+                "constraint_id": f"DNT-{index:03d}",
+                "requirement_ids": list(item.get("requirement_ids", [])),
+                "evidence_ids": list(item.get("evidence_ids", [])),
+            })
+    preservation_texts = {
+        str(item.get("text", "")).casefold()
+        for item in preservation if isinstance(item, dict) and item.get("text")
+    }
+    for item in authority:
+        # Distinct authority source IDs remain.  The shared statement is
+        # rendered once in preservation when it is semantically identical.
+        if (
+            isinstance(item, dict)
+            and item.get("text")
+            and str(item.get("text")).casefold() in preservation_texts
+            and item.get("source_ids")
+        ):
+            item.pop("text", None)
+    planning_provenance = {
+        key: value for key, value in source_metadata.items()
+        if value not in (None, "", [], {})
+    }
     packet = {
         "version": 1,
         "task_goal": _compact(goal, 1000),
         "requirements": _planner_requirement_projection(requirements),
         "surfaces": [_planner_surface_packet(item) for item in surfaces],
         "impact_seeds": [_planner_seed_packet(item) for item in seeds],
-        "preservation_constraints": _planner_preservation_projection(task_brain, requirements),
+        "preservation_constraints": preservation,
         "planning_rules": [
-            "Decide disposition for each known impact slot; do not invent repository identity.",
-            "Use only valid Source Requirement IDs.",
-            "Reuse only canonical INTERFACE surface IDs when needed.",
-            "Preserve verified owners, interfaces, tests, and persistence unless evidence proves change necessary.",
-            "A genuinely new surface requires a separate justified NEW_SURFACE_PROPOSAL.",
+            # The role envelope carries the full prose instructions.  These
+            # stable labels retain the machine-checkable rule set without
+            # repeating that prose inside the bounded payload.
+            "KNOWN_IMPACT_SLOTS_ONLY",
+            "VALID_REQUIREMENT_IDS_ONLY",
+            "REUSE_CANONICAL_INTERFACES",
+            "PRESERVE_VERIFIED_STATE_UNLESS_PROVEN",
+            "JUSTIFY_NEW_SURFACE_PROPOSALS",
         ],
         "accepted_repository_evidence": _planner_evidence_projection(
             evidence, selected_surface_ids=selected_ids, registry={"surfaces": surfaces},
@@ -1291,23 +1922,138 @@ def _planning_packet_payload(task_brain, requirements, evidence, surfaces, seeds
             "max_serialized_chars": max_chars,
         },
     }
-    return _trim_planner_optional_payload(packet, max_chars)
+    if include_role_authority:
+        # These are compact authority references.  The complete V24 records
+        # remain in VerifiedPlanningContext; the model projection does not
+        # replace or mutate that structured artifact.
+        packet.update({
+            "current_authority": authority,
+            "confirmed_conflicts": conflicts,
+            "dnt": dnt_refs,
+            "planning_provenance": planning_provenance,
+            "current_vs_desired": {
+                "desired_requirement_ids": desired_requirement_ids,
+                "current_authority_ids": authority_source_ids,
+                "current_evidence_ids": current_evidence_ids,
+            },
+            "stale_evidence_warnings": stale_warnings,
+            "not_evaluable_audit": not_evaluable,
+        })
+    return packet
+
+
+def _planner_optional_items(payload):
+    """Return complete optional model-facing units in deterministic order."""
+    value = payload if isinstance(payload, dict) else {}
+    result = []
+    order = 0
+
+    def add(category, priority, path, item, index, source_ids=None, semantic_key=None):
+        nonlocal order
+        order += 1
+        result.append({
+            "item_id": f"{category.upper()}-{index + 1:03d}",
+            "category": category,
+            "priority": priority,
+            "path": tuple(path),
+            "index": index,
+            "value": copy.deepcopy(item),
+            "source_ids": list(source_ids or []),
+            "semantic_key": semantic_key,
+            "_order": order,
+        })
+
+    for index, item in enumerate(list(value.get("accepted_repository_evidence", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "repository_evidence", 70, ("accepted_repository_evidence",), item, index,
+                source_ids=[item.get("evidence_id")] if item.get("evidence_id") else [],
+                semantic_key=str(item.get("evidence_id") or ""),
+            )
+    task_facts = value.get("task_facts") if isinstance(value.get("task_facts"), dict) else {}
+    task_priority = {
+        "user_confirmed_decisions": 90,
+        "current_owners": 60,
+        "current_state_ownership": 60,
+        "current_interfaces": 60,
+        "relevant_tests": 55,
+        "relevant_dependencies": 45,
+        "acceptance_conditions": 35,
+        "known_non_goals": 25,
+    }
+    for field, priority in task_priority.items():
+        for index, item in enumerate(list(task_facts.get(field, []) or [])):
+            if isinstance(item, dict):
+                add(
+                    f"task_facts_{field}", priority, ("task_facts", field), item, index,
+                    source_ids=_planner_source_ids(item),
+                    semantic_key=_planner_record_text(item).casefold(),
+                )
+    for index, item in enumerate(list(value.get("stale_evidence_warnings", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "stale_warning", 30, ("stale_evidence_warnings",), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("record_id") or item.get("fact_hash") or ""),
+            )
+    for index, item in enumerate(list(value.get("not_evaluable_audit", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "not_evaluable_audit", 10, ("not_evaluable_audit",), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("authority_record_id") or index),
+            )
+    for index, item in enumerate(list(value.get("project_context", []) or [])):
+        add(
+            "project_context", 20, ("project_context",), item, index,
+            semantic_key=str(item).casefold(),
+        )
+    return result
+
+
+def _planner_mandatory_payload(payload, optional_items):
+    """Remove optional containers while retaining their fixed semantic schema."""
+    value = copy.deepcopy(payload if isinstance(payload, dict) else {})
+    for field in (
+        "accepted_repository_evidence", "task_facts", "project_context",
+        "stale_evidence_warnings", "not_evaluable_audit",
+    ):
+        value.pop(field, None)
+    return value
 
 
 def build_canonical_planning_packet(task_brain, requirements, evidence,
                                     project_invariants=None, surface_registry=None,
                                     max_chars=None,
-                                    max_surfaces=MAX_CANONICAL_SURFACES):
+                                    max_surfaces=MAX_CANONICAL_SURFACES,
+                                    role="ImpactPlanner", render=None, base_render=None,
+                                    verified_planning_context=None):
     """Build and validate the complete ImpactPlanner-specific packet.
 
     The generic context projection is intentionally not used here.  Required
     requirements, selected canonical surfaces, seeds, and preservation
-    constraints are core packet authority; only optional Task/Project Brain
-    prose can be trimmed.  If the core cannot fit, the result is explicitly
-    incomplete and callers must not invoke the planner.
+    constraints are core packet authority; only optional evidence/prose units
+    can be trimmed.  When ``render`` is supplied, its exact final string is
+    the authoritative budget subject.  If the mandatory projection cannot
+    fit, the result is explicitly incomplete and callers must not invoke the
+    planner.
     """
     max_chars = MAX_PLANNER_CONTEXT_CHARS if max_chars is None else max_chars
     max_chars = max(1, int(max_chars))
+    # Direct Stage 3 callers historically received a compact JSON payload
+    # bound by ``max_chars``.  Keep that compatibility projection unchanged;
+    # the production role path opts into the richer authority projection and
+    # supplies the exact role renderer below.
+    include_role_authority = (
+        isinstance(verified_planning_context, dict)
+        or any(
+            isinstance(task_brain, dict) and task_brain.get(field)
+            for field in (
+                "current_authority", "confirmed_conflicts", "stale_evidence_warnings",
+                "not_evaluable_audit", "dnt", "prohibitions",
+            )
+        )
+    )
     registry = surface_registry or build_canonical_surface_registry(task_brain, evidence)
     registry_validation = validate_canonical_surface_registry(registry, evidence)
     selection = select_task_relevant_surfaces(
@@ -1333,10 +2079,67 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         payload = _planning_packet_payload(
             task_brain, requirements, evidence, surface_values, seeds,
             project_invariants=project_invariants, max_chars=max_chars,
+            verified_planning_context=verified_planning_context,
+            include_role_authority=include_role_authority,
         )
-        return payload, seeds, seed_validation, len(_compact_json(payload))
+        optional_items = _planner_optional_items(payload)
+        mandatory_payload = _planner_mandatory_payload(payload, optional_items)
+        mandatory_ids = ["TASK_GOAL"]
+        mandatory_ids.extend(
+            f"REQUIREMENT-{item.get('requirement_id')}"
+            for item in _planner_requirement_projection(requirements)
+            if item.get("requirement_id")
+        )
+        mandatory_ids.extend(str(item.get("surface_id")) for item in surface_values)
+        mandatory_ids.extend(
+            str(item.get("impact_id")) for item in seeds if item.get("impact_id")
+        )
+        mandatory_ids.extend(
+            f"PRESERVATION-{index:03d}"
+            for index, item in enumerate(payload.get("preservation_constraints", []), 1)
+            if isinstance(item, dict) and item.get("text")
+        )
+        mandatory_ids.extend(
+            str(item.get("conflict_id"))
+            for item in payload.get("confirmed_conflicts", [])
+            if isinstance(item, dict) and item.get("conflict_id")
+        )
+        mandatory_ids.extend(
+            f"AUTHORITY-{index:03d}"
+            for index, item in enumerate(payload.get("current_authority", []), 1)
+            if isinstance(item, dict)
+        )
+        if include_role_authority:
+            mandatory_ids.extend(["PLANNING_PROVENANCE", "CURRENT_VS_DESIRED"])
+        mandatory_ids.append("PLANNING_RULES")
 
-    payload, seeds, seed_validation, packet_chars = assemble(selected)
+        def payload_factory(selected_items, marker=True):
+            value = _role_payload_factory(mandatory_payload, selected_items)
+            value["packet_complete"] = bool(marker)
+            return value
+
+        role_packet = build_planning_role_packet(
+            role, mandatory_payload, optional_items,
+            hard_limit=max_chars, render=render, base_render=base_render,
+            source_planning_context_hash=(
+                _planner_source_metadata(task_brain, verified_planning_context)
+                .get("source_planning_context_hash")
+            ),
+            mandatory_items=mandatory_ids,
+            payload_factory=lambda selected: payload_factory(selected, marker=True),
+        )
+        # Structural errors must be reflected in the exact model packet too;
+        # the marker is never appended after the packet was audited.
+        return (
+            role_packet.get("payload", {}), seeds, seed_validation,
+            role_packet.get("rendered_chars", 0), role_packet,
+            optional_items, mandatory_payload, mandatory_ids,
+        )
+
+    (
+        payload, seeds, seed_validation, packet_chars, role_packet,
+        optional_items, mandatory_payload, mandatory_ids,
+    ) = assemble(selected)
     # Optional relevant surfaces are dropped before serialization only when
     # the complete candidate set cannot fit.  Required surfaces are never
     # silently dropped.
@@ -1348,19 +2151,25 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         scores.get(str(item.get("surface_id")), {}).get("score", 0),
         selected.index(item),
     ))
-    while packet_chars > max_chars and optional:
+    while not role_packet.get("packet_complete") and optional:
         remove = optional.pop(0)
         selected = [item for item in selected if item is not remove]
-        payload, seeds, seed_validation, packet_chars = assemble(selected)
+        (
+            payload, seeds, seed_validation, packet_chars, role_packet,
+            optional_items, mandatory_payload, mandatory_ids,
+        ) = assemble(selected)
     selected_ids = [str(item.get("surface_id")) for item in selected]
     serialized_ids = [str(item.get("surface_id")) for item in payload.get("surfaces", [])]
     dropped_ids = [
         str(item.get("surface_id")) for item in list(registry.get("surfaces", []) or [])
         if str(item.get("surface_id")) not in selected_ids
     ]
+    errors = list(registry_validation.get("errors", [])) if not registry_validation.get("valid") else []
+    if selection.get("missing_required_surface_ids"):
+        errors.append("required canonical surfaces exceed the deterministic surface bound")
     if packet_chars > max_chars:
         errors.append(
-            f"complete canonical planning authority exceeds {max_chars} serialized characters"
+            f"exact {role} planning packet exceeds {max_chars} rendered characters"
         )
     if not seed_validation.get("valid"):
         errors.extend(seed_validation.get("errors", []))
@@ -1370,18 +2179,37 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         errors.append("planner packet has no surface-bound impact seeds")
     if len(seeds) != len(serialized_ids):
         errors.append("surface-bound impact seeds were not serialized completely")
-    complete = not errors
-    payload["packet_complete"] = complete
-    packet_chars = len(_compact_json(payload))
-    if packet_chars > max_chars and not any(
-        "serialized-size bound" in str(error) for error in errors
-    ):
-        errors.append(
-            f"complete canonical planning authority exceeds {max_chars} serialized characters"
+    if role_packet.get("status") != "READY":
+        errors.extend(role_packet.get("errors", []))
+    complete = bool(role_packet.get("packet_complete")) and not errors
+    if payload.get("packet_complete") is not complete:
+        # Re-render the same semantic units with the final completeness marker
+        # before publishing any audit or provider-facing string.
+        final_optional_ids = set(role_packet.get("optional_items_selected", []))
+        selected_optional = [
+            item for item in optional_items
+            if str(item.get("item_id")) in final_optional_ids
+        ]
+        value = _role_payload_factory(mandatory_payload, selected_optional)
+        value["packet_complete"] = complete
+        role_packet = build_planning_role_packet(
+            role, mandatory_payload, optional_items,
+            hard_limit=max_chars, render=render, base_render=base_render,
+            source_planning_context_hash=(
+                _planner_source_metadata(task_brain, verified_planning_context)
+                .get("source_planning_context_hash")
+            ),
+            mandatory_items=mandatory_ids,
+            payload_factory=lambda chosen: (
+                dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=complete)
+            ),
+            packet_complete_override=complete,
         )
-        complete = False
-        payload["packet_complete"] = False
-        packet_chars = len(_compact_json(payload))
+        payload = role_packet.get("payload", value)
+        packet_chars = role_packet.get("rendered_chars", 0)
+        complete = bool(role_packet.get("packet_complete")) and not errors
+    else:
+        packet_chars = role_packet.get("rendered_chars", packet_chars)
     selection = copy.deepcopy(selection)
     selection.update({
         "selected": copy.deepcopy(selected),
@@ -1397,12 +2225,19 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         "dropped_surface_ids": dropped_ids,
         "impact_seed_ids": [normalize_impact_id(item.get("impact_id")) for item in seeds],
         "packet_chars": packet_chars,
-        "estimated_tokens": _estimated_tokens(_compact_json(payload)),
+        "payload_chars": len(_compact_json(payload)),
+        "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(payload))),
         "packet_complete": complete,
+        "role_packet": copy.deepcopy({
+            key: value for key, value in role_packet.items()
+            if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
+                           "mandatory_rendered_packet", "mandatory_serialized_payload"}
+        }),
     }
     result = copy.deepcopy(payload)
     result.update({
         "packet": copy.deepcopy(payload),
+        "role_packet": copy.deepcopy(role_packet),
         "observability": observability,
         "selected_surface_ids": selected_ids,
         "serialized_surface_ids": serialized_ids,
@@ -1411,7 +2246,10 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         "packet_chars": packet_chars,
         "estimated_tokens": observability["estimated_tokens"],
         "packet_complete": complete,
-        "status": "READY" if complete else IMPACT_PLANNING_CONTEXT_INCOMPLETE,
+        "status": "READY" if complete else (
+            role_packet.get("status") if role_packet.get("status") != "READY"
+            else IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        ),
         "errors": errors[:24],
         "impact_seeds": copy.deepcopy(seeds),
         "seed_validation": seed_validation,
@@ -1429,6 +2267,7 @@ def validate_planning_packet(packet, registry=None, requirements=None, impact_se
     """Independently verify complete planner-packet authority and retention."""
     wrapper = packet if isinstance(packet, dict) else {}
     value = wrapper.get("packet") if isinstance(wrapper.get("packet"), dict) else wrapper
+    role_packet = wrapper.get("role_packet") if isinstance(wrapper.get("role_packet"), dict) else None
     surfaces = [item for item in list(value.get("surfaces", []) or []) if isinstance(item, dict)]
     serialized_ids = [str(item.get("surface_id")) for item in surfaces]
     selected_ids = [str(item) for item in wrapper.get("selected_surface_ids", serialized_ids)]
@@ -1460,9 +2299,39 @@ def validate_planning_packet(packet, registry=None, requirements=None, impact_se
         normalize_impact_id(item.get("impact_id")) for item in value.get("impact_seeds", []) or []
     }:
         errors.append("planner packet impact seeds were not serialized completely")
-    packet_chars = len(_compact_json(value))
-    if packet_chars > max(1, int(max_chars)):
-        errors.append("planner packet serialized-size bound exceeded")
+    if role_packet is not None:
+        exact_model_input = role_packet.get("exact_model_input") or role_packet.get("rendered_packet")
+        if not isinstance(exact_model_input, str):
+            exact_model_input = str(exact_model_input or "")
+        role_limit = int(role_packet.get("hard_limit_chars") or max_chars)
+        packet_chars = len(exact_model_input)
+        if packet_chars > role_limit:
+            errors.append("planner role packet rendered-size bound exceeded")
+        if role_packet.get("rendered_chars") != packet_chars:
+            errors.append("planner role packet rendered length was not audited exactly")
+        if role_packet.get("rendered_packet") != exact_model_input:
+            errors.append("planner provider input differs from the audited rendered packet")
+        if role_packet.get("mandatory_drops"):
+            errors.append("planner role packet dropped mandatory content")
+        hash_material = {
+            key: copy.deepcopy(item) for key, item in role_packet.items()
+            if key not in {
+                "errors", "status", "packet_hash", "payload", "rendered_packet",
+                "exact_model_input", "base_rendered_packet", "mandatory_rendered_packet",
+                "mandatory_serialized_payload", "base_mandatory_rendered_chars",
+            }
+        }
+        hash_material["rendered_packet"] = exact_model_input
+        hash_material["payload"] = value
+        expected_hash = _role_packet_hash(hash_material)
+        if role_packet.get("packet_hash") != expected_hash:
+            errors.append("planner role packet hash does not match its exact render")
+        if not role_packet.get("packet_complete"):
+            errors.append("planner role packet is marked incomplete")
+    else:
+        packet_chars = len(_compact_json(value))
+        if packet_chars > max(1, int(max_chars)):
+            errors.append("planner packet serialized-size bound exceeded")
     if wrapper.get("packet_complete") is False or value.get("packet_complete") is False:
         errors.append("planner packet is marked incomplete")
     return {
@@ -1499,8 +2368,64 @@ def build_planner_context(task_brain, requirements, evidence, project_invariants
         if supplied_ids == packet_ids:
             packet["impact_seeds"] = copy.deepcopy(list(impact_seeds or []))
     packet["source_requirements"] = copy.deepcopy(packet.get("requirements", []))
-    packet["packet_observability"] = copy.deepcopy(result.get("observability", {}))
+    # Preserve the historical compact compatibility view.  The complete role
+    # audit is available as ``result['role_packet']``; copying it into this
+    # legacy model context would make the compatibility projection itself
+    # exceed the old serialized bound.
+    observability = result.get("observability", {})
+    packet["packet_observability"] = {
+        key: copy.deepcopy(observability.get(key))
+        for key in (
+            "selected_surface_ids", "serialized_surface_ids", "dropped_surface_ids",
+            "impact_seed_ids", "packet_chars", "payload_chars", "estimated_tokens",
+            "packet_complete",
+        )
+    }
     packet["packet_complete"] = bool(result.get("packet_complete"))
+    # The legacy projection is still required to fit its historical JSON
+    # representation, which uses ordinary JSON separators.  Keep this
+    # compatibility-only view bounded by removing complete optional records;
+    # the production role compiler above uses the exact role renderer and is
+    # authoritative for provider packets.
+    def legacy_size(value):
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+
+    while legacy_size(packet) > MAX_PLANNER_CONTEXT_CHARS:
+        removed = False
+        project = packet.get("project_context")
+        if isinstance(project, list) and project:
+            project.pop()
+            removed = True
+        if removed:
+            continue
+        task_facts = packet.get("task_facts")
+        if isinstance(task_facts, dict):
+            for field in (
+                "known_non_goals", "acceptance_conditions", "relevant_dependencies",
+                "current_interfaces", "current_state_ownership", "current_owners",
+                "relevant_tests", "user_confirmed_decisions",
+            ):
+                values = task_facts.get(field)
+                if isinstance(values, list) and values:
+                    values.pop()
+                    removed = True
+                    break
+                if isinstance(values, list) and not values:
+                    task_facts.pop(field, None)
+            if not removed and task_facts:
+                packet["task_facts"] = {}
+                removed = True
+        if removed:
+            continue
+        evidence = packet.get("accepted_repository_evidence")
+        if isinstance(evidence, list) and evidence:
+            evidence.pop()
+            continue
+        # Audit presentation is optional in this compatibility projection.
+        # It is removed only after optional semantic facts have been tried.
+        if packet.pop("packet_observability", None) is not None:
+            continue
+        break
     return packet
 
 
@@ -3071,6 +3996,89 @@ def _review_surface_packet(surface):
     return _planner_surface_packet(surface) if isinstance(surface, dict) else None
 
 
+def _challenger_optional_items(packet):
+    """Return challenger evidence/prose units below the review authority."""
+    value = packet if isinstance(packet, dict) else {}
+    result = []
+    sequence = 0
+
+    def add(category, priority, path, item, index, source_ids=None, semantic_key=None):
+        nonlocal sequence
+        sequence += 1
+        result.append({
+            "item_id": f"{category.upper()}-{index + 1:03d}",
+            "category": category,
+            "priority": priority,
+            "path": tuple(path),
+            "index": index,
+            "value": copy.deepcopy(item),
+            "source_ids": list(source_ids or []),
+            "semantic_key": semantic_key,
+            "_order": sequence,
+        })
+
+    candidate = value.get("candidate_impact_map") if isinstance(value.get("candidate_impact_map"), dict) else {}
+    for field, priority, count in (
+        ("integration_verification", 40, 10),
+        ("insufficient_evidence", 30, 6),
+    ):
+        for index, item in enumerate(list(candidate.get(field, []) or [])[:count]):
+            add(f"candidate_{field}", priority, ("candidate_impact_map", field), item, index)
+    for index, item in enumerate(list(value.get("accepted_repository_evidence", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "repository_evidence", 60, ("accepted_repository_evidence",), item, index,
+                source_ids=[item.get("evidence_id")] if item.get("evidence_id") else [],
+                semantic_key=str(item.get("evidence_id") or ""),
+            )
+    task_facts = value.get("task_facts") if isinstance(value.get("task_facts"), dict) else {}
+    priorities = {
+        "user_confirmed_decisions": 90, "current_owners": 60,
+        "current_state_ownership": 60, "current_interfaces": 60,
+        "relevant_tests": 55, "relevant_dependencies": 45,
+        "acceptance_conditions": 35, "known_non_goals": 25,
+    }
+    for field, priority in priorities.items():
+        for index, item in enumerate(list(task_facts.get(field, []) or [])):
+            if isinstance(item, dict):
+                add(
+                    f"task_facts_{field}", priority, ("task_facts", field), item, index,
+                    source_ids=_planner_source_ids(item),
+                    semantic_key=_planner_record_text(item).casefold(),
+                )
+    for index, item in enumerate(list(value.get("stale_evidence_warnings", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "stale_warning", 30, ("stale_evidence_warnings",), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("record_id") or item.get("fact_hash") or ""),
+            )
+    for index, item in enumerate(list(value.get("not_evaluable_audit", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "not_evaluable_audit", 10, ("not_evaluable_audit",), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("authority_record_id") or index),
+            )
+    for index, item in enumerate(list(value.get("project_context", []) or [])):
+        add("project_context", 20, ("project_context",), item, index, semantic_key=str(item).casefold())
+    return result
+
+
+def _challenger_mandatory_payload(packet):
+    value = copy.deepcopy(packet if isinstance(packet, dict) else {})
+    for field in (
+        "accepted_repository_evidence", "task_facts", "project_context",
+        "stale_evidence_warnings", "not_evaluable_audit",
+    ):
+        value.pop(field, None)
+    candidate = value.get("candidate_impact_map")
+    if isinstance(candidate, dict):
+        candidate.pop("integration_verification", None)
+        candidate.pop("insufficient_evidence", None)
+    return value
+
+
 def _trim_challenger_optional_payload(packet, max_chars):
     value = copy.deepcopy(packet)
 
@@ -3111,8 +4119,9 @@ def _trim_challenger_optional_payload(packet, max_chars):
 
 
 def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
-                            surface_registry=None, max_chars=None):
-    """Build a complete, bounded review packet without dropping impacts."""
+                            surface_registry=None, max_chars=None, role="ImpactChallenger",
+                            render=None, base_render=None, verified_planning_context=None):
+    """Build a complete review packet using the exact role renderer."""
     max_chars = MAX_CHALLENGER_CONTEXT_CHARS if max_chars is None else max_chars
     max_chars = max(1, int(max_chars))
     brain = task_brain if isinstance(task_brain, dict) else {}
@@ -3166,8 +4175,70 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
         "bounds": {"max_challenges": MAX_CHALLENGES, "challenge_rounds": MAX_CHALLENGE_ROUNDS,
                    "max_serialized_chars": max_chars},
     }
-    packet = _trim_challenger_optional_payload(packet, max_chars)
-    packet_chars = len(_compact_json(packet))
+    include_role_authority = (
+        isinstance(verified_planning_context, dict)
+        or any(
+            isinstance(task_brain, dict) and task_brain.get(field)
+            for field in (
+                "current_authority", "confirmed_conflicts", "stale_evidence_warnings",
+                "not_evaluable_audit", "dnt", "prohibitions",
+            )
+        )
+    )
+    if include_role_authority:
+        planner_context = _planner_source_metadata(
+            task_brain, verified_planning_context=verified_planning_context,
+        )
+        packet.update({
+            "current_authority": _planner_authority_projection(
+                task_brain, requirements, verified_planning_context=verified_planning_context,
+            ),
+            "confirmed_conflicts": _planner_conflict_projection(
+                task_brain, verified_planning_context=verified_planning_context,
+            ),
+            "preservation_constraints": _planner_preservation_projection(
+                task_brain, requirements, verified_planning_context=verified_planning_context,
+            ),
+            "planning_provenance": {
+                key: value for key, value in planner_context.items()
+                if value not in (None, "", [], {})
+            },
+            "stale_evidence_warnings": _planner_stale_projection(
+                task_brain, verified_planning_context=verified_planning_context,
+            ),
+            "not_evaluable_audit": _planner_not_evaluable_projection(
+                task_brain, verified_planning_context=verified_planning_context,
+            ),
+        })
+    optional_items = _challenger_optional_items(packet)
+    mandatory_payload = _challenger_mandatory_payload(packet)
+    mandatory_ids = [
+        "CANDIDATE_IMPACT_MAP",
+        *[f"IMPACT-{item.get('impact_id')}" for item in impacts if item.get("impact_id")],
+        *[f"REQUIREMENT-{item.get('requirement_id')}" for item in _planner_requirement_projection(requirements)],
+        *[f"SURFACE-{item}" for item in selected_surface_ids],
+        "PRESERVATION_CONSTRAINTS",
+    ]
+    if include_role_authority:
+        mandatory_ids.extend(["CURRENT_AUTHORITY", "CONFIRMED_CONFLICTS", "PLANNING_PROVENANCE"])
+
+    def payload_factory(selected_items, marker=True):
+        value = _role_payload_factory(mandatory_payload, selected_items)
+        value["packet_complete"] = bool(marker)
+        return value
+
+    role_packet = build_planning_role_packet(
+        role, mandatory_payload, optional_items,
+        hard_limit=max_chars, render=render, base_render=base_render,
+        source_planning_context_hash=(
+            _planner_source_metadata(task_brain, verified_planning_context)
+            .get("source_planning_context_hash")
+        ),
+        mandatory_items=mandatory_ids,
+        payload_factory=lambda selected: payload_factory(selected, marker=True),
+    )
+    packet = role_packet.get("payload", {})
+    packet_chars = role_packet.get("rendered_chars", len(_compact_json(packet)))
     serialized_impact_ids = [
         str(item.get("impact_id"))
         for item in packet.get("candidate_impact_map", {}).get("impacts", [])
@@ -3177,31 +4248,55 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
     if len(raw_impacts) > MAX_IMPACT_ENTRIES:
         errors.append("challenger impact entry bound exceeded")
     if packet_chars > max_chars:
-        errors.append("complete challenger review authority exceeds the serialized-size bound")
+        errors.append("exact challenger review packet exceeds the rendered-size bound")
     if serialized_impact_ids != impact_ids:
         errors.append("challenger packet did not retain every reviewed impact")
-    complete = not errors
-    packet["packet_complete"] = complete
-    packet_chars = len(_compact_json(packet))
-    if packet_chars > max_chars and not errors:
-        errors.append(
-            f"complete challenger review authority exceeds {max_chars} serialized characters"
+    complete = bool(role_packet.get("packet_complete")) and not errors
+    if packet.get("packet_complete") is not complete:
+        selected_ids = set(role_packet.get("optional_items_selected", []))
+        selected_optional = [
+            item for item in optional_items if str(item.get("item_id")) in selected_ids
+        ]
+        role_packet = build_planning_role_packet(
+            role, mandatory_payload, optional_items,
+            hard_limit=max_chars, render=render, base_render=base_render,
+            source_planning_context_hash=(
+                _planner_source_metadata(task_brain, verified_planning_context)
+                .get("source_planning_context_hash")
+            ),
+            mandatory_items=mandatory_ids,
+            payload_factory=lambda chosen: (
+                dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=complete)
+            ),
+            packet_complete_override=complete,
         )
-        complete = False
-        packet["packet_complete"] = False
-        packet_chars = len(_compact_json(packet))
+        packet = role_packet.get("payload", packet)
+        packet_chars = role_packet.get("rendered_chars", packet_chars)
+        complete = bool(role_packet.get("packet_complete")) and not errors
+        serialized_impact_ids = [
+            str(item.get("impact_id"))
+            for item in packet.get("candidate_impact_map", {}).get("impacts", [])
+            if item.get("impact_id")
+        ]
     observability = {
         "reviewed_impact_ids": impact_ids,
         "serialized_impact_ids": serialized_impact_ids,
         "dropped_impact_ids": [item for item in impact_ids if item not in serialized_impact_ids],
         "reviewed_surface_ids": selected_surface_ids,
         "packet_chars": packet_chars,
-        "estimated_tokens": _estimated_tokens(_compact_json(packet)),
+        "payload_chars": len(_compact_json(packet)),
+        "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(packet))),
         "packet_complete": complete,
+        "role_packet": copy.deepcopy({
+            key: value for key, value in role_packet.items()
+            if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
+                           "mandatory_rendered_packet", "mandatory_serialized_payload"}
+        }),
     }
     result = copy.deepcopy(packet)
     result.update({
         "packet": copy.deepcopy(packet),
+        "role_packet": copy.deepcopy(role_packet),
         "observability": observability,
         "reviewed_impact_ids": impact_ids,
         "serialized_impact_ids": serialized_impact_ids,
@@ -3209,7 +4304,10 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
         "packet_chars": packet_chars,
         "estimated_tokens": observability["estimated_tokens"],
         "packet_complete": complete,
-        "status": "READY" if complete else IMPACT_CHALLENGER_CONTEXT_INCOMPLETE,
+        "status": "READY" if complete else (
+            role_packet.get("status") if role_packet.get("status") != "READY"
+            else IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
+        ),
         "errors": errors[:12],
     })
     return result
@@ -3226,9 +4324,200 @@ def build_challenger_context(impact_map, requirements, evidence, task_brain=None
         surface_registry=surface_registry,
     )
     context = copy.deepcopy(result.get("packet", result))
-    context["packet_observability"] = copy.deepcopy(result.get("observability", {}))
+    observability = result.get("observability", {})
+    context["packet_observability"] = {
+        key: copy.deepcopy(observability.get(key))
+        for key in (
+            "reviewed_impact_ids", "serialized_impact_ids", "dropped_impact_ids",
+            "reviewed_surface_ids", "packet_chars", "payload_chars", "estimated_tokens",
+            "packet_complete",
+        )
+    }
     context["packet_complete"] = bool(result.get("packet_complete"))
     return context
+
+
+def _revision_optional_items(context):
+    """Return optional revision evidence as complete nested semantic units."""
+    value = context if isinstance(context, dict) else {}
+    result = []
+    sequence = 0
+
+    def add(category, priority, path, item, index, source_ids=None, semantic_key=None):
+        nonlocal sequence
+        sequence += 1
+        result.append({
+            "item_id": f"{category.upper()}-{index + 1:03d}",
+            "category": category,
+            "priority": priority,
+            "path": tuple(path),
+            "index": index,
+            "value": copy.deepcopy(item),
+            "source_ids": list(source_ids or []),
+            "semantic_key": semantic_key,
+            "_order": sequence,
+        })
+
+    candidate = value.get("candidate_impact_map") if isinstance(value.get("candidate_impact_map"), dict) else {}
+    for field, priority in (("integration_verification", 40), ("insufficient_evidence", 30)):
+        for index, item in enumerate(list(candidate.get(field, []) or [])):
+            add(f"candidate_{field}", priority, ("candidate_impact_map", field), item, index)
+
+    planning = value.get("planning_packet") if isinstance(value.get("planning_packet"), dict) else {}
+    for index, item in enumerate(list(planning.get("accepted_repository_evidence", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "planning_repository_evidence", 70,
+                ("planning_packet", "accepted_repository_evidence"), item, index,
+                source_ids=[item.get("evidence_id")] if item.get("evidence_id") else [],
+                semantic_key=str(item.get("evidence_id") or ""),
+            )
+    task_facts = planning.get("task_facts") if isinstance(planning.get("task_facts"), dict) else {}
+    priorities = {
+        "user_confirmed_decisions": 90, "current_owners": 60,
+        "current_state_ownership": 60, "current_interfaces": 60,
+        "relevant_tests": 55, "relevant_dependencies": 45,
+        "acceptance_conditions": 35, "known_non_goals": 25,
+    }
+    for field, priority in priorities.items():
+        for index, item in enumerate(list(task_facts.get(field, []) or [])):
+            if isinstance(item, dict):
+                add(
+                    f"planning_task_facts_{field}", priority,
+                    ("planning_packet", "task_facts", field), item, index,
+                    source_ids=_planner_source_ids(item),
+                    semantic_key=_planner_record_text(item).casefold(),
+                )
+    for index, item in enumerate(list(planning.get("stale_evidence_warnings", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "planning_stale_warning", 30,
+                ("planning_packet", "stale_evidence_warnings"), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("record_id") or item.get("fact_hash") or ""),
+            )
+    for index, item in enumerate(list(planning.get("not_evaluable_audit", []) or [])):
+        if isinstance(item, dict):
+            add(
+                "planning_not_evaluable_audit", 10,
+                ("planning_packet", "not_evaluable_audit"), item, index,
+                source_ids=_planner_source_ids(item),
+                semantic_key=str(item.get("authority_record_id") or index),
+            )
+    for index, item in enumerate(list(planning.get("project_context", []) or [])):
+        add(
+            "planning_project_context", 20,
+            ("planning_packet", "project_context"), item, index,
+            semantic_key=str(item).casefold(),
+        )
+    return result
+
+
+def _revision_mandatory_payload(context):
+    value = copy.deepcopy(context if isinstance(context, dict) else {})
+    candidate = value.get("candidate_impact_map")
+    if isinstance(candidate, dict):
+        candidate.pop("integration_verification", None)
+        candidate.pop("insufficient_evidence", None)
+    planning = value.get("planning_packet")
+    if isinstance(planning, dict):
+        for field in (
+            "accepted_repository_evidence", "task_facts", "project_context",
+            "stale_evidence_warnings", "not_evaluable_audit",
+        ):
+            planning.pop(field, None)
+    return value
+
+
+def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
+                          render=None, base_render=None, source_planning_context_hash=None):
+    """Compile the bounded minimal-plan/reconciliation role packet."""
+    max_chars = MAX_REVISION_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
+    value = copy.deepcopy(context if isinstance(context, dict) else {})
+    optional_items = _revision_optional_items(value)
+    mandatory_payload = _revision_mandatory_payload(value)
+    candidate = value.get("candidate_impact_map") if isinstance(value.get("candidate_impact_map"), dict) else {}
+    planning = value.get("planning_packet") if isinstance(value.get("planning_packet"), dict) else {}
+    mandatory_ids = [
+        "CANDIDATE_IMPACT_MAP",
+        *[str(item.get("impact_id")) for item in candidate.get("impacts", [])
+          if isinstance(item, dict) and item.get("impact_id")],
+        *[str(item.get("challenge_id")) for item in value.get("validated_challenges", [])
+          if isinstance(item, dict) and item.get("challenge_id")],
+        *[f"REQUIREMENT-{item.get('requirement_id')}"
+          for item in planning.get("requirements", []) if isinstance(item, dict)],
+        *[str(item.get("surface_id")) for item in planning.get("surfaces", [])
+          if isinstance(item, dict) and item.get("surface_id")],
+        "PLANNING_PACKET",
+    ]
+    if source_planning_context_hash is None:
+        provenance = planning.get("planning_provenance")
+        if isinstance(provenance, dict):
+            source_planning_context_hash = provenance.get("source_planning_context_hash")
+
+    def payload_factory(selected_items, marker=True):
+        payload = _role_payload_factory(mandatory_payload, selected_items)
+        payload["packet_complete"] = bool(marker)
+        return payload
+
+    role_packet = build_planning_role_packet(
+        role, mandatory_payload, optional_items,
+        hard_limit=max_chars, render=render, base_render=base_render,
+        source_planning_context_hash=source_planning_context_hash,
+        mandatory_items=mandatory_ids,
+        payload_factory=lambda selected: payload_factory(selected, marker=True),
+    )
+    packet = role_packet.get("payload", {})
+    packet_chars = role_packet.get("rendered_chars", len(_compact_json(packet)))
+    complete = bool(role_packet.get("packet_complete"))
+    errors = list(role_packet.get("errors", []))
+    if not complete and role_packet.get("status") == "READY":
+        errors.append("revision packet is incomplete")
+    if packet.get("packet_complete") is not complete:
+        role_packet = build_planning_role_packet(
+            role, mandatory_payload, optional_items,
+            hard_limit=max_chars, render=render, base_render=base_render,
+            source_planning_context_hash=source_planning_context_hash,
+            mandatory_items=mandatory_ids,
+            payload_factory=lambda chosen: (
+                dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=False)
+            ),
+            packet_complete_override=False,
+        )
+        packet = role_packet.get("payload", packet)
+        packet_chars = role_packet.get("rendered_chars", packet_chars)
+        complete = False
+    observability = {
+        "packet_chars": packet_chars,
+        "payload_chars": len(_compact_json(packet)),
+        "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(packet))),
+        "packet_complete": complete,
+        "role_packet": copy.deepcopy({
+            key: item for key, item in role_packet.items()
+            if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
+                           "mandatory_rendered_packet", "mandatory_serialized_payload"}
+        }),
+    }
+    result = copy.deepcopy(packet)
+    result.update({
+        "packet": copy.deepcopy(packet),
+        "role_packet": copy.deepcopy(role_packet),
+        "packet_chars": packet_chars,
+        "estimated_tokens": observability["estimated_tokens"],
+        "packet_complete": complete,
+        "status": "READY" if complete else (
+            role_packet.get("status") if role_packet.get("status") != "READY"
+            else IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE
+        ),
+        "errors": errors[:12] + [
+            item for item in role_packet.get("errors", []) if item not in errors
+        ][:12],
+        "observability": observability,
+    })
+    return result
+
+
+build_minimal_plan_packet = build_revision_packet
 
 
 def _impact_text(impact):
