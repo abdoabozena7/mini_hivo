@@ -65,6 +65,25 @@ from hivo.requirements import specification_coverage
 from hivo.requirements import thaw
 from hivo.verification import GAME_BRIDGE_EXPRESSION, GAME_BRIDGE_NAME
 from hivo.verification import evaluate_web_snapshot, infer_web_profile
+from hivo.verification_routing import AMBIGUOUS_SUPPORTED_TARGET
+from hivo.verification_routing import BLOCKED_REQUIRED_TARGET_MISSING
+from hivo.verification_routing import BROWSER as BROWSER_VERIFICATION
+from hivo.verification_routing import CONTRACT_REQUIRES_SYNTAX
+from hivo.verification_routing import CONTRACT_REQUIRES_TEST
+from hivo.verification_routing import FAIL as VERIFICATION_FAIL
+from hivo.verification_routing import FOCUSED_TEST
+from hivo.verification_routing import FOCUSED_TEST_PRESENT
+from hivo.verification_routing import NO_SUPPORTED_BROWSER_TARGET
+from hivo.verification_routing import PASS as VERIFICATION_PASS
+from hivo.verification_routing import REQUIRED_VERIFICATION_TARGET_UNRESOLVED
+from hivo.verification_routing import SKIPPED_NOT_APPLICABLE
+from hivo.verification_routing import SUPPORTED_SOURCE_PRESENT
+from hivo.verification_routing import SUPPORTED_TARGET_PRESENT
+from hivo.verification_routing import SYNTAX_STATIC_GATE
+from hivo.verification_routing import TEST_TARGET_PRESENT
+from hivo.verification_routing import VERIFICATION_EVIDENCE_UNAVAILABLE
+from hivo.verification_routing import aggregate_verification_evidence
+from hivo.verification_routing import analyze_verification_applicability as _analyze_verification_applicability
 
 # ---------------------------------------------------------------------------
 # RESEARCH CONFIGURATION
@@ -1070,18 +1089,52 @@ def run_tool(name, args, role="System"):
         return run_command(args["command"])
     if name == "verify_web_app":
         active = ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {}
+        route_artifact = analyze_verification_applicability(
+            active, active, requested_path=args.get("path"),
+        )
+        if route_artifact is None:
+            authority_failure = _authority_terminal_failure(active) or EXECUTION_CONTRACT_BLOCKED
+            blocked = _authority_fail_closed_result(
+                authority_failure,
+                message="verification routing is blocked because current execution authority is invalid",
+                task_id=str(active.get("task_id") or "tool"),
+            )
+            blocked.update({
+                "passed": False,
+                "environment_error": False,
+                "failure_type": authority_failure,
+                "verification_status": authority_failure,
+            })
+            return json.dumps(blocked, ensure_ascii=False)
+        browser_route = _verification_route(route_artifact, BROWSER_VERIFICATION)
+        if browser_route and not browser_route.get("applicable") and not browser_route.get("required"):
+            skipped = _verification_skip_result(active, route_artifact, browser_route)
+            skipped["verification_applicability"] = _update_verification_applicability_result(
+                route_artifact, None, BROWSER_VERIFICATION, skipped,
+            )
+            return "[not_applicable] " + json.dumps(skipped, ensure_ascii=False)
+        if browser_route and browser_route.get("required") and not browser_route.get("target"):
+            unresolved = _verification_required_target_result(active, route_artifact, browser_route)
+            unresolved["verification_applicability"] = _update_verification_applicability_result(
+                route_artifact, None, BROWSER_VERIFICATION, unresolved,
+            )
+            return json.dumps(unresolved, ensure_ascii=False)
         profile = infer_web_profile(str(active.get("goal") or "web"), active)
         target_evidence = {
             "requested_from_node": args["path"],
             "project_invariants": active.get("project_invariants", RUN.get("project_invariants", [])),
         }
-        return json.dumps(
-            verify_browser_application(
-                args["path"], str(active.get("task_id") or "tool"),
-                profile=profile, evidence=target_evidence,
-            ),
-            ensure_ascii=False,
+        result = verify_browser_application(
+            args["path"], str(active.get("task_id") or "tool"),
+            profile=profile, evidence=target_evidence,
         )
+        if route_artifact is not None:
+            result["verification_status"] = VERIFICATION_PASS if result.get("passed") else VERIFICATION_FAIL
+            result["verification_route"] = copy.deepcopy(browser_route or {})
+            result["verification_applicability"] = _update_verification_applicability_result(
+                route_artifact, None, BROWSER_VERIFICATION, result,
+            )
+        return json.dumps(result, ensure_ascii=False)
     return f"unknown tool: {name}"
 
 
@@ -1139,7 +1192,8 @@ def update_memory(memory, tool_name, tool_args, result, role=None, task_id=None)
             store.record_event(
                 run_id=RUN_ID or None, task_id=task_id, role=role, tool=tool_name,
                 target=str(path_arg or tool_args.get("command") or ""),
-                status="failed" if tool_result_failed(result) else "succeeded",
+                status=("skipped" if result_not_applicable(result) else
+                        "failed" if tool_result_failed(result) else "succeeded"),
                 content=str(result), details={"model": MODEL},
             )
             if role == "Builder" and path_arg and not tool_result_failed(result):
@@ -1440,6 +1494,18 @@ def new_metrics(mode):
         "browser_entrypoint_resolutions": 0,
         "browser_entrypoint_resolution_failures": 0,
         "browser_checks_skipped_for_syntax_failure": 0,
+        # V20 Stage 5A deterministic verification applicability/routing.  The
+        # route artifact is derived read-only metadata and never contributes
+        # fields to an execution-contract or mission hash.
+        "verification_applicability_checks": 0,
+        "verification_routes_created": 0,
+        "verification_routes_required": 0,
+        "verification_routes_not_applicable": 0,
+        "verification_required_targets_unresolved": 0,
+        "verification_optional_targets_skipped": 0,
+        "verification_evidence_unavailable": 0,
+        "browser_verifier_calls_avoided": 0,
+        "verification_applicability_artifacts": [],
         "verification_failures": 0, "task_too_broad_count": 0,
         "mutation_failures_recorded": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
@@ -1500,6 +1566,10 @@ def compact_task_tree():
             entry["execution_contract_hash"] = task.get("execution_contract_hash")
             entry["execution_contract_type"] = task.get("execution_contract_type")
             entry["plan_node_ids"] = list(task.get("plan_node_ids", []) or [])[:stage4.MAX_PLAN_NODES]
+        if task.get("verification_applicability") is not None:
+            entry["verification_applicability"] = copy.deepcopy(
+                task.get("verification_applicability")
+            )
         # Keep the failed attempt and its evidence beside the final status.
         # This is what makes a recovered node auditable instead of making the
         # original failure disappear when the parent eventually passes.
@@ -8045,7 +8115,10 @@ def verification_failure_signature(result):
         return ()
     if not isinstance(payload, dict) or payload.get("passed"):
         return ()
-    if payload.get("failure_type") == VERIFICATION_TARGET_UNRESOLVED:
+    if payload.get("failure_type") in {
+        VERIFICATION_TARGET_UNRESOLVED,
+        REQUIRED_VERIFICATION_TARGET_UNRESOLVED,
+    }:
         return ()
     if payload.get("environment_error"):
         return ("environment",)
@@ -8997,6 +9070,192 @@ def resolve_browser_entrypoint(workspace, evidence):
     return VERIFICATION_TARGET_UNRESOLVED
 
 
+def _verification_repository_snapshot(repository_snapshot=None):
+    if isinstance(repository_snapshot, dict):
+        return repository_snapshot
+    if WORKSPACE is None:
+        return {"files": [], "tests": [], "entrypoints": [], "languages": []}
+    try:
+        return inspect_repository(WORKSPACE)
+    except Exception:
+        return {"files": [], "tests": [], "entrypoints": [], "languages": []}
+
+
+def _record_verification_applicability(artifact, task=None):
+    """Persist one bounded Stage 5A artifact and update compact metrics."""
+    if not isinstance(artifact, dict):
+        return artifact
+    child_id = str(artifact.get("child_id") or (task or {}).get("id") or "UNKNOWN")
+    artifact = copy.deepcopy(artifact)
+    artifact["child_id"] = child_id
+    artifact_hash = artifact.get("verification_applicability_hash") or artifact.get("verification_routes_hash")
+    existing = None
+    for item in RUN.get("verification_applicability_artifacts", []) or []:
+        if (
+            isinstance(item, dict)
+            and str(item.get("child_id")) == child_id
+            and item.get("verification_applicability_hash") == artifact_hash
+        ):
+            existing = item
+            break
+    if existing is None:
+        RUN["verification_applicability_checks"] = RUN.get("verification_applicability_checks", 0) + 1
+        routes = list(artifact.get("verification_routes", []) or [])
+        RUN["verification_routes_created"] = RUN.get("verification_routes_created", 0) + len(routes)
+        RUN["verification_routes_required"] = RUN.get("verification_routes_required", 0) + sum(
+            1 for route in routes if route.get("required")
+        )
+        RUN["verification_routes_not_applicable"] = RUN.get("verification_routes_not_applicable", 0) + sum(
+            1 for route in routes if not route.get("applicable")
+        )
+        RUN["verification_required_targets_unresolved"] = RUN.get(
+            "verification_required_targets_unresolved", 0,
+        ) + sum(
+            1 for route in routes
+            if route.get("required") and not route.get("target")
+        )
+        RUN.setdefault("verification_applicability_artifacts", []).append(artifact)
+        record_run_event(
+            "verification_applicability_analyzed", child_id=child_id,
+            verification_applicability_hash=artifact_hash,
+            routes=routes,
+            model_calls=artifact.get("model_calls", 0),
+        )
+    if isinstance(task, dict):
+        task["verification_applicability"] = copy.deepcopy(
+            existing if existing is not None else artifact,
+        )
+    return copy.deepcopy(existing if existing is not None else artifact)
+
+
+def _update_verification_applicability_result(artifact, task, kind, result):
+    """Attach an actual route result while retaining the analysis hash."""
+    if not isinstance(artifact, dict):
+        return artifact
+    updated = copy.deepcopy(artifact)
+    for route in updated.get("verification_routes", []) or []:
+        if route.get("kind") != kind:
+            continue
+        verification_status = result.get("verification_status")
+        if verification_status == SKIPPED_NOT_APPLICABLE:
+            route["result"] = SKIPPED_NOT_APPLICABLE
+        elif verification_status == BLOCKED_REQUIRED_TARGET_MISSING:
+            route["result"] = BLOCKED_REQUIRED_TARGET_MISSING
+        elif result.get("passed") is True:
+            route["result"] = VERIFICATION_PASS
+        elif result.get("passed") is False:
+            route["result"] = VERIFICATION_FAIL
+        route["actual_result"] = verification_status or (
+            VERIFICATION_PASS if result.get("passed") is True else VERIFICATION_FAIL
+        )
+        if result.get("resolved_entrypoint"):
+            route["target"] = result.get("resolved_entrypoint")
+        break
+    updated["last_result"] = result.get("verification_status") or (
+        VERIFICATION_PASS if result.get("passed") is True else VERIFICATION_FAIL
+    )
+    for item in RUN.get("verification_applicability_artifacts", []) or []:
+        if (
+            isinstance(item, dict)
+            and item.get("child_id") == updated.get("child_id")
+            and item.get("verification_applicability_hash") == updated.get("verification_applicability_hash")
+        ):
+            item.clear()
+            item.update(copy.deepcopy(updated))
+            break
+    if isinstance(task, dict):
+        task["verification_applicability"] = copy.deepcopy(updated)
+    record_run_event(
+        "verification_route_result", child_id=updated.get("child_id"),
+        verification_kind=kind, result=updated.get("last_result"),
+        route=next((copy.deepcopy(item) for item in updated.get("verification_routes", [])
+                    if item.get("kind") == kind), {}),
+    )
+    return updated
+
+
+def analyze_verification_applicability(
+    task=None, contract=None, repository_snapshot=None, *, requested_path=None,
+    execution_evidence=None,
+):
+    """Run the zero-model Stage 5A analyzer for the current child only.
+
+    This is a read-only derived artifact.  Invalid Stage 4 authority is
+    terminal before this function is allowed to route any verifier.
+    """
+    task = task if isinstance(task, dict) else {}
+    if _authority_terminal_failure(task):
+        return None
+    source_contract = contract if isinstance(contract, dict) else {}
+    snapshot = _verification_repository_snapshot(repository_snapshot)
+    evidence = list(RUN.get("repository_evidence", []) or [])
+    invariants = list(RUN.get("project_invariants", []) or [])
+    if isinstance(source_contract, dict):
+        evidence.extend(source_contract.get("relevant_repository_facts", []) or [])
+        invariants.extend(source_contract.get("project_invariants", []) or [])
+    artifact = _analyze_verification_applicability(
+        task, source_contract, snapshot, workspace=WORKSPACE,
+        repository_evidence=evidence + invariants,
+        requested_path=requested_path,
+        observed_file_types=snapshot.get("languages", []),
+        execution_evidence=execution_evidence,
+        browser_target_resolver=_resolve_browser_entrypoint_details,
+    )
+    # Some direct/tool callers pass the same dictionary as both task and
+    # contract.  Never attach derived metadata to that authority object.
+    record_task = None if task is source_contract else task
+    return _record_verification_applicability(artifact, record_task)
+
+
+def _verification_route(artifact, kind):
+    if not isinstance(artifact, dict):
+        return None
+    return next(
+        (route for route in artifact.get("verification_routes", []) or []
+         if isinstance(route, dict) and route.get("kind") == kind),
+        None,
+    )
+
+
+def _verification_skip_result(task, artifact, route):
+    result = {
+        "requested_from_node": (route or {}).get("requested_from_node") or _task_browser_requested_path(task),
+        "resolved_entrypoint": None,
+        "resolution_source": (route or {}).get("resolution_source"),
+        "resolution_status": "NOT_APPLICABLE",
+        "passed": None,
+        "environment_error": False,
+        "failure_type": None,
+        "verification_status": SKIPPED_NOT_APPLICABLE,
+        "verification_route": copy.deepcopy(route or {}),
+        "verification_applicability": copy.deepcopy(artifact),
+        "evidence": "Browser verification is not applicable to the current child responsibility.",
+    }
+    RUN["verification_optional_targets_skipped"] = RUN.get(
+        "verification_optional_targets_skipped", 0,
+    ) + 1
+    RUN["browser_verifier_calls_avoided"] = RUN.get("browser_verifier_calls_avoided", 0) + 1
+    return result
+
+
+def _verification_required_target_result(task, artifact, route):
+    result = {
+        "requested_from_node": _task_browser_requested_path(task),
+        "resolved_entrypoint": None,
+        "resolution_source": (route or {}).get("resolution_source"),
+        "resolution_status": (route or {}).get("resolution_status", VERIFICATION_TARGET_UNRESOLVED),
+        "candidates": list((route or {}).get("candidates", []) or []),
+        "passed": False,
+        "environment_error": False,
+        "failure_type": REQUIRED_VERIFICATION_TARGET_UNRESOLVED,
+        "verification_status": BLOCKED_REQUIRED_TARGET_MISSING,
+        "verification_route": copy.deepcopy(route or {}),
+        "verification_applicability": copy.deepcopy(artifact),
+        "evidence": "Required browser verification has no deterministically resolvable supported target.",
+    }
+    return result
+
+
 def _browser_syntax_failures(workspace, entrypoint, requested_from_node=None):
     root = Path(workspace).resolve()
     paths = []
@@ -9092,24 +9351,59 @@ def discover_web_entrypoint(task, contract=None):
     return {"path": resolved} if resolved != VERIFICATION_TARGET_UNRESOLVED else None
 
 
-def optional_browser_check(task, contract=None, syntax_failures=None):
-    if not _web_verification_applicable(task, contract):
-        return None
-    profile = infer_web_profile(task.get("goal", ""), contract or {})
+def optional_browser_check(task, contract=None, syntax_failures=None, execution_evidence=None):
+    """Route browser verification only after deterministic applicability analysis."""
     requested = _task_browser_requested_path(task)
+    artifact = analyze_verification_applicability(
+        task, contract, requested_path=requested,
+        execution_evidence=execution_evidence,
+    )
+    if artifact is None:
+        return None
+    route = _verification_route(artifact, BROWSER_VERIFICATION)
+    if route is None:
+        return None
+    record_task = None if task is contract else task
+    if not route.get("applicable") and not route.get("required"):
+        result = _verification_skip_result(task, artifact, route)
+        result["verification_applicability"] = _update_verification_applicability_result(
+            artifact, record_task, BROWSER_VERIFICATION, result,
+        )
+        return result
+    if route.get("required") and not route.get("target"):
+        result = _verification_required_target_result(task, artifact, route)
+        result["verification_applicability"] = _update_verification_applicability_result(
+            artifact, record_task, BROWSER_VERIFICATION, result,
+        )
+        return result
+
+    profile = infer_web_profile(task.get("goal", ""), contract or {})
     current_syntax_failures = _syntax_failures_for_target(syntax_failures, requested)
     if current_syntax_failures:
-        return _verification_cycle_syntax_failure(
+        result = _verification_cycle_syntax_failure(
             requested, task["id"], current_syntax_failures,
+            compact_target={
+                "requested_from_node": requested,
+                "resolved_entrypoint": route.get("target"),
+                "resolution_source": route.get("resolution_source"),
+                "resolution_status": route.get("resolution_status", "RESOLVED"),
+            },
         )
-    return verify_browser_application(
-        requested, task["id"], profile=profile,
-        evidence={
-            "requested_from_node": requested,
-            "project_invariants": RUN.get("project_invariants", []),
-            "repository_snapshot": inspect_repository(WORKSPACE),
-        },
+    else:
+        result = verify_browser_application(
+            requested, task["id"], profile=profile,
+            evidence={
+                "requested_from_node": requested,
+                "project_invariants": RUN.get("project_invariants", []),
+                "repository_snapshot": _verification_repository_snapshot(),
+            },
+        )
+    result["verification_status"] = VERIFICATION_PASS if result.get("passed") else VERIFICATION_FAIL
+    result["verification_route"] = copy.deepcopy(route)
+    result["verification_applicability"] = _update_verification_applicability_result(
+        artifact, record_task, BROWSER_VERIFICATION, result,
     )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -9160,6 +9454,28 @@ def _current_verification_failures(builder_result, falsifier_result=None, browse
     falsifier_evidence = list((falsifier_result or {}).get("tool_evidence", []))
     merged = builder_evidence + falsifier_evidence
     failures = unresolved_tool_failures(merged)
+    optional_browser = (
+        isinstance(browser_result, dict)
+        and browser_result.get("verification_status") == SKIPPED_NOT_APPLICABLE
+    )
+    if optional_browser:
+        # A legacy Builder/Falsifier probe may have reached the old browser
+        # resolver before the Stage 5A route was attached.  Once the current
+        # child is deterministically classified as non-applicable, discard
+        # only that target-missing observation; real test/syntax failures stay
+        # authoritative.
+        retained = []
+        for item in failures:
+            if item.get("tool") != "verify_web_app":
+                retained.append(item)
+                continue
+            try:
+                payload = json.loads(str(item.get("result", "")))
+            except (TypeError, ValueError):
+                payload = {}
+            if not _verification_target_is_unresolved(payload):
+                retained.append(item)
+        failures = retained
     # A separately executed browser check is newer evidence for the Builder's
     # earlier browser probe. It must never erase a concrete Falsifier failure.
     if browser_result and browser_result.get("passed"):
@@ -9192,8 +9508,46 @@ def _current_verification_failures(builder_result, falsifier_result=None, browse
     return failures
 
 
+def _verification_applicability_from_results(builder_result, falsifier_result=None, browser_result=None):
+    for candidate in (
+        (browser_result or {}).get("verification_applicability")
+        if isinstance(browser_result, dict) else None,
+        (builder_result or {}).get("verification_applicability")
+        if isinstance(builder_result, dict) else None,
+        (falsifier_result or {}).get("verification_applicability")
+        if isinstance(falsifier_result, dict) else None,
+    ):
+        if isinstance(candidate, dict) and candidate.get("verification_routes"):
+            return candidate
+    return None
+
+
+def _verification_aggregation(builder_result, falsifier_result=None, browser_result=None):
+    artifact = _verification_applicability_from_results(
+        builder_result, falsifier_result, browser_result,
+    )
+    if artifact is None:
+        return None
+    evidence = merged_verification_evidence(builder_result, falsifier_result)
+    aggregation = aggregate_verification_evidence(artifact, evidence, browser_result)
+    if VERIFICATION_EVIDENCE_UNAVAILABLE in aggregation.get("failure_codes", []):
+        RUN["verification_evidence_unavailable"] = RUN.get(
+            "verification_evidence_unavailable", 0,
+        ) + 1
+    record_run_event(
+        "verification_evidence_aggregated", child_id=aggregation.get("child_id"),
+        passed=aggregation.get("passed"),
+        actual_passes=aggregation.get("actual_passes", []),
+        actual_failures=aggregation.get("actual_failures", []),
+        skipped_not_applicable=aggregation.get("skipped_not_applicable", []),
+        failure_codes=aggregation.get("failure_codes", []),
+    )
+    return aggregation
+
+
 def deterministic_quality_checks(builder_result, falsifier_result=None, browser_result=None,
-                                 model_checks=None, vision_review=None, integration_preflight=None):
+                                 model_checks=None, vision_review=None, integration_preflight=None,
+                                 verification_aggregation=None):
     # The second positional parameter used to be a model-quality projection.
     # Keep it advisory for callers while the live path uses it for the
     # read-only Falsifier result.
@@ -9201,6 +9555,10 @@ def deterministic_quality_checks(builder_result, falsifier_result=None, browser_
         model_checks = list(falsifier_result.get("checks", []))
         falsifier_result = None
     merged = merged_verification_evidence(builder_result, falsifier_result)
+    if verification_aggregation is None:
+        verification_aggregation = _verification_aggregation(
+            builder_result, falsifier_result, browser_result,
+        )
     checks = []
     if builder_result.get("status") != "done":
         checks.append({"name": "builder_completion", "status": "FAIL", "source": "deterministic",
@@ -9216,14 +9574,45 @@ def deterministic_quality_checks(builder_result, falsifier_result=None, browser_
     verification_ran = any(
         item.get("tool") in verification_tools
         and not result_is_tool_rejection(item.get("result", ""))
+        and not result_not_applicable(item.get("result", ""))
         for item in merged
-    ) or browser_result is not None
+    ) or (
+        browser_result is not None
+        and browser_result.get("verification_status") != SKIPPED_NOT_APPLICABLE
+    )
     if not verification_ran:
         checks.append({"name": "executable_verification", "status": "FAIL", "source": "deterministic",
                        "evidence": "no executable verification was attempted"})
-    if browser_result is not None and not browser_result.get("passed"):
+    if (
+        browser_result is not None
+        and browser_result.get("verification_status") != SKIPPED_NOT_APPLICABLE
+        and browser_result.get("passed") is not True
+    ):
         checks.append({"name": "browser_contract", "status": "FAIL", "source": "deterministic",
                        "evidence": compact_text(json.dumps(browser_result, ensure_ascii=False), 900)})
+    if verification_aggregation is not None and not verification_aggregation.get("passed"):
+        codes = verification_aggregation.get("failure_codes", [])
+        if VERIFICATION_EVIDENCE_UNAVAILABLE in codes:
+            checks.append({
+                "name": "verification_evidence", "status": "FAIL", "source": "deterministic",
+                "evidence": compact_text(json.dumps({
+                    "child_id": verification_aggregation.get("child_id"),
+                    "failure_codes": codes,
+                    "routes": verification_aggregation.get("verification_routes", []),
+                }, ensure_ascii=False), 1200),
+            })
+        elif any(
+            isinstance(item, dict) and item.get("required")
+            for item in verification_aggregation.get("actual_failures", [])
+        ):
+            checks.append({
+                "name": "verification_aggregation", "status": "FAIL", "source": "deterministic",
+                "evidence": compact_text(json.dumps({
+                    "child_id": verification_aggregation.get("child_id"),
+                    "failure_codes": codes,
+                    "actual_failures": verification_aggregation.get("actual_failures", []),
+                }, ensure_ascii=False), 1200),
+            })
     if isinstance(integration_preflight, dict) and not integration_preflight.get("passed"):
         checks.append({"name": "integration_preflight", "status": "FAIL", "source": "deterministic",
                        "evidence": compact_text(json.dumps({
@@ -9241,9 +9630,13 @@ def evidence_gate(builder_result, falsifier_result=None, browser_result=None, mo
     if _legacy_quality_projection(falsifier_result):
         model_checks = list(falsifier_result.get("checks", []))
         falsifier_result = None
+    verification_aggregation = _verification_aggregation(
+        builder_result, falsifier_result, browser_result,
+    )
     deterministic = deterministic_quality_checks(
         builder_result, falsifier_result, browser_result, model_checks=model_checks,
         integration_preflight=integration_preflight,
+        verification_aggregation=verification_aggregation,
     )
     advisory = list(model_checks or [])
     passed = builder_result.get("status") == "done" and not deterministic
@@ -9252,7 +9645,8 @@ def evidence_gate(builder_result, falsifier_result=None, browser_result=None, mo
     return {"passed": passed, "checks": deterministic + advisory,
             "deterministic_failures": deterministic, "advisory_checks": advisory,
             "advisory_failures": [item for item in advisory
-                                  if isinstance(item, dict) and str(item.get("status", "")).upper() == "FAIL"]}
+                                  if isinstance(item, dict) and str(item.get("status", "")).upper() == "FAIL"],
+            "verification_aggregation": verification_aggregation}
 
 
 def _is_execution_budget_exhausted(result):
@@ -9271,7 +9665,10 @@ def _is_execution_budget_exhausted(result):
 def _verification_target_is_unresolved(value):
     if isinstance(value, dict):
         if (
-            value.get("failure_type") == VERIFICATION_TARGET_UNRESOLVED
+            value.get("failure_type") in {
+                VERIFICATION_TARGET_UNRESOLVED,
+                REQUIRED_VERIFICATION_TARGET_UNRESOLVED,
+            }
             or value.get("resolution_status") == VERIFICATION_TARGET_UNRESOLVED
         ):
             return True
@@ -9352,6 +9749,15 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
         return "ENVIRONMENT_ERROR"
     if vision_review and vision_review.get("environment_error"):
         return "ENVIRONMENT_ERROR"
+    aggregation = gate.get("verification_aggregation") if isinstance(gate, dict) else None
+    if (
+        isinstance(browser_result, dict)
+        and browser_result.get("failure_type") == REQUIRED_VERIFICATION_TARGET_UNRESOLVED
+    ) or (
+        isinstance(aggregation, dict)
+        and REQUIRED_VERIFICATION_TARGET_UNRESOLVED in aggregation.get("failure_codes", [])
+    ):
+        return REQUIRED_VERIFICATION_TARGET_UNRESOLVED
     if _verification_target_is_unresolved(browser_result) or _verification_target_is_unresolved(gate):
         return VERIFICATION_TARGET_UNRESOLVED
     preflight = _effective_preflight(builder_result.get("integration_preflight"))
@@ -9525,7 +9931,11 @@ def _failure_evidence_from_result(result):
         if isinstance(source, dict):
             candidates.extend(_worker_failure_evidence(source))
     browser = result.get("browser")
-    if isinstance(browser, dict) and not browser.get("passed"):
+    if (
+        isinstance(browser, dict)
+        and browser.get("verification_status") != SKIPPED_NOT_APPLICABLE
+        and browser.get("passed") is not True
+    ):
         if browser.get("environment_error"):
             candidates.append({
                 "kind": "browser_environment", "status": "FAIL", "source": "deterministic",
@@ -9542,6 +9952,17 @@ def _failure_evidence_from_result(result):
                 "resolution_status": browser.get("resolution_status"),
                 "evidence": compact_text(browser.get("evidence", "browser verification failed"), 900),
             })
+    aggregation = result.get("verification_aggregation")
+    if isinstance(aggregation, dict) and not aggregation.get("passed"):
+        candidates.append({
+            "kind": "verification_aggregation", "status": "FAIL", "source": "deterministic",
+            "failure_codes": aggregation.get("failure_codes", []),
+            "evidence": compact_text(json.dumps({
+                "required_target_failures": aggregation.get("required_target_failures", []),
+                "actual_failures": aggregation.get("actual_failures", []),
+                "skipped_not_applicable": aggregation.get("skipped_not_applicable", []),
+            }, ensure_ascii=False), 900),
+        })
     syntax_failures = result.get("syntax_validation_failures") or result.get("syntax_errors")
     if syntax_failures:
         candidates.append({
@@ -11159,6 +11580,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     browser = optional_browser_check(
         task, ACTIVE_TOOL_CONTRACT,
         syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+        execution_evidence=merged_verification_evidence(builder, falsifier),
     )
     gate = evidence_gate(builder, falsifier, browser)
     verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and gate["passed"] else "VERIFY " + task["id"]
@@ -11228,6 +11650,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         current_browser = optional_browser_check(
             task, ACTIVE_TOOL_CONTRACT,
             syntax_failures=_combined_syntax_validation_failures(repaired),
+            execution_evidence=merged_verification_evidence(repaired),
         )
         current_gate = evidence_gate(repaired, None, current_browser)
         verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and current_gate["passed"] else "VERIFY " + task["id"]
@@ -11433,6 +11856,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         optional_browser_check(
             task, contract,
             syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+            execution_evidence=merged_verification_evidence(builder, falsifier),
         )
         if preflight_check["passed"] else None
     )
@@ -11502,6 +11926,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             optional_browser_check(
                 task, contract,
                 syntax_failures=_combined_syntax_validation_failures(repaired),
+                execution_evidence=merged_verification_evidence(repaired),
             )
             if current_check["passed"] else None
         )
@@ -12999,6 +13424,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         optional_browser_check(
             task, ACTIVE_TOOL_CONTRACT,
             syntax_failures=_combined_syntax_validation_failures(builder, falsifier),
+            execution_evidence=merged_verification_evidence(builder, falsifier),
         )
         if preflight_after.get("passed") else None
     )
@@ -13064,6 +13490,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                 optional_browser_check(
                     task, ACTIVE_TOOL_CONTRACT,
                     syntax_failures=_combined_syntax_validation_failures(repaired),
+                    execution_evidence=merged_verification_evidence(repaired),
                 )
                 if current_preflight.get("passed") else None
             )
@@ -13189,6 +13616,16 @@ def _mark_task_result(task, result, *, count=True):
     task["status"] = status
     task["verification_status"] = "passed" if status == "done" else "failed"
     task["summary"] = compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS)
+    if isinstance(result.get("verification_applicability"), dict):
+        task["verification_applicability"] = copy.deepcopy(
+            result.get("verification_applicability")
+        )
+    elif isinstance(result.get("browser"), dict) and isinstance(
+        result["browser"].get("verification_applicability"), dict
+    ):
+        task["verification_applicability"] = copy.deepcopy(
+            result["browser"].get("verification_applicability")
+        )
     if result.get("changed_files"):
         task["changed_files"] = list(result["changed_files"])
     if count:
@@ -14591,6 +15028,125 @@ def run_dependency_scheduler_self_test():
             globals()[name] = value
 
 
+def run_verification_applicability_self_test():
+    """Exercise Stage 5A routing with tiny local fixtures and no model/browser."""
+    saved = {
+        name: globals()[name]
+        for name in (
+            "WORKSPACE", "RUN", "TASKS", "ROLE_STATUS", "DASHBOARD", "RUN_STARTED", "RUN_ID",
+            "ACTIVE_TRANSACTION", "LAST_COMMITTED_TRANSACTION", "ACTIVE_CONTRACT", "ACTIVE_TOOL_CONTRACT",
+            "MEMORY_STORE", "FORCE_CPU_FOR_RUN", "VISION_ENABLED_FOR_RUN", "VISION_ERROR",
+            "PREFLIGHT_CONFLICT_STATE",
+        )
+    }
+
+    def write(root, relative, content="const ready = true;\n"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="mini_hivo_verification_selftest_", ignore_cleanup_errors=True) as tmp:
+            globals()["WORKSPACE"] = Path(tmp)
+            reset_run("recursive")
+            write(WORKSPACE, "src/input.js")
+            write(WORKSPACE, "src/module.js")
+            write(WORKSPACE, "tests/module.test.js", "test('module', () => { if (!true) throw Error(); });\n")
+            repository = inspect_repository()
+            module_task = {
+                "id": "SELF-NON-BROWSER",
+                "goal": "Implement the non-browser module",
+                "done_when": ["the module behavior is verified"],
+                "scope_hint": ["src/module.js"],
+                "test_contract": ["tests/module.test.js passes"],
+                "allowed_inspection_paths": ["src/module.js", "tests/module.test.js"],
+            }
+            module_artifact = analyze_verification_applicability(
+                module_task, module_task, repository,
+            )
+            module_browser = _verification_route(module_artifact, BROWSER_VERIFICATION)
+            module_builder = {
+                "status": "done",
+                "tool_evidence": [{
+                    "tool": "run_command", "target": "node --check src/module.js",
+                    "result": "[exit_code=0]",
+                }, {
+                    "tool": "run_command", "target": "node tests/module.test.js",
+                    "result": "[exit_code=0] module test ok",
+                }],
+            }
+            module_focused = _verification_route(module_artifact, FOCUSED_TEST)
+            module_skip = _verification_skip_result(module_task, module_artifact, module_browser)
+            module_skip["verification_applicability"] = _update_verification_applicability_result(
+                module_artifact, None, BROWSER_VERIFICATION, module_skip,
+            )
+            module_gate = evidence_gate(module_builder, browser_result=module_skip)
+
+            missing_task = {
+                "id": "SELF-BROWSER-MISSING",
+                "goal": "Verify browser-rendered behavior",
+                "done_when": ["browser-visible behavior works"],
+                "scope_hint": ["src/input.js"],
+            }
+            missing_artifact = analyze_verification_applicability(
+                missing_task, missing_task, repository,
+            )
+            missing_browser = _verification_route(missing_artifact, BROWSER_VERIFICATION)
+            html_task = {
+                "id": "SELF-BROWSER-PRESENT",
+                "goal": "Verify browser-rendered behavior",
+                "done_when": ["browser-visible behavior works"],
+                "scope_hint": [],
+            }
+            write(WORKSPACE, "index.html", "<!doctype html><title>Self Test</title>")
+            html_repository = inspect_repository()
+            html_artifact = analyze_verification_applicability(
+                html_task, html_task, html_repository,
+            )
+            html_browser = _verification_route(html_artifact, BROWSER_VERIFICATION)
+            no_evidence = aggregate_verification_evidence(
+                module_artifact, [], module_skip,
+            )
+            checks = {
+                "non-browser optional skip": (
+                    module_browser.get("required") is False
+                    and module_browser.get("applicable") is False
+                    and module_browser.get("result") == SKIPPED_NOT_APPLICABLE
+                    and module_gate.get("passed") is True
+                    and RUN.get("browser_checks", 0) == 0
+                ),
+                "focused test route": (
+                    module_focused is not None
+                    and module_focused.get("required") is True
+                    and module_focused.get("applicable") is True
+                    and module_focused.get("target") == "tests/module.test.js"
+                ),
+                "browser required but missing": (
+                    missing_browser.get("required") is True
+                    and missing_browser.get("applicable") is True
+                    and missing_browser.get("target") is None
+                    and missing_browser.get("resolution_status") == VERIFICATION_TARGET_UNRESOLVED
+                ),
+                "browser required and present": (
+                    html_browser.get("required") is True
+                    and html_browser.get("applicable") is True
+                    and html_browser.get("target") == "index.html"
+                ),
+                "no evidence fails closed": (
+                    no_evidence.get("passed") is False
+                    and VERIFICATION_EVIDENCE_UNAVAILABLE in no_evidence.get("failure_codes", [])
+                ),
+                "zero model calls": all(
+                    artifact.get("model_calls") == 0
+                    for artifact in (module_artifact, missing_artifact, html_artifact)
+                ),
+            }
+            return {"passed": all(checks.values()), "checks": checks}
+    finally:
+        for name, value in saved.items():
+            globals()[name] = value
+
+
 def run_self_test(install_browser=False):
     global WORKSPACE
     print("[SELF TEST]")
@@ -15774,6 +16330,9 @@ def run_self_test(install_browser=False):
         v195_scheduler_self_test = run_dependency_scheduler_self_test()
         for name, ok in v195_scheduler_self_test.get("checks", {}).items():
             print(f"{('v19.5 ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v205a_verification_self_test = run_verification_applicability_self_test()
+        for name, ok in v205a_verification_self_test.get("checks", {}).items():
+            print(f"{('v20.5A ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -16356,6 +16915,9 @@ def run_self_test(install_browser=False):
                 and v1941_stale_structural_calls == v1941_stale_structural_calls_after
             ),
             "v19.5 scheduler self-test": v195_scheduler_self_test.get("passed") is True,
+            "v20.5A verification applicability self-test": (
+                v205a_verification_self_test.get("passed") is True
+            ),
         }
         for name, ok in checks.items():
             print(f"{name:<24} {'PASS' if ok else 'FAIL'}")
