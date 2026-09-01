@@ -1518,6 +1518,60 @@ def run_verified_planning_self_test() -> dict:
     stale_plan["approved_change_nodes"][0]["evidence_ids"].append("STALE-SELF-TEST")
     stale_plan = attach_plan_binding(stale_plan, stale_context)
     stale_plan_check = validate_verified_plan(stale_plan, stale_context)
+
+    # V24.1 packet compiler checks are deliberately local and synthetic: the
+    # self-test exercises exact rendering and provider-boundary decisions
+    # without importing the provider, starting Gemma, or mutating the full
+    # VerifiedPlanningContext artifact.
+    from hivo import impact_planning as impact
+
+    stage3_brain = build_stage3_task_brain(context)
+    stage3_requirements = context.get("new_requirements", [])
+    stage3_evidence = context.get("current_repository_evidence", [])
+    stage3_registry = impact.build_canonical_surface_registry(stage3_brain, stage3_evidence)
+    role_render = lambda value: "IMPACT PLANNER PACKET:\n" + impact._compact_json(value)
+    live_packet = impact.build_canonical_planning_packet(
+        stage3_brain, stage3_requirements, stage3_evidence,
+        surface_registry=stage3_registry,
+        role="ImpactPlanner", render=role_render, base_render=role_render,
+        verified_planning_context=context,
+    )
+    live_role_packet = live_packet.get("role_packet", {})
+    live_packet_validation = impact.validate_planning_packet(
+        live_packet, registry=stage3_registry, requirements=stage3_requirements,
+    )
+
+    optional_overflow = impact.build_planning_role_packet(
+        "ImpactPlanner",
+        {"required": "R" * 20, "supporting": []},
+        [
+            {"item_id": "OPTIONAL-HIGH", "priority": 90, "path": ("supporting",),
+             "index": 0, "value": {"text": "high-priority current evidence"}},
+            {"item_id": "OPTIONAL-LOW", "priority": 10, "path": ("supporting",),
+             "index": 1, "value": {"text": "L" * 160}},
+        ],
+        hard_limit=90, render=lambda value: impact._compact_json(value),
+    )
+    mandatory_overflow = impact.build_planning_role_packet(
+        "ImpactPlanner", {"required": "M" * 180}, [], hard_limit=80,
+        render=lambda value: "ENV:\n" + impact._compact_json(value),
+    )
+    stale_packet = impact.build_canonical_planning_packet(
+        build_stage3_task_brain(stale_context), stale_context.get("new_requirements", []),
+        stale_context.get("current_repository_evidence", []),
+        surface_registry=impact.build_canonical_surface_registry(
+            build_stage3_task_brain(stale_context), stale_context.get("current_repository_evidence", []),
+        ), role="ImpactPlanner", render=role_render, base_render=role_render,
+        verified_planning_context=stale_context,
+    )
+    drift_brain = build_stage3_task_brain(drift_context)
+    drift_evidence = drift_context.get("current_repository_evidence", [])
+    drift_packet = impact.build_canonical_planning_packet(
+        drift_brain, drift_context.get("new_requirements", []), drift_evidence,
+        surface_registry=impact.build_canonical_surface_registry(drift_brain, drift_evidence),
+        role="ImpactPlanner", render=role_render, base_render=role_render,
+        verified_planning_context=drift_context,
+    )
     checks = {
         "compiler_zero_model": context.get("model_calls") == 0,
         "context_compiled": context.get("status") == "COMPILED" and context.get("valid") is True,
@@ -1539,6 +1593,41 @@ def run_verified_planning_self_test() -> dict:
             stale_plan_check.get("valid") is False
             and PLAN_RELIES_ON_STALE_VERIFIED_EVIDENCE in stale_plan_check.get("errors", [])
         ),
+        "live_packet_fits_exact_limit": (
+            live_packet.get("packet_complete") is True
+            and live_role_packet.get("rendered_chars", 0) <= impact.MAX_PLANNER_CONTEXT_CHARS
+            and live_packet_validation.get("valid") is True
+        ),
+        "live_packet_mandatory_drops_zero": (
+            live_role_packet.get("mandatory_drops", []) == []
+        ),
+        "live_packet_provider_boundary_reachable": (
+            live_role_packet.get("exact_model_input") == live_role_packet.get("rendered_packet")
+            and live_role_packet.get("accounting", {}).get("matches_exact_render") is True
+        ),
+        "optional_overflow_trims_to_complete": (
+            optional_overflow.get("packet_complete") is True
+            and "OPTIONAL-LOW" in optional_overflow.get("optional_items_dropped_ids", [])
+            and optional_overflow.get("mandatory_drops", []) == []
+        ),
+        "mandatory_overflow_fails_closed": (
+            mandatory_overflow.get("status") == impact.PLANNING_PACKET_MANDATORY_OVERFLOW
+            and mandatory_overflow.get("packet_complete") is False
+            and mandatory_overflow.get("mandatory_drops", []) == []
+        ),
+        "stale_warning_not_promoted": (
+            all(
+                item.get("classification") == "STALE_WARNING"
+                for item in stale_packet.get("packet", {}).get("stale_evidence_warnings", [])
+            )
+            and not any(
+                item.get("record_id") == "STALE-SELF-TEST"
+                for item in stale_packet.get("packet", {}).get("current_verified_facts", [])
+            )
+        ),
+        "confirmed_drift_retained_in_packet": bool(
+            drift_packet.get("packet", {}).get("confirmed_conflicts")
+        ),
     }
     return {
         "passed": all(checks.values()), "checks": checks, "model_calls": 0,
@@ -1547,5 +1636,13 @@ def run_verified_planning_self_test() -> dict:
             "drift_conflicts": len(drift_context.get("confirmed_conflicts", [])),
             "unknown_audits": len(unknown_context.get("not_evaluable_audit", [])),
             "stale_plan_errors": stale_plan_check.get("errors", []),
+            "live_packet": {
+                "rendered_chars": live_role_packet.get("rendered_chars"),
+                "hard_limit_chars": live_role_packet.get("hard_limit_chars"),
+                "mandatory_drops": live_role_packet.get("mandatory_drops", []),
+                "packet_hash": live_role_packet.get("packet_hash"),
+            },
+            "optional_dropped": optional_overflow.get("optional_items_dropped_ids", []),
+            "mandatory_overflow_status": mandatory_overflow.get("status"),
         },
     }

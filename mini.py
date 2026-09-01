@@ -195,6 +195,10 @@ PLAN_RELIES_ON_STALE_VERIFIED_EVIDENCE = stage6b.PLAN_RELIES_ON_STALE_VERIFIED_E
 UNAUTHORIZED_AUTHORITY_CHANGE = stage6b.UNAUTHORIZED_AUTHORITY_CHANGE
 CONFIRMED_DRIFT_NOT_ADDRESSED = stage6b.CONFIRMED_DRIFT_NOT_ADDRESSED
 MANDATORY_AUTHORITY_DROPPED = stage6b.MANDATORY_AUTHORITY_DROPPED
+# V24.1 deterministic model-facing packet outcomes.
+PLANNING_PACKET_MANDATORY_OVERFLOW = stage3.PLANNING_PACKET_MANDATORY_OVERFLOW
+PLANNING_PACKET_PROVIDER_OVERFLOW = stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
+IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE = stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE
 # Stage 4A execution-contract terminal states.  Stage 3 remains the owner of
 # planning and approval; these labels describe only the post-approval handoff.
 APPROVED_PLAN_STALE = stage4.APPROVED_PLAN_STALE
@@ -306,6 +310,20 @@ class TaskBrainValidationError(RuntimeError):
 
 class ImpactPlanningError(RuntimeError):
     """The bounded Stage 3 evidence/coverage gate rejected a plan."""
+
+    def __init__(self, message, status=None):
+        self.status = str(status) if status else None
+        self.code = self.status
+        super().__init__(message)
+
+
+class PlanningPacketBudgetError(ProviderError):
+    """A planning role packet was rejected before provider invocation."""
+
+    def __init__(self, message, code=stage3.PLANNING_PACKET_PROVIDER_OVERFLOW):
+        self.code = str(code)
+        self.status = self.code
+        super().__init__(message)
 
 
 class PlanApprovalRequiredError(RuntimeError):
@@ -1451,6 +1469,17 @@ def new_metrics(mode):
         "impact_seed_decisions_rejected": 0,
         "impact_planning_context_incomplete": 0,
         "impact_challenger_context_incomplete": 0,
+        # V24.1 exact-final-render packet accounting.  These counters cover
+        # all bounded planning roles without turning role details into a
+        # second metrics taxonomy.
+        "planning_role_packets_built": 0,
+        "planning_role_packets_complete": 0,
+        "planning_role_packets_optional_trimmed": 0,
+        "planning_role_packets_mandatory_overflow": 0,
+        "planning_role_optional_items_dropped": 0,
+        "planning_role_mandatory_items_dropped": 0,
+        "planning_role_max_rendered_chars": 0,
+        "planning_role_provider_calls_blocked_by_budget": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -2244,9 +2273,38 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     context_window = MODEL_POLICY.context_window(role)
     if FORCE_CPU_FOR_RUN:
         context_window = min(context_window, 8192)
-    provider_messages = compact_messages(
-        messages, max_chars=int(context_window * (1.25 if FORCE_CPU_FOR_RUN else 1.5)), keep_recent=4
-    )
+    role_limit = stage3.planning_role_limit(role)
+    if role_limit is not None:
+        # Planning packets are already deterministically compiled.  Applying
+        # the generic history compactor here could silently slice the latest
+        # role packet, so preserve the exact audited message and guard it
+        # immediately before the provider payload is built.
+        provider_messages = copy.deepcopy(messages)
+        user_messages = [
+            item for item in provider_messages
+            if isinstance(item, dict) and item.get("role") == "user"
+        ]
+        exact_model_input = user_messages[-1].get("content", "") if user_messages else ""
+        if not isinstance(exact_model_input, str):
+            exact_model_input = str(exact_model_input)
+        if len(exact_model_input) > role_limit:
+            RUN["planning_role_provider_calls_blocked_by_budget"] = RUN.get(
+                "planning_role_provider_calls_blocked_by_budget", 0,
+            ) + 1
+            record_run_event(
+                "planning_role_provider_call_blocked_by_budget",
+                role=role, hard_limit_chars=role_limit,
+                rendered_chars=len(exact_model_input),
+                status=stage3.PLANNING_PACKET_PROVIDER_OVERFLOW,
+            )
+            raise PlanningPacketBudgetError(
+                f"{stage3.PLANNING_PACKET_PROVIDER_OVERFLOW}: {role} exact prompt "
+                f"is {len(exact_model_input)} characters; limit is {role_limit}",
+            )
+    else:
+        provider_messages = compact_messages(
+            messages, max_chars=int(context_window * (1.25 if FORCE_CPU_FOR_RUN else 1.5)), keep_recent=4
+        )
     estimate = estimate_context_tokens(provider_messages)
     RUN["peak_estimated_context_tokens"] = max(RUN.get("peak_estimated_context_tokens", 0), estimate)
     DASHBOARD["context"] = estimate
@@ -2369,11 +2427,45 @@ def _parse_json_content(content):
 
 
 def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STRUCTURED_RETRIES,
-                         role="Coordinator"):
+                         role="Coordinator", role_packet=None):
     schema_text = json.dumps(schema, ensure_ascii=False)
+    if isinstance(role_packet, dict):
+        exact_model_input = role_packet.get("exact_model_input") or role_packet.get("rendered_packet")
+        if not isinstance(exact_model_input, str):
+            exact_model_input = str(exact_model_input or "")
+        configured_limit = stage3.planning_role_limit(role)
+        hard_limit = int(role_packet.get("hard_limit_chars") or configured_limit or 0)
+        if (
+            not role_packet.get("packet_complete")
+            or (hard_limit and len(exact_model_input) > hard_limit)
+        ):
+            status = (
+                stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
+                if hard_limit and len(exact_model_input) > hard_limit
+                else role_packet.get("status") or stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
+            )
+            RUN["planning_role_provider_calls_blocked_by_budget"] = RUN.get(
+                "planning_role_provider_calls_blocked_by_budget", 0,
+            ) + 1
+            record_run_event(
+                "planning_role_provider_call_blocked_by_budget",
+                role=role,
+                hard_limit_chars=hard_limit or configured_limit,
+                rendered_chars=len(exact_model_input), status=status,
+            )
+            raise PlanningPacketBudgetError(
+                f"{status}: {role} provider packet is not complete or exceeds its hard limit",
+                code=status,
+            )
+        # The schema is sent through the provider's format field.  Reusing
+        # the compiler's exact packet verbatim prevents a second hidden
+        # prompt render or an unbudgeted suffix.
+        provider_content = exact_model_input
+    else:
+        provider_content = f"{prompt_text}\n\nJSON SCHEMA:\n{schema_text}"
     messages = [
         {"role": "system", "content": "Return ONLY one JSON object matching the supplied schema. No markdown."},
-        {"role": "user", "content": f"{prompt_text}\n\nJSON SCHEMA:\n{schema_text}"},
+        {"role": "user", "content": provider_content},
     ]
     last_error = "invalid structured response"
     last_content = ""
@@ -2395,10 +2487,18 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
         print(f"[STRUCTURED RETRY] {label} {attempt + 1}/{retries} | {last_error}")
         record_run_event("structured_invalid", label=label, attempt=attempt + 1, error=last_error,
                          raw_content=last_content)
-        messages = [
-            {"role": "system", "content": "STRICT JSON REPAIR. Return only valid JSON matching the schema."},
-            {"role": "user", "content": f"{prompt_text}\nPrevious output invalid: {compact_text(last_content, 800)}\nSchema: {schema_text}"},
-        ]
+        if isinstance(role_packet, dict):
+            # Keep retries on the same hash-audited exact packet.  A dynamic
+            # previous-output suffix would be a new unbudgeted rendering.
+            messages = [
+                {"role": "system", "content": "STRICT JSON REPAIR. Return only valid JSON matching the schema."},
+                {"role": "user", "content": provider_content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": "STRICT JSON REPAIR. Return only valid JSON matching the schema."},
+                {"role": "user", "content": f"{prompt_text}\nPrevious output invalid: {compact_text(last_content, 800)}\nSchema: {schema_text}"},
+            ]
     raise StructuredOutputError(f"invalid {label} after {retries} attempts: {last_error}")
 
 
@@ -4661,6 +4761,12 @@ normalize_impact_id = stage3.normalize_impact_id
 build_canonical_planning_packet = stage3.build_canonical_planning_packet
 build_complete_planning_packet = stage3.build_complete_planning_packet
 build_planner_packet = stage3.build_planner_packet
+build_planning_role_packet = stage3.build_planning_role_packet
+compile_planning_role_packet = stage3.compile_planning_role_packet
+planning_role_limit = stage3.planning_role_limit
+build_challenger_packet = stage3.build_challenger_packet
+build_revision_packet = stage3.build_revision_packet
+build_minimal_plan_packet = stage3.build_minimal_plan_packet
 validate_planning_packet = stage3.validate_planning_packet
 bind_impact_decisions_to_seeds = stage3.bind_impact_decisions_to_seeds
 hydrate_impact_map = stage3.hydrate_impact_map
@@ -4717,6 +4823,62 @@ def _impact_project_invariants(task_brain):
     return values[:8]
 
 
+def _record_planning_role_packet(role_packet):
+    """Record one exact role packet without rebuilding or re-rendering it."""
+    packet = role_packet if isinstance(role_packet, dict) else {}
+    role = str(packet.get("role") or "PlanningRole")
+    RUN.setdefault("planning_role_packets", {})[role] = copy.deepcopy(packet)
+    RUN["planning_role_packets_built"] = RUN.get("planning_role_packets_built", 0) + 1
+    if packet.get("packet_complete"):
+        RUN["planning_role_packets_complete"] = RUN.get("planning_role_packets_complete", 0) + 1
+    dropped = list(packet.get("optional_items_dropped", []) or [])
+    if dropped:
+        RUN["planning_role_packets_optional_trimmed"] = RUN.get(
+            "planning_role_packets_optional_trimmed", 0,
+        ) + 1
+    RUN["planning_role_optional_items_dropped"] = RUN.get(
+        "planning_role_optional_items_dropped", 0,
+    ) + len(dropped)
+    mandatory_drops = list(packet.get("mandatory_drops", []) or [])
+    RUN["planning_role_mandatory_items_dropped"] = RUN.get(
+        "planning_role_mandatory_items_dropped", 0,
+    ) + len(mandatory_drops)
+    if packet.get("status") == stage3.PLANNING_PACKET_MANDATORY_OVERFLOW:
+        RUN["planning_role_packets_mandatory_overflow"] = RUN.get(
+            "planning_role_packets_mandatory_overflow", 0,
+        ) + 1
+    RUN["planning_role_max_rendered_chars"] = max(
+        RUN.get("planning_role_max_rendered_chars", 0),
+        int(packet.get("rendered_chars", 0) or 0),
+    )
+    audit = {
+        key: copy.deepcopy(value) for key, value in packet.items()
+        if key not in {
+            "payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
+            "mandatory_rendered_packet", "mandatory_serialized_payload",
+        }
+    }
+    record_run_event("planning_role_packet_built", **audit)
+    return packet
+
+
+def _planning_provider_renderer(base_renderer, schema):
+    """Return the exact role renderer used for the provider packet.
+
+    Structured roles already send ``schema`` through Ollama's ``format``
+    transport field.  It is therefore not appended to the model-facing
+    packet a second time.  Keeping it out of this renderer removes a hidden
+    post-audit suffix while preserving the provider's structured-output
+    contract.
+    """
+    del schema
+
+    def render(context):
+        return base_renderer(context)
+
+    return render
+
+
 def _impact_planner_prompt(context):
     return f"""You are IMPACT PLANNER, a narrow read-only role in a weak-model coding orchestrator.
 Propose one COMPLETE bounded semantic decision set for the deterministic impact slots in the packet below.
@@ -4736,7 +4898,8 @@ COMPLETE CANONICAL PLANNING PACKET:
 {json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
-def create_impact_map(task_brain, contract, repository_evidence, structured_call=None):
+def create_impact_map(task_brain, contract, repository_evidence, structured_call=None,
+                      verified_planning_context=None):
     """Invoke one bounded ImpactPlanner call and deterministically gate its map."""
     if RUN.get("impact_planner_calls", 0) >= 1:
         raise ImpactPlanningError("only one top-level ImpactPlanner invocation is allowed")
@@ -4760,6 +4923,10 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         task_brain, requirements, repository_evidence,
         project_invariants=_impact_project_invariants(task_brain),
         surface_registry=registry,
+        role="ImpactPlanner",
+        render=_planning_provider_renderer(_impact_planner_prompt, stage3.impact_map_schema()),
+        base_render=_impact_planner_prompt,
+        verified_planning_context=verified_planning_context,
     )
     packet = planning_packet.get("packet", planning_packet)
     packet_observability = planning_packet.get("observability", {})
@@ -4768,6 +4935,9 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     RUN["impact_seeds"] = seeds
     RUN["impact_planning_packet"] = copy.deepcopy(packet)
     RUN["impact_planning_packet_observability"] = copy.deepcopy(packet_observability)
+    role_packet = planning_packet.get("role_packet")
+    _record_planning_role_packet(role_packet)
+    RUN["impact_planning_role_packet"] = copy.deepcopy(role_packet)
     for metric, key in (
         ("impact_planning_surfaces_selected", "selected_surface_ids"),
         ("impact_planning_surfaces_serialized", "serialized_surface_ids"),
@@ -4782,15 +4952,18 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         RUN["impact_planning_context_incomplete"] = RUN.get(
             "impact_planning_context_incomplete", 0,
         ) + 1
+        packet_status = planning_packet.get("status") or stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        RUN["planning_packet_status"] = packet_status
         RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
         record_run_event(
             "impact_planning_context_incomplete",
             errors=planning_packet.get("errors", []),
             packet_observability=packet_observability,
+            packet_status=packet_status,
         )
         raise ImpactPlanningError(
-            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
-            + "; ".join(planning_packet.get("errors", []))
+            f"{packet_status}: " + "; ".join(planning_packet.get("errors", [])),
+            status=packet_status,
         )
     record_run_event(
         "canonical_surface_registry_created", surface_count=len(registry.get("surfaces", [])),
@@ -4812,7 +4985,7 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
     RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
     RUN["impact_planner_context"] = context
-    prompt_text = _impact_planner_prompt(context)
+    prompt_text = role_packet.get("base_rendered_packet") if isinstance(role_packet, dict) else _impact_planner_prompt(context)
 
     def validator(data):
         return stage3.validate_planner_output(
@@ -4824,7 +4997,7 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         if structured_call is None:
             candidate = structured_model_call(
                 prompt_text, validator, "impact-map", stage3.impact_map_schema(),
-                retries=1, role="ImpactPlanner",
+                retries=1, role="ImpactPlanner", role_packet=role_packet,
             )
         else:
             candidate = structured_call(
@@ -4867,6 +5040,11 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
             raise ImpactPlanningError(
                 "IMPACT_MAP_INVALID: " + "; ".join(validation.get("errors", []))
             )
+    except PlanningPacketBudgetError as exc:
+        status = getattr(exc, "code", stage3.PLANNING_PACKET_PROVIDER_OVERFLOW)
+        RUN["planning_packet_status"] = status
+        RUN["orchestration_failure"] = status
+        raise ImpactPlanningError(str(exc), status=status) from exc
     except StructuredOutputError as exc:
         RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
         record_run_event("impact_planner_invalid", error=str(exc))
@@ -4923,7 +5101,7 @@ COMPLETE BOUNDED FALSIFICATION PACKET:
 
 
 def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
-                         structured_call=None):
+                         structured_call=None, verified_planning_context=None):
     """Run exactly one normal weak-model challenge round plus deterministic checks."""
     if RUN.get("impact_challenger_calls", 0) >= MAX_IMPACT_CHALLENGE_ROUNDS:
         raise ImpactPlanningError("only one top-level ImpactChallenger round is allowed")
@@ -4931,33 +5109,49 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
         task_brain, repository_evidence,
     )
-    context = stage3.build_challenger_context(
+    challenger_packet = stage3.build_challenger_packet(
         impact_map, requirements, repository_evidence, task_brain,
-        surface_registry=registry,
+        surface_registry=registry, role="ImpactChallenger",
+        render=_planning_provider_renderer(_impact_challenger_prompt, stage3.challenge_schema()),
+        base_render=_impact_challenger_prompt,
+        verified_planning_context=verified_planning_context,
     )
-    if not context.get("packet_complete", True):
+    context = challenger_packet.get("packet", challenger_packet)
+    packet_observability = challenger_packet.get("observability", {})
+    role_packet = challenger_packet.get("role_packet")
+    _record_planning_role_packet(role_packet)
+    RUN["impact_challenger_role_packet"] = copy.deepcopy(role_packet)
+    RUN["impact_challenger_packet_observability"] = copy.deepcopy(packet_observability)
+    if not challenger_packet.get("packet_complete", context.get("packet_complete", True)):
         RUN["impact_challenger_context_incomplete"] = RUN.get(
             "impact_challenger_context_incomplete", 0,
         ) + 1
+        packet_status = challenger_packet.get("status") or stage3.IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
+        RUN["planning_packet_status"] = packet_status
         RUN["orchestration_failure"] = stage3.IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
         record_run_event(
             "impact_challenger_context_incomplete",
-            errors=context.get("errors", []),
-            packet_observability=context.get("packet_observability", {}),
+            errors=challenger_packet.get("errors", []),
+            packet_observability=packet_observability,
+            packet_status=packet_status,
         )
         raise ImpactPlanningError(
-            f"{stage3.IMPACT_CHALLENGER_CONTEXT_INCOMPLETE}: "
-            + "; ".join(context.get("errors", []))
+            f"{packet_status}: " + "; ".join(challenger_packet.get("errors", [])),
+            status=packet_status,
         )
     RUN.setdefault("control_flow", []).append("IMPACT_CHALLENGER")
     RUN["impact_challenger_calls"] = RUN.get("impact_challenger_calls", 0) + 1
     RUN["impact_challenger_context"] = context
-    prompt_text = _impact_challenger_prompt(context)
+    prompt_text = (
+        role_packet.get("base_rendered_packet")
+        if isinstance(role_packet, dict) else _impact_challenger_prompt(context)
+    )
     try:
         if structured_call is None:
             data = structured_model_call(
                 prompt_text, _impact_challenger_output_valid, "impact-challenge",
                 stage3.challenge_schema(), retries=1, role="ImpactChallenger",
+                role_packet=role_packet,
             )
         else:
             data = structured_call(
@@ -4967,6 +5161,11 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
         model_challenges = stage3.normalize_challenges(data, source="MODEL")
         RUN["raw_impact_challenger_output"] = copy.deepcopy(model_challenges)
         record_run_event("impact_challenger_output_captured", raw_challenges=model_challenges)
+    except PlanningPacketBudgetError as exc:
+        status = getattr(exc, "code", stage3.PLANNING_PACKET_PROVIDER_OVERFLOW)
+        RUN["planning_packet_status"] = status
+        RUN["orchestration_failure"] = status
+        raise ImpactPlanningError(str(exc), status=status) from exc
     except StructuredOutputError as exc:
         model_challenges = []
         RUN["raw_impact_challenger_output"] = []
@@ -5049,16 +5248,6 @@ def _bounded_impact_revision_context(context):
             key: compact_text(item, 320) if isinstance(item, str) else copy.deepcopy(item)
             for key, item in value["user_confirmed_revision"].items()
         }
-    planning_packet = value.get("planning_packet")
-    if isinstance(planning_packet, dict):
-        # The dedicated packet's requirements, surfaces, seeds,
-        # preservation constraints, and rules are authoritative.  Optional
-        # prose/fact projections are safe to omit from a revision envelope
-        # when the already-complete packet must share the budget with the
-        # candidate and challenges.
-        planning_packet.pop("task_facts", None)
-        planning_packet.pop("project_context", None)
-        planning_packet.pop("accepted_repository_evidence", None)
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return value, len(encoded) <= stage3.MAX_REVISION_CONTEXT_CHARS
 
@@ -5077,7 +5266,8 @@ COMPLETE BOUNDED REVISION CONTEXT:
 
 
 def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
-                      repository_evidence, user_revision=None, structured_call=None):
+                      repository_evidence, user_revision=None, structured_call=None,
+                      verified_planning_context=None):
     if RUN.get("impact_plan_revision_calls", 0) >= MAX_IMPACT_PLAN_REVISION_ROUNDS:
         raise ImpactPlanningError("the bounded Impact Plan revision round is already exhausted")
     requirements = _active_stage3_requirements(contract)
@@ -5088,13 +5278,16 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         task_brain, requirements, repository_evidence,
         project_invariants=_impact_project_invariants(task_brain),
         surface_registry=registry,
+        verified_planning_context=verified_planning_context,
     )
     planner_context = planning_packet.get("packet", planning_packet)
     if not planning_packet.get("packet_complete"):
-        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        packet_status = planning_packet.get("status") or stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE
+        RUN["planning_packet_status"] = packet_status
+        RUN["orchestration_failure"] = packet_status
         raise ImpactPlanningError(
-            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
-            + "; ".join(planning_packet.get("errors", []))
+            f"{packet_status}: " + "; ".join(planning_packet.get("errors", [])),
+            status=packet_status,
         )
     context = {
         "candidate_impact_map": impact_map,
@@ -5103,22 +5296,49 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         if isinstance(user_revision, dict) else None,
         "planning_packet": planner_context,
     }
-    context, context_complete = _bounded_impact_revision_context(context)
-    if not context_complete:
+    context, _ = _bounded_impact_revision_context(context)
+    revision_packet = stage3.build_revision_packet(
+        context, max_chars=stage3.MAX_REVISION_CONTEXT_CHARS,
+        role="ImpactPlanReviser",
+        render=_planning_provider_renderer(_impact_revision_prompt, stage3.impact_map_schema()),
+        base_render=_impact_revision_prompt,
+        source_planning_context_hash=(
+            verified_planning_context or {}
+        ).get("planning_context_hash") if isinstance(verified_planning_context, dict) else None,
+    )
+    role_packet = revision_packet.get("role_packet")
+    _record_planning_role_packet(role_packet)
+    RUN["impact_plan_revision_role_packet"] = copy.deepcopy(role_packet)
+    RUN["impact_plan_revision_packet_observability"] = copy.deepcopy(
+        revision_packet.get("observability", {})
+    )
+    if not revision_packet.get("packet_complete"):
         RUN["impact_planning_context_incomplete"] = RUN.get(
             "impact_planning_context_incomplete", 0,
         ) + 1
-        RUN["orchestration_failure"] = stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE
+        RUN["orchestration_failure"] = revision_packet.get(
+            "status", stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE,
+        )
         record_run_event(
             "impact_plan_revision_context_incomplete",
-            errors=["complete bounded revision context exceeds the serialized-size bound"],
+            status=revision_packet.get("status"),
+            errors=revision_packet.get("errors", []),
+            packet_observability=revision_packet.get("observability", {}),
+        )
+        RUN["planning_packet_status"] = revision_packet.get(
+            "status", stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE,
         )
         raise ImpactPlanningError(
-            f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
-            "complete bounded revision context exceeds the serialized-size bound"
+            f"{revision_packet.get('status', stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE)}: "
+            + "; ".join(revision_packet.get("errors", [])),
+            status=revision_packet.get("status", stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE),
         )
+    context = revision_packet.get("packet", context)
     RUN["impact_plan_revision_calls"] = RUN.get("impact_plan_revision_calls", 0) + 1
-    prompt_text = _impact_revision_prompt(context)
+    prompt_text = (
+        role_packet.get("base_rendered_packet")
+        if isinstance(role_packet, dict) else _impact_revision_prompt(context)
+    )
 
     def validator(data):
         return stage3.validate_planner_output(
@@ -5130,7 +5350,7 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         if structured_call is None:
             data = structured_model_call(
                 prompt_text, validator, "impact-plan-revision", stage3.impact_map_schema(),
-                retries=1, role="ImpactPlanReviser",
+                retries=1, role="ImpactPlanReviser", role_packet=role_packet,
             )
         else:
             data = structured_call(
@@ -5540,10 +5760,12 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         impact_map = create_impact_map(
             task_brain, contract, repository_evidence,
             structured_call=planner_structured_call,
+            verified_planning_context=verified_planning_context,
         )
         challenge_validation = challenge_impact_map(
             impact_map, task_brain, contract, repository_evidence,
             structured_call=challenger_structured_call,
+            verified_planning_context=verified_planning_context,
         )
         plan, gate = reconcile_minimal_change_plan(
             impact_map, challenge_validation, contract, repository_evidence,
@@ -5554,6 +5776,8 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
             "summary": str(exc), "project_mode": mode,
             "orchestration_failure": RUN.get("orchestration_failure"),
+            "planning_packet_status": getattr(exc, "status", None)
+            or RUN.get("planning_packet_status"),
         }
     if not gate.get("valid"):
         fingerprint_after = _stage3_workspace_fingerprint()
@@ -5579,6 +5803,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
                 impact_map, challenge_validation.get("validated", []), task_brain,
                 contract, repository_evidence, user_revision=decision,
                 structured_call=reviser_structured_call,
+                verified_planning_context=verified_planning_context,
             )
             # The one model Challenger is not invoked again. Deterministic
             # falsification still checks the revised map against the same facts.
@@ -5600,6 +5825,8 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
                 "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
                 "summary": str(exc), "project_mode": mode,
                 "orchestration_failure": RUN.get("orchestration_failure"),
+                "planning_packet_status": getattr(exc, "status", None)
+                or RUN.get("planning_packet_status"),
             }
         if not gate.get("valid"):
             return {
