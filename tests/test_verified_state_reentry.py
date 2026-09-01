@@ -14,6 +14,7 @@ from hivo.reentry import (
     ACTIVE,
     AUTHORITY_IMPLEMENTATION_DRIFT,
     CONFLICTED,
+    NOT_EVALUABLE,
     CURRENT_DURABLE_AUTHORITY,
     CURRENT_VERIFIED,
     FRESH_TASK_BRAIN_TYPE,
@@ -363,6 +364,20 @@ console.log('Parent pause-flow integration verification passed');
         self.assertIn(integration_id, {item["record_id"] for item in result["task_brain"]["current_verified_facts"]})
         self.assertEqual(result["metrics"]["project_brain_records_considered"], 12)
         self.assertEqual(result["metrics"]["project_brain_records_stale"], 0)
+        self.assertEqual(result["metrics"]["authority_drift_conflicts_emitted"], 0)
+        self.assertFalse(any(
+            item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
+            for item in result["reentry_context"]["conflicts"]
+        ))
+        self.assertFalse(any(
+            item.get("classification") == NOT_EVALUABLE
+            for item in result["task_brain"]["conflicts"]
+        ))
+        self.assertTrue(any(
+            item.get("record_id") == self._integration_record_id()
+            for item in result["task_brain"]["current_verified_facts"]
+        ))
+        self.assertLessEqual(len(json.dumps(result["task_brain"], separators=(",", ":"))), 10_000)
         self.assertEqual(result["metrics"]["reentry_model_calls"], 0)
         self.assertEqual(result["verification_calls"], 0)
         self.assertFalse(result["execution_started"])
@@ -384,6 +399,11 @@ console.log('Parent pause-flow integration verification passed');
         self.assertEqual(result["verification_calls"], 0)
         self.assertEqual(result["metrics"]["automatic_reverification_attempts"], 0)
         self.assertIn("src/input.js", classification["freshness"]["changed_dependency_paths"])
+        self.assertFalse(any(
+            item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
+            for item in result["reentry_context"]["conflicts"]
+        ))
+        self.assertEqual(result["metrics"]["authority_drift_conflicts_emitted"], 0)
 
     def test_unrelated_file_change_does_not_stale_state_bound_fact(self):
         (self.root / "README.tmp").write_text("unrelated fixture change\n", encoding="utf-8")
@@ -402,6 +422,10 @@ console.log('Parent pause-flow integration verification passed');
         )
         self.assertEqual(self._classification(result, owner["record_id"])["classification"], CURRENT_DURABLE_AUTHORITY)
         self.assertEqual(self._classification(result, self._integration_record_id())["classification"], STALE_VERIFIED)
+        self.assertFalse(any(
+            item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
+            for item in result["reentry_context"]["conflicts"]
+        ))
 
     def test_explicit_superseding_record_is_history_only(self):
         snapshot = self.store.project_brain_snapshot(self.project_id, include_inactive=True)
@@ -469,7 +493,7 @@ console.log('Parent pause-flow integration verification passed');
         ))
         self.assertEqual(before, self.store.project_brain_hash(self.project_id))
 
-    def test_authority_repository_drift_is_recorded_without_rewriting_authority(self):
+    def test_unstructured_repository_evidence_does_not_claim_authority_drift(self):
         status_path = self.root / "src" / "status_view.js"
         status_path.write_text(
             "class StatusView { // StatusView owns pause state.\n  render() {}\n}\n",
@@ -493,10 +517,15 @@ console.log('Parent pause-flow integration verification passed');
         before = self.store.project_brain_hash(self.project_id)
         result = self._run(current_repository_evidence=[observation])
         self.assertEqual(result["status"], REENTRY_READY)
-        self.assertTrue(any(
+        self.assertFalse(any(
             item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
             for item in result["reentry_context"]["conflicts"]
         ))
+        self.assertTrue(any(
+            item.get("classification") == NOT_EVALUABLE
+            for item in result["reentry_context"]["authority_drift_audit"]
+        ))
+        self.assertEqual(result["metrics"]["authority_drift_conflicts_emitted"], 0)
         self.assertTrue(all(
             item.get("provenance") == REPOSITORY_EVIDENCE
             for item in result["reentry_context"]["current_repository_evidence"]
