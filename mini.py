@@ -155,6 +155,16 @@ HYDRATED_MISSION_TOO_LARGE = stage4.HYDRATED_MISSION_TOO_LARGE
 WORKER_CONTEXT_TOO_LARGE = stage4.WORKER_CONTEXT_TOO_LARGE
 WORKER_CONTEXT_AUTHORITY_TOO_LARGE = stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE
 WORKER_CONTEXT_ADVICE_UNAVAILABLE = stage4.WORKER_CONTEXT_ADVICE_UNAVAILABLE
+# These are the existing pre-execution authority results.  They are kept as a
+# routing set only; the underlying validation/status taxonomy remains owned by
+# Stage 3/4 and is not changed here.
+AUTHORITY_VALIDATION_FAILURES = frozenset({
+    PLAN_APPROVAL_REQUIRED,
+    APPROVED_PLAN_STALE,
+    EXECUTION_CONTRACT_BLOCKED,
+    EXECUTION_CONTRACT_TOO_LARGE,
+    EXECUTION_GRAPH_INVALID,
+})
 MAX_NODE_SUMMARY_CHARS = 700
 MAX_NODE_PACKET_CHARS = 12000
 MAX_ROOT_PACKET_CHARS = 2400
@@ -1574,6 +1584,7 @@ def new_metrics(mode):
         "execution_contract_scope_violations": 0,
         "execution_contract_stale_blocks": 0,
         "execution_dependency_blocks": 0,
+        "authority_fail_closed_blocks": 0,
         # V19.4 deterministic structural granularity accounting.  These
         # observations are separate from Task-Fit model calls and never alter
         # the approved contract or its hash.
@@ -5501,6 +5512,109 @@ def _stage4_failure_result(code, message, *, phase="execution_contract"):
     }
 
 
+def _authority_bound_execution_attempt(task=None):
+    """Detect an execution attempt that has entered approved authority mode.
+
+    This deliberately relies on persisted plan/snapshot/contract state and
+    existing authority status, never on the wording of a task.  A task-level
+    contract marker is included for direct contract-bound callers; ordinary
+    unbound ROOT tasks do not become authority-bound merely because they are
+    running in recursive mode.
+    """
+    task = task if isinstance(task, dict) else {}
+    run_artifacts = (
+        isinstance(RUN.get("approved_change_plan"), dict),
+        isinstance(RUN.get("approved_plan_snapshot"), dict),
+        bool(RUN.get("execution_contracts")),
+        isinstance(RUN.get("execution_contract_assignment"), dict)
+        and bool(RUN.get("execution_contract_assignment")),
+        RUN.get("execution_contract_status") in AUTHORITY_VALIDATION_FAILURES,
+        RUN.get("orchestration_failure") in AUTHORITY_VALIDATION_FAILURES,
+    )
+    if any(run_artifacts):
+        return True
+    return bool(
+        task.get("execution_contract_id")
+        or task.get("execution_contract_hash")
+        or task.get("approved_plan_id")
+        or task.get("approved_plan_hash")
+    ) and bool(
+        RUN.get("project_mode") == EXISTING_PROJECT
+        and RUN.get("impact_planning_required")
+    )
+
+
+def _authority_terminal_failure(task=None):
+    """Return an existing terminal authority code, if one is active."""
+    if not _authority_bound_execution_attempt(task):
+        return None
+    # ``execution_contract_status`` is the authoritative current status.  A
+    # previous orchestration failure may remain in the run after a later valid
+    # compile, so do not let that historical field mask a current ``ready``
+    # status.
+    status = RUN.get("execution_contract_status")
+    if status in AUTHORITY_VALIDATION_FAILURES:
+        # A root task without a snapshot, compiled contract, or task-level
+        # contract binding may still use the deterministic injected leaf path
+        # used by compatibility callers.  In that narrow pre-binding state,
+        # EXECUTION_CONTRACT_BLOCKED is not enough to claim that a contract
+        # authority was entered; the approved-plan/snapshot gate above still
+        # fails closed for stale or missing approval.  Once a snapshot,
+        # contract, or contract-bound task exists, the same status is terminal.
+        if status != EXECUTION_CONTRACT_BLOCKED or (
+            isinstance(RUN.get("approved_plan_snapshot"), dict)
+            or bool(RUN.get("execution_contracts"))
+            or bool((task or {}).get("execution_contract_id"))
+            or bool((task or {}).get("execution_contract_hash"))
+        ):
+            return status
+    if status == "ready":
+        return None
+    failure = RUN.get("orchestration_failure")
+    if failure in AUTHORITY_VALIDATION_FAILURES:
+        if failure != EXECUTION_CONTRACT_BLOCKED or (
+            isinstance(RUN.get("approved_plan_snapshot"), dict)
+            or bool(RUN.get("execution_contracts"))
+            or bool((task or {}).get("execution_contract_id"))
+            or bool((task or {}).get("execution_contract_hash"))
+        ):
+            return failure
+    return None
+
+
+def _authority_fail_closed_result(code, message="", base=None, task_id=None):
+    """Turn a terminal authority result into an explicit no-fallback result."""
+    code = str(code or EXECUTION_CONTRACT_BLOCKED)
+    authority_status = (
+        "STALE" if code == APPROVED_PLAN_STALE
+        else "REQUIRED" if code == PLAN_APPROVAL_REQUIRED
+        else "INVALID"
+    )
+    summary = compact_text(
+        message or f"{code}: authority-bound execution terminated; generic fallback is disabled",
+        1600,
+    )
+    record = {
+        "execution_mode": "AUTHORITY_BOUND",
+        "authority_status": authority_status,
+        "terminal_reason": code,
+        "fallback_allowed": False,
+        "task_id": task_id,
+    }
+    RUN["authority_fail_closed_blocks"] = RUN.get("authority_fail_closed_blocks", 0) + 1
+    RUN["authority_fail_closed_last"] = dict(record)
+    record_run_event("authority_fail_closed", **record)
+    result = dict(base) if isinstance(base, dict) else {}
+    result.update({
+        "status": "blocked",
+        "terminal_state": code,
+        "orchestration_failure": code,
+        "summary": summary,
+        **record,
+    })
+    return result
+
+
 def compile_approved_plan_execution_contracts(contract=None, plan=None, approval=None,
                                               force=False):
     """Snapshot the approved Stage 3 plan and compile its deterministic DAG.
@@ -5736,7 +5850,11 @@ def _record_structural_fit(task, execution_contract):
 
 def structural_fit_for_task(task, execution_contract=None):
     """Public deterministic structural-fit probe used by tests and audits."""
+    if _authority_terminal_failure(task):
+        return None
     execution_contract = execution_contract or _current_execution_contract(task)
+    if _authority_terminal_failure(task):
+        return None
     return _record_structural_fit(task, execution_contract)
 
 
@@ -6840,6 +6958,14 @@ def deterministic_fit_fallback(task, depth, contract, force_smaller=False,
 
 def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary="", dependency_summaries=None,
                     force_smaller=False, execution_contract=None):
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        result["decision"] = "blocked"
+        return result
     # Keep the public helper convenient for deterministic callers that do not
     # need to prepare reconnaissance themselves.
     if repo_snapshot is None:
@@ -6852,6 +6978,14 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
         "execution_contract_id"
     ):
         execution_contract = contract
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        result["decision"] = "blocked"
+        return result
     structural_fit = _record_structural_fit(task, execution_contract)
     if structural_fit:
         classification = structural_fit.get("classification")
@@ -7026,6 +7160,13 @@ def bind_decomposition_to_approved_plan(specs):
 
 
 def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_summaries=None, force_smaller=False):
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        return []
     if str(task.get("id", "")) == "ROOT" and "DECOMPOSITION" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("DECOMPOSITION")
     if task.get("kind") == "integration":
@@ -7040,6 +7181,13 @@ def decompose_task(task, contract, repo_snapshot, parent_summary="", dependency_
                 )
         return integration_children
     execution_contract = _current_execution_contract(task)
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        return []
     if isinstance(execution_contract, dict):
         remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
         if remaining < 2 or not execution_contract.get("worker_required"):
@@ -13614,6 +13762,15 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     """Fit one node, execute one leaf if it fits, and recurse only on evidence."""
     dependency_summaries = list(dependency_summaries or [])
     repo_snapshot = repo_snapshot or inspect_repository()
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        result["memory"] = memory
+        _mark_task_result(task, result)
+        return result
     task["status"] = "running"
     RUN["max_depth"] = max(RUN.get("max_depth", 0), depth)
     update_task_ledger(task)
@@ -13625,6 +13782,15 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
 
     can_split = _can_expand(depth)
     execution_contract = _current_execution_contract(task)
+    authority_failure = _authority_terminal_failure(task)
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id=(task or {}).get("id"),
+        )
+        result["memory"] = memory
+        _mark_task_result(task, result)
+        return result
     if execution_contract is None and isinstance(contract, dict) and contract.get(
         "execution_contract_id"
     ):
@@ -13962,6 +14128,16 @@ def run_baseline_request(user_text, memory, contract_override=None, repo_snapsho
         reset_run("baseline")
     elif RUN.get("mode") != "auto":
         RUN["mode"] = "baseline"
+    authority_failure = _authority_terminal_failure()
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id="ROOT",
+        )
+        result["memory"] = memory
+        if finish:
+            finish_metrics("blocked")
+        return result, memory
     # Baseline remains the pre-v15 comparable path.  A caller reusing a run
     # object must not accidentally inherit recursive Project Brain state.
     RUN.pop("project_brain", None)
@@ -14087,19 +14263,39 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         return result, memory
     contract = impact_planning.get("contract", contract)
     approved_plan = current_approved_change_plan()
-    if isinstance(approved_plan, dict) and leaf_executor is None:
+    authority_bound = _authority_bound_execution_attempt()
+    authority_failure = _authority_terminal_failure()
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id="ROOT",
+        )
+        result["memory"] = memory
+        if finish:
+            finish_metrics("blocked")
+        return result, memory
+    if authority_bound and (leaf_executor is None or not isinstance(approved_plan, dict)):
         # Existing-project execution enters Stage 4A only after the exact plan
         # approval has been snapshotted and compiled into a deterministic DAG.
         execution_state = compile_approved_plan_execution_contracts(
-            contract=contract, plan=approved_plan,
+            contract=contract,
+            plan=RUN.get("approved_change_plan") if isinstance(
+                RUN.get("approved_change_plan"), dict
+            ) else approved_plan,
             approval=RUN.get("plan_approval"),
         )
         if execution_state.get("status") != "ready":
-            result = dict(execution_state)
+            result = _authority_fail_closed_result(
+                execution_state.get("terminal_state") or _authority_terminal_failure(),
+                execution_state.get("summary", ""),
+                base=execution_state,
+            )
             result["memory"] = memory
             if finish:
                 finish_metrics(result.get("status", "blocked"))
             return result, memory
+        approved_plan = execution_state.get("plan") or approved_plan
+    if authority_bound and isinstance(approved_plan, dict) and leaf_executor is None:
         result, memory = execute_approved_plan_graph(
             contract, memory, repo_snapshot=repo_snapshot,
             fit_decider=fit_decider, aggregator=aggregator,
@@ -14179,16 +14375,34 @@ def run_auto_request(user_text, memory, interactive=True):
         return impact_planning, memory
     contract = impact_planning.get("contract", contract)
     approved_plan = current_approved_change_plan()
-    if isinstance(approved_plan, dict):
+    authority_bound = _authority_bound_execution_attempt()
+    authority_failure = _authority_terminal_failure()
+    if authority_failure:
+        result = _authority_fail_closed_result(
+            authority_failure,
+            task_id="ROOT",
+        )
+        result["memory"] = memory
+        finish_metrics("blocked")
+        return result, memory
+    if authority_bound:
         execution_state = compile_approved_plan_execution_contracts(
-            contract=contract, plan=approved_plan,
+            contract=contract,
+            plan=RUN.get("approved_change_plan") if isinstance(
+                RUN.get("approved_change_plan"), dict
+            ) else approved_plan,
             approval=RUN.get("plan_approval"),
         )
         if execution_state.get("status") != "ready":
-            result = dict(execution_state)
+            result = _authority_fail_closed_result(
+                execution_state.get("terminal_state") or _authority_terminal_failure(),
+                execution_state.get("summary", ""),
+                base=execution_state,
+            )
             result["memory"] = memory
             finish_metrics(result.get("status", "blocked"))
             return result, memory
+        approved_plan = execution_state.get("plan") or approved_plan
         result, memory = execute_approved_plan_graph(
             contract, memory, repo_snapshot=repo_snapshot,
         )
@@ -15330,6 +15544,87 @@ def run_self_test(install_browser=False):
             v19_stale_plan, v19_approval, v184_source_goal,
             current_plan=v19_stale_plan,
         )
+        # v19.4.1 stale-authority routing is exercised against the existing
+        # validator result with deterministic fit/decomposition/leaf probes.
+        # The global run/task state is restored immediately so this safety
+        # probe cannot affect the historical self-test metrics below.
+        v1941_stale_validation = stage4.validate_approved_plan(
+            {
+                "plan_id": "PLAN-STALE-SELF-TEST",
+                "plan_hash": "stored-plan-hash",
+                "task_goal": "stale approved responsibility",
+                "approved_change_nodes": [],
+            },
+            {
+                "approval_status": "APPROVED",
+                "plan_id": "PLAN-STALE-SELF-TEST",
+                "plan_hash": "stored-plan-hash",
+                "approval_source": "STAGE4B_SYNTHETIC_FIXTURE",
+            },
+            "stale approved responsibility",
+            current_plan={
+                "plan_id": "PLAN-STALE-SELF-TEST",
+                "plan_hash": "stored-plan-hash",
+                "task_goal": "stale approved responsibility",
+                "approved_change_nodes": [],
+            },
+        )
+        v1941_saved_run = copy.deepcopy(RUN)
+        v1941_saved_tasks = copy.deepcopy(TASKS)
+        v1941_stale_fit_calls = []
+        v1941_stale_decompose_calls = []
+        v1941_stale_leaf_calls = []
+        v1941_stale_result = {}
+        v1941_stale_structural_calls = RUN.get("structural_fit_calls", 0)
+        v1941_stale_structural_calls_after = None
+        original_v1941_decompose = globals()["decompose_task"]
+        try:
+            RUN.update({
+                "project_mode": EXISTING_PROJECT,
+                "impact_planning_required": True,
+                "approved_change_plan": {
+                    "plan_id": "PLAN-STALE-SELF-TEST",
+                    "plan_hash": "stored-plan-hash",
+                    "task_goal": "stale approved responsibility",
+                    "approved_change_nodes": [],
+                },
+                "plan_approval": {
+                    "approval_status": "APPROVED",
+                    "plan_id": "PLAN-STALE-SELF-TEST",
+                    "plan_hash": "stored-plan-hash",
+                    "approval_source": "STAGE4B_SYNTHETIC_FIXTURE",
+                },
+                "execution_contract_status": v1941_stale_validation.get("code"),
+                "orchestration_failure": v1941_stale_validation.get("code"),
+                "tasks_created": 1,
+            })
+            TASKS.clear()
+            v1941_stale_task = make_task(
+                "ROOT", "stale approved responsibility", 0, None, ["done"], [],
+            )
+            TASKS["ROOT"] = v1941_stale_task
+
+            def forbidden_v1941_decompose(*_args, **_kwargs):
+                v1941_stale_decompose_calls.append(True)
+                return []
+
+            globals()["decompose_task"] = forbidden_v1941_decompose
+            v1941_stale_result = solve_task(
+                v1941_stale_task, 0,
+                {"status": "ready", "goal": "stale approved responsibility"},
+                {}, {"files": []},
+                fit_decider=lambda *_args: v1941_stale_fit_calls.append(True) or {"decision": "execute"},
+                leaf_executor=lambda *_args: v1941_stale_leaf_calls.append(True) or {
+                    "status": "done", "summary": "unexpected stale Worker", "memory": {},
+                },
+            )
+            v1941_stale_structural_calls_after = RUN.get("structural_fit_calls", 0)
+        finally:
+            globals()["decompose_task"] = original_v1941_decompose
+            RUN.clear()
+            RUN.update(v1941_saved_run)
+            TASKS.clear()
+            TASKS.update(v1941_saved_tasks)
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -15897,6 +16192,19 @@ def run_self_test(install_browser=False):
                 and not any("structural_fit" in str(item).casefold() for item in (
                     v194_simple_contract, v194_ambiguous_contract, v194_broad_contract,
                 ))
+            ),
+            "v19.4.1 stale authority terminal": (
+                v1941_stale_validation.get("code") == APPROVED_PLAN_STALE
+                and v1941_stale_result.get("status") == "blocked"
+                and v1941_stale_result.get("terminal_state") == APPROVED_PLAN_STALE
+                and v1941_stale_result.get("execution_mode") == "AUTHORITY_BOUND"
+                and v1941_stale_result.get("authority_status") == "STALE"
+                and v1941_stale_result.get("fallback_allowed") is False
+                and not v1941_stale_fit_calls
+                and not v1941_stale_decompose_calls
+                and not v1941_stale_leaf_calls
+                and v1941_stale_result.get("task_id") == "ROOT"
+                and v1941_stale_structural_calls == v1941_stale_structural_calls_after
             ),
         }
         for name, ok in checks.items():
