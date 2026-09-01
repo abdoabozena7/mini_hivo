@@ -84,6 +84,19 @@ from hivo.verification_routing import TEST_TARGET_PRESENT
 from hivo.verification_routing import VERIFICATION_EVIDENCE_UNAVAILABLE
 from hivo.verification_routing import aggregate_verification_evidence
 from hivo.verification_routing import analyze_verification_applicability as _analyze_verification_applicability
+from hivo.integration_gate import INTEGRATION_EVIDENCE_UNAVAILABLE
+from hivo.integration_gate import INTEGRATION_FAILED
+from hivo.integration_gate import INTEGRATION_NOT_READY
+from hivo.integration_gate import NOT_READY_CHILD_FAILURE
+from hivo.integration_gate import NOT_READY_COVERAGE_GAP
+from hivo.integration_gate import NOT_READY_PROVENANCE_VIOLATION
+from hivo.integration_gate import NOT_READY_STALE_AUTHORITY
+from hivo.integration_gate import NOT_READY_STALE_EVIDENCE
+from hivo.integration_gate import NOT_READY_CHILD_UNVERIFIED
+from hivo.integration_gate import PARENT_VERIFIED
+from hivo.integration_gate import aggregate_parent_integration as _aggregate_parent_integration_v21
+from hivo.integration_gate import assess_integration_readiness as _assess_integration_readiness_v21
+from hivo.integration_gate import create_verified_child_receipt as _create_verified_child_receipt_v21
 
 # ---------------------------------------------------------------------------
 # RESEARCH CONFIGURATION
@@ -1506,6 +1519,28 @@ def new_metrics(mode):
         "verification_evidence_unavailable": 0,
         "browser_verifier_calls_avoided": 0,
         "verification_applicability_artifacts": [],
+        # V21 Stage 5B verified-child integration gate.  These counters are
+        # deterministic orchestration observations; readiness and receipt
+        # creation never call a model.
+        "verified_child_receipts_created": 0,
+        "verified_child_receipts_stale": 0,
+        "integration_readiness_checks": 0,
+        "integration_ready": 0,
+        "integration_not_ready_child_failure": 0,
+        "integration_not_ready_stale_evidence": 0,
+        "integration_routes_created": 0,
+        "integration_verification_attempts": 0,
+        "integration_verification_passes": 0,
+        "integration_verification_failures": 0,
+        "integration_evidence_unavailable": 0,
+        "parent_verification_receipts_created": 0,
+        "verification_applicability_analyzer_calls": 0,
+        "verification_applicability_analyzer_model_calls": 0,
+        "integration_readiness_model_calls": 0,
+        "integration_executor_model_calls": 0,
+        "integration_executor_calls": 0,
+        "stage5b_enabled": False,
+        "child_receipts": {},
         "verification_failures": 0, "task_too_broad_count": 0,
         "mutation_failures_recorded": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
@@ -1570,6 +1605,25 @@ def compact_task_tree():
             entry["verification_applicability"] = copy.deepcopy(
                 task.get("verification_applicability")
             )
+        if task.get("verified_child_receipt") is not None:
+            receipt = task.get("verified_child_receipt")
+            entry["verified_child_receipt"] = {
+                "child_id": receipt.get("child_id"),
+                "receipt_hash": receipt.get("receipt_hash"),
+                "verified": receipt.get("verified"),
+                "dependency_fingerprint": (receipt.get("evidence_dependency_fingerprint") or {}).get("hash"),
+            }
+        if task.get("validated_child_plan") is not None:
+            entry["validated_child_plan"] = copy.deepcopy(task.get("validated_child_plan"))
+        if task.get("integration_readiness") is not None:
+            entry["integration_readiness"] = copy.deepcopy(task.get("integration_readiness"))
+        if task.get("parent_verification_receipt") is not None:
+            receipt = task.get("parent_verification_receipt")
+            entry["parent_verification_receipt"] = {
+                "parent_id": receipt.get("parent_id"),
+                "receipt_hash": receipt.get("receipt_hash"),
+                "verified": receipt.get("verified"),
+            }
         # Keep the failed attempt and its evidence beside the final status.
         # This is what makes a recovered node auditable instead of making the
         # original failure disappear when the parent eventually passes.
@@ -9545,6 +9599,310 @@ def _verification_aggregation(builder_result, falsifier_result=None, browser_res
     return aggregation
 
 
+# ---------------------------------------------------------------------------
+# V21 VERIFIED-CHILD INTEGRATION GATE
+# ---------------------------------------------------------------------------
+
+def _stage5b_enabled(task=None):
+    """Return whether the current node is on the V21 parent boundary."""
+    value = task if isinstance(task, dict) else {}
+    return bool(
+        RUN.get("stage5b_enabled")
+        or value.get("stage5b_enabled")
+        or value.get("validated_child_plan")
+    )
+
+
+def _stage5b_validated_child_plan(parent, children):
+    """Project the already validated child set without deriving it from results."""
+    parent = parent if isinstance(parent, dict) else {}
+    if "validated_child_plan" in parent and isinstance(
+        parent.get("validated_child_plan"), (list, dict),
+    ):
+        existing = parent.get("validated_child_plan")
+        return copy.deepcopy(existing)
+    plan = []
+    for item in children or []:
+        child = item.get("task", {}) if isinstance(item, dict) else {}
+        if not isinstance(child, dict):
+            continue
+        contract = child.get("execution_contract") if isinstance(child.get("execution_contract"), dict) else {}
+        child_id = str(child.get("id", ""))
+        if not child_id:
+            continue
+        required = not (child.get("optional") is True or child.get("required") is False)
+        plan.append({
+            "child_id": child_id,
+            "required": required,
+            "execution_contract_id": child.get("execution_contract_id") or contract.get("execution_contract_id"),
+            "contract_hash": child.get("execution_contract_hash") or contract.get("contract_hash"),
+            "plan_node_ids": list(child.get("plan_node_ids", []) or contract.get("plan_node_ids", []) or []),
+            "owned_plan_node_ids": list(child.get("owned_plan_node_ids", []) or contract.get("owned_plan_node_ids", []) or []),
+        })
+    return plan
+
+
+def _stage5b_child_receipt(task, result, parent_contract=None):
+    """Create and retain a safe derived receipt for one reached child."""
+    if not isinstance(task, dict) or not isinstance(result, dict):
+        return None
+    if not task.get("parent") or not _stage5b_enabled(task):
+        return None
+    contract = task.get("execution_contract") if isinstance(task.get("execution_contract"), dict) else {}
+    aggregation = None
+    gate = result.get("gate")
+    if isinstance(gate, dict):
+        aggregation = gate.get("verification_aggregation")
+    if not isinstance(aggregation, dict):
+        aggregation = result.get("verification_aggregation")
+    evidence = []
+    for source in (result, result.get("builder", {}), result.get("falsifier", {})):
+        if isinstance(source, dict):
+            evidence.extend(item for item in source.get("tool_evidence", []) or [] if isinstance(item, dict))
+    authority_failure = _authority_terminal_failure(task)
+    receipt = _create_verified_child_receipt_v21(
+        task, result,
+        parent_id=task.get("parent"),
+        parent_contract=parent_contract if isinstance(parent_contract, dict) else {},
+        verification_applicability=task.get("verification_applicability")
+        if isinstance(task.get("verification_applicability"), dict) else None,
+        verification_aggregation=aggregation if isinstance(aggregation, dict) else None,
+        verification_evidence=evidence,
+        workspace=WORKSPACE,
+        authority_valid=authority_failure is None,
+        unauthorized_mutations=int(result.get("unauthorized_mutations", 0) or 0),
+        scope_violations=int(result.get("scope_violations", 0) or 0),
+        dnt_violations=int(result.get("dnt_violations", 0) or 0),
+    )
+    task["verified_child_receipt"] = copy.deepcopy(receipt)
+    result["verified_child_receipt"] = copy.deepcopy(receipt)
+    RUN.setdefault("child_receipts", {})[str(receipt.get("child_id"))] = copy.deepcopy(receipt)
+    if receipt.get("verified") is True:
+        RUN["verified_child_receipts_created"] = RUN.get("verified_child_receipts_created", 0) + 1
+    record_run_event(
+        "verified_child_receipt_created",
+        child_id=receipt.get("child_id"), parent_id=receipt.get("parent_id"),
+        verified=receipt.get("verified"), receipt_hash=receipt.get("receipt_hash"),
+        verification_applicability_hash=receipt.get("verification_applicability_hash"),
+        dependency_fingerprint=(receipt.get("evidence_dependency_fingerprint") or {}).get("hash"),
+        browser=receipt.get("browser"), model_calls=0,
+    )
+    return receipt
+
+
+def _stage5b_scope_audit(children):
+    unauthorized = 0
+    scope = 0
+    dnt = 0
+    for item in children or []:
+        task = item.get("task", {}) if isinstance(item, dict) else {}
+        result = item.get("result", {}) if isinstance(item, dict) else {}
+        for source in (task, result):
+            if not isinstance(source, dict):
+                continue
+            unauthorized += int(source.get("unauthorized_mutations", 0) or 0)
+            scope += int(source.get("scope_violations", 0) or 0)
+            dnt += int(source.get("dnt_violations", 0) or 0)
+            failure_type = str(source.get("failure_type") or source.get("orchestration_failure") or "").upper()
+            if "SCOPE" in failure_type:
+                scope += 1
+            if "DO_NOT_TOUCH" in failure_type or "DNT" in failure_type:
+                dnt += 1
+            records = []
+            for key in ("mutation_failures", "failure_evidence", "failure_diagnosis"):
+                value = source.get(key)
+                if isinstance(value, list):
+                    records.extend(value)
+                elif isinstance(value, dict):
+                    records.append(value)
+            for record in records:
+                marker = json.dumps(record, ensure_ascii=False, default=str).upper()
+                if "UNAUTHORIZED_MUTATION" in marker or "UNAUTHORIZED PERSIST" in marker:
+                    unauthorized += 1
+                if "OUT_OF_SCOPE" in marker or "SCOPE_VIOLATION" in marker:
+                    scope += 1
+                if "DO_NOT_TOUCH" in marker or "DNT_VIOLATION" in marker:
+                    dnt += 1
+    return {"unauthorized_mutations": unauthorized, "scope_violations": scope, "dnt_violations": dnt}
+
+
+def _stage5b_parent_readiness(task, contract, completed, repo_snapshot=None):
+    """Run/read back the deterministic V21 readiness artifact exactly once per call."""
+    if not _stage5b_enabled(task):
+        return None
+    validated_plan = _stage5b_validated_child_plan(task, completed)
+    if validated_plan:
+        task["validated_child_plan"] = copy.deepcopy(validated_plan)
+    audit = _stage5b_scope_audit(completed)
+    authority_failure = _authority_terminal_failure(task)
+    parent_artifact = task.get("verification_applicability")
+    if not isinstance(parent_artifact, dict):
+        RUN["verification_applicability_analyzer_calls"] = RUN.get(
+            "verification_applicability_analyzer_calls", 0,
+        ) + 1
+        parent_artifact = analyze_verification_applicability(
+            task, contract if isinstance(contract, dict) else {},
+            repo_snapshot if isinstance(repo_snapshot, dict) else None,
+        )
+        RUN["verification_applicability_analyzer_model_calls"] = RUN.get(
+            "verification_applicability_analyzer_model_calls", 0,
+        ) + int((parent_artifact or {}).get("model_calls", 0) or 0)
+    readiness = _assess_integration_readiness_v21(
+        task, completed, RUN.get("child_receipts", {}),
+        parent_contract=contract if isinstance(contract, dict) else {},
+        validated_child_plan=validated_plan,
+        workspace=WORKSPACE,
+        parent_verification_applicability=parent_artifact,
+        authority_valid=authority_failure is None,
+        authority_failure=authority_failure,
+        **audit,
+    )
+    RUN["integration_readiness_model_calls"] = RUN.get(
+        "integration_readiness_model_calls", 0,
+    ) + int(readiness.get("model_calls", 0) or 0)
+    RUN["integration_readiness_checks"] = RUN.get("integration_readiness_checks", 0) + 1
+    if readiness.get("readiness") == "READY":
+        RUN["integration_ready"] = RUN.get("integration_ready", 0) + 1
+    elif readiness.get("reason") == NOT_READY_CHILD_FAILURE:
+        RUN["integration_not_ready_child_failure"] = RUN.get(
+            "integration_not_ready_child_failure", 0,
+        ) + 1
+    elif readiness.get("reason") == NOT_READY_STALE_EVIDENCE:
+        RUN["integration_not_ready_stale_evidence"] = RUN.get(
+            "integration_not_ready_stale_evidence", 0,
+        ) + 1
+        RUN["verified_child_receipts_stale"] = RUN.get(
+            "verified_child_receipts_stale", 0,
+        ) + len(readiness.get("stale_evidence", []) or [])
+    RUN["integration_routes_created"] = RUN.get("integration_routes_created", 0) + len(
+        readiness.get("integration_routes", []) or []
+    )
+    task["integration_readiness"] = copy.deepcopy(readiness)
+    record_run_event(
+        "integration_readiness_checked",
+        parent_id=readiness.get("parent_id"), parent_contract_hash=readiness.get("parent_contract_hash"),
+        required_child_ids=readiness.get("required_child_ids", []),
+        terminal_child_statuses=readiness.get("terminal_child_statuses", {}),
+        child_receipts=readiness.get("child_receipts", []),
+        freshness=readiness.get("freshness", {}), coverage=readiness.get("coverage", {}),
+        readiness=readiness.get("readiness"), reason=readiness.get("reason"),
+        integration_routes=readiness.get("integration_routes", []), model_calls=0,
+    )
+    return readiness
+
+
+def _stage5b_parent_evidence(completed, task):
+    """Collect only explicit parent integration evidence, never raw Worker data."""
+    evidence = []
+    for source in (
+        task.get("integration_evidence", []) if isinstance(task, dict) else [],
+        task.get("parent_integration_evidence", []) if isinstance(task, dict) else [],
+    ):
+        evidence.extend(item for item in (source or []) if isinstance(item, dict))
+    for item in completed or []:
+        result = item.get("result", {}) if isinstance(item, dict) else {}
+        if not isinstance(result, dict):
+            continue
+        for key in ("integration_evidence", "parent_integration_evidence"):
+            evidence.extend(item for item in result.get(key, []) or [] if isinstance(item, dict))
+    return evidence
+
+
+def _stage5b_child_projection(completed):
+    projected = []
+    for item in completed or []:
+        task = item.get("task", {}) if isinstance(item, dict) else {}
+        result = item.get("result", {}) if isinstance(item, dict) else {}
+        receipt = (result.get("verified_child_receipt") if isinstance(result, dict) else None) or (
+            task.get("verified_child_receipt") if isinstance(task, dict) else None
+        )
+        projected.append({
+            "task_id": str(task.get("id", "")),
+            "status": str(result.get("status", task.get("status", "failed"))),
+            "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+            "changed_files": bounded_list(result.get("changed_files", []), 12, 140),
+            "receipt_hash": (receipt or {}).get("receipt_hash"),
+            "receipt_verified": (receipt or {}).get("verified") is True,
+        })
+    return projected
+
+
+def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=None, root=False,
+                              readiness=None):
+    """Perform parent-local deterministic integration after the READY gate."""
+    readiness = readiness or _stage5b_parent_readiness(task, contract, completed, repo_snapshot)
+    child_projection = _stage5b_child_projection(completed)
+    if not isinstance(readiness, dict) or readiness.get("readiness") != "READY":
+        reason = (readiness or {}).get("reason") or NOT_READY_CHILD_UNVERIFIED
+        return {
+            "status": "failed", "failure_type": INTEGRATION_NOT_READY,
+            "integration_result": INTEGRATION_NOT_READY,
+            "integration_readiness": copy.deepcopy(readiness),
+            "integration_executor_calls": 0,
+            "summary": f"parent integration not ready: {reason}",
+            "memory": memory, "children": child_projection,
+        }
+    RUN["integration_verification_attempts"] = RUN.get("integration_verification_attempts", 0) + 1
+    RUN["integration_executor_calls"] = RUN.get("integration_executor_calls", 0) + 1
+    _start_parent_integration(task, {"error_count": 0, "conflicts": [], "invariant_violation_count": 0})
+    evidence = _stage5b_parent_evidence(completed, task)
+    result = _aggregate_parent_integration_v21(
+        task, contract if isinstance(contract, dict) else {}, readiness, evidence,
+        workspace=WORKSPACE,
+    )
+    RUN["integration_executor_model_calls"] = RUN.get(
+        "integration_executor_model_calls", 0,
+    ) + int(result.get("model_calls", 0) or 0)
+    result["memory"] = memory
+    result["children"] = child_projection
+    result["integration_readiness"] = copy.deepcopy(readiness)
+    result["integration_routes"] = copy.deepcopy(result.get("routes", []))
+    result["integration_executor_calls"] = 1
+    RUN["browser_verifier_calls_avoided"] = RUN.get("browser_verifier_calls_avoided", 0) + sum(
+        1 for item in result.get("optional_skips", []) or []
+        if isinstance(item, dict) and item.get("kind") == "BROWSER"
+        and item.get("result") == SKIPPED_NOT_APPLICABLE
+    )
+    if result.get("status") == PARENT_VERIFIED:
+        RUN["integration_verification_passes"] = RUN.get("integration_verification_passes", 0) + 1
+        RUN["parent_verification_receipts_created"] = RUN.get(
+            "parent_verification_receipts_created", 0,
+        ) + 1
+        task["parent_verification_receipt"] = copy.deepcopy(
+            result.get("parent_verification_receipt")
+        )
+        _finish_parent_integration(task, passed=True, preflight={"error_count": 0, "conflicts": []})
+        result["status"] = "done"
+        result["summary"] = result.get("summary", "parent integration verified")
+    elif result.get("status") == INTEGRATION_EVIDENCE_UNAVAILABLE:
+        RUN["integration_evidence_unavailable"] = RUN.get(
+            "integration_evidence_unavailable", 0,
+        ) + 1
+        RUN["integration_verification_failures"] = RUN.get(
+            "integration_verification_failures", 0,
+        ) + 1
+        _finish_parent_integration(task, passed=False, preflight={"error_count": 0, "conflicts": []})
+        result["status"] = "failed"
+        result["failure_type"] = INTEGRATION_EVIDENCE_UNAVAILABLE
+    else:
+        RUN["integration_verification_failures"] = RUN.get(
+            "integration_verification_failures", 0,
+        ) + 1
+        _finish_parent_integration(task, passed=False, preflight={"error_count": 0, "conflicts": []})
+        result["status"] = "failed"
+        result["failure_type"] = INTEGRATION_FAILED
+    record_run_event(
+        "parent_integration_aggregated",
+        parent_id=task.get("id"), readiness=readiness.get("readiness"),
+        integration_routes=result.get("integration_routes", []),
+        actual_evidence=result.get("integration_evidence", []),
+        integration_result=result.get("integration_result"),
+        parent_verification_receipt=(result.get("parent_verification_receipt") or {}).get("receipt_hash"),
+        model_calls=0,
+    )
+    return result
+
+
 def deterministic_quality_checks(builder_result, falsifier_result=None, browser_result=None,
                                  model_checks=None, vision_review=None, integration_preflight=None,
                                  verification_aggregation=None):
@@ -13277,6 +13635,10 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
             ),
             "evidence": compact_evidence_summary(child_result),
         })
+    if _stage5b_enabled(task) and task.get("validated_child_plan"):
+        return _aggregate_stage5b_parent(
+            task, contract, child_results, memory, repo_snapshot, root=root,
+        )
     if any(item["status"] != "done" for item in child_info):
         RUN["integration_failures"] += 1
         return {"status": "failed", "failure_type": "CHILD_FAILURE", "summary": "not all children verified",
@@ -13560,6 +13922,10 @@ def aggregate_execution_contract_children(task, contract, child_results, memory,
             "changed_files": _compact_manifest_values(child_result.get("changed_files", []), 12, 140),
             "evidence": compact_evidence_summary(child_result),
         })
+    if _stage5b_enabled(task) and task.get("validated_child_plan"):
+        return _aggregate_stage5b_parent(
+            task, contract, child_results, memory, repo_snapshot, root=root,
+        )
     if any(item["status"] != "done" for item in child_info):
         return {
             "status": "failed", "failure_type": "CHILD_FAILURE",
@@ -13628,6 +13994,19 @@ def _mark_task_result(task, result, *, count=True):
         )
     if result.get("changed_files"):
         task["changed_files"] = list(result["changed_files"])
+    # Stage 5B receipts are derived after the child has reached its terminal
+    # state.  The parent authority is read from the parent task/source
+    # contract; no receipt is produced for ROOT itself.
+    if _stage5b_enabled(task) and task.get("parent"):
+        parent_task = TASKS.get(str(task.get("parent")), {})
+        parent_contract = (
+            parent_task.get("stage5b_parent_contract")
+            if isinstance(parent_task, dict) and isinstance(parent_task.get("stage5b_parent_contract"), dict)
+            else parent_task.get("execution_contract")
+            if isinstance(parent_task, dict) and isinstance(parent_task.get("execution_contract"), dict)
+            else RUN.get("source_contract", {})
+        )
+        _stage5b_child_receipt(task, result, parent_contract=parent_contract)
     if count:
         if status == "done":
             attach_verified_manifest(task, result)
@@ -14037,6 +14416,9 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
         item for item in completed
         if not _scheduler_result_is_success(item.get("result"))
     ]
+    stage5b_readiness = _stage5b_parent_readiness(
+        task, contract, completed, repo_snapshot,
+    ) if _stage5b_enabled(task) else None
     if failed_children:
         first_failure = next(
             (
@@ -14062,6 +14444,13 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             "failure_type": failed_result.get("failure_type", "CHILD_FAILURE"),
             "children": completed,
         }
+        if stage5b_readiness is not None:
+            parent_result.update({
+                "failure_type": INTEGRATION_NOT_READY,
+                "integration_result": INTEGRATION_NOT_READY,
+                "integration_readiness": copy.deepcopy(stage5b_readiness),
+                "integration_executor_calls": 0,
+            })
         scheduler["parent_status"] = "failed"
         scheduler["terminal_children"] = [
             {
@@ -14092,15 +14481,21 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
         )
         return parent_result
 
-    aggregate_fn = aggregator or (
-        _aggregate_integration_children if task.get("kind") == "integration" else
-        (aggregate_execution_contract_children
-         if task.get("execution_contract_id") else aggregate_task)
-    )
-    try:
-        aggregate = aggregate_fn(task, contract, completed, memory, repo_snapshot, root=(task["id"] == "ROOT"))
-    except ProviderError as exc:
-        aggregate = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+    if stage5b_readiness is not None:
+        aggregate = _aggregate_stage5b_parent(
+            task, contract, completed, memory, repo_snapshot,
+            root=(task["id"] == "ROOT"), readiness=stage5b_readiness,
+        )
+    else:
+        aggregate_fn = aggregator or (
+            _aggregate_integration_children if task.get("kind") == "integration" else
+            (aggregate_execution_contract_children
+             if task.get("execution_contract_id") else aggregate_task)
+        )
+        try:
+            aggregate = aggregate_fn(task, contract, completed, memory, repo_snapshot, root=(task["id"] == "ROOT"))
+        except ProviderError as exc:
+            aggregate = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     aggregate["memory"] = aggregate.get("memory", memory)
     scheduler["parent_status"] = str(aggregate.get("status", "failed"))
     scheduler["terminal_children"] = [
@@ -14445,6 +14840,18 @@ def begin_durable_run(contract):
 def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decider=None,
                                 leaf_executor=None, aggregator=None):
     """Execute the immutable Stage 4A graph one approved contract at a time."""
+    # V21 Stage 5B is enabled only after Stage 4A has produced the immutable
+    # execution graph.  The graph, not the set of results that happens to
+    # exist later, is the source of the mandatory child plan.  A caller that
+    # injects the legacy Stage 4 test-only leaf harness remains on that
+    # compatibility path unless it explicitly opts into Stage 5B; production
+    # authority-bound execution has no injected leaf executor.
+    stage5b_requested = bool(
+        RUN.get("stage5b_enabled") or
+        (isinstance(contract, dict) and contract.get("stage5b_enabled"))
+    )
+    if leaf_executor is None or stage5b_requested:
+        RUN["stage5b_enabled"] = True
     state = compile_approved_plan_execution_contracts(contract=contract)
     if state.get("status") != "ready":
         return dict(state), memory
@@ -14457,6 +14864,28 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
     root = root_task_from_contract(contract)
     root["execution_graph_hash"] = graph.get("graph_hash")
     root["approved_plan_snapshot_hash"] = (snapshot or {}).get("snapshot_hash")
+    if RUN.get("stage5b_enabled"):
+        root["stage5b_enabled"] = True
+        root["stage5b_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
+        RUN["stage5b_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
+        root["validated_child_plan"] = [
+            {
+                "child_id": item.get("execution_contract_id"),
+                # Stage 4's worker_required flag controls whether a Worker is
+                # needed; it is not an optional-child declaration.  Every
+                # validated graph responsibility is mandatory unless the
+                # authority explicitly says otherwise.
+                "required": not (
+                    item.get("optional") is True or item.get("required") is False
+                ),
+                "execution_contract_id": item.get("execution_contract_id"),
+                "contract_hash": item.get("contract_hash"),
+                "plan_node_ids": list(item.get("plan_node_ids", []) or []),
+                "owned_plan_node_ids": list(item.get("owned_plan_node_ids", []) or []),
+            }
+            for item in state.get("contracts", []) or []
+            if isinstance(item, dict)
+        ]
     TASKS["ROOT"] = root
     RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0))
     update_task_ledger(root)
@@ -14560,27 +14989,59 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             responsibility_type=execution_contract.get("responsibility_type"),
             status=result.get("status"),
         )
-    required = [
-        item for item in state.get("contracts", []) or []
-        if item.get("worker_required")
+    child_records = [
+        {"task": TASKS.get(str(item.get("execution_contract_id")), {}),
+         "result": results.get(str(item.get("execution_contract_id")), {"status": "pending"})}
+        for item in state.get("contracts", []) or []
+        if isinstance(item, dict)
     ]
-    passed = all(results.get(item.get("execution_contract_id"), {}).get("status") == "done"
-                 for item in required) and all(
-                     result.get("status") == "done" for result in results.values()
-                 )
-    root_result = {
-        "status": "done" if passed else "failed",
-        "summary": (
-            "approved plan execution graph verified"
-            if passed else "approved plan execution graph has an unresolved contract"
-        ),
-        "memory": memory,
+    if RUN.get("stage5b_enabled"):
+        readiness = _stage5b_parent_readiness(root, contract, child_records, repo_snapshot)
+        if readiness and readiness.get("readiness") == "READY":
+            root_result = _aggregate_stage5b_parent(
+                root, contract, child_records, memory, repo_snapshot,
+                root=True, readiness=readiness,
+            )
+        else:
+            root_result = {
+                "status": "failed",
+                "failure_type": INTEGRATION_NOT_READY,
+                "integration_result": INTEGRATION_NOT_READY,
+                "summary": "approved plan execution graph is not ready for parent integration",
+                "memory": memory,
+                "children": _stage5b_child_projection(child_records),
+                "integration_readiness": copy.deepcopy(readiness),
+                "integration_executor_calls": 0,
+            }
+    else:
+        required = [
+            item for item in state.get("contracts", []) or []
+            if item.get("worker_required")
+        ]
+        passed = all(results.get(item.get("execution_contract_id"), {}).get("status") == "done"
+                     for item in required) and all(
+                         result.get("status") == "done" for result in results.values()
+                     )
+        root_result = {
+            "status": "done" if passed else "failed",
+            "summary": (
+                "approved plan execution graph verified"
+                if passed else "approved plan execution graph has an unresolved contract"
+            ),
+            "memory": memory,
+            "plan_id": (snapshot or {}).get("plan_id"),
+            "plan_hash": (snapshot or {}).get("plan_hash"),
+            "approved_plan_snapshot_hash": (snapshot or {}).get("snapshot_hash"),
+            "execution_graph_hash": graph.get("graph_hash"),
+            "contract_results": compact_results,
+        }
+    root_result.update({
         "plan_id": (snapshot or {}).get("plan_id"),
         "plan_hash": (snapshot or {}).get("plan_hash"),
         "approved_plan_snapshot_hash": (snapshot or {}).get("snapshot_hash"),
         "execution_graph_hash": graph.get("graph_hash"),
         "contract_results": compact_results,
-    }
+    })
     _mark_task_result(root, root_result)
     RUN["execution_graph_execution"] = {
         "plan_id": (snapshot or {}).get("plan_id"),
@@ -15145,6 +15606,167 @@ def run_verification_applicability_self_test():
     finally:
         for name, value in saved.items():
             globals()[name] = value
+
+
+def run_verified_child_integration_self_test():
+    """Exercise the V21 readiness/receipt/integration boundary without models."""
+    def child(root, child_id, source, status="done", failure_type=None):
+        focused = f"tests/{child_id.lower()}.test.js"
+        contract_hash = f"CONTRACT-{child_id}"
+        task = {
+            "id": child_id, "parent": "PARENT", "status": status,
+            "goal": f"Implement {child_id}", "done_when": [f"{child_id} is verified"],
+            "plan_node_ids": [f"NODE-{child_id}"],
+            "owned_plan_node_ids": [f"NODE-{child_id}"],
+            "execution_contract_id": f"EXEC-{child_id}",
+            "execution_contract": {
+                "execution_contract_id": f"EXEC-{child_id}",
+                "contract_hash": contract_hash, "plan_hash": "PARENT-PLAN",
+                "plan_node_ids": [f"NODE-{child_id}"],
+                "owned_plan_node_ids": [f"NODE-{child_id}"],
+                "allowed_mutation_paths": [source],
+                "done_when": [f"{child_id} is verified"],
+            },
+        }
+        routes = [
+            {"kind": "FOCUSED_TEST", "required": True, "applicable": True,
+             "target": focused, "result": "PENDING"},
+            {"kind": "SYNTAX_STATIC_GATE", "required": True, "applicable": True,
+             "target": source, "result": "PENDING"},
+            {"kind": "BROWSER", "required": False, "applicable": False,
+             "target": None, "result": SKIPPED_NOT_APPLICABLE},
+        ]
+        passed = status == "done"
+        aggregation = {
+            "passed": passed, "evidence_available": passed,
+            "failure_codes": [] if passed else ["REQUIRED_VERIFICATION_FAILED"],
+            "actual_passes": [dict(route, result=VERIFICATION_PASS) for route in routes[:2]] if passed else [],
+            "actual_failures": [] if passed else [dict(routes[0], result=VERIFICATION_FAIL)],
+            "skipped_not_applicable": [routes[2]],
+            "verification_routes": routes,
+        }
+        result = {
+            "status": status, "summary": f"{child_id} self-test result",
+            "failure_type": failure_type,
+            "gate": {"verification_aggregation": aggregation},
+            "builder": {"status": status, "tool_evidence": [{
+                "tool": "run_command", "target": f"node {focused}",
+                "result": "[exit_code=0] focused test passed",
+            }] if passed else []},
+        }
+        receipt = _create_verified_child_receipt_v21(
+            task, result, parent_id="PARENT",
+            parent_contract={
+                "contract_hash": "PARENT-CONTRACT", "plan_hash": "PARENT-PLAN",
+            }, workspace=root,
+        )
+        return task, result, receipt
+
+    with tempfile.TemporaryDirectory(
+        prefix="mini_hivo_verified_child_selftest_", ignore_cleanup_errors=True,
+    ) as tmp:
+        root = Path(tmp)
+        for relative, content in (
+            ("src/a.js", "export const a = 1;\n"),
+            ("src/b.js", "export const b = 1;\n"),
+            ("tests/a.test.js", "const a = require('../src/a.js'); test('a', () => a);\n"),
+            ("tests/b.test.js", "const b = require('../src/b.js'); test('b', () => b);\n"),
+            ("tests/integration.test.js", "test('integration', () => {});\n"),
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        parent = {
+            "id": "PARENT", "goal": "integrate approved responsibilities",
+            "integration_routes": [
+                {"kind": "INTEGRATION_TEST", "required": True, "applicable": True,
+                 "target": "tests/integration.test.js", "result": "PENDING"},
+                {"kind": "BROWSER", "required": False, "applicable": False,
+                 "target": None, "result": SKIPPED_NOT_APPLICABLE},
+            ],
+        }
+        parent_contract = {
+            "contract_hash": "PARENT-CONTRACT", "plan_hash": "PARENT-PLAN",
+            "execution_contract_id": "PARENT",
+        }
+        plan = [
+            {"child_id": "A", "required": True, "execution_contract_id": "EXEC-A",
+             "contract_hash": "CONTRACT-A", "plan_node_ids": ["NODE-A"],
+             "owned_plan_node_ids": ["NODE-A"]},
+            {"child_id": "B", "required": True, "execution_contract_id": "EXEC-B",
+             "contract_hash": "CONTRACT-B", "plan_node_ids": ["NODE-B"],
+             "owned_plan_node_ids": ["NODE-B"]},
+        ]
+        a = child(root, "A", "src/a.js")
+        b = child(root, "B", "src/b.js")
+        fresh_pairs = [(a[0], a[1]), (b[0], b[1])]
+        fresh_receipts = {"A": a[2], "B": b[2]}
+        partial_c = child(root, "C", "src/a.js", status="failed", failure_type="MISSION_COMPILER_REJECTED")
+        partial_plan = plan + [{
+            "child_id": "C", "required": True, "execution_contract_id": "EXEC-C",
+            "contract_hash": "CONTRACT-C", "plan_node_ids": ["NODE-C"],
+            "owned_plan_node_ids": ["NODE-C"],
+        }]
+        partial_gate = _assess_integration_readiness_v21(
+            parent, fresh_pairs + [(partial_c[0], partial_c[1])], {"A": a[2]},
+            parent_contract=parent_contract, validated_child_plan=partial_plan,
+            workspace=root,
+        )
+        partial_integration = _aggregate_parent_integration_v21(
+            parent, parent_contract, partial_gate, [], workspace=root,
+        )
+        fresh_gate = _assess_integration_readiness_v21(
+            parent, fresh_pairs, fresh_receipts, parent_contract=parent_contract,
+            validated_child_plan=plan, workspace=root,
+        )
+        (root / "src/a.js").write_text("export const a = 2;\n", encoding="utf-8")
+        stale_gate = _assess_integration_readiness_v21(
+            parent, fresh_pairs, fresh_receipts, parent_contract=parent_contract,
+            validated_child_plan=plan, workspace=root,
+        )
+        (root / "src/a.js").write_text("export const a = 1;\n", encoding="utf-8")
+        pass_result = _aggregate_parent_integration_v21(
+            parent, parent_contract, fresh_gate, [{
+                "tool": "run_command", "target": "node tests/integration.test.js",
+                "result": "[exit_code=0] integration passed",
+            }], workspace=root,
+        )
+        fail_result = _aggregate_parent_integration_v21(
+            parent, parent_contract, fresh_gate, [{
+                "tool": "run_command", "target": "node tests/integration.test.js",
+                "result": "[exit_code=1] integration failed",
+            }], workspace=root,
+        )
+        checks = {
+            "partial tree not ready": (
+                partial_gate.get("reason") == NOT_READY_CHILD_FAILURE
+                and partial_integration.get("status") == INTEGRATION_NOT_READY
+                and partial_integration.get("integration_executor_calls") == 0
+            ),
+            "all fresh ready": (
+                fresh_gate.get("readiness") == "READY"
+                and fresh_gate.get("model_calls") == 0
+            ),
+            "stale evidence not ready": (
+                stale_gate.get("reason") == NOT_READY_STALE_EVIDENCE
+                and stale_gate.get("freshness", {}).get("stale_child_ids") == ["A"]
+            ),
+            "integration pass creates parent receipt": (
+                pass_result.get("status") == PARENT_VERIFIED
+                and (pass_result.get("parent_verification_receipt") or {}).get("verified") is True
+            ),
+            "integration fail stays unverified": (
+                fail_result.get("status") == INTEGRATION_FAILED
+                and fail_result.get("parent_verified") is False
+                and "parent_verification_receipt" not in fail_result
+            ),
+            "skip is not pass": SKIPPED_NOT_APPLICABLE != VERIFICATION_PASS,
+            "zero model calls": (
+                all(item.get("model_calls") == 0 for item in (partial_gate, fresh_gate, stale_gate))
+                and (pass_result.get("parent_verification_receipt") or {}).get("provenance", {}).get("model_calls") == 0
+            ),
+        }
+        return {"passed": all(checks.values()), "checks": checks}
 
 
 def run_self_test(install_browser=False):
@@ -16333,6 +16955,9 @@ def run_self_test(install_browser=False):
         v205a_verification_self_test = run_verification_applicability_self_test()
         for name, ok in v205a_verification_self_test.get("checks", {}).items():
             print(f"{('v20.5A ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v215b_verified_child_self_test = run_verified_child_integration_self_test()
+        for name, ok in v215b_verified_child_self_test.get("checks", {}).items():
+            print(f"{('v21.5B ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -16917,6 +17542,9 @@ def run_self_test(install_browser=False):
             "v19.5 scheduler self-test": v195_scheduler_self_test.get("passed") is True,
             "v20.5A verification applicability self-test": (
                 v205a_verification_self_test.get("passed") is True
+            ),
+            "v21.5B verified-child integration self-test": (
+                v215b_verified_child_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
