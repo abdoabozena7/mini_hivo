@@ -1585,6 +1585,14 @@ def new_metrics(mode):
         "execution_contract_stale_blocks": 0,
         "execution_dependency_blocks": 0,
         "authority_fail_closed_blocks": 0,
+        # V19.5 child scheduling accounting keeps sequential order separate
+        # from explicit dependency semantics.  A failed child must not stop
+        # an eligible sibling, while required dependents remain blocked.
+        "child_scheduler_nodes_considered": 0,
+        "child_scheduler_independent_after_failure": 0,
+        "child_scheduler_dependency_blocks": 0,
+        "child_scheduler_continued_after_failure": 0,
+        "child_scheduler_terminal_failures": 0,
         # V19.4 deterministic structural granularity accounting.  These
         # observations are separate from Task-Fit model calls and never alter
         # the approved contract or its hash.
@@ -1746,6 +1754,8 @@ def compact_task_tree():
             "children": list(task.get("children", [])),
             "changed_files": bounded_list(task.get("changed_files", []), 12, 140),
         }
+        if task.get("child_scheduler") is not None:
+            entry["child_scheduler"] = copy.deepcopy(task.get("child_scheduler"))
         if task.get("execution_contract_id"):
             entry["execution_contract_id"] = task.get("execution_contract_id")
             entry["execution_contract_hash"] = task.get("execution_contract_hash")
@@ -1831,7 +1841,8 @@ def print_task_tree():
 
     def status_label(task):
         status = str(task.get("status", "pending")).casefold()
-        return {"done": "PASS", "failed": "FAIL", "too_broad": "TOO_BROAD",
+        return {"done": "PASS", "failed": "FAIL", "blocked": "BLOCKED",
+                "dependency_blocked": "DEPENDENCY_BLOCKED", "too_broad": "TOO_BROAD",
                 "budget_exhausted": EXECUTION_BUDGET_EXHAUSTED,
                 "running": "RUN", "pending": "PENDING"}.get(status, status.upper())
 
@@ -10747,6 +10758,8 @@ def _resplit_children_snapshot(completed):
             child_task = {"id": str(child_task)}
         if not isinstance(child_result, dict):
             child_result = {"status": "failed", "summary": str(child_result)}
+        scheduler = child_task.get("child_scheduler")
+        scheduler = scheduler if isinstance(scheduler, dict) else {}
         snapshot.append({
             "task_id": str(child_task.get("id", "")),
             "status": str(child_result.get("status", "failed")),
@@ -10757,6 +10770,13 @@ def _resplit_children_snapshot(completed):
             "integration_manifest": compact_manifest(
                 child_result.get("integration_manifest") or child_task.get("integration_manifest")
             ),
+            "order_position": scheduler.get("order_position"),
+            "explicit_dependencies": list(scheduler.get("explicit_dependencies", []) or []),
+            "eligible": scheduler.get("eligible"),
+            "started": scheduler.get("started"),
+            "terminal_status": scheduler.get("terminal_status"),
+            "blocked_by": list(scheduler.get("blocked_by", []) or []),
+            "continued_after_prior_failure": scheduler.get("continued_after_prior_failure"),
             "evidence": _failure_evidence_from_result(child_result),
         })
     return snapshot
@@ -13589,51 +13609,325 @@ def _backtrack_decomposition(task, depth, contract, memory, repo_snapshot, paren
     )
 
 
+def _scheduler_dependency_ids(child):
+    """Read only explicitly declared child-DAG dependencies.
+
+    The execution order supplied by the Decomposer is intentionally not a
+    dependency list.  Direct task fields are the scheduler boundary used by
+    deterministic callers and tests.  The nested child contract accepts the
+    explicit child-only spellings as a compatibility path, but its inherited
+    parent ``dependencies`` field is not treated as a sibling edge.
+    """
+    if not isinstance(child, dict):
+        return []
+
+    def normalize(value):
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (list, tuple, set)):
+            values = list(value)
+        else:
+            values = []
+        result = []
+        seen = set()
+        for item in values:
+            if isinstance(item, dict):
+                item = item.get("task_id", item.get("id", ""))
+            item = str(item).strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result
+
+    direct_fields = (
+        "depends_on", "child_dependencies", "child_dependency_ids",
+        "explicit_dependencies", "dependency_ids", "dependencies",
+    )
+    direct_present = False
+    dependency_ids = []
+    for field in direct_fields:
+        if field not in child:
+            continue
+        direct_present = True
+        for item in normalize(child.get(field)):
+            if item not in dependency_ids:
+                dependency_ids.append(item)
+    if direct_present:
+        return dependency_ids
+
+    # ``execution_contract_child`` may carry a child-specific dependency field
+    # in deterministic fixtures.  Do not read its inherited contract-level
+    # ``dependencies`` field: those dependencies belong to the parent
+    # execution graph, not to sibling failure propagation.
+    nested = child.get("execution_contract_child")
+    if isinstance(nested, dict):
+        for field in ("depends_on", "child_dependencies", "child_dependency_ids", "explicit_dependencies"):
+            for item in normalize(nested.get(field)):
+                if item not in dependency_ids:
+                    dependency_ids.append(item)
+    return dependency_ids
+
+
+def _scheduler_result_is_success(result):
+    result = result if isinstance(result, dict) else {}
+    status = str((result or {}).get("status", "")).casefold()
+    return status in {"done", "completed", "verified", "passed"}
+
+
+def _scheduler_result_is_dependency_blocked(result):
+    result = result if isinstance(result, dict) else {}
+    status = str(result.get("status", "")).casefold().replace("-", "_")
+    failure_type = str(result.get("failure_type", "")).casefold().replace("-", "_")
+    return (
+        status in {"blocked", "dependency_blocked"}
+        and failure_type in {"", EXECUTION_DEPENDENCY_BLOCKED.casefold().replace("-", "_")}
+    ) or failure_type == EXECUTION_DEPENDENCY_BLOCKED.casefold().replace("-", "_")
+
+
+def _scheduler_status_label(result, task=None):
+    """Normalize a prior node result for dependency decisions and evidence."""
+    result = result if isinstance(result, dict) else {}
+    if _scheduler_result_is_success(result):
+        return "COMPLETED"
+    if _scheduler_result_is_dependency_blocked(result):
+        return "DEPENDENCY_BLOCKED"
+    status = str(result.get("status", "") or (task or {}).get("status", "pending")).casefold()
+    if status in {"pending", "running"}:
+        return status.upper()
+    return "FAILED"
+
+
+def _scheduler_dependency_summary(child, result):
+    """Return the existing compact completed-result summary for a dependency."""
+    result = result if isinstance(result, dict) else {}
+    return {
+        "task_id": child.get("id"), "goal": child.get("goal", ""),
+        "status": result.get("status", "failed"),
+        "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+        "changed_files": _compact_manifest_values(result.get("changed_files", []), 12, 140),
+        "integration_manifest": compact_manifest(
+            result.get("integration_manifest") or child.get("integration_manifest")
+        ),
+        "evidence": compact_evidence_summary(result),
+    }
+
+
+def _scheduler_dependency_state(dependency_id, results, tasks, inherited):
+    """Resolve one explicit dependency without treating order as an edge."""
+    dependency_id = str(dependency_id)
+    result = results.get(dependency_id)
+    dependency_task = tasks.get(dependency_id, {})
+    source = "child_result"
+    if result is None:
+        result = next(
+            (
+                item for item in inherited
+                if isinstance(item, dict) and str(item.get("task_id", "")) == dependency_id
+            ),
+            None,
+        )
+        source = "inherited_summary" if result is not None else "unresolved"
+    if not isinstance(result, dict):
+        result = {}
+    raw_status = str(result.get("status", "") or dependency_task.get("status", "pending"))
+    normalized_status = _scheduler_status_label(result, dependency_task)
+    return {
+        "dependency_id": dependency_id,
+        "status": raw_status,
+        "normalized_status": normalized_status,
+        "failure_type": str(result.get("failure_type", "")),
+        "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
+        "source": source,
+    }
+
+
+def _scheduler_dependency_blocked_result(child, blocking, memory):
+    blocked_by = [str(item.get("dependency_id")) for item in blocking]
+    detail = ", ".join(
+        f"{item.get('dependency_id')} [{item.get('normalized_status')}]"
+        for item in blocking
+    ) or "required dependency"
+    return {
+        "status": "blocked",
+        "failure_type": EXECUTION_DEPENDENCY_BLOCKED,
+        "orchestration_failure": EXECUTION_DEPENDENCY_BLOCKED,
+        "dependency_status": "DEPENDENCY_BLOCKED",
+        "blocked_by": blocked_by,
+        "dependency_statuses": copy.deepcopy(blocking),
+        "summary": f"child {child.get('id')} dependency-blocked by {detail}",
+        "memory": memory,
+    }
+
+
 def _execute_children(task, children, depth, contract, memory, repo_snapshot, parent_summary,
                       dependency_summaries, fit_decider, leaf_executor, aggregator):
-    """Run sibling milestones sequentially, then integrate only verified results."""
+    """Run children sequentially while propagating only explicit dependencies."""
     completed = []
-    dependencies = list(dependency_summaries or [])
+    inherited_dependencies = copy.deepcopy(list(dependency_summaries or []))
+    child_list = [child for child in (children or []) if isinstance(child, dict)]
+    child_by_id = {str(child.get("id", "")): child for child in child_list}
+    results = {}
+    prior_failure = False
     child_parent = f"{task.get('goal', '')} | {compact_text(task.get('summary') or '(parent is being decomposed)', 500)}"
-    for child in children:
+    scheduler = {
+        "execution_order": [str(child.get("id", "")) for child in child_list],
+        "dependency_edges": [], "nodes": [], "parent_status": "running",
+    }
+    task["child_scheduler"] = scheduler
+    for child in child_list:
+        child_id = str(child.get("id", ""))
+        dependency_ids = _scheduler_dependency_ids(child)
+        scheduler["dependency_edges"].extend(
+            {"from": dependency_id, "to": child_id}
+            for dependency_id in dependency_ids
+        )
+        dependency_states = [
+            _scheduler_dependency_state(dependency_id, results, child_by_id, inherited_dependencies)
+            for dependency_id in dependency_ids
+        ]
+        blocking = [
+            state for state in dependency_states
+            if state.get("normalized_status") != "COMPLETED"
+        ]
+        node = {
+            "child_id": child_id,
+            "order_position": len(scheduler["nodes"]) + 1,
+            "explicit_dependencies": dependency_ids,
+            "dependency_statuses": dependency_states,
+            "eligible": not blocking,
+            "started": False,
+            "terminal_status": "PENDING",
+            "blocked_by": [item.get("dependency_id") for item in blocking],
+            "continued_after_prior_failure": bool(prior_failure),
+        }
+        scheduler["nodes"].append(node)
+        child["child_scheduler"] = node
+        RUN["child_scheduler_nodes_considered"] = RUN.get("child_scheduler_nodes_considered", 0) + 1
+
+        if blocking:
+            result = _scheduler_dependency_blocked_result(child, blocking, memory)
+            _mark_task_result(child, result)
+            completed.append({"task": child, "result": result})
+            results[child_id] = result
+            node["terminal_status"] = "DEPENDENCY_BLOCKED"
+            RUN["child_scheduler_dependency_blocks"] = RUN.get("child_scheduler_dependency_blocks", 0) + 1
+            prior_failure = True
+            record_run_event(
+                "child_scheduler_node", task_id=task.get("id"), child_id=child_id,
+                order_position=node["order_position"], explicit_dependencies=dependency_ids,
+                dependency_statuses=dependency_states, eligible=False, started=False,
+                terminal_status=node["terminal_status"], blocked_by=node["blocked_by"],
+                continued_after_prior_failure=node["continued_after_prior_failure"],
+            )
+            update_task_ledger(child)
+            continue
+
+        if prior_failure:
+            RUN["child_scheduler_independent_after_failure"] = RUN.get(
+                "child_scheduler_independent_after_failure", 0,
+            ) + 1
+            RUN["child_scheduler_continued_after_failure"] = RUN.get(
+                "child_scheduler_continued_after_failure", 0,
+            ) + 1
+        node["started"] = True
+        child_dependencies = copy.deepcopy(inherited_dependencies)
+        completed_dependency_ids = {
+            str(item.get("task_id", "")) for item in child_dependencies if isinstance(item, dict)
+        }
+        for dependency_id in dependency_ids:
+            dependency_result = results.get(dependency_id)
+            dependency_task = child_by_id.get(dependency_id, {})
+            if _scheduler_result_is_success(dependency_result) and dependency_id not in completed_dependency_ids:
+                child_dependencies.append(_scheduler_dependency_summary(dependency_task, dependency_result))
+                completed_dependency_ids.add(dependency_id)
         result = solve_task(
             child, depth + 1, contract, memory, repo_snapshot,
-            parent_summary=child_parent, dependency_summaries=dependencies,
+            parent_summary=child_parent, dependency_summaries=child_dependencies,
             fit_decider=fit_decider, leaf_executor=leaf_executor, aggregator=aggregator,
         )
+        result = result if isinstance(result, dict) else {
+            "status": "failed", "summary": str(result), "memory": memory,
+        }
         memory = result.get("memory", memory)
         completed.append({"task": child, "result": result})
-        if result.get("status") == "done":
+        results[child_id] = result
+        if _scheduler_result_is_success(result):
             attach_verified_manifest(child, result)
-        dependencies.append({
-            "task_id": child["id"], "goal": child["goal"], "status": result.get("status", "failed"),
-            "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
-            "changed_files": _compact_manifest_values(result.get("changed_files", []), 12, 140),
-            "integration_manifest": compact_manifest(
-                result.get("integration_manifest") or child.get("integration_manifest")
+            node["terminal_status"] = "COMPLETED"
+        else:
+            node["terminal_status"] = "FAILED"
+            if not _scheduler_result_is_dependency_blocked(result):
+                RUN["child_scheduler_terminal_failures"] = RUN.get(
+                    "child_scheduler_terminal_failures", 0,
+                ) + 1
+            prior_failure = True
+        record_run_event(
+            "child_scheduler_node", task_id=task.get("id"), child_id=child_id,
+            order_position=node["order_position"], explicit_dependencies=dependency_ids,
+            dependency_statuses=dependency_states, eligible=True, started=True,
+            terminal_status=node["terminal_status"], blocked_by=[],
+            continued_after_prior_failure=node["continued_after_prior_failure"],
+        )
+
+    failed_children = [
+        item for item in completed
+        if not _scheduler_result_is_success(item.get("result"))
+    ]
+    if failed_children:
+        first_failure = next(
+            (
+                item for item in failed_children
+                if not _scheduler_result_is_dependency_blocked(item.get("result"))
             ),
-            "evidence": compact_evidence_summary(result),
-        })
-        if result.get("status") != "done":
-            parent_result = {
-                "status": "failed", "summary": compact_text(
-                f"child {child['id']} failed: {result.get('summary', '')}", MAX_NODE_SUMMARY_CHARS,
-                ), "memory": memory,
-                "failure_type": result.get("failure_type", "CHILD_FAILURE"), "children": completed,
+            failed_children[0],
+        )
+        failed_child = first_failure.get("task", {})
+        failed_result = first_failure.get("result", {})
+        if _scheduler_result_is_dependency_blocked(failed_result):
+            failure_summary = compact_text(
+                failed_result.get("summary", f"child {failed_child.get('id')} was dependency-blocked"),
+                MAX_NODE_SUMMARY_CHARS,
+            )
+        else:
+            failure_summary = compact_text(
+                f"child {failed_child.get('id')} failed: {failed_result.get('summary', '')}",
+                MAX_NODE_SUMMARY_CHARS,
+            )
+        parent_result = {
+            "status": "failed", "summary": failure_summary, "memory": memory,
+            "failure_type": failed_result.get("failure_type", "CHILD_FAILURE"),
+            "children": completed,
+        }
+        scheduler["parent_status"] = "failed"
+        scheduler["terminal_children"] = [
+            {
+                "child_id": str(item.get("task", {}).get("id", "")),
+                "status": str(item.get("result", {}).get("status", "failed")),
             }
-            _update_resplit_outcome(task, children, completed, parent_result)
-            _record_task_failure(task, parent_result, phase="child_result")
+            for item in completed
+        ]
+        _update_resplit_outcome(task, children, completed, parent_result)
+        _record_task_failure(task, parent_result, phase="child_result")
+        alternative = None
+        if not _scheduler_result_is_dependency_blocked(failed_result):
             alternative = _backtrack_decomposition(
                 task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
-                child, result, fit_decider, leaf_executor, aggregator,
+                failed_child, failed_result, fit_decider, leaf_executor, aggregator,
             )
-            if alternative is not None:
-                return alternative
-            if task.get("decomposition_search_exhausted"):
-                parent_result["decomposition_search_exhausted"] = True
-                _record_task_failure(task, parent_result, phase="decomposition_search")
-            _mark_task_result(task, parent_result)
-            return parent_result
+        if alternative is not None:
+            return alternative
+        if task.get("decomposition_search_exhausted"):
+            parent_result["decomposition_search_exhausted"] = True
+            _record_task_failure(task, parent_result, phase="decomposition_search")
+        _mark_task_result(task, parent_result)
+        record_run_event(
+            "child_scheduler_complete", task_id=task.get("id"), status="failed",
+            execution_order=scheduler["execution_order"],
+            dependency_edges=scheduler["dependency_edges"],
+            child_statuses=scheduler["terminal_children"],
+        )
+        return parent_result
 
     aggregate_fn = aggregator or (
         _aggregate_integration_children if task.get("kind") == "integration" else
@@ -13645,8 +13939,22 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
     except ProviderError as exc:
         aggregate = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     aggregate["memory"] = aggregate.get("memory", memory)
+    scheduler["parent_status"] = str(aggregate.get("status", "failed"))
+    scheduler["terminal_children"] = [
+        {
+            "child_id": str(item.get("task", {}).get("id", "")),
+            "status": str(item.get("result", {}).get("status", "failed")),
+        }
+        for item in completed
+    ]
     _mark_task_result(task, aggregate)
     _update_resplit_outcome(task, children, completed, aggregate)
+    record_run_event(
+        "child_scheduler_complete", task_id=task.get("id"),
+        status=scheduler["parent_status"], execution_order=scheduler["execution_order"],
+        dependency_edges=scheduler["dependency_edges"],
+        child_statuses=scheduler["terminal_children"],
+    )
     if task["status"] == "done":
         event(f"[DONE {task['id']}]", task=task["id"], action="aggregated verified node")
     else:
@@ -14443,6 +14751,118 @@ def run_auto_request(user_text, memory, interactive=True):
 def _mock_contract():
     return {"status": "ready", "goal": "Build hard mock", "requirements": ["a", "b", "c"],
             "constraints": ["local"], "success_criteria": ["verified"], "original_goal": "Build hard mock"}
+
+
+def run_dependency_scheduler_self_test():
+    """Exercise V19.5 failure isolation with deterministic Worker stubs."""
+    saved = {
+        name: globals()[name]
+        for name in (
+            "WORKSPACE", "RUN", "TASKS", "ROLE_STATUS", "DASHBOARD", "RUN_STARTED", "RUN_ID",
+            "ACTIVE_TRANSACTION", "LAST_COMMITTED_TRANSACTION", "ACTIVE_CONTRACT", "ACTIVE_TOOL_CONTRACT",
+            "MEMORY_STORE", "FORCE_CPU_FOR_RUN", "VISION_ENABLED_FOR_RUN", "VISION_ERROR",
+            "PREFLIGHT_CONFLICT_STATE",
+        )
+    }
+
+    def scenario(specs, failures):
+        reset_run("recursive")
+        contract = {
+            "status": "ready", "goal": "deterministic scheduler self-test",
+            "requirements": ["all child states are accounted for"],
+            "success_criteria": ["parent preserves strict failure"],
+        }
+        parent = make_task("P", contract["goal"], 0, "ROOT", ["children accounted"], [])
+        children = []
+        for child_id, dependency_ids in specs:
+            child = make_task(
+                child_id, f"self-test {child_id}", 1, "P", [f"{child_id} complete"], [],
+            )
+            child["dependencies"] = list(dependency_ids)
+            children.append(child)
+            TASKS[child_id] = child
+            parent["children"].append(child_id)
+        TASKS["P"] = parent
+        RUN["tasks_created"] = len(children) + 1
+        fit_calls = []
+        leaf_calls = []
+
+        def fit(child, *_args):
+            fit_calls.append(child["id"])
+            return {"decision": "execute"}
+
+        def leaf(child, _contract, memory, _repo, _parent, _dependencies):
+            leaf_calls.append(child["id"])
+            if child["id"] in failures:
+                return {
+                    "status": "failed", "failure_type": "VERIFICATION_TARGET_UNRESOLVED",
+                    "summary": "deterministic child failure", "memory": memory,
+                }
+            return {"status": "done", "summary": "deterministic child success", "memory": memory}
+
+        def aggregate(_task, _contract, _children, memory, _repo, root=False):
+            return {"status": "done", "summary": "all children passed", "memory": memory}
+
+        result = _execute_children(
+            parent, children, 0, contract, {}, {"files": []}, "", [],
+            fit_decider=fit, leaf_executor=leaf, aggregator=aggregate,
+        )
+        return {
+            "result": result, "parent": parent, "children": children,
+            "fit_calls": fit_calls, "leaf_calls": leaf_calls,
+            "metrics": copy.deepcopy(RUN),
+        }
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="mini_hivo_scheduler_selftest_", ignore_cleanup_errors=True) as tmp:
+            WORKSPACE = Path(tmp)
+            MEMORY_STORE = None
+            independent = scenario(
+                [("A", []), ("B", []), ("C", [])], {"A"},
+            )
+            dependent = scenario(
+                [("A", []), ("B", []), ("C", ["A"])], {"A"},
+            )
+            transitive = scenario(
+                [("A", []), ("B", ["A"]), ("C", ["B"]), ("D", [])], {"A"},
+            )
+            independent_statuses = {
+                child["id"]: child["status"] for child in independent["children"]
+            }
+            dependent_statuses = {
+                child["id"]: child["status"] for child in dependent["children"]
+            }
+            transitive_statuses = {
+                child["id"]: child["status"] for child in transitive["children"]
+            }
+            checks = {
+                "independent siblings continue": (
+                    independent["leaf_calls"] == ["A", "B", "C"]
+                    and independent_statuses == {"A": "failed", "B": "done", "C": "done"}
+                    and independent["result"].get("status") == "failed"
+                ),
+                "explicit dependency blocks": (
+                    dependent["leaf_calls"] == ["A", "B"]
+                    and dependent_statuses == {"A": "failed", "B": "done", "C": "blocked"}
+                    and dependent["children"][2]["child_scheduler"].get("blocked_by") == ["A"]
+                ),
+                "transitive dependency blocks": (
+                    transitive["leaf_calls"] == ["A", "D"]
+                    and transitive_statuses == {"A": "failed", "B": "blocked", "C": "blocked", "D": "done"}
+                ),
+                "strict parent failure": (
+                    independent["result"].get("status") == "failed"
+                    and dependent["result"].get("status") == "failed"
+                ),
+                "no model calls": all(
+                    item["metrics"].get("model_calls", 0) == 0
+                    for item in (independent, dependent, transitive)
+                ),
+            }
+            return {"passed": all(checks.values()), "checks": checks}
+    finally:
+        for name, value in saved.items():
+            globals()[name] = value
 
 
 def run_self_test(install_browser=False):
@@ -15625,6 +16045,9 @@ def run_self_test(install_browser=False):
             RUN.update(v1941_saved_run)
             TASKS.clear()
             TASKS.update(v1941_saved_tasks)
+        v195_scheduler_self_test = run_dependency_scheduler_self_test()
+        for name, ok in v195_scheduler_self_test.get("checks", {}).items():
+            print(f"{('v19.5 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -16206,6 +16629,7 @@ def run_self_test(install_browser=False):
                 and v1941_stale_result.get("task_id") == "ROOT"
                 and v1941_stale_structural_calls == v1941_stale_structural_calls_after
             ),
+            "v19.5 scheduler self-test": v195_scheduler_self_test.get("passed") is True,
         }
         for name, ok in checks.items():
             print(f"{name:<24} {'PASS' if ok else 'FAIL'}")
