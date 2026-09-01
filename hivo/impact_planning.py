@@ -286,6 +286,12 @@ def build_planning_role_packet(
     mandatory_items=None,
     payload_factory=None,
     packet_complete_override=None,
+    planning_core_hash=None,
+    mandatory_payload_audit=None,
+    mandatory_semantic_coverage=None,
+    mandatory_model_chars_before_normalization=None,
+    mandatory_model_chars_after_normalization=None,
+    mandatory_core_metrics=None,
 ):
     """Compile one exact, deterministic model-facing planning packet.
 
@@ -450,6 +456,44 @@ def build_planning_role_packet(
             ),
         },
     }
+    if planning_core_hash:
+        audit["mandatory_core_hash"] = str(planning_core_hash)
+    if mandatory_payload_audit is not None:
+        audit["mandatory_payload_audit"] = copy.deepcopy(mandatory_payload_audit)
+    if mandatory_semantic_coverage is not None:
+        audit["mandatory_semantic_coverage"] = copy.deepcopy(mandatory_semantic_coverage)
+        if isinstance(mandatory_semantic_coverage, list):
+            audit["mandatory_semantic_coverage_rate"] = (
+                sum(bool(
+                    item.get("represented")
+                    and item.get("source_provenance_retained")
+                    and (
+                        not item.get("model_semantic_required")
+                        or item.get("model_semantic_represented")
+                    )
+                ) for item in mandatory_semantic_coverage if isinstance(item, dict))
+                / len(mandatory_semantic_coverage)
+                if mandatory_semantic_coverage else 1.0
+            )
+        else:
+            audit["mandatory_semantic_coverage_rate"] = float(mandatory_semantic_coverage)
+    if mandatory_model_chars_before_normalization is not None:
+        audit["mandatory_model_chars_before_normalization"] = int(
+            mandatory_model_chars_before_normalization
+        )
+    if mandatory_model_chars_after_normalization is not None:
+        audit["mandatory_model_chars_after_normalization"] = int(
+            mandatory_model_chars_after_normalization
+        )
+    if isinstance(mandatory_core_metrics, dict):
+        audit["mandatory_core_metrics"] = copy.deepcopy(mandatory_core_metrics)
+        for metric_name in (
+            "mandatory_planning_records_input", "mandatory_semantic_units",
+            "mandatory_semantic_units_deduplicated", "mandatory_provenance_refs",
+            "planning_core_model_calls",
+        ):
+            if metric_name in mandatory_core_metrics:
+                audit[metric_name] = copy.deepcopy(mandatory_core_metrics[metric_name])
     hash_material = {
         key: value for key, value in audit.items()
         if key not in {"errors", "status"}
@@ -1493,6 +1537,1146 @@ def _planner_source_ids(item):
     return list(dict.fromkeys(refs))[:12]
 
 
+# V24.2 canonical mandatory planning core.  This is deliberately kept in the
+# Stage 3 planning module so every role packet uses the same deterministic
+# semantic identity rules.  The core is a full structured artifact; only its
+# compact ``model_projection`` is placed in a provider-facing packet.
+CANONICAL_MANDATORY_PLANNING_CORE_TYPE = "CanonicalMandatoryPlanningCore"
+CANONICAL_MANDATORY_PLANNING_CORE_VERSION = "V24.2"
+CANONICAL_MANDATORY_CORE_TYPE = CANONICAL_MANDATORY_PLANNING_CORE_TYPE
+CANONICAL_MANDATORY_CORE_VERSION = CANONICAL_MANDATORY_PLANNING_CORE_VERSION
+
+_CORE_KIND_ORDER = (
+    "desired", "ownership", "interface", "preservation", "prohibition",
+    "dnt", "conflict", "current", "surface", "impact", "metadata",
+)
+_CORE_ALIAS_PREFIX = {
+    "desired": "REQ",
+    "ownership": "AUTH",
+    "interface": "IFACE",
+    "preservation": "PRES",
+    "prohibition": "PROH",
+    "dnt": "DNT",
+    "conflict": "CONFLICT",
+    "current": "STATE",
+    "surface": "SURF",
+    "impact": "IMPACT",
+    "metadata": "META",
+}
+_CORE_SEMANTIC_KIND_PRIORITY = {
+    "desired": 0, "conflict": 1, "ownership": 2, "interface": 3,
+    "preservation": 4, "prohibition": 5, "dnt": 6, "current": 7,
+    "surface": 8, "impact": 9, "metadata": 10,
+}
+
+
+def _core_normalize_text(value):
+    """Normalize prose for exact identity checks, never fuzzy equivalence."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _core_slug(value, limit=42):
+    text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").upper()).strip("-")
+    text = re.sub(r"-+", "-", text)
+    if not text:
+        return "ITEM"
+    if len(text) <= limit:
+        return text
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8].upper()
+    return text[: max(1, limit - 9)].rstrip("-") + "-" + digest
+
+
+def _core_text(item, limit=MAX_TEXT_CHARS):
+    value = item if isinstance(item, dict) else {}
+    raw = (
+        value.get("meaning") or value.get("text") or value.get("verified_fact")
+        or value.get("fact") or value.get("fact_summary") or value.get("authority_fact")
+        or value.get("resolution") or value.get("reason") or value.get("value") or ""
+    )
+    if isinstance(raw, dict):
+        raw = raw.get("fact") or raw.get("text") or raw.get("summary") or ""
+    return _compact(raw, limit)
+
+
+def _core_path(item):
+    value = item if isinstance(item, dict) else {}
+    return _normal_path(value.get("path") or value.get("canonical_path") or value.get("verified_path"))
+
+
+def _core_symbol(item):
+    value = item if isinstance(item, dict) else {}
+    return _compact(value.get("symbol") or value.get("canonical_symbol") or value.get("verified_symbol"), 180)
+
+
+def _core_relation(item):
+    """Return an explicitly structured relation, without parsing prose."""
+    value = item if isinstance(item, dict) else {}
+    candidates = [
+        value.get("semantic_relation"), value.get("structured_relation"),
+        value.get("authority_relation"), value.get("repository_relation"),
+        value.get("relation"),
+    ]
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        subject = raw.get("subject") or raw.get("domain")
+        predicate = raw.get("predicate") or raw.get("relationship")
+        obj = raw.get("object") or raw.get("owner") or raw.get("owner_entity")
+        if subject and predicate and obj:
+            return {
+                "subject": _core_normalize_text(subject),
+                "predicate": _core_normalize_text(predicate),
+                "object": _core_normalize_text(obj),
+            }
+    return None
+
+
+def _core_source_references(item):
+    """Collect full source IDs and hashes for the immutable provenance map."""
+    value = item if isinstance(item, dict) else {}
+    record_ids = []
+    hashes = []
+    reference_keys = (
+        "record_id", "source_record_id", "authority_record_id", "requirement_id",
+        "evidence_id", "conflict_id", "constraint_id", "seed_id", "surface_id", "impact_id",
+    )
+    list_keys = (
+        "source_id", "source_ids", "source_record_ids", "source_refs", "provenance_refs",
+        "evidence_ids", "evidence_refs", "repository_evidence_ids",
+        "requirement_ids", "authority_record_ids", "repository_evidence_id",
+        "current_authority_ids", "current_evidence_ids", "desired_requirement_ids",
+        "interface_ids", "surface_ids", "impact_ids", "conflict_ids",
+        "preservation_ids", "prohibition_ids", "dnt_ids",
+    )
+    hash_keys = (
+        "fact_hash", "semantic_hash", "authority_fact_hash", "file_sha256",
+        "source_hash", "source_hashes", "promotion_hash", "promotion_hashes",
+        "reentry_hash", "task_brain_hash", "planning_context_hash",
+        "source_planning_context_hash", "source_task_brain_hash", "source_reentry_hash",
+        "source_promotion_hash", "source_promotion_hashes", "source_repository_evidence_hash",
+        "source_project_brain_hash", "source_provenance_hash", "source_context_hash",
+    )
+    for key in reference_keys:
+        raw = value.get(key)
+        if raw not in (None, "", [], {}):
+            record_ids.append(str(raw))
+    for key in list_keys:
+        raw = value.get(key)
+        values = list(raw) if isinstance(raw, (list, tuple, set)) else [raw]
+        for item_value in values:
+            if item_value not in (None, "", [], {}):
+                record_ids.append(str(item_value))
+    for key in hash_keys:
+        raw = value.get(key)
+        values = list(raw) if isinstance(raw, (list, tuple, set)) else [raw]
+        for item_value in values:
+            if item_value not in (None, "", [], {}):
+                hashes.append(str(item_value))
+    # Some structured artifacts nest provenance under a ``source_provenance``
+    # or ``provenance`` object.  Read only explicitly ID/hash-shaped fields;
+    # do not serialize arbitrary metadata or classify prose as provenance.
+    for nested_key in ("source_provenance", "provenance"):
+        nested = value.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key, raw in nested.items():
+            key_text = str(key).casefold()
+            values = list(raw) if isinstance(raw, (list, tuple, set)) else [raw]
+            for item_value in values:
+                if item_value in (None, "", [], {}):
+                    continue
+                if "hash" in key_text:
+                    hashes.append(str(item_value))
+                elif key_text.endswith("id") or key_text.endswith("ids") or "ref" in key_text:
+                    record_ids.append(str(item_value))
+    record_ids = sorted(set(record_ids))
+    hashes = sorted(set(hashes))
+    references = sorted(set(record_ids + hashes))
+    return record_ids, hashes, references
+
+
+def _core_item_kind(section, item):
+    """Map an already structured source section to a semantic category."""
+    value = item if isinstance(item, dict) else {}
+    section = str(section or "").casefold()
+    category = str(value.get("category") or value.get("field") or "").casefold()
+    authority_type = " ".join(
+        [str(value.get("authority_type") or "")] + [
+            str(item) for item in list(value.get("authority_types", []) or [])
+        ]
+    ).casefold()
+    if section in {"requirements", "task_goal", "desired_obligations"}:
+        return "desired"
+    if section in {"surfaces", "surface_bindings"}:
+        return "surface"
+    if section in {"impact_seeds", "impact_slots"}:
+        return "impact"
+    if section in {"confirmed_conflicts", "conflicts"}:
+        return "conflict"
+    if section in {"dnt", "do_not_touch"}:
+        return "dnt"
+    if section in {"prohibitions", "prohibition_constraints"}:
+        return "prohibition"
+    if section in {"preservation_constraints", "preservation_obligations"}:
+        return "preservation"
+    if section in {"interfaces", "current_interfaces", "current_interface"}:
+        return "interface"
+    if section in {"current_ownership", "current_authority", "current_owners", "current_state_ownership"}:
+        if (
+            "interface" in category or "interface" in authority_type
+            or "toggle" in str(value.get("symbol") or "").casefold()
+        ):
+            return "interface"
+        if (
+            "owner" in category or "ownership" in category
+            or "owner" in authority_type or "ownership" in authority_type
+            or value.get("owner") or value.get("owner_entity")
+        ):
+            return "ownership"
+        if value.get("structured_relation") or value.get("authority_relation"):
+            relation = _core_relation(value) or {}
+            if str(relation.get("predicate", "")).casefold() in {"owner", "owns", "owned_by", "ownership"}:
+                return "ownership"
+        text = _core_text(value)
+        if re.search(r"\b(?:sole|only|owner|ownership|state owner)\b", text, re.IGNORECASE):
+            return "ownership"
+        if re.search(r"\b(?:interface|toggle|api|handler)\b", text, re.IGNORECASE):
+            return "interface"
+        if re.search(r"\b(?:preserv|retain|remain|escape|movement|unchanged)\b", text, re.IGNORECASE):
+            return "preservation"
+        return "current"
+    if section in {"planning_provenance", "current_vs_desired", "planning_rules", "bounds", "metadata"}:
+        return "metadata"
+    if "interface" in category or "interface" in authority_type:
+        return "interface"
+    if "owner" in category or "ownership" in category or "owner" in authority_type:
+        return "ownership"
+    if "prohibit" in category or "dnt" in category:
+        return "prohibition"
+    return "current"
+
+
+def _core_explicit_identity(item):
+    value = item if isinstance(item, dict) else {}
+    for key in ("canonical_semantic_id", "semantic_id", "semantic_key"):
+        raw = value.get(key)
+        if raw not in (None, "", [], {}):
+            return "EXPLICIT:" + _core_normalize_text(raw)
+    relation = _core_relation(value)
+    if relation:
+        return "RELATION:" + _compact_json(relation)
+    return ""
+
+
+def _core_identity_key(kind, item, *, requirement_texts=None):
+    value = item if isinstance(item, dict) else {}
+    explicit = _core_explicit_identity(value)
+    if explicit:
+        return explicit
+    if kind == "desired":
+        requirement_id = value.get("requirement_id") or value.get("id")
+        if requirement_id:
+            return "REQUIREMENT:" + str(requirement_id)
+    text = _core_normalize_text(_core_text(value, 900))
+    if requirement_texts and text in requirement_texts:
+        return "REQUIREMENT:" + str(requirement_texts[text])
+    path = _core_path(value)
+    symbol = _core_symbol(value)
+    if kind == "dnt" and path:
+        return "DNT_PATH:" + path.casefold()
+    if kind == "surface" and value.get("surface_id"):
+        return "SURFACE:" + str(value.get("surface_id"))
+    if kind == "impact" and value.get("impact_id"):
+        return "IMPACT:" + str(value.get("impact_id"))
+    if kind == "conflict" and value.get("conflict_id"):
+        return "CONFLICT:" + str(value.get("conflict_id"))
+    if kind in {"ownership", "interface"} and (path or symbol):
+        return f"{kind.upper()}_LOCATION:{path.casefold()}:{symbol.casefold()}:{str(value.get('field') or value.get('category') or '').casefold()}"
+    if text:
+        return "TEXT:" + text
+    if path:
+        return f"{kind.upper()}_PATH:{path.casefold()}"
+    # Unknown relations are never collapsed into one bucket.  A structured
+    # candidate has a stable section/index; a raw audit unit gets a stable
+    # kind-local fallback.  This is intentionally not a fuzzy equivalence.
+    section = value.get("section")
+    index = value.get("index")
+    if section is not None and index is not None:
+        return f"UNRESOLVED:{kind}:{section}:{index}"
+    return f"UNRESOLVED:{kind}:{_core_normalize_text(_core_text(value, 900))}"
+
+
+def _core_semantic_id(kind, identity):
+    prefix = _CORE_ALIAS_PREFIX.get(kind, "META")
+    if identity.startswith("REQUIREMENT:"):
+        return "REQ-" + _core_slug(identity.split(":", 1)[1], 44)
+    if identity.startswith("RELATION:"):
+        relation = identity.split(":", 1)[1]
+        if '"predicate":"owner"' in relation or '"predicate":"owns"' in relation:
+            prefix = "AUTH"
+        elif '"predicate":"interface"' in relation or '"predicate":"exposes"' in relation:
+            prefix = "IFACE"
+    if identity.startswith("DNT_PATH:"):
+        prefix = "DNT"
+    if identity.startswith("SURFACE:"):
+        return str(identity.split(":", 1)[1])
+    if identity.startswith("IMPACT:"):
+        return str(identity.split(":", 1)[1])
+    if identity.startswith("CONFLICT:"):
+        prefix = "CONFLICT"
+    readable = identity.split(":", 1)[1] if ":" in identity else identity
+    return prefix + "-" + _core_slug(readable, 40)
+
+
+def _core_candidate(
+    units, section, kind, item, index, *, model_required=True, meaning=None,
+):
+    value = item if isinstance(item, dict) else {"value": item}
+    record_ids, hashes, references = _core_source_references(value)
+    requirement_refs = list(value.get("requirement_ids") or [])
+    if value.get("requirement_id"):
+        requirement_refs.append(value.get("requirement_id"))
+    unit = {
+        "section": str(section),
+        "index": int(index),
+        "kind": kind,
+        "model_required": bool(model_required),
+        "meaning": _compact(meaning if meaning is not None else _core_text(value, 900), 900),
+        "path": _core_path(value),
+        "symbol": _core_symbol(value),
+        "requirement_ids": sorted(set(_bounded_ids(requirement_refs, MAX_REQUIREMENT_REFS_PER_IMPACT))),
+        "evidence_ids": sorted(set(_bounded_ids(
+            value.get("evidence_ids") or value.get("evidence_refs")
+            or value.get("repository_evidence_ids"), MAX_SURFACE_EVIDENCE_IDS,
+        ))),
+        "source_record_ids": record_ids,
+        "source_hashes": hashes,
+        "source_references": references,
+    }
+    relation = _core_relation(value)
+    if relation:
+        unit["semantic_relation"] = relation
+    for identity_key in ("canonical_semantic_id", "semantic_id", "semantic_key"):
+        if value.get(identity_key) not in (None, "", [], {}):
+            unit["canonical_semantic_id"] = str(value.get(identity_key))
+            break
+    units.append(unit)
+    return unit
+
+
+def _core_model_kind(unit):
+    kinds = set(unit.get("kinds", []) or [])
+    if not kinds:
+        kinds = {unit.get("kind", "metadata")}
+    return min(kinds, key=lambda item: _CORE_SEMANTIC_KIND_PRIORITY.get(item, 99))
+
+
+def _core_merge_unit(existing, candidate):
+    existing["kinds"] = sorted(set(existing.get("kinds", [])) | {candidate.get("kind")})
+    existing["sections"] = sorted(set(existing.get("sections", [])) | {candidate.get("section")})
+    existing["source_record_ids"] = sorted(set(existing.get("source_record_ids", [])) | set(candidate.get("source_record_ids", [])))
+    existing["source_hashes"] = sorted(set(existing.get("source_hashes", [])) | set(candidate.get("source_hashes", [])))
+    existing["source_references"] = sorted(set(existing.get("source_references", [])) | set(candidate.get("source_references", [])))
+    existing["requirement_ids"] = sorted(set(existing.get("requirement_ids", [])) | set(candidate.get("requirement_ids", [])))
+    existing["evidence_ids"] = sorted(set(existing.get("evidence_ids", [])) | set(candidate.get("evidence_ids", [])))
+    existing["model_required"] = bool(existing.get("model_required") or candidate.get("model_required"))
+    if not existing.get("semantic_relation") and candidate.get("semantic_relation"):
+        existing["semantic_relation"] = copy.deepcopy(candidate.get("semantic_relation"))
+    if not existing.get("canonical_semantic_id") and candidate.get("canonical_semantic_id"):
+        existing["canonical_semantic_id"] = str(candidate.get("canonical_semantic_id"))
+    meanings = [item for item in (existing.get("meaning"), candidate.get("meaning")) if item]
+    if meanings:
+        existing["meaning"] = min(meanings, key=lambda item: (len(str(item)), _core_normalize_text(item), str(item)))
+    locations = [
+        (existing.get("path", ""), existing.get("symbol", "")),
+        (candidate.get("path", ""), candidate.get("symbol", "")),
+    ]
+    locations = sorted({(str(path), str(symbol)) for path, symbol in locations if path or symbol})
+    if locations:
+        existing["path"], existing["symbol"] = locations[0]
+
+
+def _core_model_entry(unit, alias):
+    value = {"id": alias}
+    meaning = str(unit.get("meaning") or "").strip()
+    if meaning:
+        value["meaning"] = _compact(meaning, 520)
+    if unit.get("path"):
+        value["path"] = unit.get("path")
+    if unit.get("symbol"):
+        value["symbol"] = unit.get("symbol")
+    if unit.get("requirement_ids"):
+        value["requirement_ids"] = list(unit.get("requirement_ids", []))[:MAX_REQUIREMENT_REFS_PER_IMPACT]
+    aliases = [str(item) for item in list(unit.get("aliases", []) or []) if str(item)]
+    if len(aliases) > 1:
+        value["semantic_refs"] = aliases
+    return value
+
+
+def build_canonical_mandatory_planning_core(
+    payload=None, *, project_id=None, task_id=None,
+    source_planning_context_hash=None, source_task_brain_hash=None,
+    source_reentry_hash=None,
+):
+    """Build the immutable V24.2 semantic mandatory core with provenance fan-in.
+
+    Only explicit semantic IDs, explicit structured relations, exact normalized
+    text, or exact canonical locations are used for equivalence.  Unknown
+    relationships remain separate.  Full source IDs and hashes are retained in
+    ``provenance_map``; the provider projection contains concise meanings and
+    role-local aliases only.
+    """
+    value = payload if isinstance(payload, dict) else {}
+    candidates = []
+    requirement_texts = {}
+    requirements = list(value.get("requirements", []) or [])
+    if not requirements:
+        requirements = list(value.get("new_requirements", []) or [])
+    for index, item in enumerate(requirements):
+        if not isinstance(item, dict):
+            continue
+        requirement_id = str(item.get("requirement_id") or item.get("id") or "")
+        text = _core_normalize_text(_core_text(item, 900))
+        if requirement_id and text:
+            requirement_texts[text] = requirement_id
+        _core_candidate(candidates, "requirements", "desired", item, index, meaning=_core_text(item, 900))
+
+    goal = value.get("task_goal")
+    if isinstance(goal, dict):
+        goal_item = copy.deepcopy(goal)
+    else:
+        goal_item = {"text": goal}
+    if _core_text(goal_item, 900):
+        _core_candidate(
+            candidates, "task_goal", "desired", goal_item, 0,
+            meaning=_core_text(goal_item, 900),
+        )
+
+    for section, kind, model_required in (
+        ("current_authority", "current", True),
+        ("current_durable_authority", "current", True),
+        ("current_verified_facts", "current", True),
+        ("current_owners", "ownership", True),
+        ("current_state_ownership", "ownership", True),
+        ("current_interfaces", "interface", True),
+        ("interfaces", "interface", True),
+        ("preservation_constraints", "preservation", True),
+        ("prohibitions", "prohibition", True),
+        ("dnt", "dnt", True),
+        ("confirmed_conflicts", "conflict", True),
+        ("conflicts", "conflict", True),
+        ("surfaces", "surface", True),
+        ("impact_seeds", "impact", True),
+    ):
+        for index, item in enumerate(list(value.get(section, []) or [])):
+            if not isinstance(item, dict):
+                continue
+            effective_kind = _core_item_kind(section, item)
+            # Section authority is stronger than a loose prose classifier for
+            # explicitly typed DNT, prohibition, interface, and conflict data.
+            if section in {"interfaces", "preservation_constraints", "prohibitions", "dnt", "confirmed_conflicts", "surfaces", "impact_seeds"}:
+                effective_kind = kind
+            _core_candidate(
+                candidates, section, effective_kind, item, index,
+                model_required=model_required,
+                meaning=_core_text(item, 520),
+            )
+
+    # Empty current-authority objects can still carry validator-essential
+    # provenance.  Keep their references in the full core without spending
+    # model characters on an uninformative prose item.
+    for section in (
+        "planning_provenance", "source_provenance", "current_vs_desired",
+        "planning_rules", "bounds",
+    ):
+        raw = value.get(section)
+        if isinstance(raw, list):
+            values = list(raw)
+        elif isinstance(raw, dict):
+            values = [raw]
+        elif raw not in (None, "", [], {}):
+            values = [{"value": raw}]
+        else:
+            values = []
+        for index, item in enumerate(values):
+            if not isinstance(item, dict):
+                item = {"value": item}
+            _core_candidate(
+                candidates, section, "metadata", item, index,
+                model_required=False, meaning=_core_text(item, 520),
+            )
+    for index, item in enumerate(list(value.get("current_repository_evidence", []) or [])):
+        if isinstance(item, dict):
+            _core_candidate(
+                candidates, "current_repository_evidence", "metadata", item, index,
+                model_required=False, meaning=_core_text(item, 520),
+            )
+
+    # Requirement identity is established before current authority and
+    # preservation candidates, allowing exact repeated requirement statements
+    # to fan into the one desired semantic unit.
+    grouped = {}
+    identity_for_candidate = {}
+    for candidate in candidates:
+        identity = _core_identity_key(
+            candidate.get("kind"), candidate,
+            requirement_texts=requirement_texts,
+        )
+        # The candidate's extracted fields are intentionally used here rather
+        # than the original arbitrary object.  This makes the identity stable
+        # after bounded projection while retaining full references separately.
+        if candidate.get("kind") == "desired":
+            requirement_id = next(iter(candidate.get("requirement_ids", [])), None)
+            if requirement_id and candidate.get("section") == "requirements":
+                identity = "REQUIREMENT:" + str(requirement_id)
+        identity_for_candidate[id(candidate)] = identity
+        if identity not in grouped:
+            grouped[identity] = {
+                "identity_key": identity,
+                "semantic_id": "",
+                "kinds": [candidate.get("kind")],
+                "sections": [candidate.get("section")],
+                "model_required": bool(candidate.get("model_required")),
+                "meaning": candidate.get("meaning", ""),
+                "path": candidate.get("path", ""),
+                "symbol": candidate.get("symbol", ""),
+                "requirement_ids": list(candidate.get("requirement_ids", [])),
+                "evidence_ids": list(candidate.get("evidence_ids", [])),
+                "source_record_ids": list(candidate.get("source_record_ids", [])),
+                "source_hashes": list(candidate.get("source_hashes", [])),
+                "source_references": list(candidate.get("source_references", [])),
+            }
+        else:
+            _core_merge_unit(grouped[identity], candidate)
+
+    units = []
+    for identity, unit in grouped.items():
+        kind = _core_model_kind(unit)
+        unit["semantic_id"] = _core_semantic_id(kind, identity)
+        unit["kinds"] = sorted(set(unit.get("kinds", [])), key=lambda item: _CORE_SEMANTIC_KIND_PRIORITY.get(item, 99))
+        unit["sections"] = sorted(set(unit.get("sections", [])))
+        for key in ("requirement_ids", "evidence_ids", "source_record_ids", "source_hashes", "source_references"):
+            unit[key] = sorted(set(str(item) for item in unit.get(key, []) if str(item)))
+        units.append(unit)
+    # Semantic IDs are stable independently of source-record order.
+    units.sort(key=lambda item: (_CORE_SEMANTIC_KIND_PRIORITY.get(_core_model_kind(item), 99), item.get("semantic_id", ""), item.get("identity_key", "")))
+
+    units_by_kind = {kind: [] for kind in _CORE_KIND_ORDER}
+    for unit in units:
+        for kind in unit.get("kinds", []) or [_core_model_kind(unit)]:
+            units_by_kind.setdefault(kind, []).append(unit)
+    for kind in units_by_kind:
+        units_by_kind[kind] = sorted(
+            {unit.get("semantic_id"): unit for unit in units_by_kind[kind]}.values(),
+            key=lambda item: item.get("semantic_id", ""),
+        )
+
+    alias_by_kind = {}
+    semantic_alias_map = {}
+    for kind in _CORE_KIND_ORDER:
+        for index, unit in enumerate(units_by_kind.get(kind, []), 1):
+            alias = f"{_CORE_ALIAS_PREFIX.get(kind, 'META')}-{index}"
+            alias_by_kind.setdefault(kind, {})[unit.get("semantic_id")] = alias
+            semantic_alias_map[alias] = {
+                "semantic_id": unit.get("semantic_id"),
+                "category": kind,
+            }
+    for unit in units:
+        aliases = []
+        for kind in unit.get("kinds", []) or [_core_model_kind(unit)]:
+            alias = alias_by_kind.get(kind, {}).get(unit.get("semantic_id"))
+            if alias and alias not in aliases:
+                aliases.append(alias)
+        unit["aliases"] = aliases
+
+    provenance_map = {}
+    for unit in units:
+        provenance_map[unit["semantic_id"]] = {
+            "source_record_ids": list(unit.get("source_record_ids", [])),
+            "source_hashes": list(unit.get("source_hashes", [])),
+            "source_references": list(unit.get("source_references", [])),
+            "source_sections": list(unit.get("sections", [])),
+        }
+
+    def aliases_for(kind):
+        return [
+            alias_by_kind.get(kind, {}).get(item.get("semantic_id"))
+            for item in units_by_kind.get(kind, [])
+            if alias_by_kind.get(kind, {}).get(item.get("semantic_id"))
+        ]
+
+    def primary_alias(item):
+        primary_kind = _core_model_kind(item)
+        return alias_by_kind.get(primary_kind, {}).get(item.get("semantic_id"))
+
+    def model_entries(kind):
+        """Render each semantic meaning once, with category-only fan-in refs."""
+        entries = []
+        for item in units_by_kind.get(kind, []):
+            if not item.get("model_required"):
+                continue
+            alias = alias_by_kind.get(kind, {}).get(item.get("semantic_id"))
+            if not alias:
+                continue
+            primary_kind = _core_model_kind(item)
+            if primary_kind == kind:
+                entries.append(_core_model_entry(item, alias))
+            else:
+                # The meaning is emitted under its canonical primary category.
+                # This short reference preserves that the same semantic unit
+                # also participates in this category without repeating prose.
+                entry = {"id": alias, "ref": primary_alias(item)}
+                secondary_aliases = [
+                    alias_by_kind.get(other_kind, {}).get(item.get("semantic_id"))
+                    for other_kind in item.get("kinds", [])
+                    if other_kind != primary_kind
+                ]
+                secondary_aliases = [str(ref) for ref in secondary_aliases if ref]
+                if secondary_aliases:
+                    entry["semantic_refs"] = secondary_aliases
+                entries.append(entry)
+        return entries
+
+    desired_ids = aliases_for("desired")
+    current_ids = []
+    for kind in ("ownership", "interface", "preservation", "prohibition", "dnt", "conflict", "current"):
+        for alias in aliases_for(kind):
+            if alias not in current_ids:
+                current_ids.append(alias)
+    desired_requirement_ids = sorted({
+        str(item.get("requirement_id")) for item in requirements
+        if isinstance(item, dict) and item.get("requirement_id")
+    })
+    current_project_state = {
+        "ownership": model_entries("ownership"),
+        "interfaces": model_entries("interface"),
+        "preservation": model_entries("preservation"),
+        "prohibitions": model_entries("prohibition"),
+        "dnt": model_entries("dnt"),
+        "confirmed_conflicts": model_entries("conflict"),
+        "other_authority": model_entries("current"),
+    }
+    current_project_state = {
+        key: item for key, item in current_project_state.items() if item
+    }
+    model_projection = {
+        "version": 1,
+        "desired_user_change": model_entries("desired"),
+        "current_project_state": current_project_state,
+        "current_vs_desired": {
+            "desired": desired_ids,
+            "current": current_ids,
+            "desired_requirement_ids": desired_requirement_ids,
+        },
+        "planning_rules": list(value.get("planning_rules", []) or []),
+    }
+
+    # ``requirements`` is the authoritative user-facing rendering of a
+    # requirement.  A canonical desired unit that fans in that requirement is
+    # represented by its ID/relationship only, so the same prose is not
+    # printed a second time in ``mandatory_core.desired_user_change``.
+    requirement_ids = {
+        str(item.get("requirement_id") or item.get("id"))
+        for item in requirements
+        if isinstance(item, dict) and (item.get("requirement_id") or item.get("id"))
+    }
+    if requirement_ids:
+        desired_refs = []
+        for entry in model_projection.get("desired_user_change", []):
+            if not isinstance(entry, dict):
+                continue
+            entry_requirement_ids = {
+                str(item) for item in list(entry.get("requirement_ids", []) or [])
+            }
+            if entry_requirement_ids & requirement_ids:
+                desired_refs.append({
+                    key: copy.deepcopy(entry[key])
+                    for key in ("id", "requirement_ids", "semantic_refs")
+                    if key in entry
+                })
+            else:
+                desired_refs.append(entry)
+        model_projection["desired_user_change"] = desired_refs
+
+    # Every original mandatory unit is covered by a canonical semantic unit or
+    # by a validator-only provenance unit.  No source reference is discarded.
+    projection_aliases = set()
+    for section_name, section_value in model_projection.items():
+        if section_name == "current_vs_desired" and isinstance(section_value, dict):
+            for relation_value in section_value.values():
+                if isinstance(relation_value, list):
+                    projection_aliases.update(str(item) for item in relation_value)
+                elif isinstance(relation_value, dict):
+                    projection_aliases.update(str(item) for item in relation_value.values())
+            continue
+        if isinstance(section_value, dict):
+            nested_values = section_value.values()
+        elif isinstance(section_value, list):
+            nested_values = section_value
+        else:
+            nested_values = []
+        for item in nested_values:
+            if isinstance(item, dict):
+                for key in ("id", "ref", "semantic_refs"):
+                    raw = item.get(key)
+                    if isinstance(raw, list):
+                        projection_aliases.update(str(value) for value in raw)
+                    elif raw not in (None, ""):
+                        projection_aliases.add(str(raw))
+    coverage = []
+    for candidate in candidates:
+        identity = identity_for_candidate.get(id(candidate), "")
+        unit = grouped.get(identity)
+        canonical_id = unit.get("semantic_id") if unit else ""
+        source_references = list(candidate.get("source_references", []))
+        stable_original_id = (
+            candidate.get("semantic_id")
+            or (
+                f"{candidate.get('section')}:{source_references[0]}"
+                if source_references else
+                f"{candidate.get('section')}:{candidate.get('kind')}:"
+                f"{_core_normalize_text(candidate.get('meaning'))}:"
+                f"{_core_path(candidate)}:{_core_symbol(candidate)}"
+            )
+        )
+        model_backed_by_packet = candidate.get("section") in {
+            "requirements", "task_goal", "surfaces", "impact_seeds",
+        }
+        model_aliases = set(unit.get("aliases", [])) if unit else set()
+        model_semantic_represented = bool(
+            model_backed_by_packet or model_aliases.intersection(projection_aliases)
+        )
+        coverage.append({
+            "original_semantic_id": str(stable_original_id),
+            "canonical_semantic_id": canonical_id,
+            "category": candidate.get("kind"),
+            "represented": bool(unit),
+            "source_provenance_retained": bool(
+                unit and set(source_references)
+                .issubset(set(unit.get("source_references", [])))
+            ),
+            "model_semantic_required": bool(candidate.get("model_required")),
+            "model_semantic_represented": model_semantic_represented,
+            "source_record_ids": list(candidate.get("source_record_ids", [])),
+            "source_hashes": list(candidate.get("source_hashes", [])),
+            "source_references": source_references,
+        })
+    coverage.sort(key=lambda item: (str(item.get("original_semantic_id")), str(item.get("canonical_semantic_id"))))
+
+    all_source_references = sorted({
+        str(reference)
+        for candidate in candidates
+        for reference in candidate.get("source_references", [])
+        if str(reference)
+    })
+    coverage_rate = (
+        sum(bool(
+            item.get("represented")
+            and item.get("source_provenance_retained")
+            and (
+                not item.get("model_semantic_required")
+                or item.get("model_semantic_represented")
+            )
+        ) for item in coverage)
+        / len(coverage) if coverage else 1.0
+    )
+    core_metrics = {
+        "mandatory_planning_records_input": len(candidates),
+        "mandatory_semantic_units": len(units),
+        "mandatory_semantic_units_deduplicated": max(0, len(candidates) - len(units)),
+        "mandatory_provenance_refs": len(all_source_references),
+        "mandatory_model_chars_before_normalization": len(_compact_json(value)),
+        "mandatory_model_chars_after_normalization": len(_compact_json(model_projection)),
+        "mandatory_semantic_coverage": coverage_rate,
+        "planning_core_model_calls": 0,
+    }
+    source_metadata = value.get("planning_provenance") if isinstance(value.get("planning_provenance"), dict) else {}
+    if not source_metadata and isinstance(value.get("source_provenance"), dict):
+        source_metadata = value.get("source_provenance")
+    project_id = project_id if project_id is not None else value.get("project_id")
+    task_id = task_id if task_id is not None else value.get("task_id")
+    source_planning_context_hash = (
+        source_planning_context_hash or source_metadata.get("source_planning_context_hash")
+        or value.get("planning_context_hash") or value.get("verified_planning_context_hash")
+    )
+    source_task_brain_hash = (
+        source_task_brain_hash or source_metadata.get("source_task_brain_hash")
+        or value.get("task_brain_hash")
+    )
+    source_reentry_hash = (
+        source_reentry_hash or source_metadata.get("source_reentry_hash")
+        or value.get("reentry_hash")
+    )
+    core = {
+        "version": 1,
+        "artifact_type": CANONICAL_MANDATORY_PLANNING_CORE_TYPE,
+        "schema_version": CANONICAL_MANDATORY_PLANNING_CORE_VERSION,
+        "project_id": project_id,
+        "task_id": task_id,
+        "desired_obligations": [
+            copy.deepcopy(item) for item in units_by_kind.get("desired", [])
+            if item.get("model_required")
+        ],
+        "current_ownership": [
+            copy.deepcopy(item) for item in units_by_kind.get("ownership", [])
+            if item.get("model_required")
+        ],
+        "current_interfaces": [
+            copy.deepcopy(item) for item in units_by_kind.get("interface", [])
+            if item.get("model_required")
+        ],
+        "preservation_obligations": [
+            copy.deepcopy(item) for item in units_by_kind.get("preservation", [])
+            if item.get("model_required")
+        ],
+        "prohibitions": [
+            copy.deepcopy(item) for item in units_by_kind.get("prohibition", [])
+            if item.get("model_required")
+        ],
+        "dnt": [
+            copy.deepcopy(item) for item in units_by_kind.get("dnt", [])
+            if item.get("model_required")
+        ],
+        "confirmed_conflicts": [
+            copy.deepcopy(item) for item in units_by_kind.get("conflict", [])
+            if item.get("model_required")
+        ],
+        "semantic_units": copy.deepcopy(units),
+        "semantic_alias_map": {
+            key: semantic_alias_map[key] for key in sorted(semantic_alias_map)
+        },
+        "provenance_map": {
+            key: provenance_map[key] for key in sorted(provenance_map)
+        },
+        "mandatory_semantic_coverage": coverage,
+        "metrics": core_metrics,
+        "model_projection": model_projection,
+        "source_planning_context_hash": source_planning_context_hash,
+        "source_task_brain_hash": source_task_brain_hash,
+        "source_reentry_hash": source_reentry_hash,
+    }
+    core_material = copy.deepcopy(core)
+    core["mandatory_core_hash"] = hashlib.sha256(
+        _compact_json(core_material).encode("utf-8")
+    ).hexdigest()
+    core["canonical_mandatory_core_hash"] = core["mandatory_core_hash"]
+    core["mandatory_semantic_coverage_rate"] = coverage_rate
+    return core
+
+
+compile_canonical_mandatory_planning_core = build_canonical_mandatory_planning_core
+build_canonical_mandatory_core = build_canonical_mandatory_planning_core
+build_mandatory_planning_core = build_canonical_mandatory_planning_core
+
+
+def canonical_mandatory_core_hash(core):
+    value = copy.deepcopy(core if isinstance(core, dict) else {})
+    value.pop("mandatory_core_hash", None)
+    value.pop("canonical_mandatory_core_hash", None)
+    value.pop("mandatory_semantic_coverage_rate", None)
+    return hashlib.sha256(_compact_json(value).encode("utf-8")).hexdigest()
+
+
+canonical_mandatory_planning_core_hash = canonical_mandatory_core_hash
+
+
+def validate_canonical_mandatory_planning_core(core):
+    value = core if isinstance(core, dict) else {}
+    errors = []
+    if value.get("artifact_type") != CANONICAL_MANDATORY_PLANNING_CORE_TYPE:
+        errors.append("wrong canonical mandatory core artifact type")
+    if value.get("schema_version") != CANONICAL_MANDATORY_PLANNING_CORE_VERSION:
+        errors.append("wrong canonical mandatory core schema version")
+    if value.get("mandatory_core_hash") != canonical_mandatory_core_hash(value):
+        errors.append("mandatory core hash does not match canonical contents")
+    if not isinstance(value.get("semantic_alias_map"), dict):
+        errors.append("semantic alias map is missing")
+    if not isinstance(value.get("provenance_map"), dict):
+        errors.append("provenance map is missing")
+    coverage = value.get("mandatory_semantic_coverage")
+    if not isinstance(coverage, list):
+        errors.append("mandatory semantic coverage is missing")
+    else:
+        for item in coverage:
+            if not isinstance(item, dict) or not item.get("represented"):
+                errors.append("mandatory semantic coverage is incomplete")
+                break
+            if item.get("model_semantic_required") and item.get("model_semantic_represented") is not True:
+                errors.append("mandatory model semantic is not represented")
+                break
+            if item.get("source_record_ids") and item.get("source_provenance_retained") is not True:
+                errors.append("mandatory source provenance is not retained")
+                break
+    for semantic_id, provenance in (value.get("provenance_map") or {}).items():
+        if not isinstance(provenance, dict):
+            errors.append(f"provenance entry is malformed: {semantic_id}")
+            break
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:24],
+        "mandatory_semantic_coverage": (
+            sum(bool(
+                item.get("represented")
+                and item.get("source_provenance_retained")
+                and (
+                    not item.get("model_semantic_required")
+                    or item.get("model_semantic_represented")
+                )
+            ) for item in coverage) / len(coverage) if coverage else 1.0
+        ) if isinstance(coverage, list) else 0.0,
+        "provenance_entries": len(value.get("provenance_map", {}) or {}),
+        "model_calls": 0,
+    }
+
+
+validate_canonical_mandatory_core = validate_canonical_mandatory_planning_core
+validate_mandatory_planning_core = validate_canonical_mandatory_planning_core
+
+
+def audit_mandatory_planning_payload(payload):
+    """Break down a mandatory payload using exact complete semantic units."""
+    value = payload if isinstance(payload, dict) else {}
+    requirement_texts = {
+        _core_normalize_text(_core_text(item, 900)): str(item.get("requirement_id") or item.get("id"))
+        for item in list(value.get("requirements", []) or [])
+        if isinstance(item, dict) and (item.get("requirement_id") or item.get("id"))
+    }
+    units = []
+    section_order = list(value.keys())
+    for section_index, section in enumerate(section_order):
+        raw = value.get(section)
+        if isinstance(raw, list):
+            values = list(raw)
+        else:
+            values = [raw]
+        if raw in (None, "", [], {}):
+            continue
+        for index, item in enumerate(values):
+            item_value = item if isinstance(item, dict) else {"value": item}
+            kind = _core_item_kind(section, item_value)
+            identity_item = copy.deepcopy(item_value)
+            identity_item["section"] = str(section)
+            identity_item["index"] = index
+            identity = _core_identity_key(
+                kind, identity_item, requirement_texts=requirement_texts,
+            )
+            record_ids, hashes, references = _core_source_references(item_value)
+            meaning = _core_text(item_value, 900)
+            rendered = _compact_json({section: item})
+            units.append({
+                "unit_id": f"{section}:{index}",
+                "section": str(section),
+                "index": index,
+                "category": kind,
+                "semantic_identity": identity,
+                "semantic_meaning": meaning,
+                "source_record_ids": record_ids,
+                "source_hashes": hashes,
+                "source_references": references,
+                "rendered_chars": len(rendered),
+                "full_provenance_inline_required": False,
+                "provenance_is_validator_metadata": bool(references and not meaning),
+            })
+    by_identity = {}
+    for unit in units:
+        by_identity.setdefault(unit["semantic_identity"], []).append(unit["unit_id"])
+    for unit in units:
+        overlaps = [item for item in by_identity.get(unit["semantic_identity"], []) if item != unit["unit_id"]]
+        unit["semantic_overlap"] = bool(overlaps)
+        unit["overlap_unit_ids"] = overlaps
+        if overlaps:
+            unit["overlap_type"] = (
+                "STRUCTURED_IDENTITY" if unit["semantic_identity"].startswith(("EXPLICIT:", "RELATION:", "OWNERSHIP_LOCATION:", "INTERFACE_LOCATION:"))
+                else "EXACT_NORMALIZED_SEMANTICS"
+            )
+        else:
+            unit["overlap_type"] = None
+    duplicate_groups = [
+        {"semantic_identity": key, "unit_ids": sorted(item)}
+        for key, item in sorted(by_identity.items()) if len(item) > 1
+    ]
+    return {
+        "artifact_type": "MandatoryPlanningPayloadAudit",
+        "payload_chars": len(_compact_json(value)),
+        "rendered_chars": len(_compact_json(value)),
+        "unit_count": len(units),
+        "units": units,
+        "mandatory_units": copy.deepcopy(units),
+        "duplicate_semantic_groups": duplicate_groups,
+        "exact_duplicate_groups": [
+            item for item in duplicate_groups
+            if any(unit.get("overlap_type") == "EXACT_NORMALIZED_SEMANTICS" for unit in units if unit["unit_id"] in item["unit_ids"])
+        ],
+        "structured_overlap_groups": [
+            item for item in duplicate_groups
+            if any(unit.get("overlap_type") == "STRUCTURED_IDENTITY" for unit in units if unit["unit_id"] in item["unit_ids"])
+        ],
+        "model_calls": 0,
+    }
+
+
+audit_mandatory_payload = audit_mandatory_planning_payload
+breakdown_mandatory_planning_payload = audit_mandatory_planning_payload
+audit_mandatory_payload_budget = audit_mandatory_planning_payload
+
+
+def _canonical_mandatory_model_payload(payload, core):
+    """Replace repeated authority prose with the core's compact projection."""
+    value = copy.deepcopy(payload if isinstance(payload, dict) else {})
+    projection = copy.deepcopy((core or {}).get("model_projection", {}))
+    # These fields are represented once in current_project_state/current-vs-
+    # desired.  Full records remain in the core and the VerifiedPlanningContext.
+    for field in (
+        "current_authority", "confirmed_conflicts", "dnt", "planning_provenance",
+        "current_vs_desired", "prohibitions", "interfaces",
+    ):
+        value.pop(field, None)
+    value["mandatory_core"] = projection
+    # Preserve a compatibility key without repeating its meanings.  The
+    # actual statements are in mandatory_core.current_project_state.
+    value["preservation_constraints"] = [
+        {"id": item.get("id")}
+        for item in projection.get("current_project_state", {}).get("preservation", [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    # Keep the historical top-level conflict key for deterministic validators;
+    # the conflict meaning itself is emitted only in the canonical current
+    # state.  The top-level list is an ID-only compatibility reference.
+    value["confirmed_conflicts"] = copy.deepcopy(
+        [
+            {"id": item.get("id")}
+            for item in projection.get("current_project_state", {}).get("confirmed_conflicts", [])
+            if isinstance(item, dict) and item.get("id")
+        ]
+    )
+    requirements = list(value.get("requirements", []) or [])
+    requirement_by_text = {
+        _core_normalize_text(_core_text(item, 900)): str(item.get("requirement_id") or item.get("id"))
+        for item in requirements
+        if isinstance(item, dict) and (item.get("requirement_id") or item.get("id"))
+    }
+    task_goal = value.get("task_goal")
+    task_goal_text = task_goal.get("text") if isinstance(task_goal, dict) else task_goal
+    matching_requirement = requirement_by_text.get(_core_normalize_text(task_goal_text))
+    if matching_requirement:
+        # ``requirements`` is the one model-facing home for the full current
+        # user requirement.  Keep the historical task_goal field as a bounded
+        # reference so the requirement prose is not rendered twice.
+        value["task_goal"] = {"requirement_id": matching_requirement}
+    value["planning_core_ref"] = {
+        "artifact_type": CANONICAL_MANDATORY_PLANNING_CORE_TYPE,
+        "version": CANONICAL_MANDATORY_PLANNING_CORE_VERSION,
+        "hash": (core or {}).get("mandatory_core_hash"),
+    }
+    return value
+
+
+def audit_current_vs_desired_representation(payload):
+    """Validate the explicit structured current/desired boundary.
+
+    This audit intentionally examines declared fields only.  It never infers
+    current state or desired state from substrings in prose.
+    """
+    value = payload if isinstance(payload, dict) else {}
+    projection = value.get("mandatory_core")
+    if not isinstance(projection, dict):
+        projection = value.get("model_projection")
+    if isinstance(projection, dict):
+        boundary = projection.get("current_vs_desired")
+        state = projection.get("current_project_state")
+        desired = projection.get("desired_user_change")
+        if (
+            isinstance(boundary, dict)
+            and isinstance(boundary.get("desired"), list)
+            and isinstance(boundary.get("current"), list)
+            and isinstance(state, dict)
+            and isinstance(desired, list)
+        ):
+            return {
+                "valid": True,
+                "source": "CANONICAL_MANDATORY_CORE",
+                "desired_ids": list(boundary.get("desired", [])),
+                "current_ids": list(boundary.get("current", [])),
+                "desired_items": len(desired),
+                "current_state_sections": sorted(str(key) for key in state),
+            }
+    boundary = value.get("current_vs_desired")
+    if isinstance(boundary, dict):
+        required = ("desired_requirement_ids", "current_authority_ids", "current_evidence_ids")
+        if all(isinstance(boundary.get(key), list) for key in required):
+            return {
+                "valid": True,
+                "source": "LEGACY_STRUCTURED_BOUNDARY",
+                "desired_ids": list(boundary.get("desired_requirement_ids", [])),
+                "current_ids": list(boundary.get("current_authority_ids", [])),
+                "desired_items": len(boundary.get("desired_requirement_ids", [])),
+                "current_state_sections": ["current_authority", "current_evidence"],
+            }
+    return {
+        "valid": False,
+        "source": None,
+        "desired_ids": [],
+        "current_ids": [],
+        "desired_items": 0,
+        "current_state_sections": [],
+        "error": "explicit structured current_vs_desired representation is missing",
+    }
+
+
+audit_current_vs_desired = audit_current_vs_desired_representation
+
+
+def _role_core_source(payload, nested_key=None):
+    """Select structured mandatory inputs for a role's canonical core."""
+    value = payload if isinstance(payload, dict) else {}
+    if nested_key and isinstance(value.get(nested_key), dict):
+        source = copy.deepcopy(value.get(nested_key))
+    else:
+        source = copy.deepcopy(value)
+    candidate = value.get("candidate_impact_map")
+    if not source.get("task_goal") and isinstance(candidate, dict) and candidate.get("task_goal"):
+        source["task_goal"] = copy.deepcopy(candidate.get("task_goal"))
+    return source
+
+
+def _canonical_role_model_payload(payload, core, nested_key=None):
+    """Place one canonical projection in a role packet without nested copies."""
+    value = payload if isinstance(payload, dict) else {}
+    if not nested_key:
+        return _canonical_mandatory_model_payload(value, core)
+    result = copy.deepcopy(value)
+    nested = result.get(nested_key)
+    if isinstance(nested, dict):
+        nested = _canonical_mandatory_model_payload(nested, core)
+        nested.pop("mandatory_core", None)
+        nested.pop("planning_core_ref", None)
+        result[nested_key] = nested
+    result["mandatory_core"] = copy.deepcopy((core or {}).get("model_projection", {}))
+    result["planning_core_ref"] = {
+        "artifact_type": CANONICAL_MANDATORY_PLANNING_CORE_TYPE,
+        "version": CANONICAL_MANDATORY_PLANNING_CORE_VERSION,
+        "hash": (core or {}).get("mandatory_core_hash"),
+    }
+    requirements = result.get("requirements")
+    if not isinstance(requirements, list) and isinstance(result.get("planning_packet"), dict):
+        requirements = result["planning_packet"].get("requirements")
+    requirement_by_text = {
+        _core_normalize_text(_core_text(item, 900)): str(item.get("requirement_id") or item.get("id"))
+        for item in list(requirements or [])
+        if isinstance(item, dict) and (item.get("requirement_id") or item.get("id"))
+    }
+    candidate = result.get("candidate_impact_map")
+    if isinstance(candidate, dict) and candidate.get("task_goal"):
+        candidate_goal = candidate.get("task_goal")
+        candidate_goal_text = (
+            candidate_goal.get("text") if isinstance(candidate_goal, dict) else candidate_goal
+        )
+        matching_requirement = requirement_by_text.get(_core_normalize_text(candidate_goal_text))
+        if matching_requirement:
+            candidate["task_goal"] = {"requirement_id": matching_requirement}
+    return result
+
+
 def _planner_authority_projection(task_brain, requirements=None, verified_planning_context=None):
     """Project current authority as compact references, not a second artifact."""
     brain = task_brain if isinstance(task_brain, dict) else {}
@@ -1521,6 +2705,7 @@ def _planner_authority_projection(task_brain, requirements=None, verified_planni
             refs = _planner_source_ids(item)
             path = _normal_path(item.get("path"))
             symbol = _compact(item.get("symbol"), 180)
+            relation = _core_relation(item)
             # A requirement record is already the mandatory user statement;
             # retain its source identity only when it also carries a durable
             # authority/evidence identity.
@@ -1530,7 +2715,13 @@ def _planner_authority_projection(task_brain, requirements=None, verified_planni
             # and ``current_verified_facts``.  Keep the distinct source refs
             # and authority classes internally, but render one bounded
             # model-facing statement for the shared semantic obligation.
-            key = (text.casefold(), path.casefold(), symbol.casefold())
+            # Exact normalized prose/location is the fallback identity.  A
+            # declared semantic ID or structured relation always wins, so
+            # distinct authority relations cannot be hidden by a shared path.
+            key = (
+                _core_explicit_identity(item)
+                or f"EXACT:{text.casefold()}:{path.casefold()}:{symbol.casefold()}"
+            )
             if key in by_key:
                 existing = by_key[key]
                 existing["source_ids"] = _bounded_ids(
@@ -1551,6 +2742,11 @@ def _planner_authority_projection(task_brain, requirements=None, verified_planni
                 "path": path,
                 "symbol": symbol,
             }
+            if relation:
+                entry["structured_relation"] = relation
+            for structured_key in ("category", "field"):
+                if item.get(structured_key):
+                    entry[structured_key] = str(item.get(structured_key))
             matching_requirement_ids = [
                 item.get("requirement_id") for item in active_requirements(requirements)
                 if _compact(item.get("text"), 520).casefold() == text.casefold()
@@ -2082,8 +3278,31 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
             verified_planning_context=verified_planning_context,
             include_role_authority=include_role_authority,
         )
+        # V24.2 keeps this complete pre-normalization payload local to the
+        # compiler.  It is the audit source; it is never sent to the model.
+        raw_mandatory_payload = _planner_mandatory_payload(payload, [])
+        raw_mandatory_value = copy.deepcopy(raw_mandatory_payload)
+        raw_mandatory_value["packet_complete"] = True
+        mandatory_payload_audit = audit_mandatory_planning_payload(raw_mandatory_value)
+        source_metadata = _planner_source_metadata(
+            task_brain, verified_planning_context=verified_planning_context,
+        )
+        mandatory_core = build_canonical_mandatory_planning_core(
+            raw_mandatory_payload,
+            project_id=(verified_planning_context or {}).get("project_id")
+            if isinstance(verified_planning_context, dict) else None,
+            task_id=(verified_planning_context or {}).get("task_id")
+            if isinstance(verified_planning_context, dict) else None,
+            source_planning_context_hash=source_metadata.get("source_planning_context_hash"),
+            source_task_brain_hash=source_metadata.get("source_task_brain_hash"),
+            source_reentry_hash=source_metadata.get("source_reentry_hash"),
+        )
+        payload = _canonical_mandatory_model_payload(payload, mandatory_core)
         optional_items = _planner_optional_items(payload)
         mandatory_payload = _planner_mandatory_payload(payload, optional_items)
+        normalized_mandatory_value = copy.deepcopy(mandatory_payload)
+        normalized_mandatory_value["packet_complete"] = True
+        normalized_mandatory_chars = len(_compact_json(normalized_mandatory_value))
         mandatory_ids = ["TASK_GOAL"]
         mandatory_ids.extend(
             f"REQUIREMENT-{item.get('requirement_id')}"
@@ -2101,16 +3320,18 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         )
         mandatory_ids.extend(
             str(item.get("conflict_id"))
-            for item in payload.get("confirmed_conflicts", [])
+            for item in raw_mandatory_payload.get("confirmed_conflicts", [])
             if isinstance(item, dict) and item.get("conflict_id")
         )
         mandatory_ids.extend(
-            f"AUTHORITY-{index:03d}"
-            for index, item in enumerate(payload.get("current_authority", []), 1)
+            str(item.get("canonical_semantic_id"))
+            for item in mandatory_core.get("mandatory_semantic_coverage", [])
             if isinstance(item, dict)
+            and item.get("model_semantic_required")
+            and item.get("canonical_semantic_id")
         )
         if include_role_authority:
-            mandatory_ids.extend(["PLANNING_PROVENANCE", "CURRENT_VS_DESIRED"])
+            mandatory_ids.extend(["CANONICAL_MANDATORY_CORE", "CURRENT_VS_DESIRED"])
         mandatory_ids.append("PLANNING_RULES")
 
         def payload_factory(selected_items, marker=True):
@@ -2127,18 +3348,26 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
             ),
             mandatory_items=mandatory_ids,
             payload_factory=lambda selected: payload_factory(selected, marker=True),
+            planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+            mandatory_payload_audit=mandatory_payload_audit,
+            mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+            mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+            mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+            mandatory_core_metrics=mandatory_core.get("metrics"),
         )
         # Structural errors must be reflected in the exact model packet too;
         # the marker is never appended after the packet was audited.
         return (
             role_packet.get("payload", {}), seeds, seed_validation,
             role_packet.get("rendered_chars", 0), role_packet,
-            optional_items, mandatory_payload, mandatory_ids,
+            optional_items, mandatory_payload, mandatory_ids, mandatory_core,
+            mandatory_payload_audit, normalized_mandatory_chars,
         )
 
     (
         payload, seeds, seed_validation, packet_chars, role_packet,
-        optional_items, mandatory_payload, mandatory_ids,
+        optional_items, mandatory_payload, mandatory_ids, mandatory_core,
+        mandatory_payload_audit, normalized_mandatory_chars,
     ) = assemble(selected)
     # Optional relevant surfaces are dropped before serialization only when
     # the complete candidate set cannot fit.  Required surfaces are never
@@ -2156,7 +3385,8 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         selected = [item for item in selected if item is not remove]
         (
             payload, seeds, seed_validation, packet_chars, role_packet,
-            optional_items, mandatory_payload, mandatory_ids,
+            optional_items, mandatory_payload, mandatory_ids, mandatory_core,
+            mandatory_payload_audit, normalized_mandatory_chars,
         ) = assemble(selected)
     selected_ids = [str(item.get("surface_id")) for item in selected]
     serialized_ids = [str(item.get("surface_id")) for item in payload.get("surfaces", [])]
@@ -2204,6 +3434,12 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
                 dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=complete)
             ),
             packet_complete_override=complete,
+            planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+            mandatory_payload_audit=mandatory_payload_audit,
+            mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+            mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+            mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+            mandatory_core_metrics=mandatory_core.get("metrics"),
         )
         payload = role_packet.get("payload", value)
         packet_chars = role_packet.get("rendered_chars", 0)
@@ -2228,6 +3464,10 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         "payload_chars": len(_compact_json(payload)),
         "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(payload))),
         "packet_complete": complete,
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
+        "mandatory_model_chars_before_normalization": mandatory_payload_audit.get("payload_chars"),
+        "mandatory_model_chars_after_normalization": normalized_mandatory_chars,
+        "mandatory_semantic_coverage": mandatory_core.get("mandatory_semantic_coverage", []),
         "role_packet": copy.deepcopy({
             key: value for key, value in role_packet.items()
             if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
@@ -2254,6 +3494,12 @@ def build_canonical_planning_packet(task_brain, requirements, evidence,
         "impact_seeds": copy.deepcopy(seeds),
         "seed_validation": seed_validation,
         "selection": selection,
+        "canonical_mandatory_planning_core": copy.deepcopy(mandatory_core),
+        "mandatory_payload_audit": copy.deepcopy(mandatory_payload_audit),
+        "mandatory_semantic_coverage": copy.deepcopy(
+            mandatory_core.get("mandatory_semantic_coverage", [])
+        ),
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
     })
     return result
 
@@ -2277,6 +3523,15 @@ def validate_planning_packet(packet, registry=None, requirements=None, impact_se
     errors = []
     if not value.get("requirements"):
         errors.append("planner packet requirements are missing")
+    full_core = wrapper.get("canonical_mandatory_planning_core")
+    if isinstance(full_core, dict):
+        core_validation = validate_canonical_mandatory_planning_core(full_core)
+        if not core_validation.get("valid"):
+            errors.extend(core_validation.get("errors", []))
+    if isinstance(value.get("mandatory_core"), dict) or isinstance(full_core, dict):
+        current_vs_desired = audit_current_vs_desired_representation(value)
+        if not current_vs_desired.get("valid"):
+            errors.append(current_vs_desired.get("error", "current/desired audit failed"))
     if selected_ids != serialized_ids:
         errors.append("selected surfaces were not serialized completely")
     if len({str(item) for item in serialized_ids}) != len(serialized_ids):
@@ -2343,6 +3598,7 @@ def validate_planning_packet(packet, registry=None, requirements=None, impact_se
         "packet_chars": packet_chars,
         "estimated_tokens": _estimated_tokens(_compact_json(value)),
         "packet_complete": not errors,
+        "current_vs_desired": audit_current_vs_desired_representation(value),
     }
 
 
@@ -4210,8 +5466,41 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
                 task_brain, verified_planning_context=verified_planning_context,
             ),
         })
+    raw_mandatory_payload = _challenger_mandatory_payload(packet)
+    mandatory_payload_audit = audit_mandatory_planning_payload(raw_mandatory_payload)
+    core_source = _role_core_source(raw_mandatory_payload)
+    source_metadata = _planner_source_metadata(
+        task_brain, verified_planning_context=verified_planning_context,
+    )
+    core_provenance = (
+        core_source.get("planning_provenance")
+        if isinstance(core_source.get("planning_provenance"), dict) else {}
+    )
+    mandatory_core = build_canonical_mandatory_planning_core(
+        core_source,
+        project_id=(verified_planning_context or {}).get("project_id")
+        if isinstance(verified_planning_context, dict) else None,
+        task_id=(verified_planning_context or {}).get("task_id")
+        if isinstance(verified_planning_context, dict) else None,
+        source_planning_context_hash=(
+            source_metadata.get("source_planning_context_hash")
+            or core_provenance.get("source_planning_context_hash")
+        ),
+        source_task_brain_hash=(
+            source_metadata.get("source_task_brain_hash")
+            or core_provenance.get("source_task_brain_hash")
+        ),
+        source_reentry_hash=(
+            source_metadata.get("source_reentry_hash")
+            or core_provenance.get("source_reentry_hash")
+        ),
+    )
+    packet = _canonical_role_model_payload(packet, mandatory_core)
     optional_items = _challenger_optional_items(packet)
     mandatory_payload = _challenger_mandatory_payload(packet)
+    normalized_mandatory_value = copy.deepcopy(mandatory_payload)
+    normalized_mandatory_value["packet_complete"] = True
+    normalized_mandatory_chars = len(_compact_json(normalized_mandatory_value))
     mandatory_ids = [
         "CANDIDATE_IMPACT_MAP",
         *[f"IMPACT-{item.get('impact_id')}" for item in impacts if item.get("impact_id")],
@@ -4221,6 +5510,10 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
     ]
     if include_role_authority:
         mandatory_ids.extend(["CURRENT_AUTHORITY", "CONFIRMED_CONFLICTS", "PLANNING_PROVENANCE"])
+    if mandatory_core.get("mandatory_semantic_coverage"):
+        mandatory_ids.extend([
+            "CANONICAL_MANDATORY_CORE", "CURRENT_VS_DESIRED",
+        ])
 
     def payload_factory(selected_items, marker=True):
         value = _role_payload_factory(mandatory_payload, selected_items)
@@ -4236,6 +5529,12 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
         ),
         mandatory_items=mandatory_ids,
         payload_factory=lambda selected: payload_factory(selected, marker=True),
+        planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+        mandatory_payload_audit=mandatory_payload_audit,
+        mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+        mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+        mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+        mandatory_core_metrics=mandatory_core.get("metrics"),
     )
     packet = role_packet.get("payload", {})
     packet_chars = role_packet.get("rendered_chars", len(_compact_json(packet)))
@@ -4269,6 +5568,12 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
                 dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=complete)
             ),
             packet_complete_override=complete,
+            planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+            mandatory_payload_audit=mandatory_payload_audit,
+            mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+            mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+            mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+            mandatory_core_metrics=mandatory_core.get("metrics"),
         )
         packet = role_packet.get("payload", packet)
         packet_chars = role_packet.get("rendered_chars", packet_chars)
@@ -4287,6 +5592,10 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
         "payload_chars": len(_compact_json(packet)),
         "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(packet))),
         "packet_complete": complete,
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
+        "mandatory_model_chars_before_normalization": mandatory_payload_audit.get("payload_chars"),
+        "mandatory_model_chars_after_normalization": normalized_mandatory_chars,
+        "mandatory_semantic_coverage": mandatory_core.get("mandatory_semantic_coverage", []),
         "role_packet": copy.deepcopy({
             key: value for key, value in role_packet.items()
             if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
@@ -4309,6 +5618,12 @@ def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
             else IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
         ),
         "errors": errors[:12],
+        "canonical_mandatory_planning_core": copy.deepcopy(mandatory_core),
+        "mandatory_payload_audit": copy.deepcopy(mandatory_payload_audit),
+        "mandatory_semantic_coverage": copy.deepcopy(
+            mandatory_core.get("mandatory_semantic_coverage", [])
+        ),
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
     })
     return result
 
@@ -4346,8 +5661,9 @@ def _revision_optional_items(context):
     def add(category, priority, path, item, index, source_ids=None, semantic_key=None):
         nonlocal sequence
         sequence += 1
+        display_index = sequence if index is None else index + 1
         result.append({
-            "item_id": f"{category.upper()}-{index + 1:03d}",
+            "item_id": f"{category.upper()}-{display_index:03d}",
             "category": category,
             "priority": priority,
             "path": tuple(path),
@@ -4362,6 +5678,31 @@ def _revision_optional_items(context):
     for field, priority in (("integration_verification", 40), ("insufficient_evidence", 30)):
         for index, item in enumerate(list(candidate.get(field, []) or [])):
             add(f"candidate_{field}", priority, ("candidate_impact_map", field), item, index)
+
+    # Candidate-map hydration counters and version/bound labels are audit
+    # presentation, not revision semantics.  They remain available as
+    # complete optional field units, but do not compete with the candidate
+    # decisions, validated challenges, or current planning authority for the
+    # mandatory budget.  A scalar/dict field uses no list index so selecting
+    # it cannot turn a field value into a malformed one-element list.
+    candidate_audit_fields = (
+        "canonical_surface_registry_version", "bounds", "provenance",
+        "hydration_valid", "hydration_errors", "hydration_rejected_impacts",
+        "impact_decisions_received", "impact_decisions_validated",
+        "impact_decisions_rejected", "impact_unknown_surface_references",
+        "impact_unknown_impact_seed_references", "impact_surface_evidence_mismatches",
+        "impact_invented_existing_paths_rejected", "impact_invented_interfaces_rejected",
+        "impact_invalid_optional_fields_rejected", "impact_invalid_requirement_references_rejected",
+        "impact_seed_surface_binding_conflicts", "impact_seed_decisions_received",
+        "impact_seed_decisions_validated", "impact_seed_decisions_rejected",
+    )
+    for field in candidate_audit_fields:
+        if field in candidate and candidate.get(field) not in (None, "", [], {}):
+            add(
+                f"candidate_audit_{field}", 15,
+                ("candidate_impact_map", field), candidate.get(field), None,
+                semantic_key=field,
+            )
 
     planning = value.get("planning_packet") if isinstance(value.get("planning_packet"), dict) else {}
     for index, item in enumerate(list(planning.get("accepted_repository_evidence", []) or [])):
@@ -4419,6 +5760,18 @@ def _revision_mandatory_payload(context):
     if isinstance(candidate, dict):
         candidate.pop("integration_verification", None)
         candidate.pop("insufficient_evidence", None)
+        for field in (
+            "canonical_surface_registry_version", "bounds", "provenance",
+            "hydration_valid", "hydration_errors", "hydration_rejected_impacts",
+            "impact_decisions_received", "impact_decisions_validated",
+            "impact_decisions_rejected", "impact_unknown_surface_references",
+            "impact_unknown_impact_seed_references", "impact_surface_evidence_mismatches",
+            "impact_invented_existing_paths_rejected", "impact_invented_interfaces_rejected",
+            "impact_invalid_optional_fields_rejected", "impact_invalid_requirement_references_rejected",
+            "impact_seed_surface_binding_conflicts", "impact_seed_decisions_received",
+            "impact_seed_decisions_validated", "impact_seed_decisions_rejected",
+        ):
+            candidate.pop(field, None)
     planning = value.get("planning_packet")
     if isinstance(planning, dict):
         for field in (
@@ -4434,8 +5787,30 @@ def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
     """Compile the bounded minimal-plan/reconciliation role packet."""
     max_chars = MAX_REVISION_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
     value = copy.deepcopy(context if isinstance(context, dict) else {})
-    optional_items = _revision_optional_items(value)
-    mandatory_payload = _revision_mandatory_payload(value)
+    raw_mandatory_payload = _revision_mandatory_payload(value)
+    mandatory_payload_audit = audit_mandatory_planning_payload(raw_mandatory_payload)
+    core_source = _role_core_source(raw_mandatory_payload, nested_key="planning_packet")
+    source_metadata = {}
+    if isinstance(core_source.get("planning_provenance"), dict):
+        source_metadata = core_source.get("planning_provenance")
+    if source_planning_context_hash is None:
+        source_planning_context_hash = source_metadata.get("source_planning_context_hash")
+    mandatory_core = build_canonical_mandatory_planning_core(
+        core_source,
+        project_id=core_source.get("project_id"),
+        task_id=core_source.get("task_id"),
+        source_planning_context_hash=source_planning_context_hash,
+        source_task_brain_hash=source_metadata.get("source_task_brain_hash"),
+        source_reentry_hash=source_metadata.get("source_reentry_hash"),
+    )
+    model_payload = _canonical_role_model_payload(
+        value, mandatory_core, nested_key="planning_packet",
+    )
+    optional_items = _revision_optional_items(model_payload)
+    mandatory_payload = _revision_mandatory_payload(model_payload)
+    normalized_mandatory_value = copy.deepcopy(mandatory_payload)
+    normalized_mandatory_value["packet_complete"] = True
+    normalized_mandatory_chars = len(_compact_json(normalized_mandatory_value))
     candidate = value.get("candidate_impact_map") if isinstance(value.get("candidate_impact_map"), dict) else {}
     planning = value.get("planning_packet") if isinstance(value.get("planning_packet"), dict) else {}
     mandatory_ids = [
@@ -4466,6 +5841,12 @@ def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
         source_planning_context_hash=source_planning_context_hash,
         mandatory_items=mandatory_ids,
         payload_factory=lambda selected: payload_factory(selected, marker=True),
+        planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+        mandatory_payload_audit=mandatory_payload_audit,
+        mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+        mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+        mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+        mandatory_core_metrics=mandatory_core.get("metrics"),
     )
     packet = role_packet.get("payload", {})
     packet_chars = role_packet.get("rendered_chars", len(_compact_json(packet)))
@@ -4483,6 +5864,12 @@ def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
                 dict(_role_payload_factory(mandatory_payload, chosen), packet_complete=False)
             ),
             packet_complete_override=False,
+            planning_core_hash=mandatory_core.get("mandatory_core_hash"),
+            mandatory_payload_audit=mandatory_payload_audit,
+            mandatory_semantic_coverage=mandatory_core.get("mandatory_semantic_coverage", []),
+            mandatory_model_chars_before_normalization=mandatory_payload_audit.get("payload_chars"),
+            mandatory_model_chars_after_normalization=normalized_mandatory_chars,
+            mandatory_core_metrics=mandatory_core.get("metrics"),
         )
         packet = role_packet.get("payload", packet)
         packet_chars = role_packet.get("rendered_chars", packet_chars)
@@ -4492,6 +5879,10 @@ def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
         "payload_chars": len(_compact_json(packet)),
         "estimated_tokens": _estimated_tokens(role_packet.get("rendered_packet", _compact_json(packet))),
         "packet_complete": complete,
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
+        "mandatory_model_chars_before_normalization": mandatory_payload_audit.get("payload_chars"),
+        "mandatory_model_chars_after_normalization": normalized_mandatory_chars,
+        "mandatory_semantic_coverage": mandatory_core.get("mandatory_semantic_coverage", []),
         "role_packet": copy.deepcopy({
             key: item for key, item in role_packet.items()
             if key not in {"payload", "rendered_packet", "exact_model_input", "base_rendered_packet",
@@ -4513,6 +5904,12 @@ def build_revision_packet(context, max_chars=None, *, role="ImpactPlanReviser",
             item for item in role_packet.get("errors", []) if item not in errors
         ][:12],
         "observability": observability,
+        "canonical_mandatory_planning_core": copy.deepcopy(mandatory_core),
+        "mandatory_payload_audit": copy.deepcopy(mandatory_payload_audit),
+        "mandatory_semantic_coverage": copy.deepcopy(
+            mandatory_core.get("mandatory_semantic_coverage", [])
+        ),
+        "mandatory_core_hash": mandatory_core.get("mandatory_core_hash"),
     })
     return result
 

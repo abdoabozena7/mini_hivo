@@ -1464,6 +1464,7 @@ def run_verified_planning_self_test() -> dict:
     # canonical hash above; the deterministic controls below exercise V24's
     # source and plan safety independent of model output.
     context = compile_verified_planning_context(base)
+    context_before_packet_compilation = copy.deepcopy(context)
     def rehash(value):
         value["task_brain_hash"] = canonical_hash({
             key: item for key, item in value.items() if key != "task_brain_hash"
@@ -1537,6 +1538,36 @@ def run_verified_planning_self_test() -> dict:
         verified_planning_context=context,
     )
     live_role_packet = live_packet.get("role_packet", {})
+    live_core = live_packet.get("canonical_mandatory_planning_core", {})
+    live_core_check = impact.validate_canonical_mandatory_planning_core(live_core)
+    fan_in_payload = {
+        "requirements": [{
+            "requirement_id": "REQ-FANIN",
+            "text": "Keep PauseController as the pause-state owner.",
+        }],
+        "current_authority": [
+            {
+                "record_id": "AUTH-FANIN",
+                "text": "Keep PauseController as the pause-state owner.",
+                "structured_relation": relation,
+            },
+            {
+                "record_id": "REPO-FANIN",
+                "fact": "Keep PauseController as the pause-state owner.",
+                "structured_relation": relation,
+            },
+        ],
+        "preservation_constraints": [{
+            "record_id": "PRES-FANIN",
+            "text": "Keep PauseController as the pause-state owner.",
+        }],
+    }
+    fan_in_core = impact.build_canonical_mandatory_planning_core(fan_in_payload)
+    fan_in_refs = {
+        reference
+        for provenance in fan_in_core.get("provenance_map", {}).values()
+        for reference in provenance.get("source_references", [])
+    }
     live_packet_validation = impact.validate_planning_packet(
         live_packet, registry=stage3_registry, requirements=stage3_requirements,
     )
@@ -1604,6 +1635,40 @@ def run_verified_planning_self_test() -> dict:
         "live_packet_provider_boundary_reachable": (
             live_role_packet.get("exact_model_input") == live_role_packet.get("rendered_packet")
             and live_role_packet.get("accounting", {}).get("matches_exact_render") is True
+        ),
+        "canonical_mandatory_core_valid": live_core_check.get("valid") is True,
+        "canonical_mandatory_core_zero_model": (
+            live_core.get("metrics", {}).get("planning_core_model_calls") == 0
+            and live_core_check.get("model_calls") == 0
+        ),
+        "canonical_mandatory_core_hash_deterministic": (
+            live_core.get("mandatory_core_hash") == impact.canonical_mandatory_core_hash(live_core)
+        ),
+        "canonical_mandatory_core_coverage_complete": (
+            live_core.get("mandatory_semantic_coverage_rate") == 1.0
+            and all(
+                item.get("represented")
+                and item.get("source_provenance_retained")
+                and (
+                    not item.get("model_semantic_required")
+                    or item.get("model_semantic_represented")
+                )
+                for item in live_core.get("mandatory_semantic_coverage", [])
+            )
+        ),
+        "canonical_mandatory_core_fan_in_provenance": (
+            len(fan_in_core.get("semantic_units", [])) < len(fan_in_core.get("mandatory_semantic_coverage", []))
+            and {"AUTH-FANIN", "REPO-FANIN", "PRES-FANIN"}.issubset(fan_in_refs)
+        ),
+        "current_vs_desired_structured_audit": (
+            impact.audit_current_vs_desired_representation(live_packet.get("packet", {})).get("valid") is True
+        ),
+        "live_packet_exact_render_is_audited_input": (
+            live_role_packet.get("rendered_chars") == len(live_role_packet.get("exact_model_input", ""))
+            and live_role_packet.get("rendered_chars") == len(live_role_packet.get("rendered_packet", ""))
+        ),
+        "verified_planning_context_unchanged_by_packet_compilation": (
+            context == context_before_packet_compilation
         ),
         "optional_overflow_trims_to_complete": (
             optional_overflow.get("packet_complete") is True

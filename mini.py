@@ -200,6 +200,8 @@ MANDATORY_AUTHORITY_DROPPED = stage6b.MANDATORY_AUTHORITY_DROPPED
 PLANNING_PACKET_MANDATORY_OVERFLOW = stage3.PLANNING_PACKET_MANDATORY_OVERFLOW
 PLANNING_PACKET_PROVIDER_OVERFLOW = stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
 IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE = stage3.IMPACT_PLAN_REVISION_CONTEXT_INCOMPLETE
+CANONICAL_MANDATORY_PLANNING_CORE_TYPE = stage3.CANONICAL_MANDATORY_PLANNING_CORE_TYPE
+CANONICAL_MANDATORY_PLANNING_CORE_VERSION = stage3.CANONICAL_MANDATORY_PLANNING_CORE_VERSION
 # Stage 4A execution-contract terminal states.  Stage 3 remains the owner of
 # planning and approval; these labels describe only the post-approval handoff.
 APPROVED_PLAN_STALE = stage4.APPROVED_PLAN_STALE
@@ -1741,6 +1743,17 @@ def new_metrics(mode):
         "planning_role_mandatory_items_dropped": 0,
         "planning_role_max_rendered_chars": 0,
         "planning_role_provider_calls_blocked_by_budget": 0,
+        # V24.2 canonical mandatory-core accounting.  These counters describe
+        # deterministic semantic normalization; the core never calls a model.
+        "mandatory_planning_records_input": 0,
+        "mandatory_semantic_units": 0,
+        "mandatory_semantic_units_deduplicated": 0,
+        "mandatory_provenance_refs": 0,
+        "mandatory_model_chars_before_normalization": 0,
+        "mandatory_model_chars_after_normalization": 0,
+        "mandatory_semantic_coverage": 1.0,
+        "planning_core_builds": 0,
+        "planning_core_model_calls": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -2700,11 +2713,12 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
             not role_packet.get("packet_complete")
             or (hard_limit and len(exact_model_input) > hard_limit)
         ):
-            status = (
-                stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
-                if hard_limit and len(exact_model_input) > hard_limit
-                else role_packet.get("status") or stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
-            )
+            status = role_packet.get("status") or stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
+            if (
+                hard_limit and len(exact_model_input) > hard_limit
+                and status != stage3.PLANNING_PACKET_MANDATORY_OVERFLOW
+            ):
+                status = stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
             RUN["planning_role_provider_calls_blocked_by_budget"] = RUN.get(
                 "planning_role_provider_calls_blocked_by_budget", 0,
             ) + 1
@@ -5024,6 +5038,18 @@ build_complete_planning_packet = stage3.build_complete_planning_packet
 build_planner_packet = stage3.build_planner_packet
 build_planning_role_packet = stage3.build_planning_role_packet
 compile_planning_role_packet = stage3.compile_planning_role_packet
+build_canonical_mandatory_planning_core = stage3.build_canonical_mandatory_planning_core
+compile_canonical_mandatory_planning_core = stage3.compile_canonical_mandatory_planning_core
+build_canonical_mandatory_core = stage3.build_canonical_mandatory_core
+build_mandatory_planning_core = stage3.build_mandatory_planning_core
+canonical_mandatory_core_hash = stage3.canonical_mandatory_core_hash
+canonical_mandatory_planning_core_hash = stage3.canonical_mandatory_planning_core_hash
+validate_canonical_mandatory_planning_core = stage3.validate_canonical_mandatory_planning_core
+validate_canonical_mandatory_core = stage3.validate_canonical_mandatory_core
+validate_mandatory_planning_core = stage3.validate_mandatory_planning_core
+audit_mandatory_planning_payload = stage3.audit_mandatory_planning_payload
+audit_mandatory_payload_budget = stage3.audit_mandatory_payload_budget
+audit_current_vs_desired_representation = stage3.audit_current_vs_desired_representation
 planning_role_limit = stage3.planning_role_limit
 build_challenger_packet = stage3.build_challenger_packet
 build_revision_packet = stage3.build_revision_packet
@@ -5112,6 +5138,42 @@ def _record_planning_role_packet(role_packet):
         RUN.get("planning_role_max_rendered_chars", 0),
         int(packet.get("rendered_chars", 0) or 0),
     )
+    core_metrics = packet.get("mandatory_core_metrics")
+    if isinstance(core_metrics, dict):
+        RUN["mandatory_planning_records_input"] = RUN.get(
+            "mandatory_planning_records_input", 0,
+        ) + int(core_metrics.get("mandatory_planning_records_input", 0) or 0)
+        RUN["mandatory_semantic_units"] = RUN.get("mandatory_semantic_units", 0) + int(
+            core_metrics.get("mandatory_semantic_units", 0) or 0
+        )
+        RUN["mandatory_semantic_units_deduplicated"] = RUN.get(
+            "mandatory_semantic_units_deduplicated", 0,
+        ) + int(core_metrics.get("mandatory_semantic_units_deduplicated", 0) or 0)
+        RUN["mandatory_provenance_refs"] = RUN.get("mandatory_provenance_refs", 0) + int(
+            core_metrics.get("mandatory_provenance_refs", 0) or 0
+        )
+        before_chars = packet.get("mandatory_model_chars_before_normalization")
+        if before_chars is None:
+            before_chars = core_metrics.get("mandatory_model_chars_before_normalization", 0)
+        after_chars = packet.get("mandatory_model_chars_after_normalization")
+        if after_chars is None:
+            after_chars = core_metrics.get("mandatory_model_chars_after_normalization", 0)
+        RUN["mandatory_model_chars_before_normalization"] = max(
+            RUN.get("mandatory_model_chars_before_normalization", 0),
+            int(before_chars or 0),
+        )
+        RUN["mandatory_model_chars_after_normalization"] = max(
+            RUN.get("mandatory_model_chars_after_normalization", 0),
+            int(after_chars or 0),
+        )
+        coverage = float(core_metrics.get("mandatory_semantic_coverage", 1.0) or 0.0)
+        RUN["mandatory_semantic_coverage"] = min(
+            float(RUN.get("mandatory_semantic_coverage", 1.0)), coverage,
+        )
+        RUN["planning_core_builds"] = RUN.get("planning_core_builds", 0) + 1
+        RUN["planning_core_model_calls"] = RUN.get("planning_core_model_calls", 0) + int(
+            core_metrics.get("planning_core_model_calls", 0) or 0
+        )
     audit = {
         key: copy.deepcopy(value) for key, value in packet.items()
         if key not in {
