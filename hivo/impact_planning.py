@@ -1127,7 +1127,8 @@ def _planner_task_fact_projection(task_brain):
     fields = (
         "user_confirmed_decisions", "current_owners", "current_state_ownership",
         "current_interfaces", "relevant_tests", "relevant_dependencies",
-        "acceptance_conditions", "known_non_goals",
+        "acceptance_conditions", "known_non_goals", "confirmed_conflicts",
+        "stale_evidence_warnings",
     )
     for field in fields:
         values = []
