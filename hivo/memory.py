@@ -1,12 +1,13 @@
 """Durable, bounded, disk-backed memory for the coding orchestrator.
 
 The database is an execution ledger, not an ever-growing prompt.  Callers ask
-for a small relevant projection and only verified notes are eligible for that
-projection by default.
+for a small relevant projection and only verified notes or promoted facts are
+eligible for that projection by default.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -20,7 +21,9 @@ from typing import Any, Iterable
 MEMORY_DIRECTORY = ".hivo"
 MEMORY_DATABASE = "memory.sqlite3"
 LEGACY_MEMORY_FILE = ".agent_memory.json"
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
+PROMOTION_SCHEMA_VERSION = "V22.5C"
+PROMOTION_CANDIDATE_TYPE = "PromotionCandidate"
 
 
 def _now() -> str:
@@ -39,6 +42,53 @@ def _tokens(text: str) -> list[str]:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+
+
+_PROMOTION_PRIVATE_KEYS = frozenset({
+    "messages", "thinking", "chain_of_thought", "reasoning", "transcript",
+    "raw_transcript", "private_reasoning", "raw_worker_output", "raw_content",
+    "worker_output", "model_output", "mission_compiler_output", "task_fit_output",
+    "decomposer_output", "raw_model_output", "raw_model_transcript",
+    "falsifier_output", "strategy_output", "strategy_text",
+    "repair_output", "repair_speculation",
+})
+
+
+def _contains_promotion_private(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (str(key).casefold() == "raw_worker_transcript_included" and item is not False)
+            or _promotion_private_key(key)
+            or _contains_promotion_private(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_promotion_private(item) for item in value)
+    if isinstance(value, str):
+        lower = value.casefold()
+        return any(marker in lower for marker in (
+            "chain_of_thought", "private reasoning", "raw worker transcript",
+            "worker output", "worker transcript", "worker said done", "model output", "model transcript",
+            "raw model", "missioncompiler", "mission compiler output", "decomposer prose",
+            "decomposer output", "decomposer response", "task-fit output", "falsifier prose",
+            "falsifier output", "strategy text", "strategy output", "repair speculation",
+            "repair output",
+        ))
+    return False
+
+
+def _promotion_private_key(key: Any) -> bool:
+    normalized = str(key).casefold().replace("-", "_")
+    if normalized == "raw_worker_transcript_included":
+        return False
+    if normalized in _PROMOTION_PRIVATE_KEYS:
+        return True
+    return any(marker in normalized for marker in (
+        "transcript", "chain_of_thought", "private_reasoning", "raw_worker",
+        "raw_model", "worker_output", "model_output", "missioncompiler",
+        "mission_compiler", "decomposer", "task_fit", "falsifier", "strategy_output",
+        "repair_output", "repair_speculation",
+    ))
 
 
 class MemoryStore:
@@ -141,6 +191,48 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS artifacts_owner_verified
                     ON artifacts(owner, verified, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS project_brain_facts (
+                    record_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    fact_hash TEXT NOT NULL,
+                    semantic_hash TEXT NOT NULL,
+                    conflict_key TEXT NOT NULL DEFAULT '',
+                    fact_json TEXT NOT NULL,
+                    durability_class TEXT NOT NULL,
+                    subject_state_hash TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    supersedes_json TEXT NOT NULL DEFAULT '[]',
+                    superseded_by TEXT,
+                    provenance_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, fact_hash)
+                );
+                CREATE INDEX IF NOT EXISTS project_brain_facts_project_status
+                    ON project_brain_facts(project_id, status, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS project_brain_facts_semantic
+                    ON project_brain_facts(project_id, semantic_hash, status);
+                CREATE INDEX IF NOT EXISTS project_brain_facts_conflict
+                    ON project_brain_facts(project_id, conflict_key, status);
+                CREATE TABLE IF NOT EXISTS promotions (
+                    promotion_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    candidate_hash TEXT NOT NULL,
+                    promotion_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(project_id, candidate_hash)
+                );
+                CREATE TABLE IF NOT EXISTS task_brain_completions (
+                    project_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    completion_hash TEXT NOT NULL,
+                    completion_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(project_id, task_id)
+                );
                 """
             )
             connection.execute(
@@ -498,6 +590,542 @@ class MemoryStore:
                 ),
             )
 
+    # ------------------------------------------------------------------
+    # V22 Stage 5C verified Project Brain records
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _canonical_hash(value: Any) -> str:
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _project_id(project_id: str | None) -> str:
+        normalized = str(project_id or "default").strip()
+        return normalized[:180] or "default"
+
+    @staticmethod
+    def _decode_json(value: Any, fallback: Any) -> Any:
+        try:
+            decoded = json.loads(str(value))
+        except (TypeError, ValueError):
+            return copy.deepcopy(fallback) if isinstance(fallback, (dict, list)) else fallback
+        return decoded
+
+    def _records_from_connection(
+        self, connection: sqlite3.Connection, project_id: str, *, include_inactive: bool = True,
+    ) -> list[dict]:
+        project = self._project_id(project_id)
+        if include_inactive:
+            rows = connection.execute(
+                """SELECT * FROM project_brain_facts
+                   WHERE project_id = ? ORDER BY record_id""", (project,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """SELECT * FROM project_brain_facts
+                   WHERE project_id = ? AND status = 'ACTIVE'
+                   ORDER BY record_id""", (project,),
+            ).fetchall()
+        records: list[dict] = []
+        for row in rows:
+            fact = self._decode_json(row["fact_json"], {})
+            if not isinstance(fact, dict):
+                fact = {}
+            supersedes = self._decode_json(row["supersedes_json"], [])
+            if not isinstance(supersedes, list):
+                supersedes = []
+            provenance = self._decode_json(row["provenance_json"], {})
+            if not isinstance(provenance, dict):
+                provenance = {}
+            records.append({
+                "record_id": str(row["record_id"]),
+                "project_id": str(row["project_id"]),
+                "fact_hash": str(row["fact_hash"]),
+                "semantic_hash": str(row["semantic_hash"]),
+                "conflict_key": str(row["conflict_key"] or ""),
+                "fact": fact,
+                "durability_class": str(row["durability_class"]),
+                "subject_state_hash": str(row["subject_state_hash"] or ""),
+                "status": str(row["status"]),
+                "supersedes": supersedes,
+                "superseded_by": row["superseded_by"],
+                "provenance": provenance,
+            })
+        return records
+
+    def project_brain_snapshot(
+        self, project_id: str = "default", *, include_inactive: bool = True,
+    ) -> dict:
+        project = self._project_id(project_id)
+        with self._connection() as connection:
+            records = self._records_from_connection(
+                connection, project, include_inactive=include_inactive,
+            )
+        return {"project_id": project, "records": records}
+
+    def project_brain_hash(
+        self, project_id: str = "default", *, include_inactive: bool = True,
+    ) -> str:
+        return self._canonical_hash(self.project_brain_snapshot(
+            project_id, include_inactive=include_inactive,
+        ))
+
+    # Read aliases make the durable boundary discoverable without exposing
+    # the older free-form notes API as Project Brain state.
+    verified_project_facts = project_brain_snapshot
+    get_project_brain = project_brain_snapshot
+
+    def retrieve_verified_project_facts(
+        self, query: str = "", *, project_id: str = "default", max_items: int = 6,
+        include_stale: bool = False,
+    ) -> list[dict]:
+        project = self._project_id(project_id)
+        query_tokens = _tokens(query)[:12]
+        with self._connection() as connection:
+            rows = self._records_from_connection(
+                connection, project, include_inactive=bool(include_stale),
+            )
+        if not include_stale:
+            rows = [row for row in rows if row.get("status") == "ACTIVE"]
+        for row in rows:
+            searchable = _json({
+                "fact": row.get("fact", {}), "conflict_key": row.get("conflict_key", ""),
+            }).casefold()
+            overlap = sum(1 for token in query_tokens if token in searchable)
+            row["relevance"] = overlap * 5 + (1 if row.get("status") == "ACTIVE" else 0)
+        rows.sort(key=lambda item: (
+            int(item.get("relevance", 0)), item.get("status") == "ACTIVE", item.get("record_id", ""),
+        ), reverse=True)
+        return rows[: max(0, int(max_items))]
+
+    def mark_stale_verified_facts(
+        self, *, current_subject_state_hash: str | None = None,
+        changed_paths: Iterable[str] | None = None, project_id: str = "default",
+    ) -> dict:
+        project = self._project_id(project_id)
+        changed = {
+            str(path or "").replace("\\", "/").lstrip("./")
+            for path in (changed_paths or []) if str(path or "").strip()
+        }
+        marked: list[str] = []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT record_id, subject_state_hash, fact_json
+                   FROM project_brain_facts
+                   WHERE project_id = ? AND status = 'ACTIVE'
+                     AND durability_class = 'STATE_BOUND_VERIFIED'""", (project,),
+            ).fetchall()
+            for row in rows:
+                fact = self._decode_json(row["fact_json"], {})
+                if not isinstance(fact, dict):
+                    fact = {}
+                dependencies = {
+                    str(path or "").replace("\\", "/").lstrip("./")
+                    for path in fact.get("dependency_paths", []) or []
+                }
+                stale = bool(
+                    current_subject_state_hash
+                    and str(row["subject_state_hash"] or "") != str(current_subject_state_hash)
+                )
+                if changed and dependencies.intersection(changed):
+                    stale = True
+                if not stale:
+                    continue
+                connection.execute(
+                    "UPDATE project_brain_facts SET status = 'STALE', updated_at = ? WHERE record_id = ?",
+                    (_now(), row["record_id"]),
+                )
+                marked.append(str(row["record_id"]))
+        return {"marked_stale": len(marked), "record_ids": marked, "model_calls": 0}
+
+    mark_verified_facts_stale = mark_stale_verified_facts
+
+    def get_task_brain_completion(self, project_id: str = "default", task_id: str = "") -> dict | None:
+        project = self._project_id(project_id)
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT completion_json FROM task_brain_completions
+                   WHERE project_id = ? AND task_id = ?""", (project, str(task_id)),
+            ).fetchone()
+        if not row:
+            return None
+        value = self._decode_json(row["completion_json"], {})
+        return value if isinstance(value, dict) else None
+
+    def save_task_brain_completion(self, project_id: str, completion: dict) -> dict | None:
+        if not isinstance(completion, dict) or not completion.get("task_id"):
+            return None
+        project = self._project_id(project_id)
+        value = copy.deepcopy(completion)
+        value.setdefault("completion_hash", self._canonical_hash({
+            key: item for key, item in value.items() if key != "completion_hash"
+        }))
+        now = _now()
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT INTO task_brain_completions(
+                       project_id, task_id, completion_hash, completion_json, created_at, updated_at
+                   ) VALUES(?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(project_id, task_id) DO UPDATE SET
+                       completion_hash=excluded.completion_hash,
+                       completion_json=excluded.completion_json,
+                       updated_at=excluded.updated_at""",
+                (project, str(value["task_id"]), value["completion_hash"], _json(value), now, now),
+            )
+        return value
+
+    def _candidate_hash(self, candidate: dict) -> str:
+        return self._canonical_hash({
+            key: item for key, item in candidate.items()
+            if key not in {"candidate_hash", "candidate_id"}
+        })
+
+    def commit_verified_promotion(
+        self, candidate: dict, *, task_completion: dict | None = None,
+    ) -> dict:
+        """Atomically deduplicate, supersede, and persist one V22 candidate."""
+        if not isinstance(candidate, dict):
+            return {
+                "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                "model_calls": 0,
+            }
+        project = self._project_id(candidate.get("project_id"))
+        candidate_hash = str(candidate.get("candidate_hash") or "")
+        if (
+            candidate.get("artifact_type") != PROMOTION_CANDIDATE_TYPE
+            or candidate.get("schema_version") != PROMOTION_SCHEMA_VERSION
+            or not candidate_hash
+            or self._candidate_hash(candidate) != candidate_hash
+            or _contains_promotion_private(candidate)
+        ):
+            return {
+                "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                "model_calls": 0,
+            }
+        provenance = candidate.get("provenance") if isinstance(candidate.get("provenance"), dict) else {}
+        if (
+            int(provenance.get("model_calls", 0) or 0) != 0
+            or provenance.get("raw_worker_transcript_included") is not False
+            or provenance.get("authority_escalation") is True
+            or provenance.get("cross_project_memory") is True
+        ):
+            return {
+                "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                "model_calls": 0,
+            }
+        now = _now()
+        category_names = (
+            "verified_facts", "verified_interfaces", "verified_preservations", "verified_prohibitions",
+            "verified_tests",
+        )
+        with self._connection() as connection:
+            before_records = self._records_from_connection(connection, project, include_inactive=True)
+            before_snapshot = {"project_id": project, "records": before_records}
+            before_hash = self._canonical_hash(before_snapshot)
+            existing_promotion = connection.execute(
+                """SELECT receipt_json FROM promotions
+                   WHERE project_id = ? AND candidate_hash = ?""", (project, candidate_hash),
+            ).fetchone()
+            if existing_promotion:
+                receipt = self._decode_json(existing_promotion["receipt_json"], {})
+                if not isinstance(receipt, dict):
+                    receipt = {}
+                completion = None
+                task_id = (task_completion or {}).get("task_id") if isinstance(task_completion, dict) else None
+                if task_id:
+                    row = connection.execute(
+                        """SELECT completion_json FROM task_brain_completions
+                           WHERE project_id = ? AND task_id = ?""", (project, str(task_id)),
+                    ).fetchone()
+                    if row:
+                        completion = self._decode_json(row["completion_json"], {})
+                    if not isinstance(completion, dict):
+                        completion = {
+                            "schema_version": PROMOTION_SCHEMA_VERSION,
+                            "task_id": str(task_id),
+                            "terminal_state": "VERIFIED_AND_PROMOTED",
+                            "parent_verification_hash": receipt.get("parent_verification_hash"),
+                            "promotion_hash": receipt.get("promotion_hash"),
+                            "subject_state_hash": receipt.get("subject_state_hash"),
+                            "artifact_refs": [
+                                str(item)[:220] for item in (task_completion or {}).get("artifact_refs", []) or []
+                            ][:24],
+                            "project_brain_record_ids": list(
+                                receipt.get("promoted_record_ids", []) or []
+                            )[:256],
+                        }
+                        completion["completion_hash"] = self._canonical_hash(completion)
+                        connection.execute(
+                            """INSERT INTO task_brain_completions(
+                                   project_id, task_id, completion_hash, completion_json, created_at, updated_at
+                               ) VALUES(?, ?, ?, ?, ?, ?)
+                               ON CONFLICT(project_id, task_id) DO UPDATE SET
+                                   completion_hash=excluded.completion_hash,
+                                   completion_json=excluded.completion_json,
+                                   updated_at=excluded.updated_at""",
+                            (project, str(task_id), completion["completion_hash"], _json(completion), now, now),
+                        )
+                after_hash = self._canonical_hash(before_snapshot)
+                return {
+                    "promotion_status": "ALREADY_PROMOTED", "status": "ALREADY_PROMOTED",
+                    "no_op": True, "candidate": copy.deepcopy(candidate),
+                    "promotion_receipt": receipt, "project_brain_before_hash": before_hash,
+                    "project_brain_after_hash": after_hash,
+                    "project_brain_records": before_records,
+                    "task_brain_completion": completion, "model_calls": 0,
+                }
+
+            facts: list[dict] = []
+            for category in category_names:
+                values = candidate.get(category)
+                if not isinstance(values, list):
+                    return {
+                        "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                        "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                        "model_calls": 0,
+                    }
+                facts.extend(item for item in values if isinstance(item, dict))
+            if not facts:
+                return {
+                    "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                    "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                    "model_calls": 0,
+                }
+            for fact in facts:
+                fact_hash = str(fact.get("fact_hash") or "")
+                if (
+                    not fact_hash
+                    or fact.get("verified") is not True
+                    or fact.get("approved") is not True
+                    or fact.get("durability_class") not in {"DURABLE_VERIFIED", "STATE_BOUND_VERIFIED"}
+                    or fact.get("subject_state_hash") != candidate.get("subject_state_hash")
+                    or not isinstance(fact.get("evidence_refs"), list)
+                    or not fact.get("evidence_refs")
+                    or self._canonical_hash({
+                    key: item for key, item in fact.items() if key != "fact_hash"
+                    }) != fact_hash
+                ):
+                    return {
+                        "promotion_status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE",
+                        "status": "PROMOTION_NOT_ELIGIBLE_PROVENANCE", "no_op": True,
+                        "model_calls": 0,
+                    }
+
+            existing_active = [
+                item for item in before_records if item.get("status") == "ACTIVE"
+            ]
+            exact_by_hash = {str(item.get("fact_hash")): item for item in existing_active}
+            semantic_by_hash = {str(item.get("semantic_hash")): item for item in existing_active}
+            conflict_by_key = {
+                str(item.get("conflict_key")): item for item in existing_active
+                if str(item.get("conflict_key") or "")
+            }
+            authority_change = candidate.get("authority_change")
+            if not isinstance(authority_change, dict):
+                source = candidate.get("source") if isinstance(candidate.get("source"), dict) else {}
+                authority_change = source.get("authority_change") if isinstance(source.get("authority_change"), dict) else {}
+            authority_change_approved = authority_change.get("approved") is True
+            supersede_refs = {
+                str(item) for item in (candidate.get("supersedes") or [])
+            }
+            if authority_change_approved:
+                for key in ("previous_fact_hash", "previous_record_id"):
+                    if authority_change.get(key):
+                        supersede_refs.add(str(authority_change[key]))
+
+            deduplicated_ids: list[str] = []
+            superseded_ids: list[str] = []
+            superseded_by_fact_hash: dict[str, str] = {}
+            superseded_refs_by_fact_hash: dict[str, list[str]] = {}
+            new_facts: list[tuple[dict, str]] = []
+            seen_new_hashes: set[str] = set()
+            seen_new_semantics: dict[str, dict] = {}
+            for fact in facts:
+                fact_hash = str(fact.get("fact_hash"))
+                if fact_hash in seen_new_hashes:
+                    deduplicated_ids.append(fact_hash)
+                    continue
+                seen_new_hashes.add(fact_hash)
+                old_exact = exact_by_hash.get(fact_hash)
+                if old_exact:
+                    deduplicated_ids.append(old_exact.get("record_id"))
+                    continue
+                semantic_hash = str(fact.get("semantic_hash") or "")
+                old_semantic = semantic_by_hash.get(semantic_hash)
+                if old_semantic:
+                    old_record_id = str(old_semantic.get("record_id"))
+                    superseded_ids.append(old_record_id)
+                    superseded_by_fact_hash[old_record_id] = fact_hash
+                    superseded_refs_by_fact_hash.setdefault(fact_hash, []).extend(
+                        [old_record_id, str(old_semantic.get("fact_hash") or "")]
+                    )
+                conflict_key = str(fact.get("conflict_key") or "")
+                old_conflict = conflict_by_key.get(conflict_key) if conflict_key else None
+                conflict_target = old_conflict
+                if not conflict_target and conflict_key:
+                    conflict_target = seen_new_semantics.get(conflict_key)
+                if conflict_target and str(conflict_target.get("semantic_hash")) != semantic_hash:
+                    target_id = str(conflict_target.get("record_id") or conflict_target.get("fact_hash") or "")
+                    explicitly_authorized = authority_change_approved and (
+                        target_id in supersede_refs
+                        or str(conflict_target.get("fact_hash")) in supersede_refs
+                    )
+                    if not explicitly_authorized:
+                        return {
+                            "promotion_status": "PROMOTION_CONFLICT", "status": "PROMOTION_CONFLICT",
+                            "no_op": True, "candidate": copy.deepcopy(candidate),
+                            "project_brain_before_hash": before_hash,
+                            "project_brain_after_hash": before_hash,
+                            "conflict_record_ids": [target_id], "model_calls": 0,
+                        }
+                    if target_id not in superseded_ids:
+                        superseded_ids.append(target_id)
+                    superseded_by_fact_hash[target_id] = fact_hash
+                    superseded_refs_by_fact_hash.setdefault(fact_hash, []).extend(
+                        [target_id, str(conflict_target.get("fact_hash") or "")]
+                    )
+                if conflict_key:
+                    seen_new_semantics[conflict_key] = {
+                        "semantic_hash": semantic_hash,
+                        "fact_hash": fact_hash,
+                        "record_id": "",
+                    }
+                new_facts.append((fact, fact_hash))
+
+            # Resolve the record ids before changing any row so a conflict
+            # always leaves the database untouched.
+            record_specs: list[tuple[dict, str, str]] = []
+            for fact, fact_hash in new_facts:
+                record_id = f"verified-{self._canonical_hash(project)[:10]}-{fact_hash[:24]}"
+                record_specs.append((fact, fact_hash, record_id))
+            record_by_fact_hash = {fact_hash: record_id for _fact, fact_hash, record_id in record_specs}
+            for fact, fact_hash, record_id in record_specs:
+                conflict_key = str(fact.get("conflict_key") or "")
+                if conflict_key and conflict_key in seen_new_semantics:
+                    seen_new_semantics[conflict_key]["record_id"] = record_id
+            superseded_ids = list(dict.fromkeys(
+                item for item in superseded_ids if item and item not in deduplicated_ids
+            ))
+            for record_id in superseded_ids:
+                superseded_by = record_by_fact_hash.get(
+                    superseded_by_fact_hash.get(record_id, ""),
+                )
+                if superseded_by is None:
+                    superseded_by = record_specs[0][2] if record_specs else None
+                connection.execute(
+                    """UPDATE project_brain_facts
+                       SET status = 'SUPERSEDED', superseded_by = ?, updated_at = ?
+                       WHERE project_id = ? AND record_id = ? AND status = 'ACTIVE'""",
+                    (superseded_by, now, project, record_id),
+                )
+            inserted_ids: list[str] = []
+            for fact, fact_hash, record_id in record_specs:
+                supersede_refs = [
+                    str(item) for item in (fact.get("supersedes", []) or [])
+                    if str(item).strip()
+                ]
+                supersede_refs.extend(
+                    str(item) for item in (candidate.get("supersedes", []) or [])
+                    if str(item).strip()
+                )
+                supersede_refs.extend(superseded_refs_by_fact_hash.get(fact_hash, []))
+                supersede_refs = list(dict.fromkeys(supersede_refs))[:24]
+                connection.execute(
+                    """INSERT INTO project_brain_facts(
+                           record_id, project_id, fact_hash, semantic_hash, conflict_key,
+                           fact_json, durability_class, subject_state_hash, status,
+                           supersedes_json, superseded_by, provenance_json, created_at, updated_at
+                       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, NULL, ?, ?, ?)""",
+                    (
+                        record_id, project, fact_hash, str(fact.get("semantic_hash") or ""),
+                        str(fact.get("conflict_key") or ""), _json(fact),
+                        str(fact.get("durability_class") or "STATE_BOUND_VERIFIED"),
+                        str(fact.get("subject_state_hash") or candidate.get("subject_state_hash") or ""),
+                        _json(supersede_refs),
+                        _json(candidate.get("provenance", {})), now, now,
+                    ),
+                )
+                inserted_ids.append(record_id)
+            after_records = self._records_from_connection(connection, project, include_inactive=True)
+            after_snapshot = {"project_id": project, "records": after_records}
+            after_hash = self._canonical_hash(after_snapshot)
+            receipt: dict[str, Any] = {
+                "schema_version": PROMOTION_SCHEMA_VERSION,
+                "artifact_type": "PromotionReceipt",
+                "promotion_id": f"promotion-{candidate_hash[:24]}",
+                "project_id": project,
+                "candidate_hash": candidate_hash,
+                "parent_verification_hash": (candidate.get("source") or {}).get("parent_verification_hash"),
+                "subject_state_hash": candidate.get("subject_state_hash"),
+                "project_brain_before_hash": before_hash,
+                "project_brain_after_hash": after_hash,
+                "promoted_record_ids": inserted_ids,
+                "deduplicated_record_ids": deduplicated_ids,
+                "superseded_record_ids": superseded_ids,
+                "eligibility_status": "PROMOTION_ELIGIBLE",
+                "promotion_status": "PROMOTED",
+                "provenance": {
+                    "source": "deterministic_verified_state_promotion",
+                    "model_calls": 0, "raw_worker_transcript_included": False,
+                    "authority_escalation": False, "cross_project_memory": False,
+                    "strategy_learning": False, "auto_reverification": False,
+                },
+            }
+            receipt["promotion_hash"] = self._canonical_hash(receipt)
+            completion = None
+            if isinstance(task_completion, dict) and task_completion.get("task_id"):
+                completion = {
+                    "schema_version": PROMOTION_SCHEMA_VERSION,
+                    "task_id": str(task_completion["task_id"]),
+                    "terminal_state": "VERIFIED_AND_PROMOTED",
+                    "parent_verification_hash": receipt.get("parent_verification_hash"),
+                    "promotion_hash": receipt.get("promotion_hash"),
+                    "subject_state_hash": receipt.get("subject_state_hash"),
+                    "artifact_refs": list(task_completion.get("artifact_refs", []) or [])[:24],
+                    "project_brain_record_ids": inserted_ids[:256],
+                }
+                completion["completion_hash"] = self._canonical_hash(completion)
+                connection.execute(
+                    """INSERT INTO task_brain_completions(
+                           project_id, task_id, completion_hash, completion_json, created_at, updated_at
+                       ) VALUES(?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(project_id, task_id) DO UPDATE SET
+                           completion_hash=excluded.completion_hash,
+                           completion_json=excluded.completion_json,
+                           updated_at=excluded.updated_at""",
+                    (project, completion["task_id"], completion["completion_hash"], _json(completion), now, now),
+                )
+                # Keep the receipt hash independent of the pointer hash.  The
+                # pointer already carries the promotion hash, and including
+                # its own hash in the receipt would create a circular identity.
+            connection.execute(
+                """INSERT INTO promotions(
+                       promotion_id, project_id, candidate_hash, promotion_hash,
+                       status, receipt_json, created_at
+                   ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    receipt["promotion_id"], project, candidate_hash,
+                    receipt["promotion_hash"], "PROMOTED", _json(receipt), now,
+                ),
+            )
+            return {
+                "promotion_status": "PROMOTED", "status": "PROMOTED", "no_op": False,
+                "candidate": copy.deepcopy(candidate), "promotion_receipt": receipt,
+                "project_brain_before_hash": before_hash,
+                "project_brain_after_hash": after_hash,
+                "project_brain_records": after_records,
+                "task_brain_completion": completion, "model_calls": 0,
+                "promoted_record_ids": inserted_ids,
+                "deduplicated_record_ids": deduplicated_ids,
+                "superseded_record_ids": superseded_ids,
+            }
+
     def record_event(
         self,
         *,
@@ -581,14 +1209,40 @@ class MemoryStore:
         rows.sort(key=lambda row: (row["relevance"], row["importance"], row["updated_at"]), reverse=True)
         return rows[:max(0, int(max_items))]
 
-    def context_for(self, query: str, *, max_items: int = 6, max_chars: int = 2400) -> str:
+    def context_for(
+        self, query: str, *, max_items: int = 6, max_chars: int = 2400,
+        project_id: str = "default",
+    ) -> str:
         if max_chars <= 0:
             return ""
         notes = self.retrieve(query, max_items=max_items, verified_only=True)
-        if not notes:
+        facts = self.retrieve_verified_project_facts(
+            query, project_id=project_id, max_items=max_items,
+        )
+        if not notes and not facts:
             return ""
         heading = "VERIFIED LONG-TERM PROJECT MEMORY (relevant excerpts only):\n"
         output = heading
+        # Project Brain facts are structured and bounded.  Only the fact
+        # projection is rendered; timestamps and persistence internals never
+        # enter a Worker prompt.
+        for record in facts:
+            fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+            line = "- [verified_project_fact] " + _json({
+                "record_id": record.get("record_id"),
+                "category": fact.get("category"),
+                "field": fact.get("field"),
+                "fact": fact.get("fact"),
+                "authority": fact.get("authority"),
+                "durability_class": record.get("durability_class"),
+                "subject_state_hash": record.get("subject_state_hash"),
+            }) + "\n"
+            if len(output) + len(line) > max_chars:
+                remaining = max_chars - len(output)
+                if remaining > 20:
+                    output += line[:remaining]
+                break
+            output += line
         for note in notes:
             line = f"- [{note['kind']}/{note['scope']}] {note['content']}\n"
             if len(output) + len(line) > max_chars:

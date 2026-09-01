@@ -70,6 +70,15 @@ small relevance-ranked excerpt. Only notes created after deterministic evidence
 passes are retrieved as successful facts. Interrupted tasks remain explicitly
 labeled as unfinished and must be re-inspected after restart.
 
+V22 Stage 5C adds one deterministic verified-state promotion boundary after a
+`PARENT_VERIFIED` result. A valid, fresh `ParentVerificationReceipt` produces a
+bounded `PromotionCandidate`; only structured durable or state-bound facts and
+hashed evidence references may be committed to the project-local Project Brain.
+The SQLite commit records candidate/promotion hashes, deduplication and
+supersession, while state-bound records can be marked stale without automatic
+re-verification. Promotion and Task Brain completion compaction use zero model
+calls, and raw Worker/model transcripts never enter Project Brain.
+
 Recursive mode completes Stage 1 request ingestion, classifies the workspace as
 `NEW_PROJECT` or `EXISTING_PROJECT`, and performs targeted repository
 reconnaissance only for existing-project tasks. It then prepares the bounded

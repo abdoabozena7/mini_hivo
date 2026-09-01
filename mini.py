@@ -97,6 +97,15 @@ from hivo.integration_gate import PARENT_VERIFIED
 from hivo.integration_gate import aggregate_parent_integration as _aggregate_parent_integration_v21
 from hivo.integration_gate import assess_integration_readiness as _assess_integration_readiness_v21
 from hivo.integration_gate import create_verified_child_receipt as _create_verified_child_receipt_v21
+from hivo.promotion import ALREADY_PROMOTED
+from hivo.promotion import MAX_PROJECT_BRAIN_RECORDS
+from hivo.promotion import PROMOTION_CONFLICT
+from hivo.promotion import PROMOTION_ELIGIBLE
+from hivo.promotion import PROMOTION_NOT_ELIGIBLE_STALE_RECEIPT
+from hivo.promotion import PROMOTION_NOT_ELIGIBLE_STALE_SUBJECT_STATE
+from hivo.promotion import PROMOTED
+from hivo.promotion import promote_verified_parent as _promote_verified_parent_v22
+from hivo.promotion import run_verified_state_promotion_self_test
 
 # ---------------------------------------------------------------------------
 # RESEARCH CONFIGURATION
@@ -1182,7 +1191,10 @@ def relevant_memory_context(query, role="Builder", memory=None, max_chars=MAX_ME
     if not store or max_chars <= 0:
         return ""
     try:
-        verified = store.context_for(query, max_items=5, max_chars=max_chars)
+        verified = store.context_for(
+            query, max_items=5, max_chars=max_chars,
+            project_id=str(RUN.get("project_id") or "default"),
+        )
         return verified[:max_chars]
     except Exception as exc:
         print(f"[WARN] could not retrieve durable memory: {exc}")
@@ -1540,6 +1552,26 @@ def new_metrics(mode):
         "integration_executor_model_calls": 0,
         "integration_executor_calls": 0,
         "stage5b_enabled": False,
+        # V22 Stage 5C deterministic verified-state promotion.  These fields
+        # count only the promotion boundary; all execution/model role counts
+        # above remain separate and the promotion analyzer has zero model calls.
+        "stage5c_enabled": False,
+        "promotion_eligibility_checks": 0,
+        "promotion_candidates_created": 0,
+        "promotion_candidates_rejected": 0,
+        "verified_facts_promoted": 0,
+        "verified_facts_deduplicated": 0,
+        "verified_facts_superseded": 0,
+        "promotion_conflicts": 0,
+        "promotion_stale_blocks": 0,
+        "project_brain_promotions": 0,
+        "project_brain_promotion_noops": 0,
+        "task_brain_compactions": 0,
+        "promotion_model_calls": 0,
+        "task_brain_compaction_model_calls": 0,
+        "promotion_status": None,
+        "promotion_receipt": None,
+        "task_brain_completion": None,
         "child_receipts": {},
         "verification_failures": 0, "task_too_broad_count": 0,
         "mutation_failures_recorded": 0,
@@ -1794,6 +1826,23 @@ def remember_verified_outcome(task, contract, summary, changed_files):
     if not store:
         return
     try:
+        if _stage5c_enabled(task, contract):
+            # Execution summaries are an ephemeral audit trail at this stage;
+            # they are intentionally not written as verified Project Brain
+            # facts.  The parent receipt is the sole promotion input.
+            store.record_event(
+                run_id=RUN_ID or None, task_id=task.get("id"), role="Worker",
+                tool="verified_execution", target="",
+                status="ephemeral_execution",
+                content=compact_text(summary, 700),
+                details={
+                    "stage5c_boundary": True,
+                    "changed_files": bounded_list(changed_files, 12, 140),
+                    "model_calls": 0,
+                },
+            )
+            store.mark_artifacts_verified(changed_files, RUN_ID or None)
+            return
         store.add_note(
             f"Verified task completed. Goal: {compact_text(task.get('goal',''), 500)}. "
             f"Result: {compact_text(summary, 500)}. Changed files: {', '.join(changed_files[:20]) or '(none)'}",
@@ -2936,19 +2985,28 @@ def _compact_brain_record(value, max_chars=MAX_INTEGRATION_FACT_CHARS):
     """Keep deterministic verified records structured and bounded."""
     if not isinstance(value, dict):
         return compact_text(value, max_chars)
-    preferred = (
-        "kind", "owner", "symbol", "selector", "fact", "source", "rule", "file", "path",
-        "evidence_id", "category", "evidence_type", "source_kind", "line_start", "line_end",
-        "file_sha256", "support",
-        "requirement_id", "decision_id", "text", "category", "provenance", "source_segment",
-        "source_segments", "source_variants", "question_id", "answer", "selected_option",
-        "affected_requirement_ids",
-        "task_id", "goal", "summary", "evidence", "status", "changed_files",
-        "introduced_symbols", "modified_symbols", "interfaces", "invariants", "verification",
-    )
+    v22_record = "fact_hash" in value and "subject_state_hash" in value
+    if v22_record:
+        preferred = (
+            "record_id", "fact_hash", "semantic_hash", "category", "field", "fact",
+            "kind", "path", "result", "authority", "durability_class", "subject_state_hash",
+            "status", "evidence_refs", "dependency_paths", "authority_source", "verified",
+            "approved", "source", "conflict_key", "supersedes",
+        )
+    else:
+        preferred = (
+            "kind", "owner", "symbol", "selector", "fact", "source", "rule", "file", "path",
+            "evidence_id", "category", "evidence_type", "source_kind", "line_start", "line_end",
+            "file_sha256", "support",
+            "requirement_id", "decision_id", "text", "category", "provenance", "source_segment",
+            "source_segments", "source_variants", "question_id", "answer", "selected_option",
+            "affected_requirement_ids",
+            "task_id", "goal", "summary", "evidence", "status", "changed_files",
+            "introduced_symbols", "modified_symbols", "interfaces", "invariants", "verification",
+        )
     keys = [key for key in preferred if key in value]
     record = {}
-    for key in keys[:12]:
+    for key in keys[:21 if v22_record else 12]:
         item = value.get(key)
         if isinstance(item, (list, tuple, set)):
             record[str(key)] = _bounded_brain_strings(item, 8, 220)
@@ -3203,7 +3261,10 @@ def _initial_verified_project_state(repo_snapshot, repository_evidence=None):
         invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
     except Exception:
         invariants = RUN.get("project_invariants", [])
-    manifests = _verified_manifests_from_tasks()
+    # Stage 5C makes the durable promotion receipt the only path from child
+    # execution into Project Brain.  Worker manifests remain available in the
+    # task ledger, but are not copied into the Brain on this path.
+    manifests = [] if RUN.get("stage5c_enabled") else _verified_manifests_from_tasks()
     interfaces = []
     components = []
     integration_facts = []
@@ -3257,6 +3318,44 @@ def _initial_verified_project_state(repo_snapshot, repository_evidence=None):
         item.get("symbol") or item.get("fact") for item in direct_evidence
         if item.get("category") == "CURRENT_INTERFACE"
     )
+    promoted_verified_facts = copy.deepcopy(
+        RUN.get("promoted_verified_facts", []) if RUN.get("stage5c_enabled") else []
+    )
+    if RUN.get("stage5c_enabled") and WORKSPACE is not None:
+        try:
+            durable = get_memory_store().project_brain_snapshot(
+                _stage5c_project_id(RUN.get("source_contract", {})),
+                include_inactive=False,
+            )
+            promoted_verified_facts = []
+            for record in durable.get("records", [])[:MAX_PROJECT_BRAIN_RECORDS]:
+                fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+                promoted_verified_facts.append({
+                    "record_id": record.get("record_id"),
+                    "fact_hash": record.get("fact_hash"),
+                    "semantic_hash": record.get("semantic_hash"),
+                    "category": fact.get("category"),
+                    "field": fact.get("field"),
+                    "fact": compact_text(fact.get("fact", ""), 900),
+                    "kind": fact.get("kind"),
+                    "path": compact_text(fact.get("path", ""), 220) or None,
+                    "result": fact.get("result"),
+                    "authority": fact.get("authority"),
+                    "authority_source": fact.get("authority_source"),
+                    "verified": fact.get("verified") is True,
+                    "approved": fact.get("approved") is True,
+                    "evidence_refs": bounded_list(fact.get("evidence_refs", []), 24, 220),
+                    "dependency_paths": bounded_list(fact.get("dependency_paths", []), 48, 220),
+                    "source": compact_text(fact.get("source", ""), 220),
+                    "conflict_key": compact_text(fact.get("conflict_key", ""), 220),
+                    "supersedes": bounded_list(record.get("supersedes", []), 24, 220),
+                    "durability_class": record.get("durability_class"),
+                    "subject_state_hash": record.get("subject_state_hash"),
+                    "status": record.get("status"),
+                })
+            RUN["promoted_verified_facts"] = copy.deepcopy(promoted_verified_facts)
+        except Exception:
+            pass
     return {
         "source": "deterministic_reconnaissance_and_verified_manifests",
         "provenance": VERIFIED,
@@ -3267,6 +3366,12 @@ def _initial_verified_project_state(repo_snapshot, repository_evidence=None):
         "verified_interfaces": _bounded_brain_strings(interfaces, MAX_BRAIN_ITEMS, 260),
         "project_invariants": _bounded_brain_records(invariants, 12, MAX_INTEGRATION_FACT_CHARS),
         "verified_child_manifests": manifests,
+        "promoted_verified_facts": copy.deepcopy(
+            RUN.get("promoted_verified_facts", []) if RUN.get("stage5c_enabled") else []
+        )[:MAX_PROJECT_BRAIN_RECORDS],
+        "promotion_receipts": copy.deepcopy(
+            RUN.get("promotion_receipts", []) if RUN.get("stage5c_enabled") else []
+        )[:MAX_BRAIN_ITEMS],
         "integration_facts": _bounded_brain_strings(integration_facts, MAX_BRAIN_ITEMS, 260),
         "repository_evidence": [compact_repository_evidence(item) for item in direct_evidence],
         "blocking_failures": _bounded_brain_strings(
@@ -3320,6 +3425,17 @@ def _source_contract_for_brain(contract, ledger):
 def build_project_brain(contract, specification, repo_snapshot=None, repository_evidence=None):
     """Create one bounded core plus a separate deterministic verified-state view."""
     contract = contract if isinstance(contract, dict) else {}
+    nested_contract = (
+        contract.get("source_contract")
+        if isinstance(contract.get("source_contract"), dict) else {}
+    )
+    if contract.get("stage5c_enabled") or nested_contract.get("stage5c_enabled"):
+        RUN["stage5c_enabled"] = True
+        RUN["stage5b_enabled"] = True
+        RUN["project_id"] = str(
+            contract.get("project_id") or nested_contract.get("project_id")
+            or RUN.get("project_id") or "default"
+        )
     source_ledger = _source_ledger_for_contract(contract)
     specification = normalize_project_specification(
         contract.get("original_goal", contract.get("goal", "coding task")), contract,
@@ -3447,7 +3563,8 @@ def _bound_project_brain(brain, max_chars=MAX_PROJECT_BRAIN_CHARS):
         (core, "edge_cases"), (core, "interaction_contracts"),
         (core, "project_specific_quality_rules"), (core, "interface_contracts"),
         (core, "state_ownership"), (core, "architecture_invariants"), (core, "major_components"),
-        (state, "verified_child_manifests"), (state, "project_invariants"), (state, "files"),
+        (state, "verified_child_manifests"), (state, "promoted_verified_facts"),
+        (state, "promotion_receipts"), (state, "project_invariants"), (state, "files"),
         (state, "languages"), (state, "dependency_manifests"), (state, "verified_components"),
         (state, "verified_interfaces"), (state, "integration_facts"), (state, "blocking_failures"),
         (state, "repository_evidence"),
@@ -3540,9 +3657,18 @@ def refresh_project_brain_verified_state(repo_snapshot=None):
     repository_evidence = RUN.get("repository_evidence")
     if not isinstance(repository_evidence, list):
         repository_evidence = previous.get("repository_evidence", [])
+    preserved_promoted = previous.get("promoted_verified_facts", [])
+    preserved_receipts = previous.get("promotion_receipts", [])
     brain["verified_state"] = _initial_verified_project_state(
         snapshot, repository_evidence,
     )
+    if RUN.get("stage5c_enabled"):
+        brain["verified_state"]["promoted_verified_facts"] = copy.deepcopy(
+            RUN.get("promoted_verified_facts", preserved_promoted)
+        )[:MAX_PROJECT_BRAIN_RECORDS]
+        brain["verified_state"]["promotion_receipts"] = copy.deepcopy(
+            RUN.get("promotion_receipts", preserved_receipts)
+        )[:MAX_BRAIN_ITEMS]
     return brain["verified_state"]
 
 
@@ -3793,6 +3919,12 @@ def build_brain_projection(brain, task, dependency_summaries=None, repo_snapshot
             "verified_child_manifests": _select_relevant_brain_items(
                 state.get("verified_child_manifests", []), query, 4,
             ),
+            "promoted_verified_facts": _select_relevant_brain_items(
+                state.get("promoted_verified_facts", []), query, 8,
+            ),
+            "promotion_receipts": _select_relevant_brain_items(
+                state.get("promotion_receipts", []), query, 4,
+            ),
             "dependencies": dependencies,
         },
     }
@@ -3840,9 +3972,13 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
                   "non_goals", "explicit_assumptions", "derived_assumptions", "open_ambiguities"):
         if isinstance(core.get(field), list):
             core[field] = _bounded_brain_strings(core[field], MAX_BRAIN_ITEMS, 300)
-    for field in ("files", "project_invariants", "verified_child_manifests", "repository_evidence"):
+    for field in (
+        "files", "project_invariants", "verified_child_manifests",
+        "promoted_verified_facts", "promotion_receipts", "repository_evidence",
+    ):
         if isinstance(state.get(field), list):
-            state[field] = _bounded_brain_records(state[field], 12, 240)
+            item_chars = 760 if field == "promoted_verified_facts" else 520 if field == "promotion_receipts" else 240
+            state[field] = _bounded_brain_records(state[field], 12, item_chars)
 
     def encode_packet():
         return json.dumps({
@@ -9613,6 +9749,37 @@ def _stage5b_enabled(task=None):
     )
 
 
+def _stage5c_enabled(task=None, contract=None):
+    """Return whether the current approved execution requests V22 promotion."""
+    task_value = task if isinstance(task, dict) else {}
+    contract_value = contract if isinstance(contract, dict) else {}
+    execution_contract = (
+        task_value.get("execution_contract")
+        if isinstance(task_value.get("execution_contract"), dict) else {}
+    )
+    source_contract = (
+        task_value.get("source_contract")
+        if isinstance(task_value.get("source_contract"), dict) else {}
+    )
+    contract_source = (
+        contract_value.get("source_contract")
+        if isinstance(contract_value.get("source_contract"), dict) else {}
+    )
+    return bool(
+        RUN.get("stage5c_enabled")
+        or task_value.get("stage5c_enabled")
+        or contract_value.get("stage5c_enabled")
+        or execution_contract.get("stage5c_enabled")
+        or source_contract.get("stage5c_enabled")
+        or contract_source.get("stage5c_enabled")
+    )
+
+
+def _stage5c_project_id(contract=None):
+    value = contract if isinstance(contract, dict) else {}
+    return str(value.get("project_id") or RUN.get("project_id") or "default")
+
+
 def _stage5b_validated_child_plan(parent, children):
     """Project the already validated child set without deriving it from results."""
     parent = parent if isinstance(parent, dict) else {}
@@ -9891,6 +10058,10 @@ def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=N
         _finish_parent_integration(task, passed=False, preflight={"error_count": 0, "conflicts": []})
         result["status"] = "failed"
         result["failure_type"] = INTEGRATION_FAILED
+    if result.get("status") == "done" and _stage5c_enabled(task, contract):
+        result = _stage5c_promote_parent(
+            task, contract, result, memory, repo_snapshot,
+        )
     record_run_event(
         "parent_integration_aggregated",
         parent_id=task.get("id"), readiness=readiness.get("readiness"),
@@ -9898,6 +10069,164 @@ def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=N
         actual_evidence=result.get("integration_evidence", []),
         integration_result=result.get("integration_result"),
         parent_verification_receipt=(result.get("parent_verification_receipt") or {}).get("receipt_hash"),
+        model_calls=0,
+    )
+    return result
+
+
+def _stage5c_promote_parent(task, contract, result, memory, repo_snapshot=None):
+    """Run V22 promotion only after V21 has produced PARENT_VERIFIED."""
+    if not _stage5c_enabled(task, contract):
+        return result
+    RUN["promotion_eligibility_checks"] = RUN.get("promotion_eligibility_checks", 0) + 1
+    receipt = result.get("parent_verification_receipt")
+    if not isinstance(receipt, dict):
+        receipt = task.get("parent_verification_receipt") if isinstance(task, dict) else None
+    readiness = result.get("integration_readiness") if isinstance(result.get("integration_readiness"), dict) else {}
+    artifact_refs = [
+        f"parent_receipt:{receipt.get('receipt_hash')}" if isinstance(receipt, dict) else "parent_receipt:missing",
+        f"readiness:{readiness.get('readiness_hash')}" if readiness.get("readiness_hash") else "readiness:validated",
+    ]
+    audit = _stage5b_scope_audit(result.get("children", []))
+    authority_failure = _authority_terminal_failure(task)
+    promotion = _promote_verified_parent_v22(
+        parent=task,
+        parent_receipt=receipt,
+        parent_contract=contract if isinstance(contract, dict) else {},
+        parent_result=result,
+        child_receipts=RUN.get("child_receipts", {}),
+        workspace=WORKSPACE,
+        project_id=_stage5c_project_id(contract),
+        store=get_memory_store(),
+        task_id=task.get("id") if isinstance(task, dict) else None,
+        artifact_refs=artifact_refs,
+        authority_valid=authority_failure is None,
+        unauthorized_mutations=audit.get("unauthorized_mutations", 0),
+        scope_violations=audit.get("scope_violations", 0),
+        dnt_violations=audit.get("dnt_violations", 0),
+    )
+    promotion_status = promotion.get("promotion_status")
+    candidate = promotion.get("candidate")
+    if isinstance(candidate, dict):
+        RUN["promotion_candidates_created"] = RUN.get("promotion_candidates_created", 0) + 1
+    if promotion_status not in {PROMOTED, ALREADY_PROMOTED}:
+        RUN["promotion_candidates_rejected"] = RUN.get("promotion_candidates_rejected", 0) + 1
+    if promotion_status in {PROMOTION_NOT_ELIGIBLE_STALE_RECEIPT, PROMOTION_NOT_ELIGIBLE_STALE_SUBJECT_STATE}:
+        RUN["promotion_stale_blocks"] = RUN.get("promotion_stale_blocks", 0) + 1
+    if promotion_status == PROMOTION_CONFLICT:
+        RUN["promotion_conflicts"] = RUN.get("promotion_conflicts", 0) + 1
+    if promotion_status == PROMOTED:
+        receipt_out = promotion.get("promotion_receipt") if isinstance(promotion.get("promotion_receipt"), dict) else {}
+        RUN["project_brain_promotions"] = RUN.get("project_brain_promotions", 0) + 1
+        RUN["verified_facts_promoted"] = RUN.get("verified_facts_promoted", 0) + len(
+            receipt_out.get("promoted_record_ids", []) or []
+        )
+        RUN["verified_facts_deduplicated"] = RUN.get("verified_facts_deduplicated", 0) + len(
+            receipt_out.get("deduplicated_record_ids", []) or []
+        )
+        RUN["verified_facts_superseded"] = RUN.get("verified_facts_superseded", 0) + len(
+            receipt_out.get("superseded_record_ids", []) or []
+        )
+    elif promotion_status == ALREADY_PROMOTED:
+        RUN["project_brain_promotion_noops"] = RUN.get("project_brain_promotion_noops", 0) + 1
+    RUN["promotion_model_calls"] = RUN.get("promotion_model_calls", 0) + int(
+        promotion.get("model_calls", 0) or 0
+    )
+    RUN["task_brain_compaction_model_calls"] = RUN.get(
+        "task_brain_compaction_model_calls", 0,
+    ) + 0
+    RUN["promotion_status"] = promotion_status
+    RUN["promotion_receipt"] = copy.deepcopy(promotion.get("promotion_receipt"))
+    result["promotion"] = copy.deepcopy(promotion)
+    result["promotion_status"] = promotion_status
+
+    completion = promotion.get("task_brain_completion")
+    if promotion_status in {PROMOTED, ALREADY_PROMOTED} and isinstance(promotion.get("promotion_receipt"), dict):
+        promotion_receipt = promotion["promotion_receipt"]
+        if not isinstance(completion, dict):
+            record_ids = promotion_receipt.get("promoted_record_ids", []) or []
+            completion = {
+                "schema_version": "V22.5C",
+                "task_id": str(task.get("id", "")),
+                "terminal_state": "VERIFIED_AND_PROMOTED",
+                "parent_verification_hash": promotion_receipt.get("parent_verification_hash"),
+                "promotion_hash": promotion_receipt.get("promotion_hash"),
+                "subject_state_hash": promotion_receipt.get("subject_state_hash"),
+                "artifact_refs": artifact_refs[:24],
+                "project_brain_record_ids": list(record_ids)[:256],
+            }
+            completion["completion_hash"] = hashlib.sha256(
+                json.dumps(completion, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            ).hexdigest()
+        result["task_brain_completion"] = copy.deepcopy(completion)
+        task["task_brain_completion"] = copy.deepcopy(completion)
+        RUN["task_brain_completion"] = copy.deepcopy(completion)
+        RUN["task_brain_compactions"] = RUN.get("task_brain_compactions", 0) + 1
+        task_brain = RUN.get("task_brain") if isinstance(RUN.get("task_brain"), dict) else {}
+        task_brain["completion_pointer"] = copy.deepcopy(completion)
+        task_brain["terminal_state"] = "VERIFIED_AND_PROMOTED"
+        RUN["task_brain"] = task_brain
+        update_task_ledger(task)
+
+    # The SQLite transaction is the authority for durable facts.  This
+    # bounded runtime projection is only a prompt-facing view of that result.
+    project_records = [
+        record for record in (promotion.get("project_brain_records", []) or [])
+        if isinstance(record, dict) and record.get("status") == "ACTIVE"
+    ]
+    projected_facts = []
+    for record in project_records if isinstance(project_records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+        projected_facts.append({
+            "record_id": record.get("record_id"),
+            "fact_hash": record.get("fact_hash"),
+            "semantic_hash": record.get("semantic_hash"),
+            "category": fact.get("category"),
+            "field": fact.get("field"),
+            "fact": compact_text(fact.get("fact", ""), 900),
+            "kind": fact.get("kind"),
+            "path": compact_text(fact.get("path", ""), 220) or None,
+            "result": fact.get("result"),
+            "authority": fact.get("authority"),
+            "authority_source": fact.get("authority_source"),
+            "verified": fact.get("verified") is True,
+            "approved": fact.get("approved") is True,
+            "evidence_refs": bounded_list(fact.get("evidence_refs", []), 24, 220),
+            "dependency_paths": bounded_list(fact.get("dependency_paths", []), 48, 220),
+            "source": compact_text(fact.get("source", ""), 220),
+            "conflict_key": compact_text(fact.get("conflict_key", ""), 220),
+            "supersedes": bounded_list(record.get("supersedes", []), 24, 220),
+            "durability_class": record.get("durability_class"),
+            "subject_state_hash": record.get("subject_state_hash"),
+            "status": record.get("status"),
+        })
+    if promotion_status in {PROMOTED, ALREADY_PROMOTED}:
+        RUN["promoted_verified_facts"] = projected_facts[-256:]
+        receipt_projection = promotion.get("promotion_receipt") if isinstance(promotion.get("promotion_receipt"), dict) else {}
+        RUN["promotion_receipts"] = [{
+            "promotion_id": receipt_projection.get("promotion_id"),
+            "promotion_hash": receipt_projection.get("promotion_hash"),
+            "candidate_hash": receipt_projection.get("candidate_hash"),
+            "eligibility_status": receipt_projection.get("eligibility_status"),
+            "promotion_status": receipt_projection.get("promotion_status"),
+            "project_brain_before_hash": receipt_projection.get("project_brain_before_hash"),
+            "project_brain_after_hash": receipt_projection.get("project_brain_after_hash"),
+            "promoted_record_ids": list(receipt_projection.get("promoted_record_ids", []) or []),
+            "deduplicated_record_ids": list(receipt_projection.get("deduplicated_record_ids", []) or []),
+            "superseded_record_ids": list(receipt_projection.get("superseded_record_ids", []) or []),
+        }][-8:]
+        if isinstance(RUN.get("project_brain"), dict):
+            refresh_project_brain_verified_state(repo_snapshot)
+            RUN["project_brain"] = _bound_project_brain(RUN["project_brain"])
+    record_run_event(
+        "verified_state_promotion",
+        task_id=task.get("id") if isinstance(task, dict) else None,
+        promotion_status=promotion_status,
+        candidate_hash=(candidate or {}).get("candidate_hash") if isinstance(candidate, dict) else None,
+        promotion_hash=(promotion.get("promotion_receipt") or {}).get("promotion_hash")
+        if isinstance(promotion.get("promotion_receipt"), dict) else None,
         model_calls=0,
     )
     return result
@@ -12566,6 +12895,10 @@ def merge_project_invariants(owner, manifest):
     Free-form child assumptions are kept in the child manifest for audit, but
     they are deliberately not promoted to canonical project invariants.
     """
+    # With Stage 5C enabled, only the validated parent receipt may promote
+    # durable facts.  Keep the worker manifest local to the task ledger.
+    if _stage5c_enabled():
+        return list(RUN.get("project_invariants", []))
     if not isinstance(manifest, dict):
         return list(RUN.get("project_invariants", []))
     if str(manifest.get("status", "")).casefold() not in {"done", "verified"}:
@@ -14829,6 +15162,20 @@ def begin_durable_run(contract):
     ACTIVE_CONTRACT = dict(contract)
     ACTIVE_TOOL_CONTRACT = dict(contract)
     RUN["source_contract"] = copy.deepcopy(contract)
+    nested_contract = (
+        contract.get("source_contract")
+        if isinstance(contract, dict) and isinstance(contract.get("source_contract"), dict)
+        else {}
+    )
+    if isinstance(contract, dict) and (
+        contract.get("stage5c_enabled") or nested_contract.get("stage5c_enabled")
+    ):
+        RUN["stage5c_enabled"] = True
+        RUN["stage5b_enabled"] = True
+        RUN["project_id"] = str(
+            contract.get("project_id") or nested_contract.get("project_id")
+            or RUN.get("project_id") or "default"
+        )
     store = get_memory_store()
     if store and RUN_ID:
         try:
@@ -14846,9 +15193,28 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
     # injects the legacy Stage 4 test-only leaf harness remains on that
     # compatibility path unless it explicitly opts into Stage 5B; production
     # authority-bound execution has no injected leaf executor.
+    stage5c_requested = bool(
+        RUN.get("stage5c_enabled") or
+        (isinstance(contract, dict) and (
+            contract.get("stage5c_enabled")
+            or (isinstance(contract.get("source_contract"), dict)
+                and contract["source_contract"].get("stage5c_enabled"))
+        ))
+    )
+    if stage5c_requested:
+        RUN["stage5c_enabled"] = True
+        if isinstance(contract, dict):
+            source_contract = contract.get("source_contract") if isinstance(
+                contract.get("source_contract"), dict
+            ) else {}
+            RUN["project_id"] = str(
+                contract.get("project_id") or source_contract.get("project_id")
+                or RUN.get("project_id") or "default"
+            )
     stage5b_requested = bool(
         RUN.get("stage5b_enabled") or
         (isinstance(contract, dict) and contract.get("stage5b_enabled"))
+        or stage5c_requested
     )
     if leaf_executor is None or stage5b_requested:
         RUN["stage5b_enabled"] = True
@@ -14886,6 +15252,10 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             for item in state.get("contracts", []) or []
             if isinstance(item, dict)
         ]
+    if RUN.get("stage5c_enabled"):
+        root["stage5c_enabled"] = True
+        root["stage5c_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
+        RUN["stage5c_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
     TASKS["ROOT"] = root
     RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0))
     update_task_ledger(root)
@@ -16958,6 +17328,9 @@ def run_self_test(install_browser=False):
         v215b_verified_child_self_test = run_verified_child_integration_self_test()
         for name, ok in v215b_verified_child_self_test.get("checks", {}).items():
             print(f"{('v21.5B ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v225c_verified_state_self_test = run_verified_state_promotion_self_test()
+        for name, ok in v225c_verified_state_self_test.get("checks", {}).items():
+            print(f"{('v22.5C ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -17545,6 +17918,9 @@ def run_self_test(install_browser=False):
             ),
             "v21.5B verified-child integration self-test": (
                 v215b_verified_child_self_test.get("passed") is True
+            ),
+            "v22.5C verified-state promotion self-test": (
+                v225c_verified_state_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
