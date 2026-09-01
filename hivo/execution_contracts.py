@@ -72,6 +72,15 @@ WORKER_CONTEXT_TOO_LARGE = "WORKER_CONTEXT_TOO_LARGE"
 WORKER_CONTEXT_AUTHORITY_TOO_LARGE = "WORKER_CONTEXT_AUTHORITY_TOO_LARGE"
 WORKER_CONTEXT_ADVICE_UNAVAILABLE = "WORKER_CONTEXT_ADVICE_UNAVAILABLE"
 
+# V19.4 structural granularity outcomes.  These are deterministic routing
+# observations over an already-approved Execution Contract; they are not
+# model decisions and do not become part of the contract authority/hash.
+DIRECT_ALLOWED = "DIRECT_ALLOWED"
+AMBIGUOUS = "AMBIGUOUS"
+DECOMPOSITION_REQUIRED = "DECOMPOSITION_REQUIRED"
+STRUCTURAL_DECOMPOSITION_REQUIRED = "STRUCTURAL_DECOMPOSITION_REQUIRED"
+STRUCTURAL_FIT_SCHEMA_VERSION = "4B-structural-fit-1"
+
 RESPONSIBILITY_TYPES = (MUTATION, TEST_MUTATION, VERIFY_ONLY, INTERFACE_REUSE, INTEGRATION_CHECK)
 
 _RAW_FORBIDDEN_KEYS = frozenset({
@@ -1694,6 +1703,216 @@ def validate_execution_graph(snapshot, graph, contracts=None):
     if not isinstance(reported_order, list):
         reported_order = []
     return {"valid": not errors, "errors": errors[:30], "topological_order": list(reported_order or [])}
+
+
+def _structural_unique_ids(value, fields):
+    """Read optional structured ownership IDs without interpreting prose."""
+    values = []
+    for field in fields:
+        raw = value.get(field)
+        if isinstance(raw, dict):
+            raw = list(raw.keys())
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(str(item).strip() for item in raw if str(item).strip())
+    return _unique(values, text_limit=None, sort=True)
+
+
+def _structural_paths(value, field):
+    raw = value.get(field, [])
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    return _unique(
+        [_path(item) for item in raw if _path(item)],
+        text_limit=MAX_PATH_CHARS,
+        sort=True,
+    )
+
+
+def _structural_path_is_within(path, roots):
+    normalized = _path(path).casefold().rstrip("/")
+    return any(
+        normalized == root or normalized.startswith(root + "/")
+        for root in {
+            _path(item).casefold().rstrip("/")
+            for item in roots
+            if _path(item)
+        }
+    )
+
+
+def _structural_test_path(path):
+    """Recognize test *path structure*, never task prose or keywords."""
+    normalized = _path(path).casefold().strip("/")
+    if not normalized:
+        return False
+    parts = normalized.split("/")
+    filename = parts[-1]
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    return (
+        parts[0] in {"test", "tests", "spec", "specs"}
+        or filename.startswith(("test_", "spec_"))
+        or stem.endswith(("_test", "_spec"))
+        or ".test." in filename
+        or ".spec." in filename
+    )
+
+
+def analyze_structural_fit(contract):
+    """Classify one approved contract before any model Task-Fit call.
+
+    The analyzer consumes only typed/structured Execution Contract authority:
+    mutation paths/surfaces, responsibility IDs, obligation counts, and
+    completion entries.  It deliberately ignores goals, requirement prose,
+    preservation prose, prohibitions, DNT paths, inspection-only paths, and
+    interface names.  It never creates child contracts and never calls a
+    model.
+
+    ``DIRECT_ALLOWED`` is reserved for one effective mutation owner (or no
+    worker mutation).  Two owners remain ``AMBIGUOUS`` so the existing bounded
+    Task-Fit model may decide.  A mixed implementation/test mutation or three
+    owners with three separate completion entries creates a deterministic
+    ``DECOMPOSITION_REQUIRED`` obligation.
+    """
+    value = contract if isinstance(contract, dict) else {}
+    protected_paths = _structural_paths(value, "global_do_not_touch")
+    mutation_paths = [
+        path for path in _structural_paths(value, "allowed_mutation_paths")
+        if not _structural_path_is_within(path, protected_paths)
+    ]
+    all_mutation_surface_ids = _structural_unique_ids(
+        value,
+        ("allowed_mutation_surface_ids", "mutation_surface_ids"),
+    )
+    protected_surface_ids = set(_structural_unique_ids(
+        value, ("global_do_not_touch_surface_ids",),
+    ))
+    mutation_surface_ids = [
+        surface_id for surface_id in all_mutation_surface_ids
+        if surface_id not in protected_surface_ids
+    ]
+    explicit_owner_ids = _structural_unique_ids(
+        value,
+        (
+            "distinct_mutation_owners", "mutation_owner_ids", "mutation_owners",
+            "owned_mutation_responsibility_ids", "owned_responsibility_ids",
+        ),
+    )
+    # A child contract may inherit the parent's canonical surface IDs while
+    # shrinking its actual mutation paths.  Effective mutation paths therefore
+    # take precedence for owner counting; surface IDs remain an independent
+    # evidence count and are used when a contract has no concrete paths.
+    owner_ids = explicit_owner_ids or mutation_paths or mutation_surface_ids
+    effective_mutation_surface_count = len(mutation_surface_ids or mutation_paths)
+
+    explicit_test_paths = _structural_paths(value, "test_mutation_paths")
+    explicit_test_surface_ids = _structural_unique_ids(
+        value, ("test_mutation_surface_ids", "test_surface_ids"),
+    )
+    test_path_set = set(explicit_test_paths)
+    test_path_count = sum(
+        1 for path in mutation_paths
+        if path in test_path_set or _structural_test_path(path)
+    )
+    non_test_path_count = max(0, len(mutation_paths) - test_path_count)
+    surface_test_count = len(set(mutation_surface_ids).intersection(explicit_test_surface_ids))
+    responsibility_type = str(value.get("responsibility_type", "")).upper()
+    has_test_mutation = bool(test_path_count or surface_test_count or responsibility_type == TEST_MUTATION)
+    has_non_test_mutation = bool(non_test_path_count)
+    if explicit_test_surface_ids and set(mutation_surface_ids).difference(explicit_test_surface_ids):
+        has_non_test_mutation = True
+    if responsibility_type == TEST_MUTATION and not non_test_path_count:
+        has_non_test_mutation = False
+
+    requirement_ids = _structural_unique_ids(value, ("requirement_ids",))
+    requirements = value.get("requirements", [])
+    requirement_count = len(requirement_ids or (
+        _unique(requirements, text_limit=MAX_REQUIREMENT_TEXT_CHARS, sort=True)
+        if isinstance(requirements, list) else []
+    ))
+    obligation_types = _structural_unique_ids(value, ("obligation_types",))
+    done_when = value.get("done_when", [])
+    done_when_count = len(done_when) if isinstance(done_when, list) else 0
+
+    reason_codes = []
+    if not mutation_paths and not mutation_surface_ids and not value.get("worker_required"):
+        classification = DIRECT_ALLOWED
+        reason_codes.append("NO_MUTATION_RESPONSIBILITY")
+    elif has_test_mutation and has_non_test_mutation:
+        classification = DECOMPOSITION_REQUIRED
+        reason_codes.append("MIXED_IMPLEMENTATION_AND_TEST_MUTATION")
+    elif len(owner_ids) >= 3 and done_when_count >= 3:
+        classification = DECOMPOSITION_REQUIRED
+        reason_codes.append("THREE_MUTATION_OWNERS_WITH_SEPARATE_COMPLETION")
+    elif len(owner_ids) >= 2:
+        classification = AMBIGUOUS
+        reason_codes.append("MULTI_OWNER_ATOMICITY_UNCERTAIN")
+    else:
+        classification = DIRECT_ALLOWED
+        reason_codes.append("ONE_MUTATION_OWNER")
+
+    if len(owner_ids) >= 3 and done_when_count >= 3 and "THREE_MUTATION_OWNERS_WITH_SEPARATE_COMPLETION" not in reason_codes:
+        reason_codes.append("THREE_MUTATION_OWNERS_WITH_SEPARATE_COMPLETION")
+    if classification == DECOMPOSITION_REQUIRED and done_when_count >= 3:
+        reason_codes.append("MULTIPLE_COMPLETION_RESPONSIBILITIES")
+    if has_test_mutation:
+        reason_codes.append("TEST_MUTATION_PRESENT")
+    if has_non_test_mutation:
+        reason_codes.append("NON_TEST_MUTATION_PRESENT")
+
+    evidence = {
+        "schema_version": STRUCTURAL_FIT_SCHEMA_VERSION,
+        "execution_contract_id": value.get("execution_contract_id"),
+        "contract_hash": value.get("contract_hash"),
+        "approved_plan_hash": value.get("plan_hash"),
+        "classification": classification,
+        "mutation_path_count": len(mutation_paths),
+        "mutation_surface_count": effective_mutation_surface_count,
+        "owned_responsibility_count": len(owner_ids),
+        "requirement_count": requirement_count,
+        "obligation_type_count": len(obligation_types),
+        "done_when_count": done_when_count,
+        "has_test_mutation": has_test_mutation,
+        "has_non_test_mutation": has_non_test_mutation,
+        "test_mutation": has_test_mutation,
+        "non_test_mutation": has_non_test_mutation,
+        "test_mutation_path_count": test_path_count,
+        "non_test_mutation_path_count": non_test_path_count,
+        "distinct_mutation_owners": list(owner_ids),
+        "distinct_mutation_owner_count": len(owner_ids),
+        "mutation_owner_count": len(owner_ids),
+        "completion_responsibility_count": done_when_count,
+        "reason_codes": reason_codes,
+        "model_calls": 0,
+    }
+    evidence["structural_fit_hash"] = deterministic_hash(
+        _without(evidence, "structural_fit_hash"),
+    )
+    return evidence
+
+
+def validate_structural_fit(evidence, contract=None):
+    """Validate deterministic structural evidence without changing authority."""
+    value = evidence if isinstance(evidence, dict) else {}
+    errors = []
+    if value.get("classification") not in {
+        DIRECT_ALLOWED, AMBIGUOUS, DECOMPOSITION_REQUIRED,
+    }:
+        errors.append("unknown structural fit classification")
+    if value.get("model_calls") != 0:
+        errors.append("structural fit analyzer must use zero model calls")
+    expected_hash = deterministic_hash(_without(value, "structural_fit_hash"))
+    if value.get("structural_fit_hash") != expected_hash:
+        errors.append("structural fit hash does not match evidence")
+    if isinstance(contract, dict):
+        if value.get("execution_contract_id") != contract.get("execution_contract_id"):
+            errors.append("structural fit contract identity mismatch")
+        if value.get("contract_hash") != contract.get("contract_hash"):
+            errors.append("structural fit contract hash mismatch")
+    return {"valid": not errors, "errors": errors[:20]}
+
+
+structural_fit_analyzer = analyze_structural_fit
+structural_fit = analyze_structural_fit
 
 
 def contract_projection(contract, max_chars=MAX_CONTEXT_CHARS):

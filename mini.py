@@ -1313,6 +1313,18 @@ def new_metrics(mode):
         "execution_contract_scope_violations": 0,
         "execution_contract_stale_blocks": 0,
         "execution_dependency_blocks": 0,
+        # V19.4 deterministic structural granularity accounting.  These
+        # observations are separate from Task-Fit model calls and never alter
+        # the approved contract or its hash.
+        "structural_fit_analyzer_calls": 0,
+        "structural_fit_calls": 0,
+        "structural_fit_direct_allowed": 0,
+        "structural_fit_ambiguous": 0,
+        "structural_fit_decomposition_required": 0,
+        "structural_decomposition_obligations": 0,
+        "structural_fit_failures": 0,
+        "structural_fit_model_overrides_blocked": 0,
+        "structural_fit_artifacts_created": 0,
         "contract_decompositions": 0,
         "contract_child_scope_rejections": 0,
         "worker_contract_contexts_created": 0,
@@ -1478,6 +1490,8 @@ def compact_task_tree():
             entry["initial_failure_diagnosis"] = task.get("initial_failure_diagnosis")
         if task.get("fit_before_execution") is not None:
             entry["fit_before_execution"] = task.get("fit_before_execution")
+        if task.get("structural_fit") is not None:
+            entry["structural_fit"] = task.get("structural_fit")
         if task.get("execution_outcome") is not None:
             entry["execution_outcome"] = task.get("execution_outcome")
         if task.get("execution_budget_exhausted"):
@@ -5379,6 +5393,9 @@ sanitize_mission_advice = stage4.sanitize_mission_advice
 hydrate_worker_mission = stage4.hydrate_worker_mission
 validate_hydrated_worker_mission = stage4.validate_hydrated_worker_mission
 hydrated_worker_mission_chars = stage4.hydrated_worker_mission_chars
+analyze_structural_fit = stage4.analyze_structural_fit
+structural_fit_analyzer = stage4.analyze_structural_fit
+validate_structural_fit = stage4.validate_structural_fit
 validate_child_contract = stage4.validate_child_contract
 
 
@@ -5402,14 +5419,90 @@ def render_worker_context_projection(projection, max_chars=MAX_WORKER_MISSION_CH
     return stage4.render_worker_context_projection(projection, max_chars=max_chars)
 
 
+def _record_structural_fit(task, execution_contract):
+    """Analyze and record one contract's deterministic granularity evidence."""
+    if not isinstance(execution_contract, dict):
+        return None
+    task = task if isinstance(task, dict) else {}
+    expected_identity = (
+        execution_contract.get("execution_contract_id"),
+        execution_contract.get("contract_hash"),
+    )
+    cached = task.get("structural_fit")
+    if isinstance(cached, dict) and (
+        cached.get("execution_contract_id"), cached.get("contract_hash")
+    ) == expected_identity:
+        return cached
+    try:
+        evidence = stage4.analyze_structural_fit(execution_contract)
+    except (TypeError, ValueError, KeyError) as exc:
+        RUN["structural_fit_failures"] = RUN.get("structural_fit_failures", 0) + 1
+        record_run_event(
+            "structural_fit_failure", task_id=task.get("id"),
+            execution_contract_id=execution_contract.get("execution_contract_id"),
+            error=str(exc),
+        )
+        return None
+    task["structural_fit"] = copy.deepcopy(evidence)
+    classification = evidence.get("classification")
+    RUN["structural_fit_analyzer_calls"] = RUN.get("structural_fit_analyzer_calls", 0) + 1
+    RUN["structural_fit_calls"] = RUN.get("structural_fit_calls", 0) + 1
+    RUN["structural_fit_artifacts_created"] = RUN.get("structural_fit_artifacts_created", 0) + 1
+    metric_by_classification = {
+        stage4.DIRECT_ALLOWED: "structural_fit_direct_allowed",
+        stage4.AMBIGUOUS: "structural_fit_ambiguous",
+        stage4.DECOMPOSITION_REQUIRED: "structural_fit_decomposition_required",
+    }
+    metric = metric_by_classification.get(classification)
+    if metric:
+        RUN[metric] = RUN.get(metric, 0) + 1
+    if classification == stage4.DECOMPOSITION_REQUIRED:
+        RUN["structural_decomposition_obligations"] = RUN.get(
+            "structural_decomposition_obligations", 0,
+        ) + 1
+    if "STRUCTURAL_FIT_ANALYZER" not in RUN.setdefault("control_flow", []):
+        RUN["control_flow"].append("STRUCTURAL_FIT_ANALYZER")
+    RUN.setdefault("structural_fit_artifacts", {})[
+        str(evidence.get("execution_contract_id") or task.get("id") or "unknown")
+    ] = copy.deepcopy(evidence)
+    record_run_event(
+        "structural_fit_analyzed", task_id=task.get("id"),
+        execution_contract_id=execution_contract.get("execution_contract_id"),
+        structural_fit=copy.deepcopy(evidence),
+    )
+    return evidence
+
+
+def structural_fit_for_task(task, execution_contract=None):
+    """Public deterministic structural-fit probe used by tests and audits."""
+    execution_contract = execution_contract or _current_execution_contract(task)
+    return _record_structural_fit(task, execution_contract)
+
+
 def _current_execution_contract(task=None):
     """Return the current contract or ``None`` outside the Stage 4A path."""
+    task = task if isinstance(task, dict) else {}
+    embedded = task.get("execution_contract")
+    if (
+        isinstance(embedded, dict)
+        and embedded.get("execution_contract_id")
+        and (
+            RUN.get("project_mode") != EXISTING_PROJECT
+            or not RUN.get("impact_planning_required")
+        )
+    ):
+        child = task.get("execution_contract_child")
+        if isinstance(child, dict):
+            checked = stage4.validate_child_contract(embedded, child)
+            if not checked.get("valid"):
+                return None
+            return child
+        return embedded
     if RUN.get("project_mode") != EXISTING_PROJECT or not RUN.get("impact_planning_required"):
         return None
     state = compile_approved_plan_execution_contracts()
     if state.get("status") != "ready":
         return None
-    task = task if isinstance(task, dict) else {}
     plan = RUN.get("approved_change_plan") or {}
     if task.get("approved_plan_hash") and task.get("approved_plan_hash") != plan.get("plan_hash"):
         return None
@@ -6394,6 +6487,7 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "attempts": [], "failure_diagnosis": None,
         "last_failure_type": None,
         "fit_before_execution": None,
+        "structural_fit": None,
         "execution_outcome": None,
         "execution_budget_exhausted": False,
         "repair_history": [],
@@ -6415,6 +6509,11 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "execution_contract_hash": (execution_contract or {}).get("contract_hash")
         if isinstance(execution_contract, dict) else None,
         "execution_contract_type": (execution_contract or {}).get("responsibility_type")
+        if isinstance(execution_contract, dict) else None,
+        # Keep the already-authoritative contract available to deterministic
+        # structural probes and direct task callers.  It is internal task
+        # state; compact Worker/context projections never serialize it here.
+        "execution_contract": copy.deepcopy(execution_contract)
         if isinstance(execution_contract, dict) else None,
         "execution_contract_child": execution_contract_child,
     }
@@ -6488,6 +6587,25 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
         dependency_summaries, repo_snapshot = repo_snapshot, inspect_repository()
     dependency_summaries = dependency_summaries or []
     execution_contract = execution_contract or _current_execution_contract(task)
+    if execution_contract is None and isinstance(contract, dict) and contract.get(
+        "execution_contract_id"
+    ):
+        execution_contract = contract
+    structural_fit = _record_structural_fit(task, execution_contract)
+    if structural_fit:
+        classification = structural_fit.get("classification")
+        if classification == stage4.DECOMPOSITION_REQUIRED:
+            return {
+                "decision": "split",
+                "reason": "deterministic structural decomposition obligation",
+                "structural_fit": copy.deepcopy(structural_fit),
+            }
+        if classification == stage4.DIRECT_ALLOWED and not force_smaller:
+            return {
+                "decision": "execute",
+                "reason": "deterministic structural direct allowance",
+                "structural_fit": copy.deepcopy(structural_fit),
+            }
     if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("TASK_FIT")
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
@@ -13224,8 +13342,6 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     repo_snapshot = repo_snapshot or inspect_repository()
     task["status"] = "running"
     RUN["max_depth"] = max(RUN.get("max_depth", 0), depth)
-    if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
-        RUN["control_flow"].append("TASK_FIT")
     update_task_ledger(task)
     label = task["id"]
     if label == "ROOT":
@@ -13235,23 +13351,60 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
 
     can_split = _can_expand(depth)
     execution_contract = _current_execution_contract(task)
+    if execution_contract is None and isinstance(contract, dict) and contract.get(
+        "execution_contract_id"
+    ):
+        execution_contract = contract
+    structural_fit = _record_structural_fit(task, execution_contract)
+    if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
+        RUN["control_flow"].append("TASK_FIT")
     if can_split:
-        try:
-            decision = (
-                fit_decider(task, depth, contract, repo_snapshot, parent_summary, dependency_summaries, False)
-            if fit_decider else decide_task_fit(
-                    task, depth, contract, repo_snapshot, parent_summary, dependency_summaries,
-                    execution_contract=execution_contract,
+        structural_classification = structural_fit.get("classification") if structural_fit else None
+        if structural_classification == stage4.DIRECT_ALLOWED:
+            # A clearly single-owner contract takes the existing direct leaf
+            # path without spending a model Task-Fit call.
+            decision = {
+                "decision": "execute",
+                "reason": "deterministic structural direct allowance",
+                "structural_fit": copy.deepcopy(structural_fit),
+            }
+        elif structural_classification == stage4.DECOMPOSITION_REQUIRED:
+            # Structural authority cannot be downgraded by a model answer.
+            decision = {
+                "decision": "split",
+                "reason": "deterministic structural decomposition obligation",
+                "structural_fit": copy.deepcopy(structural_fit),
+            }
+        else:
+            try:
+                decision = (
+                    fit_decider(task, depth, contract, repo_snapshot, parent_summary, dependency_summaries, False)
+                    if fit_decider else decide_task_fit(
+                        task, depth, contract, repo_snapshot, parent_summary, dependency_summaries,
+                        execution_contract=execution_contract,
+                    )
                 )
-            )
-        except ProviderError as exc:
-            result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
-            _mark_task_result(task, result)
-            event(f"[FAILED {label}] provider/environment error; no decomposition", task=label)
-            return result
-
-
+            except ProviderError as exc:
+                result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+                _mark_task_result(task, result)
+                event(f"[FAILED {label}] provider/environment error; no decomposition", task=label)
+                return result
     else:
+        if structural_fit and structural_fit.get("classification") == stage4.DECOMPOSITION_REQUIRED:
+            # Do not let depth/task budget turn a deterministic decomposition
+            # obligation into an unauthorized direct Worker execution.
+            RUN["structural_fit_model_overrides_blocked"] = RUN.get(
+                "structural_fit_model_overrides_blocked", 0,
+            ) + 1
+            result = {
+                "status": "failed",
+                "failure_type": stage4.STRUCTURAL_DECOMPOSITION_REQUIRED,
+                "summary": "structural decomposition is required but recursion/task budget cannot expand",
+                "memory": memory,
+            }
+            _mark_task_result(task, result)
+            event(f"[FAILED {label}] structural decomposition required", task=label)
+            return result
         decision = {"decision": "execute", "reason": "hard recursion/task budget reached"}
     decision_name = str((decision or {}).get("decision", "execute")).lower()
     if task.get("fit_before_execution") is None:
@@ -13276,6 +13429,22 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
                 task, children, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
                 fit_decider, leaf_executor, aggregator,
             )
+        if structural_fit and structural_fit.get("classification") == stage4.DECOMPOSITION_REQUIRED:
+            # The existing Decomposer is the only producer of child specs.  A
+            # required split that yielded fewer than two validated children may
+            # not fall through to direct Worker execution.
+            RUN["structural_fit_model_overrides_blocked"] = RUN.get(
+                "structural_fit_model_overrides_blocked", 0,
+            ) + 1
+            result = {
+                "status": "failed",
+                "failure_type": stage4.STRUCTURAL_DECOMPOSITION_REQUIRED,
+                "summary": "existing Decomposer did not produce two validated children for a required split",
+                "memory": memory,
+            }
+            _mark_task_result(task, result)
+            event(f"[FAILED {label}] required decomposition produced no child set", task=label)
+            return result
 
     executor = leaf_executor or execute_leaf
     try:
@@ -14812,6 +14981,34 @@ def run_self_test(install_browser=False):
             v191_test_mission, v19_test_contract, v191_test_dependency,
             max_chars=MAX_WORKER_MISSION_CHARS,
         )
+        # v19.4 structural-fit checks are pure contract observations. They
+        # deliberately use the existing approved mutation contract shape and
+        # never invoke Task-Fit, MissionCompiler, a Worker, or Gemma.
+        v194_simple_contract = copy.deepcopy(v19_mutation_contract)
+        v194_simple_fit = stage4.analyze_structural_fit(v194_simple_contract)
+        v194_ambiguous_contract = copy.deepcopy(v19_mutation_contract)
+        v194_ambiguous_contract["allowed_mutation_paths"] = [
+            "src/input.js", "src/status_view.js",
+        ]
+        v194_ambiguous_contract["allowed_mutation_surface_ids"] = [
+            "SURF-INPUT", "SURF-VIEW",
+        ]
+        v194_ambiguous_contract["done_when"] = [
+            "input responsibility is verified", "view responsibility is verified",
+        ]
+        v194_ambiguous_fit = stage4.analyze_structural_fit(v194_ambiguous_contract)
+        v194_broad_contract = copy.deepcopy(v19_mutation_contract)
+        v194_broad_contract["allowed_mutation_paths"] = [
+            "src/input.js", "src/status_view.js", "tests/pause_flow.test.js",
+        ]
+        v194_broad_contract["allowed_mutation_surface_ids"] = [
+            "SURF-INPUT", "SURF-VIEW", "SURF-TEST",
+        ]
+        v194_broad_contract["done_when"] = [
+            "input behavior is verified", "view behavior is verified",
+            "focused test behavior is verified",
+        ]
+        v194_broad_fit = stage4.analyze_structural_fit(v194_broad_contract)
         v191_test_conflict = stage4.sanitize_mission_advice({
             "objective": "Create tests/pause.test.js for the new behavior.",
         }, v19_test_contract)
@@ -15401,6 +15598,31 @@ def run_self_test(install_browser=False):
                 and RUN.get("worker_context_projection_failures", 0) == 0
                 and RUN.get("worker_context_authority_items_dropped", 0) == 0
                 and RUN.get("worker_context_rendered_chars", 0) <= MAX_WORKER_MISSION_CHARS
+            ),
+            "v19.4 structural simple": (
+                v194_simple_fit.get("classification") == stage4.DIRECT_ALLOWED
+                and v194_simple_fit.get("mutation_path_count") == 1
+                and v194_simple_fit.get("owned_responsibility_count") == 1
+            ),
+            "v19.4 structural ambiguous": (
+                v194_ambiguous_fit.get("classification") == stage4.AMBIGUOUS
+                and v194_ambiguous_fit.get("mutation_path_count") == 2
+                and v194_ambiguous_fit.get("owned_responsibility_count") == 2
+            ),
+            "v19.4 structural broad": (
+                v194_broad_fit.get("classification") == stage4.DECOMPOSITION_REQUIRED
+                and v194_broad_fit.get("mutation_path_count") == 3
+                and v194_broad_fit.get("done_when_count") == 3
+                and v194_broad_fit.get("has_test_mutation")
+                and v194_broad_fit.get("has_non_test_mutation")
+            ),
+            "v19.4 structural zero model": (
+                all(item.get("model_calls") == 0 for item in (
+                    v194_simple_fit, v194_ambiguous_fit, v194_broad_fit,
+                ))
+                and not any("structural_fit" in str(item).casefold() for item in (
+                    v194_simple_contract, v194_ambiguous_contract, v194_broad_contract,
+                ))
             ),
         }
         for name, ok in checks.items():
