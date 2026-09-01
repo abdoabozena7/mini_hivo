@@ -1479,6 +1479,10 @@ def run_verified_state_reentry(
             "project_brain_records_excluded", "reentry_conflicts", "task_brain_bootstraps",
             "reentry_model_calls", "freshness_model_calls", "relevance_model_calls",
             "task_brain_bootstrap_model_calls", "automatic_reverification_attempts",
+            "authority_drift_checks", "authority_drift_confirmed",
+            "authority_drift_consistent", "authority_drift_not_evaluable",
+            "authority_drift_conflicts_emitted",
+            "authority_drift_duplicate_conflicts_suppressed",
         ):
             if key in metrics:
                 # Re-entry is an explicit boundary and may be used for more
@@ -1907,6 +1911,12 @@ def new_metrics(mode):
         "project_brain_records_relevant": 0,
         "project_brain_records_excluded": 0,
         "reentry_conflicts": 0,
+        "authority_drift_checks": 0,
+        "authority_drift_confirmed": 0,
+        "authority_drift_consistent": 0,
+        "authority_drift_not_evaluable": 0,
+        "authority_drift_conflicts_emitted": 0,
+        "authority_drift_duplicate_conflicts_suppressed": 0,
         "task_brain_bootstraps": 0,
         "reentry_model_calls": 0,
         "freshness_model_calls": 0,

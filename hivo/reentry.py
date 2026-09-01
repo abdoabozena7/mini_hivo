@@ -51,6 +51,13 @@ SUPERSEDED = "SUPERSEDED"
 CONFLICTED = "CONFLICTED"
 NOT_RELEVANT = "NOT_RELEVANT"
 
+# V23.1 authority-vs-repository conformance classifications.  These are
+# deterministic evidence states, not model judgments: an absent or
+# unstructured observation cannot establish a contradiction.
+CONFIRMED_CONSISTENT = "CONFIRMED_CONSISTENT"
+CONFIRMED_DRIFT = "CONFIRMED_DRIFT"
+NOT_EVALUABLE = "NOT_EVALUABLE"
+
 REENTRY_READY = "REENTRY_READY"
 REENTRY_RECONCILED = "REENTRY_RECONCILED"
 REENTRY_PROJECT_ID_MISMATCH = "REENTRY_PROJECT_ID_MISMATCH"
@@ -87,6 +94,8 @@ MAX_TASK_BRAIN_EVIDENCE = 12
 MAX_TASK_BRAIN_STALE = 12
 MAX_TASK_BRAIN_SUPERSEDED = 12
 MAX_TASK_BRAIN_CONFLICTS = 12
+MAX_AUTHORITY_DRIFT_AUDIT = 32
+MAX_TASK_BRAIN_DRIFT_AUDIT = 16
 
 _MODEL_CALL_ROLES = (
     "reentry", "freshness_reconciliation", "relevance_selection",
@@ -103,6 +112,8 @@ _ALLOWED_FACT_KEYS = frozenset({
     "fact", "text", "id", "requirement_id", "field", "kind", "category", "path",
     "paths", "symbol", "authority", "provenance", "source", "verified", "approved",
     "authority_source", "subject", "predicate", "object", "value", "description", "name",
+    "domain", "relationship", "relation", "owner", "owner_entity", "structured_relation",
+    "authority_relation", "repository_relation",
     "evidence_hash", "evidence_hashes", "conflict_key", "dependency_paths", "evidence_refs",
     "evidence", "durability_class", "subject_state_hash", "fact_hash", "semantic_hash",
     "record_id", "supersedes", "result", "dependency_fingerprints", "subject_state",
@@ -825,6 +836,377 @@ def _domain_tokens(text: Any) -> set[str]:
     return base
 
 
+_STRUCTURED_OWNER_PREDICATES = frozenset({
+    "owner", "owns", "ownership", "state_owner", "state_ownership", "sole_owner",
+})
+_OWNER_RELATION_EXPRESSION_RE = re.compile(
+    r"^\s*(?:owner|owns|ownership|state[_ -]?owner)\s*\(\s*"
+    r"([A-Za-z0-9_$.-]+)\s*\)\s*(?:=|:|->|is)\s*"
+    r"([A-Za-z_$][A-Za-z0-9_$.-]*)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_relation_atom(value: Any) -> str:
+    """Normalize one explicit relation atom without interpreting source text."""
+    text = " ".join(str(value or "").split()).strip(" .,:;")
+    if not text or "/" in text or "\\" in text or _HASH_RE.fullmatch(text):
+        return ""
+    text = re.sub(r"[\s-]+", "_", text)
+    if not re.fullmatch(r"[A-Za-z0-9_$][A-Za-z0-9_$.:]*", text):
+        return ""
+    return text.casefold()
+
+
+def _normalize_relation_predicate(value: Any) -> str:
+    text = " ".join(str(value or "").split()).strip(" .,:;").casefold()
+    text = re.sub(r"[\s-]+", "_", text)
+    return "OWNER" if text in _STRUCTURED_OWNER_PREDICATES else ""
+
+
+def _make_structured_owner_relation(subject: Any, predicate: Any, owner: Any) -> dict | None:
+    normalized_subject = _normalize_relation_atom(subject)
+    normalized_predicate = _normalize_relation_predicate(predicate)
+    normalized_owner = _normalize_relation_atom(owner)
+    if not normalized_subject or not normalized_predicate or not normalized_owner:
+        return None
+    return {
+        "subject": normalized_subject,
+        "predicate": normalized_predicate,
+        "object": normalized_owner,
+    }
+
+
+def _parse_owner_relation_expression(value: Any) -> dict | None:
+    match = _OWNER_RELATION_EXPRESSION_RE.fullmatch(str(value or ""))
+    if not match:
+        return None
+    return _make_structured_owner_relation(match.group(1), "OWNER", match.group(2))
+
+
+def _structured_owner_relation_from_mapping(value: Any) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+
+    subject = (
+        value.get("subject")
+        or value.get("domain")
+        or value.get("resource")
+        or value.get("state")
+    )
+    predicate = (
+        value.get("predicate")
+        or value.get("relationship")
+        or value.get("relation_type")
+        or value.get("relation")
+    )
+    owner_key = next(
+        (key for key in ("object", "owner", "owner_entity", "implementation_owner", "target", "value")
+         if value.get(key) not in (None, "")),
+        None,
+    )
+    owner = value.get(owner_key) if owner_key else None
+    if subject not in (None, "") and owner not in (None, ""):
+        # An explicit ``owner``/``object`` field is sufficient to identify the
+        # relation when no separate predicate field was supplied.  Generic
+        # symbols and filenames are never used here.
+        normalized_predicate = predicate or ("OWNER" if owner_key in {"owner", "owner_entity", "implementation_owner"} else "")
+        relation = _make_structured_owner_relation(subject, normalized_predicate, owner)
+        if relation is not None:
+            return relation
+    return None
+
+
+def _structured_owner_relation(value: Any) -> dict | None:
+    """Read only an explicit ownership relation from structured evidence.
+
+    Stage 2 observations intentionally contain compact descriptive prose and
+    symbols.  Those fields are useful repository evidence, but they do not
+    prove an ownership relationship.  This parser therefore accepts explicit
+    relation fields or one strict canonical expression and never falls back to
+    filenames, symbols, comments, or arbitrary source snippets.
+    """
+    if isinstance(value, str):
+        return _parse_owner_relation_expression(value)
+    if not isinstance(value, dict):
+        return None
+
+    relation = _structured_owner_relation_from_mapping(value)
+    if relation is not None:
+        return relation
+    for key in (
+        "structured", "structured_relation", "authority_relation", "repository_relation",
+        "ownership", "relation", "relationship", "structured_fact",
+    ):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            relation = _structured_owner_relation_from_mapping(nested)
+            if relation is not None:
+                return relation
+        elif isinstance(nested, str):
+            relation = _parse_owner_relation_expression(nested)
+            if relation is not None:
+                return relation
+    for key in ("structured_fact", "fact"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            relation = _parse_owner_relation_expression(candidate)
+            if relation is not None:
+                return relation
+    return None
+
+
+def _authority_fact_mentions_ownership(fact: dict) -> bool:
+    relation = _structured_owner_relation(fact)
+    if relation is not None:
+        return True
+    field = str(fact.get("field") or "").casefold()
+    fact_text = str(fact.get("fact") or "")
+    return bool(
+        field in {"owner", "current_owner", "state_ownership", "current_state_ownership"}
+        or re.search(r"\b(?:owner|owns|ownership|sole|only|state[- ]owner)\b", fact_text, re.IGNORECASE)
+    )
+
+
+def _authority_drift_audit_entry(
+    record: dict,
+    fact: dict,
+    classification: str,
+    reason_code: str,
+    evidence_ids: Iterable[Any],
+    *,
+    authority_relation: dict | None = None,
+    repository_relations: Iterable[dict] | None = None,
+    conflict_emitted: bool = False,
+) -> dict:
+    entry = {
+        "authority_record_id": _compact(record.get("record_id") or record.get("fact_hash"), 180),
+        "evidence_refs": _unique_strings(evidence_ids, 16, 120),
+        "classification": classification,
+        "reason_code": _compact(reason_code, 120),
+        "conflict_emitted": bool(conflict_emitted),
+    }
+    # The required audit fields remain present for every evaluated fact.  The
+    # descriptive kind is useful when a relation was actually evaluated, but
+    # omitting it for unknown/non-relevant records keeps the bounded context
+    # safe for large Project Brains.
+    if classification not in {NOT_EVALUABLE, NOT_RELEVANT}:
+        entry["authority_fact_kind"] = _compact(
+            fact.get("kind") or fact.get("field") or fact.get("category"), 120,
+        )
+    if authority_relation is not None:
+        entry["authority_relation"] = copy.deepcopy(authority_relation)
+    relations = [copy.deepcopy(item) for item in (repository_relations or []) if isinstance(item, dict)]
+    if relations:
+        entry["repository_relations"] = relations[:8]
+    return entry
+
+
+def _empty_authority_drift_metrics() -> dict[str, int]:
+    return {
+        "authority_drift_checks": 0,
+        "authority_drift_confirmed": 0,
+        "authority_drift_consistent": 0,
+        "authority_drift_not_evaluable": 0,
+        "authority_drift_conflicts_emitted": 0,
+        "authority_drift_duplicate_conflicts_suppressed": 0,
+    }
+
+
+def classify_authority_repository_drift(
+    current_records: list[dict],
+    repository_evidence: list[dict],
+) -> dict:
+    """Classify authority conformance from explicit structured evidence only."""
+    metrics = _empty_authority_drift_metrics()
+    conflicts: list[dict] = []
+    audits: list[dict] = []
+    audit_by_record_id: dict[str, dict] = {}
+    conflict_groups: dict[tuple[str, str, str], list[dict]] = {}
+
+    owner_categories = {"CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_BEHAVIOR"}
+    owner_observations: list[tuple[dict, dict | None]] = []
+    for item in repository_evidence or []:
+        if not isinstance(item, dict):
+            continue
+        relation = _structured_owner_relation(item)
+        if str(item.get("category") or "") in owner_categories or relation is not None:
+            owner_observations.append((item, relation))
+
+    for record in current_records or []:
+        if not isinstance(record, dict):
+            continue
+        fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+        if _normalize_authority(fact.get("authority")) != "USER/REQUIREMENT":
+            continue
+        metrics["authority_drift_checks"] += 1
+        authority_relation = _structured_owner_relation(fact)
+        authority_like = _authority_fact_mentions_ownership(fact)
+        evidence_ids = [item.get("evidence_id") for item, _relation in owner_observations]
+        record_id = str(record.get("record_id") or record.get("fact_hash") or "")
+
+        if not authority_like:
+            classification = NOT_RELEVANT
+            reason_code = "AUTHORITY_FACT_NOT_OWNER_RELATION"
+            audit = _authority_drift_audit_entry(
+                record, fact, classification, reason_code, evidence_ids,
+            )
+            audits.append(audit)
+            audit_by_record_id[record_id] = audit
+            continue
+
+        if authority_relation is None:
+            classification = NOT_EVALUABLE
+            reason_code = "AUTHORITY_RELATION_NOT_STRUCTURED"
+            metrics["authority_drift_not_evaluable"] += 1
+            audit = _authority_drift_audit_entry(
+                record, fact, classification, reason_code, evidence_ids,
+            )
+            audits.append(audit)
+            audit_by_record_id[record_id] = audit
+            continue
+
+        structured_observations = [
+            (item, relation) for item, relation in owner_observations if relation is not None
+        ]
+        if not owner_observations:
+            classification = NOT_EVALUABLE
+            reason_code = "NO_CURRENT_OWNER_EVIDENCE"
+            metrics["authority_drift_not_evaluable"] += 1
+            audit = _authority_drift_audit_entry(
+                record, fact, classification, reason_code, evidence_ids,
+                authority_relation=authority_relation,
+            )
+            audits.append(audit)
+            audit_by_record_id[record_id] = audit
+            continue
+        if not structured_observations:
+            classification = NOT_EVALUABLE
+            reason_code = "CURRENT_OWNER_EVIDENCE_NOT_STRUCTURED"
+            metrics["authority_drift_not_evaluable"] += 1
+            audit = _authority_drift_audit_entry(
+                record, fact, classification, reason_code, evidence_ids,
+                authority_relation=authority_relation,
+            )
+            audits.append(audit)
+            audit_by_record_id[record_id] = audit
+            continue
+
+        matching = [
+            (item, relation) for item, relation in structured_observations
+            if relation["subject"] == authority_relation["subject"]
+            and relation["predicate"] == authority_relation["predicate"]
+        ]
+        matching_evidence_ids = [item.get("evidence_id") for item, _relation in matching]
+        matching_relations = [relation for _item, relation in matching]
+        if not matching:
+            classification = NOT_RELEVANT
+            reason_code = "NO_MATCHING_STRUCTURED_OWNER_RELATION"
+            audit = _authority_drift_audit_entry(
+                record, fact, classification, reason_code, evidence_ids,
+                authority_relation=authority_relation,
+                repository_relations=matching_relations,
+            )
+            audits.append(audit)
+            audit_by_record_id[record_id] = audit
+            continue
+
+        mismatches = [
+            (item, relation) for item, relation in matching
+            if relation["object"] != authority_relation["object"]
+        ]
+        if mismatches:
+            classification = CONFIRMED_DRIFT
+            reason_code = "STRUCTURED_OWNER_RELATION_CONTRADICTS"
+            metrics["authority_drift_confirmed"] += 1
+            for item, relation in mismatches:
+                group_key = (
+                    authority_relation["subject"],
+                    authority_relation["predicate"],
+                    relation["object"],
+                )
+                conflict_groups.setdefault(group_key, []).append({
+                    "record": record,
+                    "fact": fact,
+                    "authority_relation": authority_relation,
+                    "observation": item,
+                    "repository_relation": relation,
+                })
+        else:
+            classification = CONFIRMED_CONSISTENT
+            reason_code = "STRUCTURED_OWNER_RELATION_AGREES"
+            metrics["authority_drift_consistent"] += 1
+        audit = _authority_drift_audit_entry(
+            record, fact, classification, reason_code, matching_evidence_ids,
+            authority_relation=authority_relation,
+            repository_relations=matching_relations,
+            conflict_emitted=classification == CONFIRMED_DRIFT,
+        )
+        audits.append(audit)
+        audit_by_record_id[record_id] = audit
+
+    for group_key in sorted(conflict_groups, key=lambda value: tuple(str(item) for item in value)):
+        rows = sorted(
+            conflict_groups[group_key],
+            key=lambda row: (
+                str(row["record"].get("record_id") or row["record"].get("fact_hash") or ""),
+                str(row["observation"].get("evidence_id") or ""),
+            ),
+        )
+        authority_ids = sorted({
+            str(row["record"].get("record_id") or row["record"].get("fact_hash") or "")
+            for row in rows
+        })
+        evidence_ids = sorted({
+            str(row["observation"].get("evidence_id") or "") for row in rows
+        })
+        first = rows[0]
+        stable_key = canonical_hash({
+            "kind": AUTHORITY_IMPLEMENTATION_DRIFT,
+            "authority_relation": first["authority_relation"],
+            "repository_relation": first["repository_relation"],
+        })
+        conflict = _conflict(
+            AUTHORITY_IMPLEMENTATION_DRIFT,
+            authority_record_id=authority_ids[0] if authority_ids else None,
+            authority_record_ids=authority_ids,
+            authority_fact_hash=first["record"].get("fact_hash"),
+            authority_fact=_compact(first["fact"].get("fact"), 420),
+            authority_relation=first["authority_relation"],
+            repository_evidence_id=evidence_ids[0] if evidence_ids else None,
+            repository_evidence_ids=evidence_ids,
+            repository_fact=_compact(first["observation"].get("fact"), 420),
+            repository_path=first["observation"].get("path"),
+            repository_relation=first["repository_relation"],
+            drift_classification=CONFIRMED_DRIFT,
+            drift_conflict_key=stable_key,
+            resolution="RETAIN_AUTHORITY_AND_SURFACE_DRIFT",
+            authority_rewritten=False,
+        )
+        # The identity is based on the contradiction itself, not on which
+        # projection or duplicate authority record happened to be selected.
+        conflict["conflict_id"] = f"REENTRY-CONFLICT-{canonical_hash({
+            "kind": AUTHORITY_IMPLEMENTATION_DRIFT,
+            "drift_conflict_key": stable_key,
+        })[:16]}"
+        conflicts.append(conflict)
+        for authority_id in authority_ids:
+            audit = audit_by_record_id.get(authority_id)
+            if audit is not None:
+                audit.setdefault("conflict_ids", []).append(conflict["conflict_id"])
+                audit["conflict_emitted"] = True
+        metrics["authority_drift_duplicate_conflicts_suppressed"] += max(0, len(authority_ids) - 1)
+        metrics["authority_drift_duplicate_conflicts_suppressed"] += max(0, len(evidence_ids) - 1)
+
+    metrics["authority_drift_conflicts_emitted"] = len(conflicts[:MAX_CONFLICTS])
+    return {
+        "conflicts": conflicts[:MAX_CONFLICTS],
+        "audit": audits[:MAX_AUTHORITY_DRIFT_AUDIT],
+        "metrics": metrics,
+        "model_calls": 0,
+    }
+
+
 def _new_requirement_conflicts(
     requirements: list[dict],
     current_records: list[dict],
@@ -889,42 +1271,8 @@ def _new_requirement_conflicts(
 
 
 def _authority_repo_drift(current_records: list[dict], repository_evidence: list[dict]) -> list[dict]:
-    conflicts: list[dict] = []
-    owner_evidence = [
-        item for item in repository_evidence
-        if item.get("category") in {"CURRENT_OWNER", "CURRENT_STATE_OWNER"}
-    ]
-    for record in current_records:
-        fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
-        if _normalize_authority(fact.get("authority")) != "USER/REQUIREMENT":
-            continue
-        fact_text = str(fact.get("fact") or "")
-        if not re.search(r"\b(?:owner|owns|ownership|sole|only)\b", fact_text, re.IGNORECASE):
-            continue
-        fact_entities = _owner_entities(fact_text, fact.get("symbol"))
-        fact_domain = _domain_tokens(fact_text)
-        if not fact_entities:
-            continue
-        for observation in owner_evidence:
-            observed_text = " ".join(str(observation.get(key) or "") for key in ("fact", "symbol", "support"))
-            observed_entities = _owner_entities(observed_text, observation.get("symbol"))
-            if not observed_entities or observed_entities.intersection(fact_entities):
-                continue
-            observed_domain = _domain_tokens(observed_text)
-            if fact_domain and observed_domain and not fact_domain.intersection(observed_domain):
-                continue
-            conflicts.append(_conflict(
-                AUTHORITY_IMPLEMENTATION_DRIFT,
-                authority_record_id=record.get("record_id"),
-                authority_fact_hash=record.get("fact_hash"),
-                authority_fact=_compact(fact_text, 420),
-                repository_evidence_id=observation.get("evidence_id"),
-                repository_fact=_compact(observed_text, 420),
-                repository_path=observation.get("path"),
-                resolution="RETAIN_AUTHORITY_AND_SURFACE_DRIFT",
-                authority_rewritten=False,
-            ))
-    return conflicts
+    """Compatibility projection returning only confirmed drift conflicts."""
+    return classify_authority_repository_drift(current_records, repository_evidence).get("conflicts", [])
 
 
 def _authority_entries(
@@ -1259,7 +1607,8 @@ def _reconcile_internal(
     conflicts.extend(_new_requirement_conflicts(
         [*requirements, *authority_requirements], selected_current,
     ))
-    conflicts.extend(_authority_repo_drift(selected_current, selected_evidence))
+    authority_drift = classify_authority_repository_drift(selected_current, selected_evidence)
+    conflicts.extend(authority_drift.get("conflicts", []))
     conflicts.extend(_conflict(
         CONTRADICTORY_ACTIVE_AUTHORITY,
         record_id=record.get("record_id"),
@@ -1320,6 +1669,7 @@ def _reconcile_internal(
         "project_brain_records_relevant": sum(1 for item in classifications if item.get("relevant")),
         "project_brain_records_excluded": sum(1 for item in classifications if not item.get("relevant") or not item.get("accepted_as_current")),
         "reentry_conflicts": len(conflicts),
+        **copy.deepcopy(authority_drift.get("metrics", _empty_authority_drift_metrics())),
         "task_brain_bootstraps": 0,
         "reentry_model_calls": 0,
         "freshness_model_calls": 0,
@@ -1341,6 +1691,7 @@ def _reconcile_internal(
         "record_classification_count": len(classifications),
         "record_classification_counts": dict(sorted(classification_counts.items())),
         "record_classifications_truncated": len(classifications) > MAX_CLASSIFICATION_REFS,
+        "authority_drift_audit": copy.deepcopy(authority_drift.get("audit", [])),
         "authority": authority,
         "current_verified_facts": current_public,
         "current_durable_authority": [
@@ -1439,7 +1790,11 @@ def validate_reentry_context(context: dict | None) -> dict:
         int(accounting.get(role, 0) or 0) != 0 for role in _MODEL_CALL_ROLES
     ):
         errors.append("model-call accounting is not zero for every role")
-    for key in ("authority", "current_verified_facts", "stale_verified_facts", "superseded_facts", "current_repository_evidence", "new_requirements", "conflicts", "source_promotion_hashes"):
+    for key in (
+        "authority", "current_verified_facts", "stale_verified_facts", "superseded_facts",
+        "current_repository_evidence", "new_requirements", "conflicts", "source_promotion_hashes",
+        "authority_drift_audit",
+    ):
         if not isinstance(value.get(key), list):
             errors.append(f"{key} must be a list")
     if value.get("new_requirements_hash") != canonical_hash(value.get("new_requirements", [])):
@@ -1533,6 +1888,7 @@ def build_reentry_context(
         "record_classification_count": reconciliation.get("record_classification_count", 0),
         "record_classification_counts": copy.deepcopy(reconciliation.get("record_classification_counts", {})),
         "record_classifications_truncated": bool(reconciliation.get("record_classifications_truncated", False)),
+        "authority_drift_audit": copy.deepcopy(reconciliation.get("authority_drift_audit", [])),
         "metrics": copy.deepcopy(reconciliation.get("metrics", {})),
         "model_call_accounting": copy.deepcopy(reconciliation.get("model_call_accounting", _zero_model_call_accounting())),
         "model_calls": 0,
@@ -1593,7 +1949,7 @@ def _trim_task_brain(brain: dict) -> dict:
         # Remove optional repository/conflict material and duplicate authority
         # projections before reducing current facts, and trim stale history
         # only as the final bounded fallback.
-        "superseded_facts", "current_repository_evidence", "conflicts",
+        "superseded_facts", "current_repository_evidence", "authority_drift_audit", "conflicts",
         "current_durable_authority", "current_verified_facts", "stale_verified_facts",
     )
     while _json_size(brain) > target_chars:
@@ -1697,7 +2053,7 @@ def _task_authority_projection(record: dict) -> dict:
 
 def _repository_record_projection(record: dict) -> dict:
     """Retain direct-observation identity without copying source snippets."""
-    return {
+    result = {
         "evidence_id": _compact(record.get("evidence_id"), 100),
         "category": _compact(record.get("category"), 100),
         "path": _compact(record.get("path"), 220),
@@ -1711,6 +2067,10 @@ def _repository_record_projection(record: dict) -> dict:
         "file_sha256": _compact(record.get("file_sha256"), 100),
         "support": _compact(record.get("support"), 180),
     }
+    relation = _structured_owner_relation(record)
+    if relation is not None:
+        result["structured_relation"] = relation
+    return result
 
 
 def validate_fresh_task_brain(task_brain: dict | None) -> dict:
@@ -1735,7 +2095,7 @@ def validate_fresh_task_brain(task_brain: dict | None) -> dict:
     for field in (
         "authority", "new_requirements", "current_verified_facts", "current_durable_authority",
         "current_repository_evidence", "stale_verified_facts", "superseded_facts", "conflicts",
-        "source_promotion_hashes",
+        "source_promotion_hashes", "authority_drift_audit",
     ):
         if not isinstance(value.get(field), list):
             errors.append(f"{field} must be a list")
@@ -1830,6 +2190,7 @@ def build_fresh_task_brain(
         "stale_verified_facts": copy.deepcopy(context.get("stale_verified_facts", []))[:MAX_TASK_BRAIN_STALE],
         "superseded_facts": copy.deepcopy(context.get("superseded_facts", []))[:MAX_TASK_BRAIN_SUPERSEDED],
         "conflicts": copy.deepcopy(context.get("conflicts", []))[:MAX_TASK_BRAIN_CONFLICTS],
+        "authority_drift_audit": copy.deepcopy(context.get("authority_drift_audit", []))[:MAX_TASK_BRAIN_DRIFT_AUDIT],
         "source_promotion_hashes": _unique_strings(context.get("source_promotion_hashes", []), MAX_PROMOTION_HASHES, 100),
         "continuation_provenance": copy.deepcopy(context.get("continuation_provenance")),
         "reentry_hash": context.get("reentry_hash"),
@@ -1852,6 +2213,7 @@ def build_fresh_task_brain(
             "max_stale_facts": MAX_TASK_BRAIN_STALE,
             "max_superseded_facts": MAX_TASK_BRAIN_SUPERSEDED,
             "max_conflicts": MAX_TASK_BRAIN_CONFLICTS,
+            "max_authority_drift_audit": MAX_TASK_BRAIN_DRIFT_AUDIT,
             "truncated": False,
         },
         "model_calls": 0,
@@ -2176,6 +2538,14 @@ def run_verified_state_reentry_self_test() -> dict:
             checks["fresh_zero_model"] = fresh.get("model_calls") == 0 and fresh.get("metrics", {}).get("reentry_model_calls") == 0
             checks["fresh_no_execution"] = fresh.get("execution_started") is False
             checks["fresh_brain_read_only"] = fresh.get("project_brain_mutated") is False
+            checks["unchanged_no_unsupported_drift"] = not any(
+                item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
+                for item in (fresh.get("reentry_context") or {}).get("conflicts", [])
+            )
+            checks["unknown_conformance_not_fake_drift"] = all(
+                item.get("classification") in {NOT_EVALUABLE, NOT_RELEVANT}
+                for item in (fresh.get("reentry_context") or {}).get("authority_drift_audit", [])
+            )
             fresh_hash = fresh.get("reentry_context", {}).get("reentry_hash")
 
             (root / "README.tmp").write_text("unrelated\n", encoding="utf-8")
@@ -2185,6 +2555,23 @@ def run_verified_state_reentry_self_test() -> dict:
             checks["unrelated_does_not_stale_state"] = "verified-state-integration" not in {
                 item.get("record_id") for item in unrelated.get("task_brain", {}).get("stale_verified_facts", [])
             }
+
+            comment_changed = root / "src" / "input.js"
+            comment_changed.write_text(
+                comment_changed.read_text(encoding="utf-8") + "// stage6a stale-evidence probe\n",
+                encoding="utf-8",
+            )
+            comment_probe = run_verified_state_reentry(
+                store, project_id, "COMMENT-ONLY", "Continue pause behavior.", workspace=root,
+            )
+            comment_context = comment_probe.get("reentry_context", {})
+            checks["comment_only_state_bound_stale"] = "verified-state-integration" in {
+                item.get("record_id") for item in comment_probe.get("task_brain", {}).get("stale_verified_facts", [])
+            }
+            checks["comment_only_no_semantic_drift"] = not any(
+                item.get("kind") == AUTHORITY_IMPLEMENTATION_DRIFT
+                for item in comment_context.get("conflicts", [])
+            )
 
             changed = root / "src" / "input.js"
             changed.write_text("export class InputManager { changed() {} }\n", encoding="utf-8")
@@ -2214,6 +2601,48 @@ def run_verified_state_reentry_self_test() -> dict:
                 item.get("record_id") == "verified-durable-owner"
                 for item in conflict.get("task_brain", {}).get("current_verified_facts", [])
             )
+
+            structured_authority = copy.deepcopy(records[0])
+            structured_authority["record_id"] = "structured-authority"
+            structured_authority["fact"]["fact"] = "owner(PAUSE_STATE) = PauseController"
+            structured_before = copy.deepcopy(structured_authority)
+            structured_consistent = classify_authority_repository_drift(
+                [structured_authority],
+                [{
+                    "evidence_id": "REPO-SELF-CONSISTENT",
+                    "category": "CURRENT_STATE_OWNER",
+                    "fact": "owner(PAUSE_STATE) = PauseController",
+                }],
+            )
+            structured_drift = classify_authority_repository_drift(
+                [structured_authority],
+                [{
+                    "evidence_id": "REPO-SELF-DRIFT",
+                    "category": "CURRENT_STATE_OWNER",
+                    "fact": "owner(PAUSE_STATE) = StatusView",
+                }],
+            )
+            unknown_conformance = classify_authority_repository_drift(
+                [structured_authority],
+                [{
+                    "evidence_id": "REPO-SELF-UNKNOWN",
+                    "category": "CURRENT_INTERFACE",
+                    "fact": "PauseController.togglePause is a current interface",
+                }],
+            )
+            checks["structured_consistency_confirmed"] = (
+                structured_consistent.get("audit", [{}])[0].get("classification") == CONFIRMED_CONSISTENT
+                and not structured_consistent.get("conflicts")
+            )
+            checks["structured_drift_confirmed_once"] = (
+                structured_drift.get("audit", [{}])[0].get("classification") == CONFIRMED_DRIFT
+                and len(structured_drift.get("conflicts", [])) == 1
+            )
+            checks["structured_drift_keeps_authority_immutable"] = structured_authority == structured_before
+            checks["structured_unknown_not_evaluable"] = (
+                unknown_conformance.get("audit", [{}])[0].get("classification") == NOT_EVALUABLE
+                and not unknown_conformance.get("conflicts")
+            )
             cross = build_reentry_context(
                 "other-project", "CROSS", {"project_id": project_id, "records": records}, root,
                 task_goal="Continue pause behavior.",
@@ -2233,6 +2662,12 @@ def run_verified_state_reentry_self_test() -> dict:
                 "stale_task_brain_validation": stale.get("task_brain_validation", {}),
                 "fresh_task_brain_errors": (fresh.get("task_brain") or {}).get("errors", []),
                 "stale_task_brain_errors": (stale.get("task_brain") or {}).get("errors", []),
+                "comment_probe_metrics": comment_probe.get("metrics", {}),
+                "fresh_authority_drift_audit": (fresh.get("reentry_context") or {}).get("authority_drift_audit", []),
+                "comment_authority_drift_audit": comment_context.get("authority_drift_audit", []),
+                "structured_consistent": structured_consistent,
+                "structured_drift": structured_drift,
+                "structured_unknown": unknown_conformance,
                 "fresh_keys": sorted(fresh),
                 "stale_keys": sorted(stale),
                 "fresh_context_status": (fresh.get("reentry_context") or {}).get("status"),
