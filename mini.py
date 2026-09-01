@@ -37,6 +37,7 @@ from hivo import project_understanding as stage2
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import reentry as stage6a
+from hivo import verified_planning as stage6b
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -184,6 +185,17 @@ PLAN_APPROVAL_REQUIRED = "PLAN_APPROVAL_REQUIRED"
 PLAN_REJECTED = "PLAN_REJECTED"
 PLAN_INCOMPLETE = "PLAN_INCOMPLETE"
 UNAPPROVED_SCOPE_EXPANSION = "UNAPPROVED_SCOPE_EXPANSION"
+# V24 Stage 6B verified-state-aware planning. These names are aliases only;
+# the deterministic implementation remains in hivo.verified_planning.
+VERIFIED_STATE_REENTRY = stage6b.VERIFIED_STATE_REENTRY
+PLANNING_CONTEXT_READY = stage6b.PLANNING_CONTEXT_READY
+PLANNING_CONTEXT_INSUFFICIENT_CURRENT_EVIDENCE = stage6b.PLANNING_CONTEXT_INSUFFICIENT_CURRENT_EVIDENCE
+PLANNING_CONTEXT_INVALID = stage6b.PLANNING_CONTEXT_INVALID
+PLANNING_CONTEXT_STALE = stage6b.PLANNING_CONTEXT_STALE
+PLAN_RELIES_ON_STALE_VERIFIED_EVIDENCE = stage6b.PLAN_RELIES_ON_STALE_VERIFIED_EVIDENCE
+UNAUTHORIZED_AUTHORITY_CHANGE = stage6b.UNAUTHORIZED_AUTHORITY_CHANGE
+CONFIRMED_DRIFT_NOT_ADDRESSED = stage6b.CONFIRMED_DRIFT_NOT_ADDRESSED
+MANDATORY_AUTHORITY_DROPPED = stage6b.MANDATORY_AUTHORITY_DROPPED
 # Stage 4A execution-contract terminal states.  Stage 3 remains the owner of
 # planning and approval; these labels describe only the post-approval handoff.
 APPROVED_PLAN_STALE = stage4.APPROVED_PLAN_STALE
@@ -1501,6 +1513,23 @@ def run_verified_state_reentry_self_test():
     return stage6a.run_verified_state_reentry_self_test()
 
 
+def compile_verified_planning_context(*args, **kwargs):
+    """V24 deterministic Planning Context Compiler compatibility entrypoint."""
+    return stage6b.compile_verified_planning_context(*args, **kwargs)
+
+
+build_verified_planning_context = compile_verified_planning_context
+compile_planning_context = compile_verified_planning_context
+validate_verified_planning_context = stage6b.validate_verified_planning_context
+assess_planning_context_readiness = stage6b.assess_planning_context_readiness
+planning_context_readiness = assess_planning_context_readiness
+build_stage3_task_brain_from_verified_context = stage6b.build_stage3_task_brain
+build_verified_planning_contract = stage6b.build_planning_contract
+validate_verified_plan = stage6b.validate_verified_plan
+validate_verified_planning_plan = validate_verified_plan
+run_verified_planning_self_test = stage6b.run_verified_planning_self_test
+
+
 def load_memory():
     store = get_memory_store()
     return {
@@ -1923,6 +1952,28 @@ def new_metrics(mode):
         "relevance_model_calls": 0,
         "task_brain_bootstrap_model_calls": 0,
         "automatic_reverification_attempts": 0,
+        # V24 Stage 6B verified-state-aware planning. All compiler,
+        # readiness, binding, and validation counters are deterministic and
+        # intentionally separate from Stage 3 model-role counters.
+        "verified_planning_contexts_created": 0,
+        "verified_planning_context_ready": 0,
+        "verified_planning_context_insufficient": 0,
+        "verified_planning_context_invalid": 0,
+        "verified_planning_context_stale": 0,
+        "planning_current_verified_items": 0,
+        "planning_stale_items_excluded": 0,
+        "planning_confirmed_conflicts": 0,
+        "planning_not_evaluable_audits": 0,
+        "planning_authority_change_blocks": 0,
+        "planning_stale_evidence_blocks": 0,
+        "planning_mandatory_authority_drops": 0,
+        "verified_reentry_planning_calls": 0,
+        "planning_context_compiler_model_calls": 0,
+        "planning_readiness_model_calls": 0,
+        "verified_planning_model_calls": 0,
+        "planning_mode": None,
+        "verified_planning_context": None,
+        "verified_planning_context_validation": None,
         "verification_failures": 0, "task_too_broad_count": 0,
         "mutation_failures_recorded": 0, "mutation_recovery_packets_emitted": 0,
         "provider_cpu_fallbacks": 0, "provider_execution": "gpu_or_auto",
@@ -5382,7 +5433,7 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
 
 
 def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
-                                  repository_evidence):
+                                  repository_evidence, verified_planning_context=None):
     requirements = _active_stage3_requirements(contract)
     task_brain = RUN.get("task_brain") or {}
     registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
@@ -5425,6 +5476,15 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
     plan["unresolved_challenges"] = [
         stage3.compact_challenge_record(item) for item in unresolved[:stage3.MAX_CHALLENGES]
     ]
+    if isinstance(verified_planning_context, dict):
+        # Bind the plan to the exact deterministic V24 context before Stage 3
+        # computes plan identity. The full context remains outside the plan;
+        # only source hashes and bounded provenance are carried forward.
+        plan = stage6b.attach_plan_binding(plan, verified_planning_context)
+        # Stage 3 normally fits the plan before V24 metadata is attached.
+        # Reuse its bounded compatibility-field trimmer so provenance binding
+        # cannot turn an otherwise valid plan into an oversized plan.
+        plan = stage3._fit_plan_to_serialized_bound(plan)
     plan = stage3.finalize_plan_identity(plan)
     reconciled["challenge_lifecycle"] = final_lifecycle
     reconciled["challenges_resolved_post_reconciliation"] = len(resolved)
@@ -5436,6 +5496,27 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         obligation_ledger=obligation_ledger,
         authoritative_task_goal=authoritative_task_goal,
     )
+    if isinstance(verified_planning_context, dict):
+        v24_gate = stage6b.validate_verified_plan(
+            plan,
+            verified_planning_context,
+            requirements=requirements,
+            current_repository_evidence=repository_evidence,
+        )
+        gate["verified_planning_context_validation"] = v24_gate
+        if not v24_gate.get("valid"):
+            gate["valid"] = False
+            gate.setdefault("errors", []).extend(v24_gate.get("errors", []))
+        RUN["verified_planning_context_validation"] = copy.deepcopy(v24_gate)
+        RUN["planning_authority_change_blocks"] = RUN.get(
+            "planning_authority_change_blocks", 0,
+        ) + int(v24_gate.get("authority_change_blocks", 0) or 0)
+        RUN["planning_stale_evidence_blocks"] = RUN.get(
+            "planning_stale_evidence_blocks", 0,
+        ) + int(v24_gate.get("stale_evidence_blocks", 0) or 0)
+        RUN["planning_mandatory_authority_drops"] = RUN.get(
+            "planning_mandatory_authority_drops", 0,
+        ) + int(v24_gate.get("mandatory_authority_drops", 0) or 0)
     RUN["change_plans_created"] = RUN.get("change_plans_created", 0) + 1
     RUN["plan_nodes"] = RUN.get("plan_nodes", 0) + gate.get("plan_nodes", 0)
     RUN["plan_requirements_covered"] = RUN.get("plan_requirements_covered", 0) + gate.get(
@@ -5698,7 +5779,7 @@ def _stage3_workspace_fingerprint():
 def prepare_stage3_context(understanding, contract, interactive=True, terminal_available=None,
                            planner_structured_call=None, challenger_structured_call=None,
                            reviser_structured_call=None, approval_selector=None,
-                           approval_answer_reader=None):
+                           approval_answer_reader=None, verified_planning_context=None):
     """Create, challenge, gate, and approve the task-scoped existing-project plan."""
     understanding = understanding if isinstance(understanding, dict) else {}
     mode = understanding.get("project_mode")
@@ -5727,6 +5808,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         )
         plan, gate = reconcile_minimal_change_plan(
             impact_map, challenge_validation, contract, repository_evidence,
+            verified_planning_context=verified_planning_context,
         )
     except ImpactPlanningError as exc:
         return {
@@ -5772,6 +5854,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             )
             plan, gate = reconcile_minimal_change_plan(
                 impact_map, revised_validation, contract, repository_evidence,
+                verified_planning_context=verified_planning_context,
             )
         except ImpactPlanningError as exc:
             return {
@@ -5827,6 +5910,239 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         "plan_execution_graph": execution_contracts.get("graph"),
         "read_only": fingerprint_before == fingerprint_after,
     }
+
+
+def run_verified_state_aware_planning(
+    fresh_task_brain=None,
+    memory=None,
+    *,
+    reentry_context=None,
+    verified_state_reentry=None,
+    task_goal=None,
+    contract=None,
+    workspace=None,
+    current_repository_evidence=None,
+    expected_project_id=None,
+    impact_planner_structured_call=None,
+    impact_challenger_structured_call=None,
+    impact_reviser_structured_call=None,
+    reset=True,
+    finish=True,
+):
+    """Run the V24 Stage 6B planning boundary from a fresh Stage 6A brain.
+
+    This route intentionally starts after Stage 6A. It compiles and checks a
+    deterministic planning projection, reuses the existing Stage 3 planning
+    and challenge/reconciliation code, and stops at PLAN_APPROVAL_REQUIRED.
+    It never performs Stage 2 discovery, execution-contract compilation,
+    Worker execution, verification, promotion, or Project Brain mutation.
+    """
+    global WORKSPACE
+    if workspace is not None:
+        WORKSPACE = Path(workspace).expanduser().resolve()
+    if reset:
+        reset_run("recursive")
+    elif RUN.get("mode") != "recursive":
+        RUN["mode"] = "recursive"
+    active_memory = memory if isinstance(memory, dict) else {}
+    source = fresh_task_brain if fresh_task_brain is not None else verified_state_reentry
+    context = stage6b.compile_verified_planning_context(
+        source,
+        reentry_context=reentry_context,
+        expected_project_id=expected_project_id,
+        current_repository_evidence=current_repository_evidence,
+    )
+    source_context = reentry_context
+    if source_context is None and isinstance(source, dict):
+        source_context = source.get("reentry_context")
+    source_metrics = (
+        source_context.get("metrics")
+        if isinstance(source_context, dict) and isinstance(source_context.get("metrics"), dict)
+        else {}
+    )
+    for key in (
+        "verified_reentry_attempts", "project_brain_records_considered",
+        "project_brain_records_current", "project_brain_records_stale",
+        "project_brain_records_superseded", "project_brain_records_relevant",
+        "project_brain_records_excluded", "reentry_conflicts",
+        "authority_drift_checks", "authority_drift_confirmed",
+        "authority_drift_consistent", "authority_drift_not_evaluable",
+        "authority_drift_conflicts_emitted",
+        "authority_drift_duplicate_conflicts_suppressed",
+        "task_brain_bootstraps", "reentry_model_calls", "freshness_model_calls",
+        "relevance_model_calls", "task_brain_bootstrap_model_calls",
+        "automatic_reverification_attempts",
+    ):
+        if key in source_metrics:
+            RUN[key] = int(source_metrics.get(key, 0) or 0)
+    RUN["planning_mode"] = VERIFIED_STATE_REENTRY
+    RUN["verified_planning_context"] = copy.deepcopy(context)
+    RUN["verified_reentry_planning_calls"] = RUN.get("verified_reentry_planning_calls", 0) + 1
+    RUN["planning_context_compiler_model_calls"] = int(context.get("model_calls", 0) or 0)
+    if context.get("status") == "COMPILED" and context.get("valid") is True:
+        RUN["verified_planning_contexts_created"] += 1
+        RUN["planning_current_verified_items"] = len(context.get("current_verified_facts", []) or [])
+        RUN["planning_stale_items_excluded"] = len(context.get("stale_evidence_warnings", []) or [])
+        RUN["planning_confirmed_conflicts"] = len(context.get("confirmed_conflicts", []) or [])
+        RUN["planning_not_evaluable_audits"] = len(context.get("not_evaluable_audit", []) or [])
+    else:
+        RUN["verified_planning_context_invalid"] += 1
+        result = {
+            "status": "planning_context_invalid",
+            "terminal_state": PLANNING_CONTEXT_INVALID,
+            "summary": "; ".join(context.get("errors", []) or [PLANNING_CONTEXT_INVALID]),
+            "planning_context": context,
+            "memory": active_memory,
+        }
+        if finish:
+            finish_metrics(result["status"])
+        return result, active_memory
+
+    readiness = stage6b.assess_planning_context_readiness(
+        context, current_repository_evidence=current_repository_evidence,
+    )
+    RUN["planning_readiness_model_calls"] = int(readiness.get("model_calls", 0) or 0)
+    if readiness.get("ready") is True:
+        RUN["verified_planning_context_ready"] += 1
+    elif readiness.get("status") == PLANNING_CONTEXT_INSUFFICIENT_CURRENT_EVIDENCE:
+        RUN["verified_planning_context_insufficient"] += 1
+    elif readiness.get("status") == PLANNING_CONTEXT_STALE:
+        RUN["verified_planning_context_stale"] += 1
+    else:
+        RUN["verified_planning_context_invalid"] += 1
+    RUN["verified_planning_context_readiness"] = copy.deepcopy(readiness)
+    if not readiness.get("ready"):
+        terminal = readiness.get("status") or PLANNING_CONTEXT_INVALID
+        result = {
+            "status": "planning_context_not_ready",
+            "terminal_state": terminal,
+            "summary": readiness.get("reason") or terminal,
+            "planning_context": context,
+            "planning_context_readiness": readiness,
+            "memory": active_memory,
+        }
+        if finish:
+            finish_metrics(result["status"])
+        return result, active_memory
+
+    stage3_task_brain = stage6b.build_stage3_task_brain(context)
+    # The compiled V24 context is the authoritative source for the planning
+    # contract. A caller-supplied legacy contract is intentionally not allowed
+    # to replace its requirement ledger or current-state bindings.
+    planning_contract = stage6b.build_planning_contract(context)
+    planning_contract.setdefault("project_id", context.get("project_id"))
+    planning_contract["planning_mode"] = VERIFIED_STATE_REENTRY
+    planning_contract["verified_planning_context_hash"] = context.get("planning_context_hash")
+    begin_durable_run(planning_contract)
+    RUN["project_mode"] = EXISTING_PROJECT
+    RUN["impact_planning_required"] = True
+    RUN["task_brain"] = copy.deepcopy(stage3_task_brain)
+    RUN["repository_evidence"] = copy.deepcopy(context.get("current_repository_evidence", []) or [])
+    RUN["verified_planning_context"] = copy.deepcopy(context)
+    RUN["source_contract"] = copy.deepcopy(planning_contract)
+
+    repository_evidence = list(context.get("current_repository_evidence", []) or [])
+    requirements = _active_stage3_requirements(planning_contract)
+
+    # The V24 entrypoint has a deterministic fallback for tests and local
+    # architecture self-checks. A caller may supply the existing Stage 3
+    # structured callbacks, but no V24 path implicitly starts a model role.
+    planner_call = impact_planner_structured_call
+    if planner_call is None:
+        prohibited_paths = {
+            str(item.get("path")).replace("\\", "/")
+            for item in context.get("prohibitions", []) or []
+            if isinstance(item, dict) and item.get("path") and re.search(
+                r"\b(?:do not|don't|must not|never)\b",
+                str(item.get("text") or ""), re.IGNORECASE,
+            )
+        }
+
+        def deterministic_planner(*_args):
+            result = stage3.deterministic_impact_map(
+                stage3_task_brain.get("task_goal", {}).get("text", task_goal or "coding task"),
+                requirements, repository_evidence,
+                registry=RUN.get("canonical_surface_registry"),
+            )
+            # The existing deterministic Stage 3 fallback maps behavior to
+            # every owner surface. V24 applies the already-authoritative DNT
+            # projection before planning so a forbidden owner file becomes a
+            # verify/reuse surface rather than a mutation target.
+            for impact in result.get("impacts", []) or []:
+                if str(impact.get("path") or "").replace("\\", "/") in prohibited_paths:
+                    impact["disposition"] = "VERIFY_ONLY"
+                    impact["necessity_status"] = "CANDIDATE"
+                    impact["candidate_change"] = "Verify the prohibited current surface without mutation."
+                    impact["action"] = impact["candidate_change"]
+            return result
+
+        planner_call = deterministic_planner
+    challenger_call = impact_challenger_structured_call
+    if challenger_call is None:
+        challenger_call = lambda *_args: {
+            "challenges": stage3.deterministic_challenges(
+                RUN.get("impact_map", {}), requirements, repository_evidence,
+                surface_registry=RUN.get("canonical_surface_registry"),
+            ),
+        }
+
+    understanding = {
+        "status": "ready",
+        "project_mode": EXISTING_PROJECT,
+        "planning_mode": VERIFIED_STATE_REENTRY,
+        "verified_planning_context": copy.deepcopy(context),
+        "task_brain": copy.deepcopy(stage3_task_brain),
+        "contract": copy.deepcopy(planning_contract),
+        "project_brain": {
+            "project_id": context.get("project_id"),
+            "source_hash": context.get("source_project_brain_hash"),
+            "read_only": True,
+        },
+        "reconnaissance": {
+            "status": REPOSITORY_RECONNAISSANCE_COMPLETE,
+            "evidence": copy.deepcopy(repository_evidence),
+            "read_only": True,
+            "operations": [],
+            "source": "VERIFIED_STATE_REENTRY",
+        },
+        "repository_summary": {
+            "source": "VERIFIED_STATE_REENTRY",
+            "evidence_count": len(repository_evidence),
+        },
+        "specification": {"source": "VerifiedPlanningContext"},
+    }
+    try:
+        planning = prepare_stage3_context(
+            understanding,
+            planning_contract,
+            interactive=False,
+            terminal_available=False,
+            planner_structured_call=planner_call,
+            challenger_structured_call=challenger_call,
+            reviser_structured_call=impact_reviser_structured_call,
+            verified_planning_context=context,
+        )
+    except (ImpactPlanningError, StructuredOutputError) as exc:
+        planning = {
+            "status": "plan_incomplete",
+            "terminal_state": PLAN_INCOMPLETE,
+            "summary": str(exc),
+            "project_mode": EXISTING_PROJECT,
+        }
+    planning["planning_mode"] = VERIFIED_STATE_REENTRY
+    planning["planning_context"] = copy.deepcopy(context)
+    planning["planning_context_readiness"] = copy.deepcopy(readiness)
+    planning["memory"] = active_memory
+    if planning.get("status") == "plan_approval_required":
+        planning["terminal_state"] = PLAN_APPROVAL_REQUIRED
+        planning["approval_boundary"] = PLAN_APPROVAL_REQUIRED
+    if finish:
+        finish_metrics(planning.get("status", "failed"))
+    return planning, active_memory
+
+
+prepare_verified_state_aware_planning = run_verified_state_aware_planning
+run_stage6b_planning = run_verified_state_aware_planning
 
 
 def current_approved_change_plan():
@@ -15856,7 +16172,36 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           impact_challenger_structured_call=None,
                           impact_reviser_structured_call=None,
                           plan_approval_selector=None, plan_approval_answer_reader=None,
-                          terminal_available=None):
+                          terminal_available=None, verified_state_reentry=None,
+                          fresh_task_brain=None, reentry_context=None,
+                          current_repository_evidence=None):
+    if verified_state_reentry is not None or fresh_task_brain is not None:
+        # Explicit V24 route: Stage 6A has already produced the fresh brain,
+        # so do not invoke Stage 2 extraction/reconnaissance or any model role
+        # before the existing Stage 3 approval boundary.
+        return run_verified_state_aware_planning(
+            fresh_task_brain=fresh_task_brain,
+            verified_state_reentry=verified_state_reentry,
+            memory=memory,
+            reentry_context=reentry_context,
+            task_goal=user_text,
+            contract=contract_override,
+            workspace=WORKSPACE,
+            current_repository_evidence=(
+                current_repository_evidence
+                if current_repository_evidence is not None
+                else (
+                    understanding_override.get("current_repository_evidence")
+                    if isinstance(understanding_override, dict)
+                    else None
+                )
+            ),
+            impact_planner_structured_call=impact_planner_structured_call,
+            impact_challenger_structured_call=impact_challenger_structured_call,
+            impact_reviser_structured_call=impact_reviser_structured_call,
+            reset=reset,
+            finish=finish,
+        )
     if reset:
         reset_run("recursive")
     elif RUN.get("mode") != "auto":
@@ -17697,6 +18042,9 @@ def run_self_test(install_browser=False):
         v236a_verified_state_reentry_self_test = run_verified_state_reentry_self_test()
         for name, ok in v236a_verified_state_reentry_self_test.get("checks", {}).items():
             print(f"{('v23.6A ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v246b_verified_planning_self_test = run_verified_planning_self_test()
+        for name, ok in v246b_verified_planning_self_test.get("checks", {}).items():
+            print(f"{('v24.6B ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -18290,6 +18638,9 @@ def run_self_test(install_browser=False):
             ),
             "v23.6A verified-state re-entry self-test": (
                 v236a_verified_state_reentry_self_test.get("passed") is True
+            ),
+            "v24.6B verified-state-aware planning self-test": (
+                v246b_verified_planning_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
