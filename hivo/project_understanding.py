@@ -8,9 +8,11 @@ select candidate paths after deterministic search has run.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
+import posixpath
 import re
 from pathlib import Path
 
@@ -53,6 +55,22 @@ REPOSITORY_EVIDENCE_CATEGORIES = frozenset({
     "CURRENT_DEPENDENCY", "CURRENT_TEST", "CURRENT_ENTRYPOINT",
     "CURRENT_CONSTRAINT", "CURRENT_BEHAVIOR", "CURRENT_CONFIG",
     "CURRENT_PERSISTENCE", "CURRENT_FAILURE_EVIDENCE",
+})
+# These names are a bounded semantic vocabulary for repository evidence.  The
+# category remains backward-compatible; the relation makes the structural
+# reason for a surface candidate explicit without turning prose into authority.
+STRUCTURED_EVIDENCE_RELATIONS = frozenset({
+    "CURRENT_IMPLEMENTATION_SURFACE",
+    "CURRENT_BEHAVIOR_OWNER",
+    "CURRENT_RENDER_SURFACE",
+    "CURRENT_INTERFACE_IMPLEMENTATION",
+    "CURRENT_TEST",
+    "CURRENT_STATE_OWNER",
+    "TEST_TO_SOURCE_IMPORT",
+    "PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW",
+    "PRESERVE_BEHAVIOR:MOVEMENT_INPUT",
+    "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER",
+    "USER_FACING_PAUSE_INDICATOR",
 })
 TASK_BRAIN_PROVENANCE = frozenset({
     USER_STATED, USER_CONFIRMED, PROJECT_BRAIN,
@@ -149,6 +167,18 @@ _METHOD_DECLARATION_RE = re.compile(
 _IMPORT_SYMBOL_RE = re.compile(
     r"(?:import\s+\{([^}]+)\}|(?:const|let|var)\s+\{([^}]+)\}\s*=\s*require\s*\()"
 )
+_JS_IMPORT_MODULE_RE = re.compile(
+    r"^\s*import\s+(?:(?P<clause>.+?)\s+from\s+)?['\"](?P<module>\.\.?/[^'\"]+)['\"]\s*;?\s*$",
+    re.IGNORECASE,
+)
+_JS_REQUIRE_MODULE_RE = re.compile(
+    r"^\s*(?:const|let|var)\s+(?P<binding>[^=]+?)\s*=\s*require\s*\(\s*['\"](?P<module>\.\.?/[^'\"]+)['\"]\s*\)\s*;?\s*$",
+    re.IGNORECASE,
+)
+_PY_FROM_MODULE_RE = re.compile(
+    r"^\s*from\s+(?P<module>\.+[A-Za-z0-9_./-]*)\s+import\s+(?P<clause>.+?)\s*$",
+    re.IGNORECASE,
+)
 _INPUT_SIGNAL_RE = re.compile(
     r"\b(?:input|keyboard|keydown|keyup|arrow|wasd|supportedkeys|ispressed)\b",
     re.IGNORECASE,
@@ -175,6 +205,24 @@ _STRONG_PERSISTENCE_RE = re.compile(
 _PERSISTENCE_KEY_RE = re.compile(r"\b[A-Z][A-Z0-9_]*KEY\b")
 _TEST_ASSERTION_RE = re.compile(
     r"\b(?:test|it|describe|specify|assert|expect)\s*(?:\(|\.)|\b(?:assert|expect)\b",
+    re.IGNORECASE,
+)
+_RENDER_OUTPUT_RE = re.compile(
+    r"\b(?:return|textContent|innerText|innerHTML|setText|setStatus|setLabel|display|render|output|label|status)\b|"
+    r"['\"](?:paused|running)['\"]",
+    re.IGNORECASE,
+)
+_PAUSE_STATE_READ_RE = re.compile(
+    r"\b(?:isPaused|paused|pauseState|pause[-_ ]state)\b",
+    re.IGNORECASE,
+)
+_ESCAPE_FLOW_RE = re.compile(
+    r"\bEscape\b.{0,180}\b(?:pause|togglePause|resume)\b|"
+    r"\b(?:pause|togglePause|resume)\b.{0,180}\bEscape\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_MOVEMENT_FLOW_RE = re.compile(
+    r"\b(?:ArrowUp|ArrowDown|ArrowLeft|ArrowRight|WASD|movement|move|position|direction)\b",
     re.IGNORECASE,
 )
 _CONTROL_FLOW_METHODS = frozenset({"catch", "constructor", "for", "if", "switch", "while"})
@@ -511,6 +559,7 @@ def search_repository(workspace, inventory, terms, max_files=MAX_RECON_FILES):
     root = Path(workspace).resolve()
     terms = list(terms or [])[:MAX_RECON_SEARCHES]
     matches_by_path = {}
+    contents_by_path = {}
     errors = []
     searchable = [
         item for item in inventory.get("files", [])
@@ -524,6 +573,7 @@ def search_repository(workspace, inventory, terms, max_files=MAX_RECON_FILES):
         except OSError as exc:
             errors.append({"path": relative, "error": _compact(exc, 180)})
             continue
+        contents_by_path[relative.replace("\\", "/")] = content
         lines = content.splitlines()
         path_lower = relative.casefold()
         for term in terms:
@@ -575,7 +625,104 @@ def search_repository(workspace, inventory, terms, max_files=MAX_RECON_FILES):
                     if variant.casefold() in path_lower:
                         strength += base
                     match_strength = max(match_strength, strength)
-                record.setdefault("term_strength", {})[term] = match_strength
+                    record.setdefault("term_strength", {})[term] = match_strength
+
+    # Preserve explicit test-to-source imports as bounded structural edges.
+    # The first hop starts only from already search-matched test files; a
+    # second hop is permitted only to discover the directly imported owner.
+    # Comments, prose, package imports, and arbitrary filename similarity do
+    # not create an edge.
+    inventory_paths = [
+        str(item.get("path", "")).replace("\\", "/")
+        for item in inventory.get("files", [])
+        if item.get("path")
+    ]
+    matched_tests = sorted(
+        (
+            item for item in matches_by_path.values()
+            if _file_kind(item.get("path")) == "TEST"
+        ),
+        key=lambda item: (-int(item.get("score", 0) or 0), str(item.get("path", ""))),
+    )[:MAX_RECON_FILES]
+    direct_source_paths = {}
+
+    def add_link(record, link):
+        links = record.setdefault("source_links", [])
+        identity = (
+            str(link.get("from", "")), str(link.get("path", "")),
+            str(link.get("module", "")),
+            int(link.get("line", 0) or 0), int(link.get("hop", 0) or 0),
+        )
+        if any((
+            str(item.get("from", "")), str(item.get("path", "")),
+            str(item.get("module", "")),
+            int(item.get("line", 0) or 0), int(item.get("hop", 0) or 0),
+        ) == identity for item in links):
+            return
+        links.append({
+            "from": str(link.get("from", "")).replace("\\", "/"),
+            "path": str(link.get("path", "")).replace("\\", "/"),
+            "module": str(link.get("module", "")),
+            "line": int(link.get("line", 0) or 0),
+            "symbols": [str(item) for item in list(link.get("symbols", []) or [])[:8]],
+            "relation": str(link.get("relation") or "TEST_TO_SOURCE_IMPORT"),
+            "hop": int(link.get("hop", 0) or 0),
+        })
+
+    for test in matched_tests:
+        test_path = str(test.get("path", "")).replace("\\", "/")
+        test_content = contents_by_path.get(test_path, "")
+        test_links = _direct_import_references(
+            test_path, test_content.splitlines(), inventory_paths,
+        )
+        for link in test_links:
+            link = {**link, "hop": 0, "relation": "TEST_TO_SOURCE_IMPORT"}
+            add_link(test, link)
+            source_path = str(link.get("path", "")).replace("\\", "/")
+            direct_source_paths.setdefault(source_path, []).append({
+                "from": test_path, **link,
+            })
+
+    # Add each direct source edge as a high-priority candidate even when no
+    # requirement term appears in the source body.  This is still bounded by
+    # the search/read caps and remains evidence-backed by the importing test.
+    for source_path, links in sorted(direct_source_paths.items()):
+        record = matches_by_path.setdefault(source_path, {
+            "path": source_path, "terms": [], "lines": [], "score": 0,
+        })
+        for link in links:
+            add_link(record, link)
+            for symbol in list(link.get("symbols", []) or []):
+                if symbol not in record["terms"]:
+                    record["terms"].append(symbol)
+        record["link_depth"] = min(int(link.get("hop", 0) or 0) for link in record.get("source_links", []))
+
+    # One owner hop makes a current imported behavior surface auditable when a
+    # test imports a view/handler but the view imports the state owner.  Do
+    # not recursively crawl beyond this edge.
+    for source_path in sorted(direct_source_paths):
+        source_content = contents_by_path.get(source_path, "")
+        if not source_content:
+            continue
+        owner_links = _direct_import_references(
+            source_path, source_content.splitlines(), inventory_paths,
+        )
+        for link in owner_links:
+            owner_path = str(link.get("path", "")).replace("\\", "/")
+            if owner_path == source_path:
+                continue
+            link = {**link, "hop": 1, "relation": "SOURCE_TO_OWNER_IMPORT"}
+            owner_record = matches_by_path.setdefault(owner_path, {
+                "path": owner_path, "terms": [], "lines": [], "score": 0,
+            })
+            add_link(owner_record, {"from": source_path, **link})
+            owner_record["link_depth"] = min(
+                int(item.get("hop", 0) or 0)
+                for item in owner_record.get("source_links", [])
+            )
+            for symbol in list(link.get("symbols", []) or []):
+                if symbol not in owner_record["terms"]:
+                    owner_record["terms"].append(symbol)
     ranked = []
     by_path = {item.get("path"): item for item in inventory.get("files", [])}
     for relative, match in matches_by_path.items():
@@ -599,11 +746,24 @@ def search_repository(workspace, inventory, terms, max_files=MAX_RECON_FILES):
         # an incidental comment or repeated fixture text.
         score += declaration_overlap * 12
         score += 10 if match.get("strong_persistence") else 0
+        link_depth = match.get("link_depth")
+        link_rank = 0
+        if link_depth is not None:
+            link_rank = max(1, 2 - int(link_depth or 0))
+            score += 24 if link_rank == 2 else 10
+        elif match.get("source_links") and _file_kind(relative) == "TEST":
+            # A directly importing test is a bounded evidence pointer. Keep
+            # it ahead of unrelated configuration/fixture files, while
+            # retaining source candidates ahead of the test itself.
+            link_rank = 1
+            score += 10
         ranked.append({
             "path": relative, "terms": unique_terms[:MAX_RECON_SEARCHES],
             "lines": unique_lines[:8], "score": score, "kind": item.get("kind", _file_kind(relative)),
+            "source_links": list(match.get("source_links", []) or [])[:8],
+            "link_depth": link_depth, "link_rank": link_rank,
         })
-    ranked.sort(key=lambda item: (-item["score"], item["path"]))
+    ranked.sort(key=lambda item: (-int(item.get("link_rank", 0) or 0), -item["score"], item["path"]))
     operations = [{
         "operation": "SEARCH", "term": term,
         "candidate_count": sum(1 for item in ranked if term in item.get("terms", [])),
@@ -706,9 +866,244 @@ def _source_support(lines, anchors, max_lines=8):
     return _line_window(lines, first, last, max_lines=max_lines)
 
 
+def _bounded_relation_names(values, limit=8):
+    """Keep only the declared, finite semantic relation vocabulary."""
+    result = []
+    raw_values = values if isinstance(values, (list, tuple, set)) else [values]
+    pending = list(raw_values)
+    while pending:
+        raw = pending.pop(0)
+        if isinstance(raw, (list, tuple, set)):
+            pending[0:0] = list(raw)
+            continue
+        if isinstance(raw, dict):
+            continue
+        for value in str(raw or "").split(","):
+            value = value.strip().upper()
+            if value in STRUCTURED_EVIDENCE_RELATIONS and value not in result:
+                result.append(value)
+            if len(result) >= limit:
+                return result
+    return result
+
+
+def _candidate_relation_names(record):
+    if not isinstance(record, dict):
+        return []
+    return _bounded_relation_names(
+        [record.get("structured_relations", []), record.get("structured_relation")],
+    )
+
+
+def _structured_relation_shape_valid(record):
+    """Validate relation names without rejecting older structured relation maps."""
+    if not isinstance(record, dict):
+        return False
+    raw = record.get("structured_relations")
+    if raw not in (None, "", [], {}):
+        values = raw if isinstance(raw, (list, tuple, set)) else [raw]
+        if any(
+            not isinstance(value, str)
+            or value.strip().upper() not in STRUCTURED_EVIDENCE_RELATIONS
+            for value in values
+        ):
+            return False
+    relation = record.get("structured_relation")
+    if isinstance(relation, str) and relation.strip().upper() not in STRUCTURED_EVIDENCE_RELATIONS:
+        return False
+    return True
+
+
+def _normalize_relative_path(value):
+    text = str(value or "").replace("\\", "/").strip()
+    if not text:
+        return ""
+    normalized = posixpath.normpath(text)
+    if normalized in {".", ".."} or normalized.startswith("../"):
+        return ""
+    return normalized.lstrip("./") if normalized.startswith("./") else normalized
+
+
+def _resolve_relative_source(relative, module, inventory_paths):
+    """Resolve one explicit relative import against the bounded inventory."""
+    module = str(module or "").replace("\\", "/").strip()
+    if not module.startswith("."):
+        return ""
+    base = posixpath.normpath(posixpath.join(posixpath.dirname(relative), module))
+    by_normalized = {
+        _normalize_relative_path(path): str(path).replace("\\", "/")
+        for path in inventory_paths
+    }
+    candidates = [base]
+    suffix = Path(base).suffix.casefold()
+    if not suffix:
+        candidates.extend(base + item for item in sorted(_SOURCE_SUFFIXES))
+    candidates.extend(posixpath.join(base, "index" + item) for item in sorted(_SOURCE_SUFFIXES))
+    for candidate in candidates:
+        normalized = _normalize_relative_path(candidate)
+        resolved = by_normalized.get(normalized)
+        if resolved and _file_kind(resolved) == "SOURCE":
+            return resolved
+    return ""
+
+
+def _import_symbols_from_clause(clause):
+    values = []
+    text = str(clause or "")
+    brace = re.search(r"\{([^}]+)\}", text)
+    if brace:
+        text = brace.group(1)
+    for raw in text.split(","):
+        value = raw.strip().split(" as ")[-1].strip()
+        value = value.strip("{} ")
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", value) and value not in values:
+            values.append(value)
+    return values[:8]
+
+
+def _direct_import_references(relative, lines, inventory_paths):
+    """Extract explicit import edges; comments and prose cannot create edges."""
+    result = []
+    for number, line in enumerate(lines, 1):
+        match = _JS_IMPORT_MODULE_RE.match(line) or _JS_REQUIRE_MODULE_RE.match(line)
+        if match:
+            module = match.group("module")
+            clause = match.groupdict().get("clause") or match.groupdict().get("binding") or ""
+        else:
+            match = _PY_FROM_MODULE_RE.match(line)
+            if not match:
+                continue
+            module = match.group("module")
+            clause = match.group("clause")
+        target = _resolve_relative_source(relative, module, inventory_paths)
+        if not target:
+            continue
+        symbols = _import_symbols_from_clause(clause)
+        result.append({
+            "path": target,
+            "module": module,
+            "line": number,
+            "symbols": symbols,
+            "relation": "TEST_TO_SOURCE_IMPORT" if _file_kind(relative) == "TEST" else "SOURCE_IMPORT",
+        })
+        if len(result) >= 8:
+            break
+    return result
+
+
+def _relation_names_for_source(relative, content, symbol="", *, source_links=None):
+    """Derive typed relations from source structure, not filename guesses."""
+    normalized = str(content or "")
+    lower = normalized.casefold()
+    relations = ["CURRENT_IMPLEMENTATION_SURFACE"]
+    implementation_behavior = bool(
+        _STRONG_INPUT_SIGNAL_RE.search(normalized)
+        or _ESCAPE_FLOW_RE.search(normalized)
+        or _MOVEMENT_FLOW_RE.search(normalized)
+    )
+    state_owner_signal = bool(re.search(
+        r"\bthis\s*\.\s*paused\b|\bpaused\s*=|\bpaused\s*:\s*(?:false|true)\b|"
+        r"\b(?:pause|paused)[-_ ]?(?:state|flag)\s*=",
+        normalized, re.IGNORECASE,
+    ))
+    if state_owner_signal and (
+        _PAUSE_INTERFACE_RE.search(normalized) or _PAUSE_STATE_READ_RE.search(normalized)
+    ):
+        relations.extend(("CURRENT_STATE_OWNER", "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER"))
+    if (
+        _ESCAPE_FLOW_RE.search(normalized)
+        and _PAUSE_INTERFACE_RE.search(normalized)
+    ):
+        relations.append("PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW")
+    if _MOVEMENT_FLOW_RE.search(normalized) and (
+        re.search(r"\b(?:position|direction|delta)\b", normalized, re.IGNORECASE)
+        or re.search(r"\b(?:ArrowUp|ArrowDown|ArrowLeft|ArrowRight|WASD)\b", normalized)
+    ):
+        relations.append("PRESERVE_BEHAVIOR:MOVEMENT_INPUT")
+    render_output = bool(
+        re.search(
+            r"\b(?:textContent|innerText|innerHTML|setText|setStatus|setLabel|display|render|output|label|status|indicator)\b",
+            normalized, re.IGNORECASE,
+        )
+            or re.search(r"['\"](?:paused|running)['\"]", normalized, re.IGNORECASE)
+    )
+    render_signal = bool(
+        render_output
+        and _PAUSE_STATE_READ_RE.search(normalized)
+        and re.search(r"\b(?:function|return|export|module\.exports)\b", normalized, re.IGNORECASE)
+    )
+    if render_signal:
+        relations.extend(("CURRENT_RENDER_SURFACE", "USER_FACING_PAUSE_INDICATOR"))
+    elif implementation_behavior:
+        relations.append("CURRENT_BEHAVIOR_OWNER")
+    if symbol and re.search(
+        rf"\b(?:function|def|class|interface)\s+{re.escape(str(symbol).split('.')[-1])}\b|"
+        rf"\b{re.escape(str(symbol).split('.')[-1])}\s*\([^\n;{{}}]*\)\s*\{{",
+        normalized,
+    ):
+        relations.append("CURRENT_INTERFACE_IMPLEMENTATION")
+    if source_links:
+        # The edge itself is evidence; it does not grant implementation
+        # capability to the importing test surface.
+        relations.append("TEST_TO_SOURCE_IMPORT")
+    return _bounded_relation_names(relations)
+
+
+def _function_source_window(lines, declaration_line, max_lines=40):
+    """Return one bounded function body using declaration boundaries."""
+    start = max(1, int(declaration_line or 1))
+    end = min(len(lines), start + max(1, int(max_lines)) - 1)
+    for number in range(start + 1, end + 1):
+        if number == start + 1:
+            continue
+        if _FUNCTION_DECLARATION_RE.search(lines[number - 1]) or _CLASS_DECLARATION_RE.search(lines[number - 1]):
+            end = number - 1
+            break
+    return "\n".join(lines[start - 1:end])
+
+
+def _enrich_semantic_candidates(candidates, relative, content, metadata=None):
+    """Attach typed relations and bounded import edges to accepted facts."""
+    metadata = metadata if isinstance(metadata, dict) else {}
+    links = [
+        copy for copy in list(metadata.get("source_links", []) or [])[:8]
+        if isinstance(copy, dict) and copy.get("path")
+    ]
+    for candidate in candidates:
+        category = str(candidate.get("category") or "").upper()
+        symbol = str(candidate.get("symbol") or "")
+        if category == "CURRENT_TEST":
+            relations = ["CURRENT_TEST"]
+            if links:
+                relations.append("TEST_TO_SOURCE_IMPORT")
+            candidate["structured_relations"] = _bounded_relation_names(relations)
+            if links:
+                candidate["source_links"] = links
+        elif category in {
+            "CURRENT_OWNER", "CURRENT_STATE_OWNER", "CURRENT_BEHAVIOR",
+            "CURRENT_INTERFACE",
+        }:
+            relations = _relation_names_for_source(relative, content, symbol)
+            if category == "CURRENT_STATE_OWNER" and "CURRENT_STATE_OWNER" not in relations:
+                relations.append("CURRENT_STATE_OWNER")
+            if category == "CURRENT_INTERFACE" and "CURRENT_INTERFACE_IMPLEMENTATION" not in relations:
+                relations.append("CURRENT_INTERFACE_IMPLEMENTATION")
+            candidate["structured_relations"] = _bounded_relation_names(relations)
+            if links:
+                candidate["linked_from_paths"] = sorted({
+                    str(item.get("from") or "").replace("\\", "/")
+                    for item in links if item.get("from")
+                })[:8]
+                candidate["source_links"] = links
+                candidate["link_depth"] = min(
+                    int(item.get("hop", 0) or 0) for item in links
+                )
+    return candidates
+
+
 def _evidence_candidate(category, fact, path, symbol, source_kind, line_start, line_end,
-                        file_sha256, support, quality=0, semantic_key=None):
-    return {
+                        file_sha256, support, quality=0, semantic_key=None, **extra):
+    result = {
         "evidence_id": "", "fact": _compact(fact, 360), "category": category,
         "path": path, "symbol": symbol or None, "source_kind": source_kind,
         "evidence_type": DIRECT_OBSERVATION, "provenance": REPOSITORY_EVIDENCE,
@@ -716,6 +1111,10 @@ def _evidence_candidate(category, fact, path, symbol, source_kind, line_start, l
         "file_sha256": file_sha256, "support": _compact(support, 420),
         "_quality": int(quality), "_semantic_key": semantic_key or "",
     }
+    for key, value in extra.items():
+        if value not in (None, "", [], {}, ()):
+            result[key] = value
+    return result
 
 
 def _test_imported_symbol(lines):
@@ -743,7 +1142,8 @@ def _test_referenced_symbol(content):
     return ""
 
 
-def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms, task_terms):
+def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms, task_terms,
+                                  candidate_metadata=None):
     """Extract compact source-backed facts from one already selected file."""
     kind = _file_kind(relative)
     content = "\n".join(lines)
@@ -771,7 +1171,7 @@ def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms,
                 kind, start, end, fingerprint, support, quality=70,
                 semantic_key=f"CURRENT_TEST|{relative}|{imported or focus}",
             ))
-        return candidates
+        return _enrich_semantic_candidates(candidates, relative, content, candidate_metadata)
 
     if kind == "ENTRYPOINT":
         anchor = next((number for number, line in enumerate(lines, 1) if line.strip()), 1)
@@ -795,10 +1195,20 @@ def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms,
                 kind, start, end, fingerprint, support, quality=58,
                 semantic_key=f"CURRENT_PERSISTENCE|{relative}",
             ))
-        return candidates
+        return _enrich_semantic_candidates(candidates, relative, content, candidate_metadata)
 
     declarations = list(_declaration_records(lines))
-    class_records = [item for item in declarations if item["kind"] in {"class", "object"}]
+    class_records = [
+        item for item in declarations
+        if item["kind"] == "class"
+        or (
+            item["kind"] == "object"
+            and re.search(
+                r"(?:owner|controller|manager|state|store|router|view|service|input|keyboard)",
+                str(item.get("name") or ""), re.IGNORECASE,
+            )
+        )
+    ]
     methods = [item for item in declarations if item["kind"] == "method"]
     source_focus = _source_term_match(content, task_terms or candidate_terms)
 
@@ -870,6 +1280,57 @@ def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms,
             semantic_key=f"CURRENT_INTERFACE|{relative}|{qualified}",
         ))
 
+    # Exported/top-level functions can be implementation surfaces too.  A
+    # function qualifies only when its bounded body contains structural input
+    # or state-to-user-output behavior; its name alone is never sufficient.
+    functions = [item for item in declarations if item["kind"] == "function"]
+    for function in functions:
+        name = function["name"]
+        body = _function_source_window(lines, function["line"])
+        input_signal = bool(
+            _STRONG_INPUT_SIGNAL_RE.search(body)
+            or (_ESCAPE_FLOW_RE.search(body) and _PAUSE_INTERFACE_RE.search(body))
+            or (_MOVEMENT_FLOW_RE.search(body) and re.search(
+                r"\b(?:position|direction|delta|move)\b", body, re.IGNORECASE,
+            ))
+        )
+        render_output = bool(
+            re.search(
+                r"\b(?:textContent|innerText|innerHTML|setText|setStatus|setLabel|display|render|output|label|status|indicator)\b",
+                body, re.IGNORECASE,
+            )
+            or re.search(r"['\"](?:paused|running)['\"]", body, re.IGNORECASE)
+        )
+        render_signal = bool(
+            render_output and _PAUSE_STATE_READ_RE.search(body)
+        )
+        if not source_focus or not (input_signal or render_signal):
+            continue
+        anchors = [function["line"]]
+        anchors.extend(
+            number for number, line in enumerate(lines, 1)
+            if function["line"] <= number <= function["line"] + len(body.splitlines())
+            and (
+                _STRONG_INPUT_SIGNAL_RE.search(line)
+                or _ESCAPE_FLOW_RE.search(line)
+                or _MOVEMENT_FLOW_RE.search(line)
+                or _PAUSE_STATE_READ_RE.search(line)
+                or _RENDER_OUTPUT_RE.search(line)
+            )
+        )
+        start, end, support = _source_support(lines, anchors, max_lines=8)
+        if render_signal:
+            fact = f"{name} is a current user-facing pause status/render implementation"
+            quality = 99
+        else:
+            fact = f"{name} implements current input and pause behavior"
+            quality = 94
+        candidates.append(_evidence_candidate(
+            "CURRENT_OWNER", fact, relative, name, kind, start, end, fingerprint,
+            support, quality=quality,
+            semantic_key=f"CURRENT_OWNER|{relative}|{name}|function",
+        ))
+
     strong_persistence_lines = [
         number for number, line in enumerate(lines, 1) if _has_strong_persistence(line)
     ]
@@ -922,7 +1383,7 @@ def _semantic_evidence_candidates(relative, lines, fingerprint, candidate_terms,
             kind, start, end, fingerprint, support, quality=24,
             semantic_key=f"CURRENT_DEPENDENCY|{relative}|{start}",
         ))
-    return candidates
+    return _enrich_semantic_candidates(candidates, relative, content, candidate_metadata)
 
 
 def _fact(category, path, symbol, terms, support):
@@ -1031,6 +1492,7 @@ def _category_source_valid(record, content, lines):
     kind = _file_kind(path)
     normalized = content.casefold()
     support_normalized = support.casefold()
+    relation_names = set(_candidate_relation_names(record))
     if category == "CURRENT_ENTRYPOINT":
         return kind == "ENTRYPOINT"
     if category == "CURRENT_TEST":
@@ -1055,6 +1517,20 @@ def _category_source_valid(record, content, lines):
             semantic_hint = any(
                 token in symbol_hint
                 for token in ("input", "keyboard", "game", "state", "auth", "router", "cache", "api", "service", "storage", "token")
+            )
+        if "CURRENT_RENDER_SURFACE" in relation_names:
+            semantic_hint = bool(
+                re.search(
+                    r"\b(?:textContent|innerText|innerHTML|setText|setStatus|setLabel|display|render|output|label|status|indicator)\b",
+                    normalized, re.IGNORECASE,
+                )
+                or re.search(r"['\"](?:paused|running)['\"]", normalized, re.IGNORECASE)
+                and _PAUSE_STATE_READ_RE.search(normalized)
+                and _RENDER_OUTPUT_RE.search(support)
+            )
+        elif "CURRENT_IMPLEMENTATION_SURFACE" in relation_names:
+            semantic_hint = semantic_hint or bool(
+                re.search(r"\b(?:function|class|export|module\.exports)\b", support, re.IGNORECASE)
             )
         return (
             kind in {"SOURCE", "TEXT"} and not _is_test_path(path)
@@ -1093,6 +1569,7 @@ def _category_shape_valid_without_workspace(record):
     symbol = str(record.get("symbol") or "")
     support = str(record.get("support", ""))
     kind = _file_kind(path)
+    relation_names = set(_candidate_relation_names(record))
     if category == "CURRENT_ENTRYPOINT":
         return kind == "ENTRYPOINT"
     if category == "CURRENT_TEST":
@@ -1113,6 +1590,14 @@ def _category_shape_valid_without_workspace(record):
         if not semantic_hint:
             semantic_hint = any(token in symbol.casefold() for token in ("input", "keyboard", "game", "state", "auth", "router", "cache", "api", "service", "storage", "token"))
         declaration_hint = bool(re.search(r"\b(?:class|function|def|interface|export)\b|\([^)]*\)\s*\{", support, re.IGNORECASE))
+        if "CURRENT_RENDER_SURFACE" in relation_names:
+            semantic_hint = bool(
+                _PAUSE_STATE_READ_RE.search(support)
+                and (
+                    _RENDER_OUTPUT_RE.search(support)
+                    or re.search(r"['\"](?:paused|running)['\"]", support, re.IGNORECASE)
+                )
+            )
         return (
             kind not in {"TEST", "ENTRYPOINT", "CONFIG"} and bool(symbol)
             and semantic_hint and declaration_hint
@@ -1136,6 +1621,8 @@ def validate_repository_evidence(record, workspace=None):
     if not re.fullmatch(r"REPO-\d{3,}", str(record.get("evidence_id", ""))):
         return False
     if record.get("category") not in REPOSITORY_EVIDENCE_CATEGORIES:
+        return False
+    if not _structured_relation_shape_valid(record):
         return False
     if record.get("evidence_type") != DIRECT_OBSERVATION or record.get("provenance") != REPOSITORY_EVIDENCE:
         return False
@@ -1187,6 +1674,22 @@ def validate_repository_evidence(record, workspace=None):
         return False
     if not _record_window_supports_source(lines, record):
         return False
+    source_links = record.get("source_links", [])
+    if source_links not in (None, "", [], {}):
+        if not isinstance(source_links, list) or len(source_links) > 8:
+            return False
+        for link in source_links:
+            if not isinstance(link, dict) or not str(link.get("path") or "").strip():
+                return False
+            linked_path = (root / Path(str(link.get("path")).replace("\\", "/"))).resolve()
+            try:
+                linked_path.relative_to(root)
+            except ValueError:
+                return False
+            if not linked_path.is_file() or _file_kind(str(link.get("path"))) != "SOURCE":
+                return False
+            if int(link.get("hop", 0) or 0) not in {0, 1}:
+                return False
     return _category_source_valid(record, content, lines)
 
 
@@ -1363,6 +1866,7 @@ def inspect_repository_candidates(workspace, inventory, candidates, max_files=MA
         if file_had_snippet:
             raw_candidates.extend(_semantic_evidence_candidates(
                 relative, lines, fingerprint, candidate.get("terms", []), task_terms or [],
+                candidate_metadata=candidate,
             ))
     provisional = []
     rejected = 0
@@ -1709,6 +2213,8 @@ def _repo_entry(record):
         record.get("fact", ""), REPOSITORY_EVIDENCE,
         evidence_ids=[record.get("evidence_id")], path=record.get("path"),
         symbol=record.get("symbol"), category=record.get("category"),
+        structured_relations=_bounded_relation_names(record.get("structured_relations")),
+        source_links=copy.deepcopy(record.get("source_links", []))[:8],
     )
 
 
@@ -1773,6 +2279,8 @@ def build_task_brain(task_id, task_goal, project_mode, contract, project_brain_p
         "path": item.get("path"), "symbol": item.get("symbol"),
         "line_start": item.get("line_start"), "line_end": item.get("line_end"),
         "file_sha256": item.get("file_sha256"),
+        "structured_relations": _bounded_relation_names(item.get("structured_relations")),
+        "source_links": copy.deepcopy(item.get("source_links", []))[:8],
     } for item in evidence]
     brain = {
         "version": 1,

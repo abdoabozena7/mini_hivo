@@ -29,6 +29,7 @@ from hivo.project_understanding import (
     REPOSITORY_EMPTY,
     REPOSITORY_RECONNAISSANCE_COMPLETE,
     REPOSITORY_RECONNAISSANCE_FAILED,
+    STRUCTURED_EVIDENCE_RELATIONS,
     run_repository_reconnaissance,
     validate_repository_evidence,
     inventory_repository,
@@ -1952,6 +1953,18 @@ def _trim_task_brain(brain: dict) -> dict:
         "superseded_facts", "current_repository_evidence", "authority_drift_audit", "conflicts",
         "current_durable_authority", "current_verified_facts", "stale_verified_facts",
     )
+
+    def structured_repository_evidence(item):
+        if not isinstance(item, dict):
+            return False
+        raw = item.get("structured_relations")
+        values = raw if isinstance(raw, (list, tuple, set)) else [raw]
+        return any(
+            isinstance(value, str)
+            and value.strip().upper() in STRUCTURED_EVIDENCE_RELATIONS
+            for value in values
+        )
+
     while _json_size(brain) > target_chars:
         removed = False
         for field in trim_order:
@@ -1964,13 +1977,46 @@ def _trim_task_brain(brain: dict) -> dict:
                     index for index, item in enumerate(values)
                     if not (
                         isinstance(item, dict)
-                        and isinstance(item.get("fact"), dict)
                         and (
-                            item["fact"].get("category") == "verified_prohibitions"
-                            or _normalize_authority(item["fact"].get("authority")) == "USER/REQUIREMENT"
-                            and re.search(r"\b(?:do not|must not|sole|only|owner|ownership)\b", str(item["fact"].get("fact") or ""), re.IGNORECASE)
+                            item.get("durability_class") == STATE_BOUND_VERIFIED
+                            or (
+                                isinstance(item.get("fact"), dict)
+                                and (
+                                    item["fact"].get("category") == "verified_prohibitions"
+                                    or _normalize_authority(item["fact"].get("authority")) == "USER/REQUIREMENT"
+                                    and re.search(r"\b(?:do not|must not|sole|only|owner|ownership)\b", str(item["fact"].get("fact") or ""), re.IGNORECASE)
+                                )
+                            )
                         )
                     )
+                ]
+                if not removable:
+                    continue
+                values.pop(removable[-1])
+            elif field == "stale_verified_facts":
+                removable = [
+                    index for index, item in enumerate(values)
+                    if not (
+                        isinstance(item, dict)
+                        and (
+                            item.get("previously_verified") is True
+                            or item.get("durability_class") == STATE_BOUND_VERIFIED
+                        )
+                    )
+                ]
+                if not removable:
+                    continue
+                values.pop(removable[-1])
+            elif field == "current_repository_evidence":
+                # A structurally typed current surface is the bridge from the
+                # bounded Stage 2 observation to V24 planning.  Trim optional
+                # repository records first, but retain named surface evidence
+                # so the next boundary does not have to rediscover or infer it
+                # from prose.  The ReentryContext remains the complete bounded
+                # source when more than this projection can carry.
+                removable = [
+                    index for index, item in enumerate(values)
+                    if not structured_repository_evidence(item)
                 ]
                 if not removable:
                     continue
@@ -2070,6 +2116,100 @@ def _repository_record_projection(record: dict) -> dict:
     relation = _structured_owner_relation(record)
     if relation is not None:
         result["structured_relation"] = relation
+    # V24.4.2 carries the bounded named relation vocabulary through the
+    # read-only re-entry projection.  These fields are evidence metadata, not
+    # mutation authority, and are retained only when Stage 2 established them
+    # from a validated repository observation.
+    if record.get("source_links"):
+        links = []
+        for link in list(record.get("source_links", []) or [])[:8]:
+            if not isinstance(link, dict) or not str(link.get("path") or "").strip():
+                continue
+            links.append({
+                "from": _compact(link.get("from"), 180),
+                "path": _compact(link.get("path"), 220),
+                "module": _compact(link.get("module"), 180),
+                "line": int(link.get("line", 0) or 0),
+                "symbols": _unique_strings(link.get("symbols", []), 8, 100),
+                "relation": _compact(link.get("relation"), 100),
+                "hop": int(link.get("hop", 0) or 0),
+            })
+        if links:
+            result["source_links"] = links
+    for key in ("structured_relations", "linked_from_paths"):
+        raw = record.get(key)
+        if raw not in (None, "", [], {}):
+            result[key] = _safe_value(raw, limit=900)
+    if record.get("link_depth") is not None:
+        result["link_depth"] = int(record.get("link_depth") or 0)
+    return result
+
+
+def _fresh_repository_evidence(values):
+    """Keep one bounded fact per typed surface/category in the fresh brain."""
+    result = []
+    seen = set()
+    has_structured = any(
+        isinstance(item, dict) and item.get("structured_relations")
+        for item in list(values or [])
+    )
+    for item in list(values or [])[:MAX_TASK_BRAIN_EVIDENCE]:
+        if not isinstance(item, dict):
+            continue
+        if has_structured and item.get("structured_relations"):
+            relations = {
+                str(value).upper()
+                for value in item.get("structured_relations", []) or []
+            }
+            category = str(item.get("category") or "").upper()
+            if category == "CURRENT_TEST" or "CURRENT_TEST" in relations:
+                family = "TEST"
+            elif category == "CURRENT_INTERFACE":
+                family = "INTERFACE"
+            elif "CURRENT_RENDER_SURFACE" in relations:
+                family = "RENDER"
+            elif any(value.startswith("PRESERVE_BEHAVIOR:") for value in relations):
+                family = "BEHAVIOR_PRESERVATION"
+            elif (
+                category == "CURRENT_STATE_OWNER"
+                or "CURRENT_STATE_OWNER" in relations
+                or "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER" in relations
+            ):
+                family = "STATE_OWNERSHIP"
+            else:
+                family = "IMPLEMENTATION"
+            key = (
+                str(item.get("path") or "").replace("\\", "/"),
+                family,
+                str(item.get("symbol") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+        projected = copy.deepcopy(item)
+        # The typed relation, canonical locator, hash, and bounded edge are
+        # the useful V24.4.2 proof at this boundary.  Support text is an
+        # optional Stage 2 explanation and can consume the entire remaining
+        # Task Brain budget when the exact continuation requirement is long.
+        # ReentryContext retains the complete bounded observation, so omit
+        # only this redundant prose from the fresh projection.
+        if has_structured:
+            projected.pop("support", None)
+        elif projected.get("support"):
+            projected["support"] = _compact(projected.get("support"), 100)
+        if projected.get("source_links"):
+            projected["source_links"] = list(projected.get("source_links", []) or [])[:1]
+        if str(projected.get("category") or "").upper() == "CURRENT_TEST":
+            # The importing-test edge is retained in ReentryContext and the
+            # named TEST_TO_SOURCE_IMPORT relation remains on this compact
+            # record.  Keep the fresh projection focused on source surfaces.
+            projected.pop("source_links", None)
+        # The complete bounded edge set remains in ReentryContext.  The fresh
+        # Task Brain keeps the compact source-link proof and relation names;
+        # repeating the reverse-path list here adds size without adding a new
+        # authority fact.
+        projected.pop("linked_from_paths", None)
+        result.append(projected)
     return result
 
 
@@ -2186,7 +2326,9 @@ def build_fresh_task_brain(
         "new_requirements": copy.deepcopy(context.get("new_requirements", []))[:MAX_TASK_BRAIN_AUTHORITY],
         "current_verified_facts": copy.deepcopy(selected_current),
         "current_durable_authority": copy.deepcopy(selected_authority),
-        "current_repository_evidence": copy.deepcopy(context.get("current_repository_evidence", []))[:MAX_TASK_BRAIN_EVIDENCE],
+        "current_repository_evidence": _fresh_repository_evidence(
+            context.get("current_repository_evidence", [])
+        ),
         "stale_verified_facts": copy.deepcopy(context.get("stale_verified_facts", []))[:MAX_TASK_BRAIN_STALE],
         "superseded_facts": copy.deepcopy(context.get("superseded_facts", []))[:MAX_TASK_BRAIN_SUPERSEDED],
         "conflicts": copy.deepcopy(context.get("conflicts", []))[:MAX_TASK_BRAIN_CONFLICTS],

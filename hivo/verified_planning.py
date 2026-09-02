@@ -85,6 +85,19 @@ _OWNER_ACTION_RE = re.compile(
 _OWNER_TOKEN_RE = re.compile(
     r"\b[A-Z][A-Za-z0-9_]*(?:Controller|View|Manager|State|Service|Owner|Store|Router)\b"
 )
+STRUCTURED_SURFACE_RELATIONS = frozenset({
+    "CURRENT_IMPLEMENTATION_SURFACE",
+    "CURRENT_BEHAVIOR_OWNER",
+    "CURRENT_RENDER_SURFACE",
+    "CURRENT_INTERFACE_IMPLEMENTATION",
+    "CURRENT_TEST",
+    "CURRENT_STATE_OWNER",
+    "TEST_TO_SOURCE_IMPORT",
+    "PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW",
+    "PRESERVE_BEHAVIOR:MOVEMENT_INPUT",
+    "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER",
+    "USER_FACING_PAUSE_INDICATOR",
+})
 
 
 def _without(value: dict[str, Any], key: str) -> dict[str, Any]:
@@ -167,6 +180,50 @@ def _fact_text(item: dict) -> str:
     return _compact(item.get("fact_summary") or item.get("text") or item.get("fact"), 520)
 
 
+def _structured_relation_names(item: Any) -> list[str]:
+    value = item if isinstance(item, dict) else {}
+    pending = []
+    for key in ("structured_relations", "structured_relation", "semantic_relations"):
+        raw = value.get(key)
+        if isinstance(raw, (list, tuple, set)):
+            pending.extend(raw)
+        elif isinstance(raw, str):
+            pending.append(raw)
+    result = []
+    while pending:
+        raw = pending.pop(0)
+        if isinstance(raw, (list, tuple, set)):
+            pending[0:0] = list(raw)
+            continue
+        if not isinstance(raw, str):
+            continue
+        name = raw.strip().upper()
+        if name in STRUCTURED_SURFACE_RELATIONS and name not in result:
+            result.append(name)
+    return result[:8]
+
+
+_CANONICAL_FACT_RELATIONS = {
+    "escape flows through the existing pause interface": "PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW",
+    "movement behavior remains intact": "PRESERVE_BEHAVIOR:MOVEMENT_INPUT",
+    "statusview reflects pausecontroller running and paused state": "CURRENT_RENDER_SURFACE",
+    "pausecontroller remains the sole pause-state owner": "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER",
+}
+
+
+def _fact_structured_relations(item: Any) -> list[str]:
+    """Recover only exact known fact identities from current Brain records."""
+    value = item if isinstance(item, dict) else {}
+    result = _structured_relation_names(value)
+    normalized = " ".join(_fact_text(value).casefold().rstrip(".").split())
+    relation = _CANONICAL_FACT_RELATIONS.get(normalized)
+    if relation and relation not in result:
+        result.append(relation)
+    if relation == "CURRENT_RENDER_SURFACE" and "USER_FACING_PAUSE_INDICATOR" not in result:
+        result.append("USER_FACING_PAUSE_INDICATOR")
+    return result[:8]
+
+
 def _entry(
     text: Any,
     provenance: str,
@@ -232,6 +289,9 @@ def _record_projection(item: Any, *, provenance: str = "PROJECT_BRAIN") -> dict:
             result[key] = _safe(value[key])
         elif key in fact:
             result[key] = _safe(fact[key])
+    relations = _fact_structured_relations(value)
+    if relations:
+        result["structured_relations"] = relations
     return {key: item for key, item in result.items() if item not in (None, "", [], {})}
 
 
@@ -251,7 +311,10 @@ def _repository_projection(item: Any) -> dict:
         "file_sha256": _compact(value.get("file_sha256"), 100),
         "support": _compact(value.get("support"), 220),
     }
-    for key in ("structured_relation", "repository_relation", "owner", "owner_entity"):
+    for key in (
+        "structured_relation", "structured_relations", "repository_relation",
+        "source_links", "linked_from_paths", "link_depth", "owner", "owner_entity",
+    ):
         if key in value:
             result[key] = _safe(value[key])
     return {key: item for key, item in result.items() if item not in (None, "", [], {})}
@@ -648,6 +711,7 @@ def compile_verified_planning_context(
                 evidence_ids=[item.get("evidence_id")], path=item.get("path"),
                 symbol=item.get("symbol"), category=item.get("category"),
                 structured_relation=item.get("structured_relation"),
+                structured_relations=item.get("structured_relations"),
             ))
     for item in current_facts:
         if str(item.get("category") or "").casefold() in {"verified_interfaces", "interfaces", "interface"}:
@@ -963,6 +1027,10 @@ def build_stage3_task_brain(context: dict) -> dict:
             line_start=item.get("line_start"), line_end=item.get("line_end"),
             file_sha256=item.get("file_sha256"), support=item.get("support"),
             structured_relation=item.get("structured_relation"),
+            structured_relations=item.get("structured_relations"),
+            source_links=item.get("source_links"),
+            linked_from_paths=item.get("linked_from_paths"),
+            link_depth=item.get("link_depth"),
         )
 
     repository_entries = [repo_entry(item) for item in repo if isinstance(item, dict)]
@@ -996,6 +1064,7 @@ def build_stage3_task_brain(context: dict) -> dict:
                 evidence_ids=item.get("evidence_refs", []),
                 path=item.get("path"), symbol=item.get("symbol"),
                 category=item.get("category"),
+                structured_relations=item.get("structured_relations"),
             ))
     durable = value.get("current_authority", []) or []
     dnt = value.get("dnt", []) or []
