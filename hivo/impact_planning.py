@@ -14415,6 +14415,61 @@ def _plan_challenge_record(challenge):
 compact_challenge_record = _plan_challenge_record
 
 
+def _canonical_final_plan_challenge_summary(resolved, unresolved,
+                                            reconciliation_hash=None):
+    """Bind review outcome without copying the review packet into authority.
+
+    The immutable challenge/reconciliation artifact remains the source of
+    claims, evidence, and deterministic effects.  A canonical approval plan
+    needs only the bounded outcome index and its identity; retaining one
+    compact record per challenge makes final-plan size depend on model output
+    cardinality even though those records are not execution authority.
+    """
+    resolved = [
+        _plan_challenge_record(item)
+        for item in list(resolved or [])[:MAX_CHALLENGES]
+        if isinstance(item, dict)
+    ]
+    unresolved = [
+        _plan_challenge_record(item)
+        for item in list(unresolved or [])[:MAX_CHALLENGES]
+        if isinstance(item, dict)
+    ]
+
+    def ids(values):
+        return _canonical_final_plan_unique(
+            item.get("challenge_id") for item in values
+        )
+
+    def ids_with_effect(values, effect):
+        return _canonical_final_plan_unique(
+            item.get("challenge_id")
+            for item in values
+            if item.get("effect_status") == effect
+        )
+
+    open_blocking = [
+        item.get("challenge_id")
+        for item in unresolved
+        if item.get("blocking", True)
+        and item.get("lifecycle_state") in {None, "OPEN"}
+    ]
+    summary = {
+        "resolved_challenge_ids": ids(resolved),
+        "unresolved_challenge_ids": ids(unresolved),
+        "open_blocking_challenge_ids": _canonical_final_plan_unique(open_blocking),
+        "applied_effect_challenge_ids": ids_with_effect(resolved, "APPLIED"),
+        "suppressed_effect_challenge_ids": ids_with_effect(resolved, "SUPPRESSED"),
+        "resolved_count": len(resolved),
+        "unresolved_count": len(unresolved),
+        "open_blocking_count": len(open_blocking),
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+    if reconciliation_hash:
+        summary["reconciliation_hash"] = str(reconciliation_hash)
+    return summary
+
+
 def _canonical_final_plan_unique(values, *, text=False):
     """Return stable, duplicate-free values without lossy serialization."""
     result = []
@@ -14691,8 +14746,23 @@ def canonicalize_final_plan(plan, impact_map=None, requirements=None, evidence=N
     raw_by_id = {str(item.get("node_id")): item for item in raw_nodes if item.get("node_id")}
     groups = []
     group_by_key = {}
+    raw_group_keys = [
+        _canonical_final_plan_group_key(node, index, surface_by_id)
+        for index, node in enumerate(raw_nodes, 1)
+    ]
+    # An INTERFACE_REUSE responsibility is approval-relevant context, but it
+    # is not an independent Worker/Builder action.  When the plan already
+    # has a deterministic context group, fan the interface binding into that
+    # group so the canonical plan has one context responsibility.  Keep an
+    # interface-only group distinct: Stage 4 may need that orphan context
+    # responsibility when there is no executable owner to attach it to.
+    has_deterministic_context_group = any(
+        key[0] == "DETERMINISTIC_CONTEXT" for key in raw_group_keys
+    )
     for index, node in enumerate(raw_nodes, 1):
-        key = _canonical_final_plan_group_key(node, index, surface_by_id)
+        key = raw_group_keys[index - 1]
+        if has_deterministic_context_group and key[0] == "INTERFACE_REUSE":
+            key = ("DETERMINISTIC_CONTEXT",)
         group = group_by_key.get(key)
         if group is None:
             group = {"key": key, "nodes": []}
@@ -15041,15 +15111,27 @@ def canonicalize_final_plan(plan, impact_map=None, requirements=None, evidence=N
             if value not in (None, "", [], {})
         })
 
-    resolved = list(source.get("resolved_challenges", []) or [])
-    unresolved = list(source.get("unresolved_challenges", []) or [])
+    # Normalize challenge state before binding its identity.  Model claim and
+    # proposal text is deliberately excluded from the approval representation
+    # even when a direct caller supplies the richer validated record.
+    resolved = [
+        _plan_challenge_record(item)
+        for item in list(source.get("resolved_challenges", []) or [])
+        if isinstance(item, dict)
+    ][:MAX_CHALLENGES]
+    unresolved = [
+        _plan_challenge_record(item)
+        for item in list(source.get("unresolved_challenges", []) or [])
+        if isinstance(item, dict)
+    ][:MAX_CHALLENGES]
+    challenge_reconciliation_hash = _impact_decision_hash({
+        "resolved_challenges": resolved,
+        "unresolved_challenges": unresolved,
+    })
     upstream = {
         "planning_mode": source.get("planning_mode"),
         "requirements_hash": _impact_decision_hash(reqs),
-        "challenge_reconciliation_hash": _impact_decision_hash({
-            "resolved_challenges": resolved,
-            "unresolved_challenges": unresolved,
-        }),
+        "challenge_reconciliation_hash": challenge_reconciliation_hash,
         "provenance": DERIVED_PLAN_DECISION,
     }
     binding = source.get("verified_planning_context")
@@ -15090,6 +15172,17 @@ def canonicalize_final_plan(plan, impact_map=None, requirements=None, evidence=N
     result["canonical_verification_contracts"] = verification_records
     result["impact_references"] = impact_references
     result["upstream_bindings"] = upstream
+    if resolved or unresolved:
+        # Keep only a compact, hash-bound outcome index in the approval plan.
+        # The complete validated review and reconciliation remain reachable
+        # through the immutable upstream artifact identified by this hash.
+        result["challenger_reconciliation"] = _canonical_final_plan_challenge_summary(
+            resolved, unresolved, challenge_reconciliation_hash,
+        )
+    else:
+        result.pop("challenger_reconciliation", None)
+    result.pop("resolved_challenges", None)
+    result.pop("unresolved_challenges", None)
     result["planning_provenance"] = [
         {
             key: copy.deepcopy(item.get(key))
@@ -15850,11 +15943,29 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
             errors.append(f"{requirement_id}: active requirement is unassigned")
         elif not set(str(item) for item in coverage[requirement_id].get("node_ids", [] )).issubset(known_node_ids):
             errors.append(f"{requirement_id}: coverage references an unknown plan node")
-    blocking = [
-        item for item in value.get("unresolved_challenges", [])
-        if isinstance(item, dict) and item.get("blocking", True)
-        and item.get("lifecycle_state") in {None, "OPEN"}
-    ]
+    reconciliation_summary = value.get("challenger_reconciliation")
+    if canonical_representation and isinstance(reconciliation_summary, dict):
+        open_blocking_ids = [
+            str(item) for item in reconciliation_summary.get(
+                "open_blocking_challenge_ids", [],
+            ) or [] if item
+        ]
+        open_blocking_count = reconciliation_summary.get(
+            "open_blocking_count", len(open_blocking_ids),
+        )
+        if open_blocking_count != len(open_blocking_ids):
+            errors.append("challenger reconciliation open-blocking count is inconsistent")
+        if reconciliation_summary.get("reconciliation_hash") != (
+            value.get("upstream_bindings", {}) or {}
+        ).get("challenge_reconciliation_hash"):
+            errors.append("challenger reconciliation identity is not upstream-bound")
+        blocking = open_blocking_ids
+    else:
+        blocking = [
+            item for item in value.get("unresolved_challenges", [])
+            if isinstance(item, dict) and item.get("blocking", True)
+            and item.get("lifecycle_state") in {None, "OPEN"}
+        ]
     if blocking:
         errors.append("unresolved blocking challenge")
     preservation_required = any(_PRESERVE_RE.search(item["text"]) for item in active_requirements(requirements))
