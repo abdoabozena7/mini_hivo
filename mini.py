@@ -1760,6 +1760,13 @@ def new_metrics(mode):
         "impact_decision_frames_created": 0,
         "impact_decision_frame_incomplete": 0,
         "impact_decision_slots_required": 0,
+        "impact_choice_projection_builds": 0,
+        "impact_frame_slots_total": 0,
+        "impact_model_choice_slots_required": 0,
+        "impact_slots_inherited_only": 0,
+        "impact_slots_evidence_only": 0,
+        "impact_choice_projection_chars": 0,
+        "impact_choice_projection_semantic_coverage": 1.0,
         "impact_decision_choices_received": 0,
         "impact_decision_duplicate_slots": 0,
         "impact_decision_missing_slots": 0,
@@ -5308,8 +5315,8 @@ COMPLETE CANONICAL PLANNING PACKET:
 {json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
-def _impact_decision_frame_prompt(context):
-    """Render the compact V24.3 choice-only ImpactPlanner envelope."""
+def _impact_decision_frame_prompt_v24_4_2(context):
+    """Render the frozen pre-projection V24.4.2 frame for audit only."""
     return f"""You are IMPACT PLANNER, a bounded read-only role in a weak-model coding orchestrator.
 The ImpactDecisionFrame below is authoritative and was constructed before this call.
 
@@ -5317,7 +5324,7 @@ WHAT IS FIXED:
 - slot, seed, impact, surface, owner, interface, DNT, prohibition, preservation, and verification identity.
 
 WHAT YOU MUST DECIDE:
-- return exactly one choice for every required slot;
+- return exactly one choice for every slot;
 - choose only an allowed decision and an allowed target;
 - choose decisions sufficient to satisfy the listed active obligations according to
   the frame's capability mapping;
@@ -5334,6 +5341,39 @@ Return only {{"decisions":[{{"slot_id":"...","decision":"...","chosen_target":".
 or reproduce raw source.
 
 AUTHORITY-BOUND DECISION FRAME:
+{json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
+
+
+def _impact_decision_frame_prompt(context):
+    """Render the V24.4.3 decision-relevant choice projection envelope."""
+    return f"""You are IMPACT PLANNER, a bounded read-only role in a weak-model coding orchestrator.
+The full ImpactDecisionFrame was constructed and validated before this call. The
+DecisionRelevantImpactChoiceProjection below is a read-only model-facing projection;
+the full frame remains authoritative for every downstream decision and contract.
+
+WHAT IS FIXED:
+- slot, seed, impact, surface, owner, interface, DNT, prohibition, preservation, and verification identity;
+- inherited current-state obligations and shared constraint aliases.
+
+WHAT YOU MUST DECIDE:
+- return exactly one choice for every required choice slot listed in response_bounds;
+- choose only an allowed decision and an allowed target;
+- choose decisions sufficient to satisfy the listed active obligations according to
+  the full frame's capability mapping;
+- provide a short reason_code and bounded_rationale.
+
+WHAT YOU MUST NOT REPEAT OR CHANGE:
+- do not return or rewrite preservation_promises, verification_contracts, DNT, prohibitions, owners,
+  repository paths, repository evidence, seed IDs, impact IDs, or surface IDs;
+- do not return an excluded support/evidence/inherited-only slot;
+- do not add a slot, omit a required slot, duplicate a slot, invent a target, or migrate ownership
+  unless the full frame explicitly exposes AUTHORITY_CHANGE.
+
+Return only {{"decisions":[{{"slot_id":"...","decision":"...","chosen_target":"...",
+"reason_code":"...","bounded_rationale":"..."}}]}}. Do not write code, inspect files, call tools,
+or reproduce raw source.
+
+DECISION-RELEVANT IMPACT CHOICE PROJECTION:
 {json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
@@ -5468,9 +5508,50 @@ def _create_impact_map_from_decision_frame(
             _impact_decision_frame_prompt, stage3.impact_decision_choice_schema(),
         ),
         base_render=_impact_decision_frame_prompt,
+        legacy_render=_impact_decision_frame_prompt_v24_4_2,
         mandatory_core=core,
     )
+    projection = decision_packet.get("projection") or {}
+    projection_metrics = decision_packet.get("projection_metrics", {})
+    RUN["impact_choice_projection_builds"] = RUN.get(
+        "impact_choice_projection_builds", 0,
+    ) + 1
+    RUN["impact_frame_slots_total"] = max(
+        RUN.get("impact_frame_slots_total", 0),
+        int(projection_metrics.get(
+            "impact_frame_slots_total", len(frame.get("decision_slots", []) or [])
+        ) or 0),
+    )
+    RUN["impact_model_choice_slots_required"] = max(
+        RUN.get("impact_model_choice_slots_required", 0),
+        int(projection_metrics.get("impact_model_choice_slots_required", 0) or 0),
+    )
+    RUN["impact_slots_inherited_only"] = max(
+        RUN.get("impact_slots_inherited_only", 0),
+        int(projection_metrics.get("impact_slots_inherited_only", 0) or 0),
+    )
+    RUN["impact_slots_evidence_only"] = max(
+        RUN.get("impact_slots_evidence_only", 0),
+        int(projection_metrics.get("impact_slots_evidence_only", 0) or 0),
+    )
+    RUN["impact_choice_projection_chars"] = max(
+        RUN.get("impact_choice_projection_chars", 0),
+        int(projection_metrics.get("impact_choice_projection_chars", 0) or 0),
+    )
+    RUN["impact_choice_projection_semantic_coverage"] = min(
+        float(RUN.get("impact_choice_projection_semantic_coverage", 1.0) or 0.0),
+        float(projection_metrics.get(
+            "impact_choice_projection_semantic_coverage", 1.0
+        ) or 0.0),
+    )
     decision_role_packet = decision_packet.get("role_packet")
+    RUN["impact_decision_choice_projection"] = copy.deepcopy(projection)
+    RUN["impact_decision_choice_projection_validation"] = copy.deepcopy(
+        decision_packet.get("projection_validation", {})
+    )
+    RUN["impact_decision_legacy_payload_audit"] = copy.deepcopy(
+        decision_packet.get("legacy_payload_audit", {})
+    )
     RUN["impact_decision_packet"] = copy.deepcopy(decision_packet.get("packet", {}))
     RUN["impact_decision_packet_observability"] = copy.deepcopy(
         decision_role_packet or {}
@@ -5488,6 +5569,9 @@ def _create_impact_map_from_decision_frame(
         packet_complete=decision_packet.get("packet_complete"),
         packet_hash=(decision_role_packet or {}).get("packet_hash"),
         exact_model_input=(decision_role_packet or {}).get("exact_model_input"),
+        projection_hash=decision_packet.get("projection_hash"),
+        required_choice_slot_ids=decision_packet.get("required_choice_slot_ids", []),
+        excluded_choice_slot_ids=decision_packet.get("excluded_choice_slot_ids", []),
     )
     if not decision_packet.get("packet_complete"):
         RUN["impact_planning_context_incomplete"] = RUN.get(
@@ -5506,11 +5590,31 @@ def _create_impact_map_from_decision_frame(
     RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
     RUN["impact_planner_context"] = copy.deepcopy(context)
     prompt_text = (
-        decision_role_packet.get("base_rendered_packet")
+        decision_role_packet.get("exact_model_input")
         if isinstance(decision_role_packet, dict)
         else _impact_decision_frame_prompt(context)
     )
     last_validation = {"valid": False, "errors": [stage3.IMPACT_DECISION_OUTPUT_MALFORMED]}
+
+    full_frame_slot_ids = {
+        str(item.get("slot_id")) for item in list(frame.get("decision_slots", []) or [])
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+
+    def projection_for_candidate(data):
+        # The injected callback is a compatibility seam used by frozen
+        # pre-V24.4.3 callers.  A complete legacy full-slot response retains
+        # its old contract; the actual provider path and projected responses
+        # use the strict required-slot contract.
+        if structured_call is not None and isinstance(data, dict):
+            received_ids = {
+                str(item.get("slot_id"))
+                for item in list(data.get("decisions", []) or [])
+                if isinstance(item, dict) and item.get("slot_id")
+            }
+            if received_ids == full_frame_slot_ids:
+                return None
+        return projection
 
     def validator(data):
         nonlocal last_validation
@@ -5520,6 +5624,7 @@ def _create_impact_map_from_decision_frame(
         # trigger generic repair/retry behavior.
         last_validation = stage3.validate_impact_decision_choices(
             data, frame, include_coverage=False,
+            projection=projection_for_candidate(data),
         )
         _record_impact_decision_validation(last_validation)
         return last_validation
@@ -5550,7 +5655,10 @@ def _create_impact_map_from_decision_frame(
             status=stage3.IMPACT_DECISION_OUTPUT_MALFORMED,
         ) from exc
 
-    choice_validation = stage3.validate_impact_decision_choices(candidate, frame)
+    selected_projection = projection_for_candidate(candidate)
+    choice_validation = stage3.validate_impact_decision_choices(
+        candidate, frame, projection=selected_projection,
+    )
     if not last_validation.get("valid") or last_validation.get("choices") != choice_validation.get("choices"):
         # A callback may not have called the supplied validator.  Count this
         # deterministic final gate exactly once for that callback path.
@@ -5602,6 +5710,7 @@ def _create_impact_map_from_decision_frame(
         surface_registry=registry, impact_seeds=seeds,
         task_goal=_authoritative_stage3_task_goal(contract, task_brain),
         provider_generation_identity=provider_generation_identity,
+        projection=selected_projection,
     )
     RUN["impact_decision_compilation"] = copy.deepcopy(compiled)
     if not compiled.get("valid"):
