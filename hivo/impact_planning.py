@@ -86,6 +86,22 @@ IMPACT_DECISION_SLOT_CLASSIFICATIONS = (
     "EVIDENCE_ONLY",
 )
 DECISION_RELEVANT_IMPACT_CHOICE_PROJECTION_VERSION = "V24.4.3"
+CHALLENGER_REVIEW_PROJECTION_VERSION = "V24.4.4"
+CHALLENGER_REVIEW_PRIMARY = "CHALLENGER_REVIEW_PRIMARY"
+CHALLENGER_REVIEW_SUPPORT = "CHALLENGER_REVIEW_SUPPORT"
+DETERMINISTIC_FIXED_CONTEXT = "DETERMINISTIC_FIXED_CONTEXT"
+EVIDENCE_ONLY = "EVIDENCE_ONLY"
+CHALLENGER_REVIEW_SEMANTIC_UNITS = (
+    "REQUIREMENT_GAP",
+    "SCOPE",
+    "AUTHORITY",
+    "MINIMALITY",
+    "DNT",
+    "STALE_EVIDENCE",
+    "VERIFICATION",
+    "PRESERVATION",
+    "CHALLENGE_TAXONOMY",
+)
 DECISION_CAPABILITY_NAMES = (
     "IMPLEMENTATION_CHANGE", "TEST_CHANGE", "INSPECTION_ONLY", "REUSE_ONLY",
     "PRESERVATION_ONLY", "AUTHORITY_CHANGE",
@@ -10104,6 +10120,1319 @@ def _review_surface_packet(surface):
     return _planner_surface_packet(surface) if isinstance(surface, dict) else None
 
 
+def challenger_review_projection_hash(projection):
+    """Hash a Challenger review projection without the derived hash field."""
+    value = copy.deepcopy(projection if isinstance(projection, dict) else {})
+    value.pop("projection_hash", None)
+    return _impact_decision_hash(value)
+
+
+challenger_review_projection_artifact_hash = challenger_review_projection_hash
+
+
+def challenger_review_source_map_hash(impact_map):
+    """Return a deterministic identity for the complete compiled Impact Map."""
+    return _impact_decision_hash(copy.deepcopy(impact_map if isinstance(impact_map, dict) else {}))
+
+
+def _challenger_review_projection_enabled(impact_map, role="ImpactChallenger"):
+    """Opt into V24.4.4 only for an explicit V24.4 choice artifact."""
+    if str(role or "").casefold() != "impactchallenger":
+        return False
+    value = impact_map if isinstance(impact_map, dict) else {}
+    ledger = value.get("requirement_obligation_ledger")
+    frame_coverage = value.get("impact_decision_frame_coverage")
+    choice_coverage = value.get("impact_decision_choice_coverage")
+    has_ledger = isinstance(ledger, dict) and ledger.get("version") == 2
+    has_frame = bool(value.get("impact_decision_frame_hash")) or (
+        isinstance(frame_coverage, dict)
+        and frame_coverage.get("artifact_type") == "ImpactDecisionFrameCoverage"
+    )
+    has_choice = bool(value.get("impact_decision_choice_hash")) or (
+        isinstance(choice_coverage, dict)
+        and choice_coverage.get("artifact_type") == "ImpactDecisionChoiceCoverage"
+    )
+    return bool(has_ledger and has_frame and has_choice)
+
+
+def _challenger_review_relative_path(path):
+    return _projection_relative_path(path) if path not in (None, "") else ""
+
+
+def _challenger_review_owner(owner):
+    if not isinstance(owner, dict):
+        return None
+    value = {
+        "surface_id": owner.get("surface_id"),
+        "path": _challenger_review_relative_path(owner.get("path")),
+        "symbol": _compact(owner.get("symbol"), 160),
+    }
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _challenger_review_contract_records(values, limit=8):
+    """Compact preservation/verification contracts without file hashes."""
+    result = []
+    for item in list(values or [])[:limit]:
+        if isinstance(item, dict):
+            value = {
+                "obligation_id": item.get("obligation_id"),
+                "requirement_ids": _bounded_ids(item.get("requirement_ids"), 8),
+                "text": _compact(item.get("text") or item.get("meaning"), 260),
+                "evidence_refs": _bounded_ids(
+                    item.get("evidence_refs") or item.get("evidence_ids"), 8,
+                ),
+                "structured_relations": _bounded_ids(item.get("structured_relations"), 8),
+            }
+        else:
+            value = {"text": _compact(item, 260)}
+        value = {key: item for key, item in value.items() if item not in (None, "", [], {})}
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
+def _challenger_review_text_values(values, count=6, chars=220):
+    result = []
+    for item in list(values or [])[:count]:
+        if isinstance(item, dict):
+            item = item.get("text") or item.get("meaning") or item.get("fact")
+        text = _compact(item, chars)
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _challenger_review_impact_classification(impact):
+    """Classify a compiled impact by review responsibility, not by path."""
+    value = impact if isinstance(impact, dict) else {}
+    kind = str(value.get("impact_kind") or "").upper()
+    surface_kind = str(value.get("surface_kind") or "").upper()
+    surface_role = str(value.get("surface_role") or "").upper()
+    decision = str(value.get("chosen_decision") or value.get("disposition") or "").upper()
+    capabilities = value.get("decision_capabilities")
+    if isinstance(capabilities, dict):
+        capabilities = capabilities.get(decision, [])
+    capabilities = [str(item) for item in list(capabilities or [])]
+    if not capabilities and decision:
+        capabilities = list(_decision_capabilities(decision))
+    if kind == "BEHAVIOR_CHANGE" and (
+        "IMPLEMENTATION_CHANGE" in capabilities
+        or decision in {"MUST_CHANGE", "AUTHORITY_CHANGE"}
+    ):
+        return CHALLENGER_REVIEW_PRIMARY
+    if kind == "TEST_CHANGE" or surface_kind == "TEST" or surface_role == "CURRENT_TEST":
+        return EVIDENCE_ONLY
+    contribution = [
+        str(item).upper() for item in list(value.get("coverage_contribution", []) or [])
+    ]
+    if isinstance(value.get("coverage_contribution"), str):
+        contribution = [str(value.get("coverage_contribution")).upper()]
+    if (
+        decision in {"INTERFACE_REUSE", "PRESERVATION_ONLY", "INSPECT_ONLY", "VERIFY_ONLY"}
+        or contribution and all(item.startswith("INHERITED") or item in {
+            "REUSE_ONLY", "INSPECTION_ONLY", "PRESERVATION_ONLY",
+        } for item in contribution)
+    ):
+        return DETERMINISTIC_FIXED_CONTEXT
+    return CHALLENGER_REVIEW_SUPPORT
+
+
+def _challenger_review_impact_card(impact, classification):
+    """Serialize one review card while keeping the full record out of prompt."""
+    value = impact if isinstance(impact, dict) else {}
+    decision = str(value.get("chosen_decision") or value.get("disposition") or "")
+    capabilities = value.get("decision_capabilities")
+    if isinstance(capabilities, dict):
+        capabilities = capabilities.get(decision, [])
+    if not capabilities:
+        capabilities = _decision_capabilities(decision)
+    owner = _challenger_review_owner(value.get("current_owner"))
+    common = {
+        "impact_id": value.get("impact_id"),
+        "surface_id": value.get("surface_id") or value.get("canonical_surface_id"),
+        "decision_slot_id": value.get("decision_slot_id"),
+        "surface_role": value.get("surface_role"),
+        "path": _challenger_review_relative_path(value.get("path")),
+        "symbol": _compact(
+            (value.get("symbols") or [value.get("component") or value.get("existing_owner")])[0]
+            if isinstance(value.get("symbols") or [], (list, tuple))
+            else value.get("component") or value.get("existing_owner"),
+            160,
+        ),
+        "classification": classification,
+        "impact_kind": value.get("impact_kind"),
+        "disposition": value.get("disposition"),
+        "chosen_decision": decision,
+        "decision_capabilities": [str(item) for item in list(capabilities or [])],
+        "requirement_ids": _bounded_ids(value.get("requirement_ids"), MAX_REQUIREMENT_REFS_PER_IMPACT),
+        "obligation_ids": _bounded_ids(value.get("obligation_ids"), 12),
+        "repository_evidence_ids": _bounded_ids(
+            value.get("repository_evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT,
+        ),
+    }
+    if classification == CHALLENGER_REVIEW_PRIMARY:
+        constraints = []
+        for field in ("dnt", "prohibitions"):
+            for text in _challenger_review_text_values(value.get(field), 8, 240):
+                if text and text not in constraints:
+                    constraints.append(text)
+        preservation = _challenger_review_contract_records(
+            value.get("required_preservation_promises")
+            or value.get("preservation_promises")
+        )
+        verification = _challenger_review_contract_records(
+            value.get("required_verification_contracts")
+            or value.get("verification_contracts")
+            or value.get("verification")
+            or value.get("local_verification")
+        )
+        for text in _challenger_review_text_values(value.get("preserve"), 3, 220):
+            if not any(item.get("text") == text for item in preservation):
+                preservation.append({"text": text})
+        common.update({
+            "surface_kind": value.get("surface_kind"),
+            "necessity_status": value.get("necessity_status"),
+            "current_owner": owner,
+            "owner_surface_id": value.get("owner_surface_id"),
+            "required_interfaces": _bounded_ids(value.get("required_interfaces"), 8),
+            "interfaces_to_reuse": _bounded_ids(value.get("interfaces_to_reuse"), 8),
+            "interface_surface_ids": _bounded_ids(value.get("interface_surface_ids"), 8),
+            "existing_interfaces_to_reuse": _bounded_strings(
+                value.get("existing_interfaces_to_reuse"), 8, 200,
+            ),
+            "coverage_contribution": [
+                str(item) for item in list(value.get("coverage_contribution", []) or [])
+            ] if isinstance(value.get("coverage_contribution"), (list, tuple)) else (
+                [str(value.get("coverage_contribution"))]
+                if value.get("coverage_contribution") else []
+            ),
+            "action": _compact(value.get("action") or value.get("candidate_change"), 360),
+            "reason": _compact(value.get("reason"), 360),
+            "constraints": constraints[:8],
+            "preservation": preservation[:8],
+            "verification": verification[:8],
+        })
+    elif classification == DETERMINISTIC_FIXED_CONTEXT:
+        contribution = value.get("coverage_contribution")
+        common.update({
+            "coverage_contribution": [str(item) for item in list(contribution or [])]
+            if isinstance(contribution, (list, tuple)) else ([str(contribution)] if contribution else []),
+            "owner_surface_id": value.get("owner_surface_id"),
+            "interfaces_to_reuse": _bounded_ids(value.get("interfaces_to_reuse"), 4),
+        })
+    else:
+        verification = _challenger_review_text_values(
+            value.get("verification") or value.get("local_verification") or value.get("test_contract"),
+            3, 180,
+        )
+        common.update({"verification": verification})
+        for key in (
+            "owner_surface_id", "interfaces_to_reuse",
+        ):
+            common.pop(key, None)
+    card = common
+    return {key: item for key, item in card.items() if item not in (None, "", [], {})}
+
+
+def _challenger_review_model_impact_card(impact, classification):
+    """Build the compact model-facing form of a compiled impact.
+
+    The rich card remains in the immutable projection artifact.  The model
+    only needs the identifiers and review facts that make a challenge
+    meaningful; the full compiled record is retained in ``full_provenance``.
+    """
+    rich = _challenger_review_impact_card(impact, classification)
+    common_keys = (
+        "impact_id", "surface_id", "decision_slot_id", "surface_role", "path",
+        "classification", "impact_kind", "chosen_decision", "decision_capabilities",
+        "requirement_ids", "obligation_ids",
+    )
+    card = {key: copy.deepcopy(rich.get(key)) for key in common_keys if rich.get(key) not in (None, "", [], {})}
+    if classification != CHALLENGER_REVIEW_PRIMARY:
+        # The requirement and obligation ledgers carry the repeated
+        # requirement mapping; the impact card carries the decision/surface
+        # identity and its obligation IDs.
+        card.pop("requirement_ids", None)
+        card.pop("impact_kind", None)
+    if classification == CHALLENGER_REVIEW_PRIMARY:
+        for key in (
+            "surface_kind", "necessity_status", "current_owner", "owner_surface_id",
+            "coverage_contribution", "reason", "constraints", "preservation", "verification",
+            "repository_evidence_ids",
+        ):
+            if rich.get(key) not in (None, "", [], {}):
+                value = copy.deepcopy(rich.get(key))
+                if key in {"reason"}:
+                    value = _compact(value, 220)
+                elif key in {"constraints"}:
+                    # Fixed constraints are fanned in once below; keep only a
+                    # short local indication on the primary card.
+                    value = _challenger_review_text_values(value, 2, 120)
+                elif key == "preservation":
+                    value = [
+                        {
+                            field: copy.deepcopy(record.get(field))
+                            for field in ("obligation_id", "evidence_refs")
+                            if record.get(field) not in (None, "", [], {})
+                        }
+                        for record in _challenger_review_contract_records(value, 4)
+                        if isinstance(record, dict)
+                    ]
+                    value = [item for item in value if item]
+                elif key == "verification":
+                    value = [
+                        {
+                            field: copy.deepcopy(record.get(field))
+                            for field in ("obligation_id", "evidence_refs")
+                            if record.get(field) not in (None, "", [], {})
+                        }
+                        for record in _challenger_review_contract_records(value, 3)
+                        if isinstance(record, dict)
+                    ]
+                    value = [item for item in value if item]
+                card[key] = value
+        card.pop("constraints", None)
+        card.pop("owner_surface_id", None)
+    elif classification == DETERMINISTIC_FIXED_CONTEXT:
+        for key in ("owner_surface_id", "interfaces_to_reuse"):
+            if rich.get(key) not in (None, "", [], {}):
+                card[key] = copy.deepcopy(rich.get(key))
+    elif classification == EVIDENCE_ONLY:
+        # Keep tests/evidence as explicit review support.  Their detailed
+        # verification facts are represented once in verification_support and
+        # repository_evidence rather than repeated on every test card.
+        if rich.get("repository_evidence_ids") not in (None, "", [], {}):
+            card["repository_evidence_ids"] = copy.deepcopy(rich["repository_evidence_ids"])
+        card["review_support"] = "TEST_EVIDENCE"
+    return {key: item for key, item in card.items() if item not in (None, "", [], {})}
+
+
+def _challenger_review_surface_cards(impact_map, surface_registry=None):
+    value = impact_map if isinstance(impact_map, dict) else {}
+    registry = surface_registry if isinstance(surface_registry, dict) else {}
+    by_id = canonical_surface_by_id(registry)
+    result = []
+    seen = set()
+    for impact in list(value.get("impacts", []) or []):
+        if not isinstance(impact, dict):
+            continue
+        surface_id = str(impact.get("surface_id") or impact.get("canonical_surface_id") or "")
+        if not surface_id or surface_id in seen:
+            continue
+        source = by_id.get(surface_id, impact)
+        seen.add(surface_id)
+        card = {
+            "surface_id": surface_id,
+            "kind": source.get("kind") or impact.get("surface_kind"),
+            "role": source.get("role") or impact.get("surface_role"),
+            "path": _challenger_review_relative_path(source.get("path") or impact.get("path")),
+            "symbol": _compact(source.get("symbol") or impact.get("component"), 160),
+            "verified_fact": _compact(
+                source.get("verified_fact") or source.get("fact") or impact.get("reason"), 260,
+            ),
+            "evidence_ids": _bounded_ids(
+                source.get("evidence_ids") or impact.get("repository_evidence_ids"),
+                MAX_SURFACE_EVIDENCE_IDS,
+            ),
+            "owner_surface_id": source.get("owner_surface_id") or impact.get("owner_surface_id"),
+        }
+        result.append({key: item for key, item in card.items() if item not in (None, "", [], {})})
+    return result
+
+
+def _challenger_review_model_surface_cards(surface_cards):
+    """Reduce surface records to model-facing review facts and IDs."""
+    result = []
+    for source in list(surface_cards or []):
+        if not isinstance(source, dict):
+            continue
+        card = {
+            key: copy.deepcopy(source.get(key)) for key in (
+                "surface_id", "kind", "role", "path",
+            ) if source.get(key) not in (None, "", [], {})
+        }
+        result.append(card)
+    return result
+
+
+def _challenger_review_evidence_cards(impact_map, evidence):
+    value = impact_map if isinstance(impact_map, dict) else {}
+    referenced = {
+        str(item)
+        for impact in list(value.get("impacts", []) or [])
+        if isinstance(impact, dict)
+        for item in list(impact.get("repository_evidence_ids", []) or [])
+        if item
+    }
+    result = []
+    for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2):
+        evidence_id = str(item.get("evidence_id") or "")
+        if referenced and evidence_id not in referenced:
+            continue
+        card = {
+            "evidence_id": evidence_id,
+            "category": item.get("category"),
+            "path": _challenger_review_relative_path(item.get("path")),
+            "symbol": _compact(item.get("symbol"), 160),
+            "fact": _compact(_planner_record_text(item), 180),
+            "structured_relations": _bounded_ids(item.get("structured_relations"), 8),
+        }
+        result.append({key: value for key, value in card.items() if value not in (None, "", [], {})})
+    return result
+
+
+def _challenger_review_model_evidence_cards(evidence_cards):
+    """Reduce repository evidence to one bounded fact per evidence ID."""
+    result = []
+    for source in list(evidence_cards or []):
+        if not isinstance(source, dict):
+            continue
+        card = {
+            key: copy.deepcopy(source.get(key)) for key in (
+                "evidence_id", "category", "path",
+            ) if source.get(key) not in (None, "", [], {})
+        }
+        if source.get("category") == "CURRENT_TEST":
+            # Test impacts remain explicit in candidate_impact_map and their
+            # IDs remain in verification_support.  Repeating every test fact
+            # here would consume the same prompt budget twice.
+            continue
+        raw_relations = [str(item) for item in list(source.get("structured_relations", []) or []) if item]
+        preferred = [
+            item for item in raw_relations
+            if any(token in item.upper() for token in ("USER_FACING", "PRESERVE", "STATE_OWNER"))
+        ]
+        relations = _bounded_ids(preferred or raw_relations, 1)
+        if relations:
+            card["structured_relations"] = relations
+        if source.get("fact") not in (None, "", [], {}):
+            card["fact"] = _compact(source.get("fact"), 125)
+        result.append(card)
+    return result
+
+
+def _challenger_review_obligation_cards(impact_map, requirements=None):
+    value = impact_map if isinstance(impact_map, dict) else {}
+    frame_coverage = value.get("impact_decision_frame_coverage")
+    choice_coverage = value.get("impact_decision_choice_coverage")
+    frame_records = (
+        list(frame_coverage.get("obligations", []) or [])
+        if isinstance(frame_coverage, dict) else []
+    )
+    choice_records = (
+        list(choice_coverage.get("obligations", []) or [])
+        if isinstance(choice_coverage, dict) else []
+    )
+    choice_by_id = {
+        str(item.get("obligation_id")): item for item in choice_records
+        if isinstance(item, dict) and item.get("obligation_id")
+    }
+    if not frame_records:
+        frame_records = _atomic_obligation_records(value.get("requirement_obligation_ledger", {}))
+    impact_by_obligation = {}
+    for impact in list(value.get("impacts", []) or []):
+        if not isinstance(impact, dict):
+            continue
+        for obligation_id in list(impact.get("obligation_ids", []) or []):
+            impact_by_obligation.setdefault(str(obligation_id), []).append(
+                str(impact.get("impact_id"))
+            )
+    result = []
+    for item in frame_records:
+        if not isinstance(item, dict) or not item.get("obligation_id"):
+            continue
+        obligation_id = str(item.get("obligation_id"))
+        choice = choice_by_id.get(obligation_id, {})
+        covered_by = []
+        for assignment in list(choice.get("covered_by", []) or []):
+            if not isinstance(assignment, dict):
+                continue
+            covered_by.append({
+                key: assignment.get(key) for key in (
+                    "slot_id", "surface_id", "decision", "decision_capabilities",
+                ) if assignment.get(key) not in (None, "", [], {})
+            })
+        assignment = choice.get("assignment") if isinstance(choice.get("assignment"), dict) else None
+        if assignment:
+            covered_by.append({
+                "slot_id": assignment.get("slot_id"),
+                "surface_id": assignment.get("surface_id"),
+                "decision": assignment.get("decision") or assignment.get("chosen_decision"),
+                "decision_capabilities": assignment.get("decision_capability")
+                or assignment.get("decision_capabilities"),
+            })
+        deduplicated_covered_by = []
+        seen_assignments = set()
+        for covered in covered_by:
+            covered = {
+                key: item for key, item in covered.items()
+                if item not in (None, "", [], {})
+            }
+            identity = _compact_json(covered)
+            if identity not in seen_assignments:
+                seen_assignments.add(identity)
+                deduplicated_covered_by.append(covered)
+        value_out = {
+            "obligation_id": obligation_id,
+            "requirement_id": item.get("requirement_id"),
+            "obligation_type": item.get("obligation_type"),
+            "meaning": _compact(item.get("meaning") or item.get("text"), 300),
+            "coverage_state": "COVERED" if item.get("coverage_ready") else "UNCOVERED",
+            "inherited_satisfaction": bool(item.get("inherited_satisfaction")),
+            "candidate_slot_ids": _bounded_ids(
+                item.get("candidate_slots") or item.get("candidate_surface_ids"), 12,
+            ),
+            "candidate_decision_kinds": _bounded_ids(item.get("candidate_decisions"), 8),
+            "inherited_slot_ids": _bounded_ids(item.get("inherited_slots"), 12),
+            "assigned_impact_ids": _bounded_ids(impact_by_obligation.get(obligation_id), 12),
+            "covered_by": deduplicated_covered_by[:8],
+            "evidence_refs": _bounded_ids(item.get("evidence_refs"), MAX_EVIDENCE_REFS_PER_IMPACT),
+            "structured_relations": _bounded_ids(item.get("structured_relations"), 8),
+        }
+        result.append({key: value for key, value in value_out.items() if value not in (None, "", [], {})})
+    if not result:
+        # A malformed/legacy input is not silently upgraded into a V24.4
+        # obligation-aware packet.  The caller's explicit mode gate controls
+        # whether this artifact is used at all.
+        for requirement in active_requirements(requirements):
+            result.append({
+                "requirement_id": requirement.get("requirement_id"),
+                "meaning": _compact(requirement.get("text"), 300),
+                "coverage_state": "UNKNOWN",
+            })
+    return result
+
+
+def _challenger_review_model_obligation_cards(obligations):
+    """Keep obligation identity, meaning, and assignment evidence for review."""
+    result = []
+    for source in list(obligations or []):
+        if not isinstance(source, dict):
+            continue
+        card = {
+            key: copy.deepcopy(source.get(key)) for key in (
+                "obligation_id", "requirement_id", "obligation_type", "coverage_state",
+                "inherited_satisfaction", "candidate_slot_ids", "candidate_decision_kinds",
+                "inherited_slot_ids", "assigned_impact_ids",
+            ) if source.get(key) not in (None, "", [], {})
+        }
+        if source.get("obligation_type") != "BEHAVIOR_CHANGE":
+            card.pop("assigned_impact_ids", None)
+        if source.get("meaning") not in (None, "", [], {}):
+            card["meaning"] = _compact(source.get("meaning"), 160)
+        covered_by = []
+        for assignment in list(source.get("covered_by", []) or [])[:6]:
+            if not isinstance(assignment, dict):
+                continue
+            value = {
+                key: copy.deepcopy(assignment.get(key)) for key in (
+                    "slot_id", "surface_id", "decision", "decision_capabilities",
+                ) if assignment.get(key) not in (None, "", [], {})
+            }
+            if value:
+                covered_by.append(value)
+        if covered_by and source.get("obligation_type") == "BEHAVIOR_CHANGE":
+            card["covered_by"] = covered_by
+        result.append({key: item for key, item in card.items() if item not in (None, "", [], {})})
+    return result
+
+
+def _challenger_review_constraint_records(impact_map, obligations, task_brain=None,
+                                          verified_planning_context=None, requirements=None):
+    value = impact_map if isinstance(impact_map, dict) else {}
+    grouped = {}
+    requirement_texts = {
+        _core_normalize_text(item.get("text"))
+        for item in active_requirements(requirements)
+        if isinstance(item, dict) and item.get("text")
+    }
+
+    def add(text, constraint_type, impact_id=None, surface_id=None, source="COMPILED_IMPACT"):
+        text = _compact(text, 280)
+        if not text:
+            return
+        if _core_normalize_text(text) in requirement_texts:
+            return
+        key = _core_normalize_text(text)
+        entry = grouped.setdefault(key, {
+            "text": text, "constraint_types": [], "impact_ids": [],
+            "surface_ids": [], "source": source,
+        })
+        if constraint_type not in entry["constraint_types"]:
+            entry["constraint_types"].append(constraint_type)
+        if impact_id and str(impact_id) not in entry["impact_ids"]:
+            entry["impact_ids"].append(str(impact_id))
+        if surface_id and str(surface_id) not in entry["surface_ids"]:
+            entry["surface_ids"].append(str(surface_id))
+
+    for impact in list(value.get("impacts", []) or []):
+        if not isinstance(impact, dict):
+            continue
+        impact_id = impact.get("impact_id")
+        surface_id = impact.get("surface_id") or impact.get("canonical_surface_id")
+        for text in list(impact.get("dnt", []) or []):
+            add(text, "DNT", impact_id, surface_id)
+        for text in list(impact.get("prohibitions", []) or []):
+            add(text, "PROHIBITION", impact_id, surface_id)
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    for field, constraint_type in (("dnt", "DNT"), ("prohibitions", "PROHIBITION"),
+                                   ("preservation_constraints", "PRESERVATION")):
+        for item in list(source.get(field, []) or []):
+            add(item.get("text") if isinstance(item, dict) else item, constraint_type, source="PLANNING_CONTEXT")
+    result = []
+    for index, item in enumerate(sorted(grouped.values(), key=lambda entry: (
+        _core_normalize_text(entry.get("text")), ",".join(entry.get("constraint_types", [])),
+    )), 1):
+        result.append({
+            "alias": f"FIXED-{index:03d}",
+            "text": item["text"],
+            "constraint_types": list(item["constraint_types"]),
+            "impact_ids": list(item["impact_ids"]),
+            "surface_ids": list(item["surface_ids"]),
+            "source": item["source"],
+        })
+    return result
+
+
+def _challenger_review_model_constraints(constraints):
+    """Fan shared constraints into compact review records once."""
+    result = []
+    for source in list(constraints or []):
+        if not isinstance(source, dict):
+            continue
+        value = {
+            key: copy.deepcopy(source.get(key)) for key in (
+                "alias", "text", "constraint_types", "impact_ids",
+            ) if source.get(key) not in (None, "", [], {})
+        }
+        if value:
+            result.append(value)
+    return result
+
+
+def _challenger_review_context(task_brain=None, verified_planning_context=None,
+                               requirements=None):
+    source = (
+        verified_planning_context if isinstance(verified_planning_context, dict)
+        else task_brain if isinstance(task_brain, dict) else {}
+    )
+    authority = _planner_authority_projection(
+        task_brain if isinstance(task_brain, dict) else source,
+        requirements,
+        verified_planning_context=verified_planning_context,
+    )
+    compact_authority = []
+    for item in authority:
+        if not isinstance(item, dict):
+            continue
+        value = {
+            key: copy.deepcopy(item.get(key)) for key in (
+                "authority_type", "category", "field", "path", "symbol", "text",
+                "source_ids", "requirement_ids", "structured_relation",
+            ) if item.get(key) not in (None, "", [], {})
+        }
+        value["source_ids"] = _bounded_ids(value.get("source_ids"), 4)
+        value["requirement_ids"] = _bounded_ids(value.get("requirement_ids"), 4)
+        if "path" in value:
+            value["path"] = _challenger_review_relative_path(value.get("path"))
+        compact_authority.append({
+            key: item for key, item in value.items() if item not in (None, "", [], {})
+        })
+    conflicts = []
+    for item in _planner_conflict_projection(
+        task_brain if isinstance(task_brain, dict) else source,
+        verified_planning_context=verified_planning_context,
+    ):
+        value = copy.deepcopy(item)
+        for key in ("fact_hash", "authority_fact_hash", "source_hash", "file_sha256"):
+            value.pop(key, None)
+        conflicts.append(value)
+    stale = []
+    for item in _planner_stale_projection(
+        task_brain if isinstance(task_brain, dict) else source,
+        verified_planning_context=verified_planning_context,
+    ):
+        value = copy.deepcopy(item)
+        for key in ("fact_hash", "authority_fact_hash", "source_hash", "file_sha256"):
+            value.pop(key, None)
+        stale.append(value)
+    not_evaluable = _planner_not_evaluable_projection(
+        task_brain if isinstance(task_brain, dict) else source,
+        verified_planning_context=verified_planning_context,
+    )
+    return {
+        "planning_mode": source.get("planning_mode"),
+        "current_authority": compact_authority[:32],
+        "confirmed_conflicts": conflicts[:16],
+        "stale_evidence_warnings": stale[:16],
+        "not_evaluable_audit": copy.deepcopy(not_evaluable[:16]),
+    }
+
+
+def _challenger_review_model_context(context):
+    """Compact context records without dropping review-relevant statuses."""
+    value = context if isinstance(context, dict) else {}
+
+    def records(items, limit=12):
+        result = []
+        seen = set()
+        for source in list(items or [])[:limit]:
+            if not isinstance(source, dict):
+                continue
+            record = {}
+            for key in (
+                "authority_type", "status", "record_id", "evidence_id", "classification",
+                "warning", "kind", "drift_classification", "authority_fact",
+                "impact_id", "surface_id", "requirement_id", "obligation_id",
+                "path", "symbol", "text", "message", "reason", "type",
+                "repository_evidence_ids", "evidence_refs",
+            ):
+                item = source.get(key)
+                if item in (None, "", [], {}):
+                    continue
+                if key == "path":
+                    item = _challenger_review_relative_path(item)
+                elif key in {"text", "message", "reason", "warning", "authority_fact"}:
+                    item = _compact(item, 180)
+                elif key in {"repository_evidence_ids", "evidence_refs"}:
+                    item = _bounded_ids(item, 4)
+                record[key] = copy.deepcopy(item)
+            if not record:
+                continue
+            semantic_identity = (
+                record.get("authority_type"), record.get("status"),
+                record.get("record_id"), record.get("evidence_id"),
+                record.get("impact_id"), record.get("surface_id"),
+                record.get("requirement_id"), record.get("obligation_id"),
+                record.get("symbol"), record.get("text") or record.get("message") or record.get("reason"),
+            )
+            if semantic_identity not in seen:
+                seen.add(semantic_identity)
+                result.append(record)
+        return result
+
+    authority_records = records(value.get("current_authority"), 16)
+    authority_records = [
+        item for item in authority_records
+        if len(item) > 1 and (
+            item.get("authority_type") == "REQUIRED_INTERFACE"
+            or str(item.get("path") or "").startswith("src/")
+            or any(
+                token in str(item.get("text") or "").casefold()
+                for token in ("owner", "modify", "preserve", "interface")
+            )
+        )
+    ]
+    return {
+        "planning_mode": value.get("planning_mode"),
+        "current_authority": authority_records[:8],
+        "confirmed_conflicts": records(value.get("confirmed_conflicts"), 8),
+        "stale_evidence_warnings": records(value.get("stale_evidence_warnings"), 8),
+        "not_evaluable_audit": records(value.get("not_evaluable_audit"), 8),
+    }
+
+
+def _challenger_review_semantic_coverage(model_payload, primary, fixed, evidence_support,
+                                         obligations, constraints):
+    payload = model_payload if isinstance(model_payload, dict) else {}
+    impacts = list((payload.get("candidate_impact_map") or {}).get("impacts", []) or [])
+    impact_ids = {str(item.get("impact_id")) for item in impacts if isinstance(item, dict)}
+    requirement_ids = {
+        str(item.get("requirement_id")) for item in list(payload.get("requirements", []) or [])
+        if isinstance(item, dict) and item.get("requirement_id")
+    }
+    units = {
+        "REQUIREMENT_GAP": bool(requirement_ids and payload.get("review_dimensions")),
+        "SCOPE": bool(impact_ids and payload.get("review_dimensions")),
+        "AUTHORITY": bool(payload.get("authority_boundary") and payload.get("surfaces")),
+        "MINIMALITY": all(
+            isinstance(item, dict) and item.get("necessity_status") and item.get("chosen_decision")
+            for item in primary
+        ) if primary else False,
+        "DNT": "fixed_constraints" in payload,
+        "STALE_EVIDENCE": "stale_evidence_warnings" in payload,
+        "VERIFICATION": bool(evidence_support or payload.get("verification_support")),
+        "PRESERVATION": bool(obligations or constraints),
+        "CHALLENGE_TAXONOMY": bool(payload.get("allowed_challenge_types")),
+    }
+    return {
+        "units": [
+            {"unit_id": unit, "represented": bool(units.get(unit))}
+            for unit in CHALLENGER_REVIEW_SEMANTIC_UNITS
+        ],
+        "represented_units": [unit for unit, present in units.items() if present],
+        "uncovered_units": [unit for unit, present in units.items() if not present],
+        "rate": sum(bool(item) for item in units.values()) / len(units) if units else 1.0,
+    }
+
+
+def build_challenger_review_projection(impact_map, requirements=None, evidence=None,
+                                       surface_registry=None, task_brain=None,
+                                       verified_planning_context=None):
+    """Build the immutable V24.4.4 semantic projection for ImpactChallenger.
+
+    The compiled map and its complete source records are retained in the
+    artifact for local validation and reconciliation.  Only ``model_payload``
+    is model-facing; it contains compact review cards and never grants
+    mutation authority.
+    """
+    value = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
+    raw_impacts = [item for item in list(value.get("impacts", []) or []) if isinstance(item, dict)]
+    requirements_value = [item for item in active_requirements(requirements) if isinstance(item, dict)]
+    if not requirements_value:
+        requirements_value = [
+            {
+                "requirement_id": item.get("requirement_id"),
+                "text": item.get("text"),
+                "provenance": item.get("source_provenance", USER_STATED),
+            }
+            for item in list((value.get("requirement_obligation_ledger") or {}).get("requirements", []) or [])
+            if isinstance(item, dict) and item.get("requirement_id")
+        ]
+    requirements_projection = _planner_requirement_projection(requirements_value)
+    obligations = _challenger_review_obligation_cards(value, requirements_value)
+    classifications = []
+    cards = []
+    for item in raw_impacts:
+        classification = _challenger_review_impact_classification(item)
+        card = _challenger_review_impact_card(item, classification)
+        classifications.append({
+            "impact_id": str(item.get("impact_id") or ""),
+            "classification": classification,
+            "surface_id": str(item.get("surface_id") or item.get("canonical_surface_id") or ""),
+        })
+        cards.append(card)
+    primary = [item for item in cards if item.get("classification") == CHALLENGER_REVIEW_PRIMARY]
+    fixed = [item for item in cards if item.get("classification") == DETERMINISTIC_FIXED_CONTEXT]
+    evidence_support = [item for item in cards if item.get("classification") == EVIDENCE_ONLY]
+    support = [item for item in cards if item.get("classification") == CHALLENGER_REVIEW_SUPPORT]
+    model_cards = [
+        _challenger_review_model_impact_card(item, classification)
+        for item, classification in zip(raw_impacts, [item["classification"] for item in classifications])
+    ]
+    model_primary = [
+        item for item in model_cards if item.get("classification") == CHALLENGER_REVIEW_PRIMARY
+    ]
+    model_fixed = [
+        item for item in model_cards if item.get("classification") == DETERMINISTIC_FIXED_CONTEXT
+    ]
+    model_evidence_support = [
+        item for item in model_cards if item.get("classification") == EVIDENCE_ONLY
+    ]
+    model_support = [
+        item for item in model_cards if item.get("classification") == CHALLENGER_REVIEW_SUPPORT
+    ]
+    constraints = _challenger_review_constraint_records(
+        value, obligations, task_brain=task_brain,
+        verified_planning_context=verified_planning_context,
+        requirements=requirements_value,
+    )
+    surfaces = _challenger_review_surface_cards(value, surface_registry)
+    evidence_cards = _challenger_review_evidence_cards(value, evidence)
+    context = _challenger_review_context(
+        task_brain=task_brain, verified_planning_context=verified_planning_context,
+        requirements=requirements_value,
+    )
+    model_obligations = _challenger_review_model_obligation_cards(obligations)
+    model_surfaces = _challenger_review_model_surface_cards(surfaces)
+    model_evidence_cards = _challenger_review_model_evidence_cards(evidence_cards)
+    model_context = _challenger_review_model_context(context)
+    source_map_hash = challenger_review_source_map_hash(value)
+    frame_coverage = value.get("impact_decision_frame_coverage")
+    choice_coverage = value.get("impact_decision_choice_coverage")
+    full_impact_ids = [str(item.get("impact_id")) for item in raw_impacts if item.get("impact_id")]
+    full_surface_ids = [
+        str(item.get("surface_id") or item.get("canonical_surface_id"))
+        for item in raw_impacts
+        if item.get("surface_id") or item.get("canonical_surface_id")
+    ]
+    model_payload = {
+        "version": 1,
+        "artifact_type": "ChallengerReviewRequest",
+        "source_impact_map_hash": source_map_hash,
+        "candidate_impact_map": {
+            "version": value.get("version", 1),
+            "impacts": model_cards,
+        },
+        "requirements": requirements_projection,
+        "obligation_coverage": model_obligations,
+        "review_scope": {
+            "primary_impact_ids": [str(item.get("impact_id")) for item in model_primary],
+            "support_impact_ids": [str(item.get("impact_id")) for item in model_support],
+            "deterministic_fixed_context_impact_ids": [str(item.get("impact_id")) for item in model_fixed],
+            "evidence_support_impact_ids": [str(item.get("impact_id")) for item in model_evidence_support],
+        },
+        "verification_support": {
+            "impact_ids": [str(item.get("impact_id")) for item in model_evidence_support],
+            "surface_ids": [str(item.get("surface_id")) for item in model_evidence_support if item.get("surface_id")],
+            "evidence_ids": [
+                str(evidence_id) for item in evidence_support
+                for evidence_id in item.get("repository_evidence_ids", [])
+            ],
+        },
+        "surfaces": model_surfaces,
+        "repository_evidence": model_evidence_cards,
+        "current_authority": model_context.get("current_authority", []),
+        "confirmed_conflicts": model_context.get("confirmed_conflicts", []),
+        "stale_evidence_warnings": model_context.get("stale_evidence_warnings", []),
+        "not_evaluable_audit": model_context.get("not_evaluable_audit", []),
+        "fixed_constraints": _challenger_review_model_constraints(constraints),
+        "review_dimensions": list(CHALLENGER_REVIEW_SEMANTIC_UNITS),
+        "allowed_challenge_types": list(CHALLENGE_TYPES),
+        "authority_boundary": (
+            "Review only; coverage/cards are not mutation authority. Full map/contracts remain authoritative."
+        ),
+        "bounds": {
+            "max_challenges": MAX_CHALLENGES,
+            "challenge_rounds": MAX_CHALLENGE_ROUNDS,
+            "max_serialized_chars": MAX_CHALLENGER_CONTEXT_CHARS,
+        },
+    }
+    semantic_coverage = _challenger_review_semantic_coverage(
+        model_payload, primary, fixed, evidence_support, obligations, constraints,
+    )
+    full_map_authority = bool(
+        len(full_impact_ids) == len(cards)
+        and len(set(full_impact_ids)) == len(full_impact_ids)
+        and set(full_impact_ids) == {
+            str(item.get("impact_id")) for item in cards if item.get("impact_id")
+        }
+    )
+    full_provenance = {
+        "source_impact_map": copy.deepcopy(value),
+        "source_requirements": copy.deepcopy(requirements_value),
+        "source_evidence": copy.deepcopy(list(evidence or [])),
+        "source_surface_registry": copy.deepcopy(surface_registry or {}),
+        "source_task_brain": copy.deepcopy(task_brain or {}),
+        "source_verified_planning_context": copy.deepcopy(verified_planning_context or {}),
+    }
+    provenance_map = {
+        "source_impact_map": {
+            "hash": source_map_hash,
+            "source_ref": "full_provenance.source_impact_map",
+        },
+        "impacts": {
+            str(item.get("impact_id")): {
+                "source_ref": f"full_provenance.source_impact_map.impacts[{index}]",
+                "surface_id": str(item.get("surface_id") or item.get("canonical_surface_id") or ""),
+                "classification": classifications[index].get("classification"),
+            }
+            for index, item in enumerate(raw_impacts)
+            if item.get("impact_id")
+        },
+        "surfaces": {
+            str(item.get("surface_id")): {
+                "source_ref": "full_provenance.source_surface_registry.surfaces",
+                "path": _challenger_review_relative_path(item.get("path")),
+            }
+            for item in surfaces if item.get("surface_id")
+        },
+        "obligations": {
+            str(item.get("obligation_id")): {
+                "source_ref": "full_provenance.source_impact_map.impact_decision_choice_coverage.obligations",
+                "assigned_impact_ids": _bounded_ids(item.get("assigned_impact_ids"), 12),
+            }
+            for item in obligations if item.get("obligation_id")
+        },
+        "evidence": {
+            str(item.get("evidence_id")): {
+                "source_ref": "full_provenance.source_evidence",
+                "path": _challenger_review_relative_path(item.get("path")),
+            }
+            for item in list(evidence or [])
+            if isinstance(item, dict) and item.get("evidence_id")
+        },
+    }
+    projection = {
+        "version": CHALLENGER_REVIEW_PROJECTION_VERSION,
+        "artifact_type": "ChallengerReviewProjection",
+        "source_impact_map_hash": source_map_hash,
+        "source_impact_decision_frame_hash": value.get("impact_decision_frame_hash"),
+        "source_impact_decision_choice_hash": value.get("impact_decision_choice_hash"),
+        "source_frame_hash": value.get("impact_decision_frame_hash"),
+        "source_choice_hash": value.get("impact_decision_choice_hash"),
+        "source_planning_context_hash": value.get("source_planning_context_hash"),
+        "source_mandatory_core_hash": value.get("source_mandatory_core_hash"),
+        "full_impact_ids": full_impact_ids,
+        "serialized_impact_ids": [str(item.get("impact_id")) for item in cards if item.get("impact_id")],
+        "slot_classification": classifications,
+        "primary_impacts": copy.deepcopy(primary),
+        "fixed_context_impacts": copy.deepcopy(fixed),
+        "evidence_support_impacts": copy.deepcopy(evidence_support),
+        "support_impacts": copy.deepcopy(support),
+        "obligation_coverage": copy.deepcopy(obligations),
+        "coverage_status": (
+            (frame_coverage or {}).get("coverage_status")
+            if isinstance(frame_coverage, dict) else None
+        ),
+        "coverage_hash": (
+            (frame_coverage or {}).get("coverage_hash")
+            if isinstance(frame_coverage, dict) else None
+        ),
+        "choice_coverage_status": (
+            (choice_coverage or {}).get("coverage_status")
+            if isinstance(choice_coverage, dict) else None
+        ),
+        "choice_coverage_hash": (
+            (choice_coverage or {}).get("coverage_hash")
+            if isinstance(choice_coverage, dict) else None
+        ),
+        "fixed_constraints": copy.deepcopy(constraints),
+        "provenance_map": provenance_map,
+        "model_payload": model_payload,
+        "review_semantic_coverage": semantic_coverage,
+        "review_semantic_coverage_rate": semantic_coverage.get("rate", 0.0),
+        "challenger_review_required_semantics_total": len(
+            semantic_coverage.get("units", []) or []
+        ),
+        "challenger_review_required_semantics_rendered": len(
+            semantic_coverage.get("represented_units", []) or []
+        ),
+        "challenger_review_semantic_coverage_rate": semantic_coverage.get("rate", 0.0),
+        "full_map_authority_coverage": 1.0 if full_map_authority else 0.0,
+        "full_map_authority_coverage_rate": 1.0 if full_map_authority else 0.0,
+        "full_impact_map_semantic_coverage": 1.0 if full_map_authority else 0.0,
+        "full_impact_map_provenance_reachable": 1.0 if full_map_authority and full_provenance.get("source_impact_map") else 0.0,
+        "full_provenance_reachable": 1.0 if full_map_authority and full_provenance.get("source_impact_map") else 0.0,
+        "full_provenance": full_provenance,
+        "metrics": {
+            "challenger_impacts_total": len(cards),
+            "challenger_primary_impacts": len(primary),
+            "challenger_fixed_context_units": len(fixed),
+            "challenger_evidence_support_units": len(evidence_support),
+            "challenger_projection_chars": len(_compact_json(model_payload)),
+            "challenger_review_semantic_coverage": semantic_coverage.get("rate", 0.0),
+        },
+    }
+    projection["projection_hash"] = challenger_review_projection_hash(projection)
+    return projection
+
+
+build_challenger_review_relevant_projection = build_challenger_review_projection
+
+
+def validate_challenger_review_projection(projection, impact_map=None, requirements=None,
+                                           evidence=None, surface_registry=None,
+                                           task_brain=None, verified_planning_context=None):
+    """Validate the immutable Challenger projection against its full source."""
+    value = projection if isinstance(projection, dict) else {}
+    source = impact_map
+    provenance = value.get("full_provenance") if isinstance(value.get("full_provenance"), dict) else {}
+    if not isinstance(source, dict):
+        source = provenance.get("source_impact_map") if isinstance(provenance.get("source_impact_map"), dict) else {}
+    if requirements is None:
+        requirements = provenance.get("source_requirements")
+    if evidence is None:
+        evidence = provenance.get("source_evidence")
+    if surface_registry is None:
+        surface_registry = provenance.get("source_surface_registry")
+    if task_brain is None:
+        task_brain = provenance.get("source_task_brain")
+    if verified_planning_context is None:
+        verified_planning_context = provenance.get("source_verified_planning_context")
+    expected = build_challenger_review_projection(
+        source, requirements=requirements, evidence=evidence,
+        surface_registry=surface_registry, task_brain=task_brain,
+        verified_planning_context=verified_planning_context,
+    )
+    errors = []
+    for field in (
+        "version", "artifact_type", "source_impact_map_hash", "source_impact_decision_frame_hash",
+        "source_impact_decision_choice_hash", "source_frame_hash", "source_choice_hash",
+        "source_planning_context_hash",
+        "source_mandatory_core_hash", "full_impact_ids", "serialized_impact_ids",
+        "slot_classification", "obligation_coverage", "coverage_status", "coverage_hash",
+        "choice_coverage_status", "choice_coverage_hash", "fixed_constraints", "provenance_map",
+        "model_payload",
+        "review_semantic_coverage", "review_semantic_coverage_rate", "full_map_authority_coverage",
+        "challenger_review_required_semantics_total", "challenger_review_required_semantics_rendered",
+        "challenger_review_semantic_coverage_rate", "full_map_authority_coverage_rate",
+        "full_impact_map_semantic_coverage", "full_impact_map_provenance_reachable",
+        "full_provenance_reachable", "metrics",
+    ):
+        if value.get(field) != expected.get(field):
+            errors.append(f"projection mismatch: {field}")
+    if value.get("projection_hash") != challenger_review_projection_hash(value):
+        errors.append("projection hash mismatch")
+    source_ids = [
+        str(item.get("impact_id")) for item in list(source.get("impacts", []) or [])
+        if isinstance(item, dict) and item.get("impact_id")
+    ]
+    serialized_ids = list(value.get("serialized_impact_ids", []) or [])
+    if source_ids != serialized_ids:
+        errors.append("projection does not retain every compiled impact")
+    payload_value = value.get("model_payload", {})
+    payload_text = _compact_json(payload_value)
+
+    def has_nested_key(candidate, names):
+        if isinstance(candidate, dict):
+            if any(name in candidate for name in names):
+                return True
+            return any(has_nested_key(item, names) for item in candidate.values())
+        if isinstance(candidate, (list, tuple)):
+            return any(has_nested_key(item, names) for item in candidate)
+        return False
+
+    if "file_sha256" in payload_text or has_nested_key(
+        payload_value, {"source_impact_map", "full_provenance"}
+    ):
+        errors.append("full source provenance leaked into model payload")
+    paths = []
+    for collection in (
+        (value.get("model_payload") or {}).get("surfaces", []),
+        (value.get("model_payload") or {}).get("repository_evidence", []),
+        (value.get("model_payload") or {}).get("candidate_impact_map", {}).get("impacts", []),
+    ):
+        for item in list(collection or []):
+            if isinstance(item, dict):
+                paths.extend([item.get("path"), item.get("surface_path")])
+    if any(
+        isinstance(path, str) and (path.startswith("/") or path.startswith("\\")
+                                   or (len(path) > 1 and path[1] == ":"))
+        for path in paths if path
+    ):
+        errors.append("model-facing projection contains an absolute path")
+    semantic = value.get("review_semantic_coverage") or {}
+    if semantic.get("rate") != 1.0 or semantic.get("uncovered_units"):
+        errors.append("review semantic coverage is incomplete")
+    return {
+        "valid": not errors,
+        "status": "READY" if not errors else "CHALLENGER_REVIEW_PROJECTION_INVALID",
+        "errors": list(dict.fromkeys(errors)),
+        "source_impact_map_hash": value.get("source_impact_map_hash"),
+        "projection_hash": value.get("projection_hash"),
+        "full_impact_count": len(source_ids),
+        "serialized_impact_count": len(serialized_ids),
+        "review_semantic_coverage": semantic.get("rate", 0.0),
+        "challenger_review_required_semantics_total": value.get(
+            "challenger_review_required_semantics_total", 0,
+        ),
+        "challenger_review_required_semantics_rendered": value.get(
+            "challenger_review_required_semantics_rendered", 0,
+        ),
+        "challenger_review_semantic_coverage_rate": value.get(
+            "challenger_review_semantic_coverage_rate", semantic.get("rate", 0.0),
+        ),
+        "full_map_authority_coverage": value.get("full_map_authority_coverage", 0.0),
+        "full_impact_map_semantic_coverage": value.get(
+            "full_impact_map_semantic_coverage", value.get("full_map_authority_coverage", 0.0),
+        ),
+        "full_impact_map_provenance_reachable": value.get(
+            "full_impact_map_provenance_reachable", value.get("full_provenance_reachable", 0.0),
+        ),
+        "full_provenance_reachable": value.get("full_provenance_reachable", 0.0),
+        "model_calls": 0,
+    }
+
+
+validate_challenger_review_relevant_projection = validate_challenger_review_projection
+
+
+def _legacy_challenger_packet_audit(packet):
+    """Expose the pre-V24.4.4 representation for deterministic comparison."""
+    value = packet if isinstance(packet, dict) else {}
+    role_packet = value.get("role_packet") if isinstance(value.get("role_packet"), dict) else {}
+    audit = role_packet.get("mandatory_payload_audit")
+    return {
+        "representation": "V24.4.3_FULL_COMPILED_MAP",
+        "status": role_packet.get("status"),
+        "packet_hash": role_packet.get("packet_hash"),
+        "mandatory_payload_chars": role_packet.get("serialized_payload_chars"),
+        "rendered_chars": role_packet.get("rendered_chars"),
+        "hard_limit_chars": role_packet.get("hard_limit_chars"),
+        "remaining_chars": role_packet.get("remaining_chars"),
+        "mandatory_drops": copy.deepcopy(role_packet.get("mandatory_drops", [])),
+        "optional_items_dropped_ids": copy.deepcopy(
+            role_packet.get("optional_items_dropped_ids", [])
+        ),
+        "mandatory_payload_audit": copy.deepcopy(audit) if isinstance(audit, dict) else {},
+        "mandatory_core_metrics": copy.deepcopy(role_packet.get("mandatory_core_metrics", {})),
+    }
+
+
+def _challenger_review_packet_budget_audit(payload, role_packet, max_chars):
+    """Report the exact rendered budget without changing packet selection."""
+    value = payload if isinstance(payload, dict) else {}
+    role = role_packet if isinstance(role_packet, dict) else {}
+    candidate = value.get("candidate_impact_map") if isinstance(value.get("candidate_impact_map"), dict) else {}
+    impacts = list(candidate.get("impacts", []) or [])
+    primary = [item for item in impacts if isinstance(item, dict) and item.get("classification") == CHALLENGER_REVIEW_PRIMARY]
+    support = [item for item in impacts if isinstance(item, dict) and item.get("classification") == CHALLENGER_REVIEW_SUPPORT]
+    fixed = [item for item in impacts if isinstance(item, dict) and item.get("classification") == DETERMINISTIC_FIXED_CONTEXT]
+    evidence = [item for item in impacts if isinstance(item, dict) and item.get("classification") == EVIDENCE_ONLY]
+
+    def encoded(item):
+        return len(_compact_json(item))
+
+    review_payload = copy.deepcopy(value)
+    review_candidate = copy.deepcopy(candidate)
+    review_candidate["impacts"] = primary + support
+    review_payload["candidate_impact_map"] = review_candidate
+    for field in (
+        "fixed_constraints", "current_authority", "confirmed_conflicts",
+        "stale_evidence_warnings", "not_evaluable_audit", "verification_support",
+        "surfaces", "repository_evidence",
+    ):
+        review_payload.pop(field, None)
+    fixed_payload = {
+        "impacts": fixed,
+        "fixed_constraints": copy.deepcopy(value.get("fixed_constraints", [])),
+        "current_authority": copy.deepcopy(value.get("current_authority", [])),
+    }
+    verification_payload = {
+        "impacts": evidence,
+        "verification_support": copy.deepcopy(value.get("verification_support", {})),
+        "surfaces": copy.deepcopy(value.get("surfaces", [])),
+        "repository_evidence": copy.deepcopy(value.get("repository_evidence", [])),
+    }
+    serialized_chars = role.get("serialized_payload_chars")
+    rendered_chars = role.get("rendered_chars")
+    if serialized_chars is None:
+        serialized_chars = encoded({**value, "packet_complete": True})
+    if rendered_chars is None:
+        rendered_chars = serialized_chars
+    return {
+        "envelope_chars": max(0, int(rendered_chars) - int(serialized_chars)),
+        "review_mandatory_chars": encoded(review_payload),
+        "fixed_context_chars": encoded(fixed_payload),
+        "verification_support_chars": encoded(verification_payload),
+        "optional_chars": 0,
+        "serialized_payload_chars": int(serialized_chars),
+        "exact_rendered_chars": int(rendered_chars),
+        "hard_limit_chars": int(max_chars),
+        "remaining_chars": int(max_chars) - int(rendered_chars),
+    }
+
+
+def _build_challenger_review_packet(impact_map, requirements, evidence, task_brain,
+                                    surface_registry, max_chars, role, render, base_render,
+                                    verified_planning_context, legacy_packet):
+    projection = build_challenger_review_projection(
+        impact_map, requirements=requirements, evidence=evidence,
+        surface_registry=surface_registry, task_brain=task_brain,
+        verified_planning_context=verified_planning_context,
+    )
+    projection_check = validate_challenger_review_projection(
+        projection, impact_map=impact_map, requirements=requirements, evidence=evidence,
+        surface_registry=surface_registry, task_brain=task_brain,
+        verified_planning_context=verified_planning_context,
+    )
+    payload = copy.deepcopy(projection.get("model_payload", {}))
+    semantic_units = [
+        {
+            "unit_id": str(item.get("unit_id")),
+            "represented": bool(item.get("represented")),
+            "source_provenance_retained": True,
+            "model_semantic_required": True,
+            "model_semantic_represented": bool(item.get("represented")),
+        }
+        for item in list(
+            (projection.get("review_semantic_coverage") or {}).get("units", []) or []
+        )
+        if isinstance(item, dict)
+    ]
+    mandatory_ids = [
+        "CHALLENGER_REVIEW_PROJECTION",
+        *[str(item) for item in projection.get("serialized_impact_ids", []) or []],
+        *[
+            str(item.get("obligation_id")) for item in projection.get("obligation_coverage", [])
+            if isinstance(item, dict) and item.get("obligation_id")
+        ],
+        "REVIEW_DIMENSIONS",
+        "CHALLENGE_RESPONSE_BOUNDS",
+    ]
+    mandatory_payload_audit = audit_mandatory_planning_payload({
+        **copy.deepcopy(payload), "packet_complete": True,
+    })
+
+    def payload_factory(selected_items, marker=True):
+        value = _role_payload_factory(payload, selected_items)
+        value["packet_complete"] = bool(marker)
+        return value
+
+    role_packet = build_planning_role_packet(
+        role, payload, [], hard_limit=max_chars, render=render, base_render=base_render,
+        source_planning_context_hash=projection.get("source_planning_context_hash"),
+        mandatory_items=mandatory_ids,
+        payload_factory=lambda selected: payload_factory(selected, marker=True),
+        planning_core_hash=projection.get("source_mandatory_core_hash"),
+        mandatory_payload_audit=mandatory_payload_audit,
+        mandatory_semantic_coverage=semantic_units,
+        mandatory_model_chars_before_normalization=len(_compact_json(payload)),
+        mandatory_model_chars_after_normalization=len(_compact_json(payload)),
+    )
+    packet = role_packet.get("payload", payload)
+    full_ids = list(projection.get("full_impact_ids", []) or [])
+    serialized_ids = [
+        str(item.get("impact_id"))
+        for item in list((packet.get("candidate_impact_map") or {}).get("impacts", []) or [])
+        if isinstance(item, dict) and item.get("impact_id")
+    ]
+    errors = list(projection_check.get("errors", []) or [])
+    if serialized_ids != full_ids:
+        errors.append("challenger projection did not retain every compiled impact")
+    if role_packet.get("status") != "READY":
+        errors.extend(role_packet.get("errors", []))
+    complete = bool(role_packet.get("packet_complete")) and not errors
+    legacy_audit = _legacy_challenger_packet_audit(legacy_packet)
+    budget_audit = _challenger_review_packet_budget_audit(payload, role_packet, max_chars)
+    observability = {
+        "reviewed_impact_ids": full_ids,
+        "serialized_impact_ids": serialized_ids,
+        "dropped_impact_ids": [item for item in full_ids if item not in serialized_ids],
+        "reviewed_surface_ids": [
+            str(item.get("surface_id")) for item in projection.get("primary_impacts", [])
+            + projection.get("fixed_context_impacts", [])
+            + projection.get("evidence_support_impacts", [])
+            + projection.get("support_impacts", [])
+            if isinstance(item, dict) and item.get("surface_id")
+        ],
+        "packet_chars": role_packet.get("rendered_chars", 0),
+        "payload_chars": len(_compact_json(packet)),
+        "estimated_tokens": _estimated_tokens(
+            role_packet.get("rendered_packet", _compact_json(packet))
+        ),
+        "packet_complete": complete,
+        "projection_hash": projection.get("projection_hash"),
+        "projection_metrics": copy.deepcopy(projection.get("metrics", {})),
+        "review_semantic_coverage": projection.get("review_semantic_coverage_rate", 0.0),
+        "full_map_authority_coverage": projection.get("full_map_authority_coverage", 0.0),
+        "full_provenance_reachable": projection.get("full_provenance_reachable", 0.0),
+        "packet_budget_audit": copy.deepcopy(budget_audit),
+    }
+    result = copy.deepcopy(packet)
+    result.update({
+        "packet": copy.deepcopy(packet),
+        "role_packet": copy.deepcopy(role_packet),
+        "observability": observability,
+        "reviewed_impact_ids": full_ids,
+        "serialized_impact_ids": serialized_ids,
+        "dropped_impact_ids": list(observability["dropped_impact_ids"]),
+        "packet_chars": role_packet.get("rendered_chars", 0),
+        "estimated_tokens": observability["estimated_tokens"],
+        "packet_complete": complete,
+        "status": "READY" if complete else (
+            role_packet.get("status") if role_packet.get("status") != "READY"
+            else IMPACT_CHALLENGER_CONTEXT_INCOMPLETE
+        ),
+        "errors": list(dict.fromkeys(errors))[:24],
+        "challenger_review_projection": copy.deepcopy(projection),
+        "challenger_review_projection_validation": projection_check,
+        "packet_budget_audit": copy.deepcopy(budget_audit),
+        "previous_challenger_packet_audit": legacy_audit,
+        # Keep the descriptive legacy name available to artifact consumers
+        # without changing the existing full-map validator input.
+        "legacy_payload_audit": legacy_audit,
+        "full_compiled_impact_map": copy.deepcopy(impact_map),
+        "model_calls": 0,
+    })
+    return result
+
+
 def _challenger_optional_items(packet):
     """Return challenger evidence/prose units below the review authority."""
     value = packet if isinstance(packet, dict) else {}
@@ -10228,10 +11557,24 @@ def _trim_challenger_optional_payload(packet, max_chars):
 
 def build_challenger_packet(impact_map, requirements, evidence, task_brain=None,
                             surface_registry=None, max_chars=None, role="ImpactChallenger",
-                            render=None, base_render=None, verified_planning_context=None):
+                            render=None, base_render=None, verified_planning_context=None,
+                            _force_legacy=False):
     """Build a complete review packet using the exact role renderer."""
     max_chars = MAX_CHALLENGER_CONTEXT_CHARS if max_chars is None else max_chars
     max_chars = max(1, int(max_chars))
+    if not _force_legacy and _challenger_review_projection_enabled(impact_map, role):
+        legacy_packet = build_challenger_packet(
+            impact_map, requirements, evidence, task_brain=task_brain,
+            surface_registry=surface_registry, max_chars=max_chars, role=role,
+            render=render, base_render=base_render,
+            verified_planning_context=verified_planning_context,
+            _force_legacy=True,
+        )
+        return _build_challenger_review_packet(
+            impact_map, requirements, evidence, task_brain, surface_registry,
+            max_chars, role, render, base_render, verified_planning_context,
+            legacy_packet,
+        )
     brain = task_brain if isinstance(task_brain, dict) else {}
     raw_impacts = list((impact_map or {}).get("impacts", []) or [])
     impacts = [

@@ -1816,6 +1816,15 @@ def new_metrics(mode):
         "impact_planner_calls": 0,
         "impact_challenger_calls": 0,
         "impact_plan_revision_calls": 0,
+        # V24.4.4 weak-Challenger review projection accounting.  These are
+        # deterministic packet-shaping counters, not model roles or retries.
+        "challenger_review_projection_builds": 0,
+        "challenger_impacts_total": 0,
+        "challenger_primary_impacts": 0,
+        "challenger_fixed_context_units": 0,
+        "challenger_evidence_support_units": 0,
+        "challenger_projection_chars": 0,
+        "challenger_review_semantic_coverage": 1.0,
         "plan_approval_requests": 0,
         # v19 Stage 4A approved-plan execution contracts.  These counters are
         # intentionally separate from Stage 3 planning and Worker/tool work.
@@ -5127,6 +5136,13 @@ audit_mandatory_payload_budget = stage3.audit_mandatory_payload_budget
 audit_current_vs_desired_representation = stage3.audit_current_vs_desired_representation
 planning_role_limit = stage3.planning_role_limit
 build_challenger_packet = stage3.build_challenger_packet
+build_challenger_review_projection = stage3.build_challenger_review_projection
+build_challenger_review_relevant_projection = stage3.build_challenger_review_relevant_projection
+validate_challenger_review_projection = stage3.validate_challenger_review_projection
+validate_challenger_review_relevant_projection = stage3.validate_challenger_review_relevant_projection
+challenger_review_projection_hash = stage3.challenger_review_projection_hash
+challenger_review_projection_artifact_hash = stage3.challenger_review_projection_artifact_hash
+challenger_review_source_map_hash = stage3.challenger_review_source_map_hash
 build_revision_packet = stage3.build_revision_packet
 build_minimal_plan_packet = stage3.build_minimal_plan_packet
 validate_planning_packet = stage3.validate_planning_packet
@@ -6005,6 +6021,30 @@ def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
     )
     context = challenger_packet.get("packet", challenger_packet)
     packet_observability = challenger_packet.get("observability", {})
+    review_projection = challenger_packet.get("challenger_review_projection")
+    if isinstance(review_projection, dict):
+        projection_metrics = review_projection.get("metrics", {})
+        RUN["challenger_review_projection_builds"] = RUN.get(
+            "challenger_review_projection_builds", 0,
+        ) + 1
+        for metric_name in (
+            "challenger_impacts_total", "challenger_primary_impacts",
+            "challenger_fixed_context_units", "challenger_evidence_support_units",
+            "challenger_projection_chars",
+        ):
+            RUN[metric_name] = projection_metrics.get(metric_name, RUN.get(metric_name, 0))
+        RUN["challenger_review_semantic_coverage"] = projection_metrics.get(
+            "challenger_review_semantic_coverage",
+            RUN.get("challenger_review_semantic_coverage", 1.0),
+        )
+        RUN["impact_challenger_review_projection"] = copy.deepcopy(review_projection)
+        record_run_event(
+            "challenger_review_projection_built",
+            projection_hash=review_projection.get("projection_hash"),
+            projection_metrics=copy.deepcopy(projection_metrics),
+            full_map_authority_coverage=review_projection.get("full_map_authority_coverage"),
+            full_provenance_reachable=review_projection.get("full_provenance_reachable"),
+        )
     role_packet = challenger_packet.get("role_packet")
     _record_planning_role_packet(role_packet)
     RUN["impact_challenger_role_packet"] = copy.deepcopy(role_packet)
