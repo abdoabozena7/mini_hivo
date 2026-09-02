@@ -1202,6 +1202,120 @@ def compact_requirement_obligation_ledger(ledger_or_requirements):
     }
 
 
+def _is_obligation_aware_artifact(artifact=None, ledger=None):
+    """Identify an artifact that explicitly opts into the V24.4 contract."""
+    value = artifact if isinstance(artifact, dict) else {}
+    stored_ledger = value.get("requirement_obligation_ledger")
+    if isinstance(stored_ledger, dict) and stored_ledger.get("version") == 2:
+        return True
+    if value.get("planning_mode") == "VERIFIED_STATE_REENTRY":
+        return True
+    if any(value.get(key) is not None for key in (
+        "impact_decision_frame_hash", "impact_decision_frame_coverage",
+        "impact_decision_choice_coverage", "source_planning_context_hash",
+    )):
+        return True
+    return isinstance(ledger, dict) and ledger.get("version") == 2
+
+
+def _legacy_requirement_obligation_ledger(ledger_or_requirements):
+    """Return the full pre-V24.4 ledger used by legacy reconciliation code."""
+    records = _obligation_records(ledger_or_requirements)
+    legacy_types = [
+        item for item in REQUIREMENT_OBLIGATION_TYPES
+        if item != "AUTHORITY_CHANGE"
+    ]
+    legacy_records = []
+    for item in records:
+        obligation_types = list(item.get("obligation_types", []) or [])
+        obligation_types = [
+            item for item in legacy_types if item in obligation_types
+        ]
+        legacy_records.append({
+            "requirement_id": item.get("requirement_id"),
+            "text": item.get("text", ""),
+            "obligation_types": obligation_types,
+            "source_provenance": item.get("source_provenance", USER_STATED),
+            "classification_provenance": DERIVED_PLAN_DECISION,
+        })
+    return {
+        "version": 1,
+        "requirements": legacy_records,
+        "obligation_count": sum(
+            len(item.get("obligation_types", [])) for item in legacy_records
+        ),
+        "bounds": {
+            "max_requirements": len(legacy_records),
+            "allowed_types": legacy_types,
+        },
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+
+
+def _legacy_compact_requirement_obligation_ledger(ledger_or_requirements):
+    """Project obligations into the pre-V24.4 type-level plan contract.
+
+    V24.4 adds atomic obligation records to the verified-state planning
+    artifact. Older Stage 3 callers still use the version-1 compact
+    projection, whose canonical contract contains only requirement-level
+    obligation types. This projection deliberately does not invent atoms; it
+    only preserves the type information already present in the supplied
+    ledger.
+    """
+    records = _legacy_requirement_obligation_ledger(ledger_or_requirements).get(
+        "requirements", []
+    )
+    compact_records = []
+    for item in records:
+        obligation_types = list(item.get("obligation_types", []) or [])
+        if not obligation_types:
+            obligation_types = list(dict.fromkeys(
+                str(value.get("obligation_type"))
+                for value in list(item.get("obligations", []) or [])
+                if isinstance(value, dict) and value.get("obligation_type")
+            ))
+        compact_records.append({
+            "requirement_id": item.get("requirement_id"),
+            "obligation_types": obligation_types,
+            "source_provenance": item.get("source_provenance", USER_STATED),
+            "classification_provenance": DERIVED_PLAN_DECISION,
+        })
+    return {
+        "version": 1,
+        "requirements": compact_records,
+        "obligation_count": sum(
+            len(item.get("obligation_types", [])) for item in compact_records
+        ),
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+
+
+def _legacy_semantic_obligation_coverage(semantic):
+    """Remove V24.4 atomic projections from a legacy plan projection."""
+    value = semantic if isinstance(semantic, dict) else {}
+    legacy = {
+        key: copy.deepcopy(value.get(key))
+        for key in (
+            "requirements_covered", "requirements_uncovered",
+            "behavior_obligations", "behavior_obligations_covered",
+            "behavior_obligations_uncovered",
+        )
+        if key in value
+    }
+    legacy["requirements"] = []
+    for record in list(value.get("requirements", []) or []):
+        if not isinstance(record, dict):
+            continue
+        legacy["requirements"].append({
+            key: copy.deepcopy(record.get(key))
+            for key in (
+                "requirement_id", "obligation_types", "obligations", "state", "provenance",
+            )
+            if key in record
+        })
+    return legacy
+
+
 def bounded_evidence(evidence, max_items=12):
     """Keep semantic Stage 2 facts and hashes, never raw source support."""
     result = []
@@ -11181,7 +11295,8 @@ def re_evaluate_challenge_lifecycle(challenges, final_source, requirements, evid
 
 def reconcile_impact_map(impact_map, validated_challenges, requirements, evidence,
                          surface_registry=None, impact_seeds=None,
-                         obligation_ledger=None, task_goal=None, task_brain=None):
+                         obligation_ledger=None, task_goal=None, task_brain=None,
+                         obligation_aware=None):
     """Apply one bounded deterministic revision while conserving obligations."""
     revised = copy.deepcopy(impact_map if isinstance(impact_map, dict) else {})
     impacts = list(revised.get("impacts", []) or [])
@@ -11191,7 +11306,10 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     }
     req_by_id = {item["requirement_id"]: item for item in active_requirements(requirements)}
     surface_by_id = canonical_surface_by_id(surface_registry) if surface_registry else {}
-    obligation_ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    supplied_ledger = obligation_ledger or revised.get("requirement_obligation_ledger")
+    if obligation_aware is None:
+        obligation_aware = _is_obligation_aware_artifact(revised, supplied_ledger)
+    obligation_ledger = supplied_ledger or build_requirement_obligation_ledger(requirements)
     challenge_records = []
     for item in list(validated_challenges or [])[:MAX_CHALLENGES]:
         challenge = copy.deepcopy(item)
@@ -11444,8 +11562,13 @@ def reconcile_impact_map(impact_map, validated_challenges, requirements, evidenc
     semantic = evaluate_requirement_obligations(
         normalized, requirements, evidence, surface_registry, obligation_ledger,
     )
-    normalized["requirement_obligation_ledger"] = copy.deepcopy(obligation_ledger)
-    normalized["semantic_obligation_coverage"] = semantic
+    normalized["requirement_obligation_ledger"] = copy.deepcopy(
+        obligation_ledger if obligation_aware else
+        _legacy_requirement_obligation_ledger(obligation_ledger)
+    )
+    normalized["semantic_obligation_coverage"] = copy.deepcopy(
+        semantic if obligation_aware else _legacy_semantic_obligation_coverage(semantic)
+    )
     normalized["deterministic_behavior_anchor_promotions"] = len(closure_actions)
     normalized["behavior_anchor_closure_actions"] = closure_actions
     obligation_metric_keys = {
@@ -11603,7 +11726,7 @@ def _fit_plan_to_serialized_bound(plan):
     # a few characters beyond the fixed Stage 3 bound.
     optional_node_fields = (
         "objective", "target_paths", "test_contract", "new_surface_proposals",
-        "parent_scopes", "dependencies", "inspect_targets",
+        "parent_scopes",
     )
     for field in optional_node_fields:
         if _json_size(value) <= MAX_PLAN_CHARS - 128:
@@ -11621,12 +11744,14 @@ def _fit_plan_to_serialized_bound(plan):
 def build_minimal_change_plan(impact_map, requirements, evidence, resolved_challenges=None,
                               unresolved_challenges=None, project_mode=EXISTING_PROJECT,
                               surface_registry=None, obligation_ledger=None,
-                              task_goal=None):
+                              task_goal=None, obligation_aware=None):
     reqs = active_requirements(requirements)
-    obligation_ledger = obligation_ledger or (
+    supplied_ledger = obligation_ledger or (
         (impact_map or {}).get("requirement_obligation_ledger")
-        or build_requirement_obligation_ledger(reqs)
     )
+    if obligation_aware is None:
+        obligation_aware = _is_obligation_aware_artifact(impact_map, supplied_ledger)
+    obligation_ledger = supplied_ledger or build_requirement_obligation_ledger(reqs)
     req_by_id = {item["requirement_id"]: item for item in reqs}
     evidence_by_id = {
         item["evidence_id"]: item for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)
@@ -11878,8 +12003,14 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
             _plan_challenge_record(item) for item in list(unresolved_challenges or [])[:MAX_CHALLENGES]
         ],
         "coverage": coverage,
-        "requirement_obligation_ledger": compact_requirement_obligation_ledger(obligation_ledger),
-        "semantic_obligation_coverage": semantic,
+        "requirement_obligation_ledger": (
+            compact_requirement_obligation_ledger(obligation_ledger)
+            if obligation_aware else
+            _legacy_compact_requirement_obligation_ledger(obligation_ledger)
+        ),
+        "semantic_obligation_coverage": copy.deepcopy(
+            semantic if obligation_aware else _legacy_semantic_obligation_coverage(semantic)
+        ),
         "behavior_anchor_closure_actions": copy.deepcopy(
             (impact_map or {}).get("behavior_anchor_closure_actions", [])
         ),
@@ -11906,10 +12037,12 @@ def build_minimal_change_plan(impact_map, requirements, evidence, resolved_chall
 
 def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PROJECT,
                          surface_registry=None, obligation_ledger=None,
-                         authoritative_task_goal=None):
+                         authoritative_task_goal=None, obligation_aware=None):
     value = plan if isinstance(plan, dict) else {}
     errors = []
     expected_obligation_ledger = obligation_ledger or build_requirement_obligation_ledger(requirements)
+    if obligation_aware is None:
+        obligation_aware = _is_obligation_aware_artifact(value, obligation_ledger)
     req_ids = {item["requirement_id"] for item in active_requirements(requirements)}
     evidence_ids = {item["evidence_id"] for item in bounded_evidence(evidence, MAX_IMPACT_ENTRIES * 2)}
     evidence_by_id = {
@@ -11936,9 +12069,12 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
         errors.append("authoritative task goal is required")
     if authoritative_task_goal is not None and value.get("task_goal") != authoritative_task_goal:
         errors.append("task goal does not match the authoritative root goal")
-    if value.get("requirement_obligation_ledger") != compact_requirement_obligation_ledger(
-        expected_obligation_ledger
-    ):
+    expected_compact_ledger = (
+        compact_requirement_obligation_ledger(expected_obligation_ledger)
+        if obligation_aware else
+        _legacy_compact_requirement_obligation_ledger(expected_obligation_ledger)
+    )
+    if value.get("requirement_obligation_ledger") != expected_compact_ledger:
         errors.append("requirement obligation ledger is missing or not authoritative")
     do_not_touch = set(str(item) for item in value.get("do_not_touch", []))
     do_not_touch_surface_ids = {
@@ -12430,23 +12566,23 @@ def mutation_scope(plan_contract):
     nodes = list(contract.get("nodes", []) or [])
     return {
         "approved_targets": _bounded_strings([
-            item for node in nodes for item in node.get("candidate_targets", [])
+            item for node in nodes for item in (node.get("candidate_targets", []) or [])
             if node.get("mutation_required")
         ], 16, 240),
         "inspect_only_targets": _bounded_strings([
-            item for node in nodes for item in node.get("inspect_targets", [])
+            item for node in nodes for item in (node.get("inspect_targets", []) or [])
         ], 16, 240),
         "do_not_touch": _bounded_strings(contract.get("do_not_touch"), 16, 240),
         "approved_surface_ids": _bounded_ids([
-            item for node in nodes for item in node.get("target_surface_ids", [])
+            item for node in nodes for item in (node.get("target_surface_ids", []) or [])
             if node.get("mutation_required")
         ], 24),
         "approved_new_surface_proposal_ids": _bounded_ids([
-            item for node in nodes for item in node.get("target_new_surface_proposal_ids", [])
+            item for node in nodes for item in (node.get("target_new_surface_proposal_ids", []) or [])
             if node.get("mutation_required")
         ], 12),
         "approved_new_surface_parent_scopes": _bounded_strings([
-            item for node in nodes for item in node.get("parent_scopes", [])
+            item for node in nodes for item in (node.get("parent_scopes", []) or [])
             if node.get("mutation_required") and node.get("target_new_surface_proposal_ids")
         ], 12, 240),
         "do_not_touch_surface_ids": _bounded_ids(contract.get("do_not_touch_surface_ids"), 24),

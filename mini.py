@@ -6172,6 +6172,7 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
 def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
                                   repository_evidence, verified_planning_context=None):
     requirements = _active_stage3_requirements(contract)
+    obligation_aware = isinstance(verified_planning_context, dict)
     task_brain = RUN.get("task_brain") or {}
     registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
         task_brain, repository_evidence,
@@ -6187,6 +6188,7 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         obligation_ledger=obligation_ledger,
         task_goal=authoritative_task_goal,
         task_brain=task_brain,
+        obligation_aware=obligation_aware,
     )
     RUN.setdefault("control_flow", []).append("MINIMAL_EFFECTIVE_CHANGE_PLAN")
     plan = stage3.build_minimal_change_plan(
@@ -6196,6 +6198,7 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         surface_registry=registry,
         obligation_ledger=obligation_ledger,
         task_goal=authoritative_task_goal,
+        obligation_aware=obligation_aware,
     )
     # Recompute challenge lifecycle against the actual final plan payload.
     # The impact map is retained as the canonical target lookup so omitted
@@ -6232,6 +6235,7 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         surface_registry=registry,
         obligation_ledger=obligation_ledger,
         authoritative_task_goal=authoritative_task_goal,
+        obligation_aware=obligation_aware,
     )
     if isinstance(verified_planning_context, dict):
         v24_gate = stage6b.validate_verified_plan(
