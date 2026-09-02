@@ -77,6 +77,15 @@ BEHAVIOR_CHANGE_UNCOVERED = "BEHAVIOR_CHANGE_UNCOVERED"
 DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE = (
     "DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE"
 )
+EXCLUDED_IMPACT_DECISION_SLOT = "EXCLUDED_IMPACT_DECISION_SLOT"
+IMPACT_DECISION_PROJECTION_INVALID = "IMPACT_DECISION_PROJECTION_INVALID"
+IMPACT_DECISION_SLOT_CLASSIFICATIONS = (
+    "MODEL_CHOICE_REQUIRED",
+    "MODEL_CHOICE_SUPPORT",
+    "DETERMINISTIC_INHERITED_ONLY",
+    "EVIDENCE_ONLY",
+)
+DECISION_RELEVANT_IMPACT_CHOICE_PROJECTION_VERSION = "V24.4.3"
 DECISION_CAPABILITY_NAMES = (
     "IMPLEMENTATION_CHANGE", "TEST_CHANGE", "INSPECTION_ONLY", "REUSE_ONLY",
     "PRESERVATION_ONLY", "AUTHORITY_CHANGE",
@@ -6598,11 +6607,709 @@ def _impact_decision_frame_payload(frame):
     }
 
 
+def _projection_relative_path(path):
+    """Return a safe project-relative path for the model-facing projection."""
+    value = _normal_path(path)
+    while value.startswith("./"):
+        value = value[2:]
+    if re.match(r"^[A-Za-z]:/", value):
+        # The canonical frame should already contain project-relative paths.
+        # If an older caller supplied an absolute path, retain only the
+        # repository-looking suffix rather than leaking a machine path.
+        lowered = value.casefold()
+        for marker in ("src/", "tests/"):
+            position = lowered.find(marker)
+            if position >= 0:
+                return value[position:]
+        return value[3:].lstrip("/")
+    return value.lstrip("/")
+
+
+def _projection_alias(identifier):
+    """Create a readable compact alias without hiding the canonical ID."""
+    value = str(identifier or "")
+    match = re.match(r"^(SLOT|SURF)-0*(\d+)$", value, re.IGNORECASE)
+    if match:
+        return f"{match.group(1).upper()}-{int(match.group(2))}"
+    return value
+
+
+def _projection_surface_from_slot(slot):
+    value = slot if isinstance(slot, dict) else {}
+    return {
+        "surface_id": value.get("surface_id"),
+        "kind": value.get("surface_kind"),
+        "role": value.get("surface_role"),
+        "path": value.get("surface_path"),
+        "symbol": value.get("surface_symbol"),
+        "structured_relations": list(value.get("surface_structured_relations", []) or []),
+    }
+
+
+def _projection_frame_obligations(frame):
+    value = frame if isinstance(frame, dict) else {}
+    coverage = value.get("impact_decision_frame_coverage")
+    if not isinstance(coverage, dict):
+        coverage = _build_frame_coverage(value)
+    atomic_by_id = {
+        str(item.get("obligation_id")): item
+        for item in _atomic_obligation_records(value.get("requirement_obligation_ledger", {}))
+        if isinstance(item, dict) and item.get("obligation_id")
+    }
+    return [
+        {
+            **copy.deepcopy(atomic_by_id.get(str(item.get("obligation_id")), {})),
+            **copy.deepcopy(item),
+        }
+        for item in list(coverage.get("obligations", []) or [])
+        if isinstance(item, dict) and item.get("obligation_id")
+    ]
+
+
+def _projection_required_obligation_details(frame, slot):
+    """Derive model-required responsibility from the canonical frame only."""
+    value = frame if isinstance(frame, dict) else {}
+    slot_value = slot if isinstance(slot, dict) else {}
+    surface = _projection_surface_from_slot(slot_value)
+    inherited_on_slot = {
+        str(item) for item in slot_value.get("inherited_obligation_ids", []) or []
+    }
+    required = []
+    candidate_decisions = {}
+    for obligation in _projection_frame_obligations(value):
+        obligation_id = str(obligation.get("obligation_id") or "")
+        if not obligation_id or obligation.get("inherited_satisfaction"):
+            continue
+        if obligation_id in inherited_on_slot:
+            continue
+        satisfying = []
+        for decision in list(slot_value.get("allowed_decisions", []) or []):
+            decision_name = str(decision)
+            if _frame_decision_satisfies_obligation(
+                obligation, slot_value, decision_name, surface,
+            ):
+                satisfying.append(decision_name)
+        if satisfying:
+            required.append(obligation_id)
+            candidate_decisions[obligation_id] = satisfying
+    return list(dict.fromkeys(required)), candidate_decisions
+
+
+def classify_impact_decision_slots(frame):
+    """Classify every full-frame slot without selecting a decision.
+
+    The classification is a deterministic responsibility taxonomy.  It is
+    deliberately separate from authority: the full frame remains the only
+    source used to decide whether a choice is allowed.
+    """
+    value = frame if isinstance(frame, dict) else {}
+    obligations = _projection_frame_obligations(value)
+    by_obligation = {
+        str(item.get("obligation_id")): item for item in obligations
+    }
+    result = []
+    for slot in list(value.get("decision_slots", []) or []):
+        if not isinstance(slot, dict) or not slot.get("slot_id"):
+            continue
+        required_ids, required_decisions = _projection_required_obligation_details(
+            value, slot,
+        )
+        inherited_ids = [
+            str(item) for item in list(slot.get("inherited_obligation_ids", []) or [])
+            if str(item) in by_obligation
+        ]
+        candidate_ids = [
+            str(item) for item in list(slot.get("candidate_obligation_ids", []) or [])
+            if str(item) in by_obligation
+        ]
+        kind = str(slot.get("surface_kind") or "").upper()
+        role = str(slot.get("surface_role") or "").upper()
+        if required_ids:
+            classification = "MODEL_CHOICE_REQUIRED"
+            reason = "an active non-inherited obligation has a satisfying allowed decision"
+        elif inherited_ids:
+            classification = "DETERMINISTIC_INHERITED_ONLY"
+            reason = "the slot contributes only inherited current-state obligations"
+        elif kind == "TEST" or role == "CURRENT_TEST":
+            classification = "EVIDENCE_ONLY"
+            reason = "current test evidence is context and no explicit TEST obligation requires a choice"
+        else:
+            classification = "MODEL_CHOICE_SUPPORT"
+            reason = "the slot is retained as bounded support context without a required model choice"
+        all_decision_kinds = [
+            str(item) for item in list(slot.get("allowed_decisions", []) or [])
+        ]
+        result.append({
+            "slot_id": str(slot.get("slot_id")),
+            "slot_alias": _projection_alias(slot.get("slot_id")),
+            "surface_id": str(slot.get("surface_id") or ""),
+            "surface_alias": _projection_alias(slot.get("surface_id")),
+            "surface_kind": str(slot.get("surface_kind") or ""),
+            "surface_role": str(slot.get("surface_role") or ""),
+            "surface_path": _projection_relative_path(slot.get("surface_path")),
+            "classification": classification,
+            "choice_required": classification == "MODEL_CHOICE_REQUIRED",
+            "reason": reason,
+            "required_obligation_ids": list(required_ids),
+            "required_decision_kinds": list(dict.fromkeys(
+                decision for obligation_id in required_ids
+                for decision in required_decisions.get(obligation_id, [])
+            )),
+            "candidate_obligation_ids": list(candidate_ids),
+            "candidate_decision_kinds": all_decision_kinds,
+            "inherited_obligation_ids": list(dict.fromkeys(inherited_ids)),
+            "dnt_targeted": _frame_surface_is_forbidden(
+                _projection_surface_from_slot(slot), slot,
+            ),
+            "prohibited": _frame_surface_is_forbidden(
+                _projection_surface_from_slot(slot), slot,
+            ),
+            "dnt_status": (
+                "DNT_PROHIBITED"
+                if _frame_surface_is_forbidden(_projection_surface_from_slot(slot), slot)
+                else "NOT_DNT"
+            ),
+        })
+    return result
+
+
+def _projection_constraint_records(frame):
+    """Fan shared constraints in once while retaining all source fan-in."""
+    value = frame if isinstance(frame, dict) else {}
+    grouped = {}
+    for slot in list(value.get("decision_slots", []) or []):
+        if not isinstance(slot, dict) or not slot.get("slot_id"):
+            continue
+        slot_id = str(slot.get("slot_id"))
+        surface_id = str(slot.get("surface_id") or "")
+        values = []
+        for text in list(slot.get("dnt", []) or []):
+            values.append(("DNT", text))
+        for text in list(slot.get("prohibitions", []) or []):
+            values.append(("PROHIBITION", text))
+        for item in list(slot.get("required_preservation_promises", []) or []):
+            if isinstance(item, dict):
+                values.append(("PRESERVATION", item.get("text") or item.get("meaning")))
+        for constraint_type, text in values:
+            text = _compact(text, 280)
+            if not text:
+                continue
+            key = _core_normalize_text(text)
+            entry = grouped.setdefault(key, {
+                "text": text,
+                "constraint_types": [],
+                "slot_ids": [],
+                "surface_ids": [],
+                "authority_refs": [],
+                "evidence_refs": [],
+            })
+            if constraint_type not in entry["constraint_types"]:
+                entry["constraint_types"].append(constraint_type)
+            if slot_id not in entry["slot_ids"]:
+                entry["slot_ids"].append(slot_id)
+            if surface_id and surface_id not in entry["surface_ids"]:
+                entry["surface_ids"].append(surface_id)
+            for ref in list(slot.get("authority_refs", []) or []):
+                if str(ref) and str(ref) not in entry["authority_refs"]:
+                    entry["authority_refs"].append(str(ref))
+            for ref in list(slot.get("evidence_refs", []) or []):
+                if str(ref) and str(ref) not in entry["evidence_refs"]:
+                    entry["evidence_refs"].append(str(ref))
+    result = []
+    for index, item in enumerate(sorted(grouped.values(), key=lambda value: (
+        _core_normalize_text(value.get("text")),
+        ",".join(value.get("constraint_types", [])),
+    )), 1):
+        prefix = "DNT" if "DNT" in item["constraint_types"] else "FIXED"
+        result.append({
+            "constraint_id": f"{prefix}-{index:03d}",
+            "alias": f"{prefix}-{index:03d}",
+            "text": item["text"],
+            "constraint_types": list(item["constraint_types"]),
+            "slot_ids": list(item["slot_ids"]),
+            "surface_ids": list(item["surface_ids"]),
+            "authority_refs": _bounded_ids(item["authority_refs"], 32),
+            "evidence_refs": _bounded_ids(item["evidence_refs"], MAX_EVIDENCE_REFS_PER_IMPACT),
+        })
+    return result
+
+
+def _projection_constraint_aliases(constraints, slot_id):
+    return [
+        str(item.get("alias")) for item in constraints
+        if str(slot_id) in {str(value) for value in item.get("slot_ids", []) or []}
+    ]
+
+
+def _projection_compact_obligation(obligation):
+    value = obligation if isinstance(obligation, dict) else {}
+    return {
+        "obligation_id": str(value.get("obligation_id") or ""),
+        "requirement_id": str(value.get("requirement_id") or ""),
+        "obligation_type": str(value.get("obligation_type") or ""),
+        "meaning": _compact(value.get("meaning") or value.get("text"), 240),
+        "inherited_satisfaction": bool(value.get("inherited_satisfaction")),
+        "candidate_slot_ids": [str(item) for item in list(value.get("candidate_slots", []) or [])],
+        "candidate_decision_kinds": [str(item) for item in list(value.get("candidate_decisions", []) or [])],
+    }
+
+
+def _projection_model_payload(frame, classifications, constraints, obligations):
+    value = frame if isinstance(frame, dict) else {}
+    required = [
+        item for item in classifications
+        if item.get("classification") == "MODEL_CHOICE_REQUIRED"
+    ]
+    required_ids = [str(item.get("slot_id")) for item in required]
+    model_slots = []
+    support_context = []
+    full_slots = {
+        str(item.get("slot_id")): item for item in value.get("decision_slots", [])
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+    for classification in classifications:
+        slot_id = str(classification.get("slot_id"))
+        slot = full_slots.get(slot_id, {})
+        constraint_aliases = _projection_constraint_aliases(constraints, slot_id)
+        if classification.get("classification") == "MODEL_CHOICE_REQUIRED":
+            required_obligations = set(
+                str(item) for item in classification.get("required_obligation_ids", []) or []
+            )
+            mapping = {}
+            for decision in list(slot.get("allowed_decisions", []) or []):
+                decision = str(decision)
+                selected = [
+                    str(item) for item in list(
+                        (slot.get("obligations_satisfied_by_decision", {}) or {}).get(decision, [])
+                        or []
+                    ) if str(item) in required_obligations
+                ]
+                if selected:
+                    mapping[decision] = selected
+            model_slots.append({
+                "slot_id": slot_id,
+                "slot_alias": _projection_alias(slot_id),
+                "surface_id": str(slot.get("surface_id") or ""),
+                "surface_alias": _projection_alias(slot.get("surface_id")),
+                "surface_role": str(slot.get("surface_role") or ""),
+                "surface_path": _projection_relative_path(slot.get("surface_path")),
+                "surface_capabilities": list(slot.get("surface_capabilities", []) or []),
+                "allowed_decisions": [str(item) for item in list(slot.get("allowed_decisions", []) or [])],
+                "decision_capabilities": {
+                    str(decision): list(
+                        (slot.get("decision_capabilities", {}) or {}).get(str(decision))
+                        or _decision_capabilities(decision)
+                    ) for decision in list(slot.get("allowed_decisions", []) or [])
+                },
+                "obligation_ids": list(classification.get("required_obligation_ids", []) or []),
+                "obligations_satisfied_by_decision": mapping,
+                "allowed_targets": [str(item) for item in list(slot.get("allowed_targets", []) or [])],
+                "constraint_aliases": constraint_aliases,
+                "dnt_status": classification.get("dnt_status"),
+            })
+        else:
+            # Support and evidence are context only.  They are never included
+            # in the response contract and therefore cannot become writable
+            # merely because they are visible to the model.
+            support_context.append({
+                "slot_id": slot_id,
+                "slot_alias": _projection_alias(slot_id),
+                "surface_id": str(slot.get("surface_id") or ""),
+                "surface_alias": _projection_alias(slot.get("surface_id")),
+                "surface_role": str(slot.get("surface_role") or ""),
+                "surface_path": _projection_relative_path(slot.get("surface_path")),
+                "classification": classification.get("classification"),
+                "inherited_obligation_ids": list(classification.get("inherited_obligation_ids", []) or []),
+                "candidate_obligation_ids": list(classification.get("candidate_obligation_ids", []) or []),
+                "constraint_aliases": constraint_aliases,
+            })
+    active = [_projection_compact_obligation(item) for item in obligations]
+    return {
+        "version": 1,
+        "artifact_type": "DecisionRelevantImpactChoiceRequest",
+        "source_frame_hash": value.get("frame_hash"),
+        "source_planning_context_hash": value.get("source_planning_context_hash"),
+        "source_mandatory_core_hash": value.get("source_mandatory_core_hash"),
+        "active_obligations": active,
+        "required_choice_slots": model_slots,
+        "required_choice_slot_ids": required_ids,
+        "support_context": support_context,
+        "fixed_constraints": [
+            {
+                "alias": str(item.get("alias")),
+                "constraint_types": list(item.get("constraint_types", []) or []),
+                "text": _compact(item.get("text"), 280),
+            }
+            for item in constraints
+        ],
+        "response_bounds": {
+            "required_slot_count": len(required_ids),
+            "required_choice_slot_ids": required_ids,
+            "exactly_one_choice_per_required_slot": True,
+            "excluded_slot_policy": "returning an excluded slot is invalid",
+            "model_owned_fields": list(IMPACT_DECISION_MODEL_FIELDS),
+        },
+        "authority_boundary": (
+            "The full ImpactDecisionFrame remains authoritative; this is a read-only choice projection."
+        ),
+    }
+
+
+def build_decision_relevant_impact_choice_projection(frame):
+    """Build the immutable V24.4.3 model-choice projection from a full frame."""
+    value = copy.deepcopy(frame if isinstance(frame, dict) else {})
+    obligations = _projection_frame_obligations(value)
+    classifications = classify_impact_decision_slots(value)
+    constraints = _projection_constraint_records(value)
+    full_slots = {
+        str(item.get("slot_id")): item for item in list(value.get("decision_slots", []) or [])
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+    slot_provenance = {}
+    for classification in classifications:
+        slot_id = str(classification.get("slot_id"))
+        slot = full_slots.get(slot_id, {})
+        slot_provenance[slot_id] = {
+            "slot_id": slot_id,
+            "seed_id": str(slot.get("seed_id") or ""),
+            "impact_id": str(slot.get("impact_id") or ""),
+            "surface_id": str(slot.get("surface_id") or ""),
+            "surface_role": str(slot.get("surface_role") or ""),
+            "surface_path": _projection_relative_path(slot.get("surface_path")),
+            "classification": classification.get("classification"),
+            "allowed_decisions": [str(item) for item in list(slot.get("allowed_decisions", []) or [])],
+            "allowed_targets": [str(item) for item in list(slot.get("allowed_targets", []) or [])],
+            "decision_capabilities": copy.deepcopy(slot.get("decision_capabilities", {})),
+            "candidate_obligation_ids": [str(item) for item in list(slot.get("candidate_obligation_ids", []) or [])],
+            "inherited_obligation_ids": [str(item) for item in list(slot.get("inherited_obligation_ids", []) or [])],
+            "obligations_satisfied_by_decision": copy.deepcopy(
+                slot.get("obligations_satisfied_by_decision", {})
+            ),
+            "current_owner": copy.deepcopy(slot.get("current_owner")),
+            "required_interfaces": [str(item) for item in list(slot.get("required_interfaces", []) or [])],
+            "required_preservation_promises": copy.deepcopy(
+                slot.get("required_preservation_promises", [])
+            ),
+            "required_verification_contracts": copy.deepcopy(
+                slot.get("required_verification_contracts", [])
+            ),
+            "dnt": list(slot.get("dnt", []) or []),
+            "prohibitions": list(slot.get("prohibitions", []) or []),
+            "dnt_surface_ids": [str(item) for item in list(slot.get("dnt_surface_ids", []) or [])],
+            "prohibited_surface_ids": [str(item) for item in list(slot.get("prohibited_surface_ids", []) or [])],
+            "authority_refs": [str(item) for item in list(slot.get("authority_refs", []) or [])],
+            "evidence_refs": [str(item) for item in list(slot.get("evidence_refs", []) or [])],
+            "source_frame_hash": value.get("frame_hash"),
+        }
+    obligation_provenance = {
+        str(item.get("obligation_id")): {
+            **_projection_compact_obligation(item),
+            "inherited_slots": [str(value) for value in list(item.get("inherited_slots", []) or [])],
+            "satisfied_by_decision": copy.deepcopy(item.get("satisfied_by_decision", {})),
+            "evidence_refs": [str(value) for value in list(item.get("evidence_refs", []) or [])],
+            "coverage_ready": bool(item.get("coverage_ready")),
+        }
+        for item in obligations
+    }
+    constraint_provenance = {
+        str(item.get("alias")): copy.deepcopy(item) for item in constraints
+    }
+    aliases = {
+        _projection_alias(slot_id): slot_id for slot_id in slot_provenance
+    }
+    aliases.update({
+        f"OBL-{index:03d}": obligation_id
+        for index, obligation_id in enumerate(obligation_provenance, 1)
+    })
+    aliases.update({
+        str(item.get("alias")): str(item.get("constraint_id"))
+        for item in constraints
+    })
+    required_obligation_ids = list(dict.fromkeys(
+        str(value) for item in classifications
+        if item.get("classification") == "MODEL_CHOICE_REQUIRED"
+        for value in item.get("required_obligation_ids", []) or []
+    ))
+    required_ids = [
+        str(item.get("slot_id")) for item in classifications
+        if item.get("classification") == "MODEL_CHOICE_REQUIRED"
+    ]
+    represented_obligation_ids = set(required_obligation_ids)
+    model_choice_coverage = [
+        {
+            "obligation_id": str(item.get("obligation_id")),
+            "inherited": bool(item.get("inherited_satisfaction")),
+            "model_choice_required": str(item.get("obligation_id")) in set(required_obligation_ids),
+            "model_choice_represented": (
+                bool(item.get("inherited_satisfaction"))
+                or str(item.get("obligation_id")) in represented_obligation_ids
+            ),
+        }
+        for item in obligations
+    ]
+    model_choice_rate = (
+        sum(item["model_choice_represented"] for item in model_choice_coverage)
+        / len(model_choice_coverage) if model_choice_coverage else 1.0
+    )
+    full_reachable = bool(
+        len(slot_provenance) == len(full_slots)
+        and len(obligation_provenance) == len(obligations)
+        and all(item.get("source_frame_hash") == value.get("frame_hash") for item in slot_provenance.values())
+    )
+    model_payload = _projection_model_payload(
+        value, classifications, constraints, obligations,
+    )
+    projection = {
+        "version": DECISION_RELEVANT_IMPACT_CHOICE_PROJECTION_VERSION,
+        "artifact_type": "DecisionRelevantImpactChoiceProjection",
+        "source_frame_hash": value.get("frame_hash"),
+        "source_frame_version": value.get("version"),
+        "source_planning_context_hash": value.get("source_planning_context_hash"),
+        "source_mandatory_core_hash": value.get("source_mandatory_core_hash"),
+        "required_choice_slot_ids": [
+            str(item.get("slot_id")) for item in classifications
+            if item.get("classification") == "MODEL_CHOICE_REQUIRED"
+        ],
+        "excluded_choice_slot_ids": [
+            str(item.get("slot_id")) for item in classifications
+            if item.get("classification") != "MODEL_CHOICE_REQUIRED"
+        ],
+        "slot_classification": classifications,
+        "fixed_constraints": constraints,
+        "support_context": model_payload.get("support_context", []),
+        "provenance_map": {
+            "source_frame": {
+                "frame_hash": value.get("frame_hash"),
+                "frame_version": value.get("version"),
+                "artifact_type": value.get("artifact_type"),
+                "authoritative_fields": [
+                    "decision_slots", "requirement_obligation_ledger",
+                    "impact_decision_frame_coverage", "frame_hash",
+                ],
+            },
+            "aliases": aliases,
+            "slots": slot_provenance,
+            "obligations": obligation_provenance,
+            "constraints": constraint_provenance,
+        },
+        "model_payload": model_payload,
+        "model_choice_semantic_coverage": model_choice_rate,
+        "full_authority_provenance_coverage": 1.0 if full_reachable else 0.0,
+        "required_model_choice_slots_total": len(required_ids),
+        "required_model_choice_slots_rendered": len(required_ids),
+        "required_model_choice_slot_coverage_rate": 1.0 if required_ids else 1.0,
+        "full_frame_semantic_coverage": 1.0 if full_reachable else 0.0,
+        "full_provenance_reachable": 1.0 if full_reachable else 0.0,
+        "projection_semantic_coverage": {
+            "obligations": model_choice_coverage,
+            "model_choice_rate": model_choice_rate,
+            "full_frame_reachable": full_reachable,
+            "full_frame_slot_count": len(full_slots),
+            "full_frame_obligation_count": len(obligations),
+        },
+        "response_contract": copy.deepcopy(model_payload.get("response_bounds", {})),
+        "metrics": {
+            "impact_frame_slots_total": len(full_slots),
+            "impact_model_choice_slots_required": len(
+                [item for item in classifications if item.get("classification") == "MODEL_CHOICE_REQUIRED"]
+            ),
+            "impact_slots_inherited_only": len(
+                [item for item in classifications if item.get("classification") == "DETERMINISTIC_INHERITED_ONLY"]
+            ),
+            "impact_slots_evidence_only": len(
+                [item for item in classifications if item.get("classification") == "EVIDENCE_ONLY"]
+            ),
+            "impact_choice_projection_chars": len(_compact_json(model_payload)),
+            "impact_choice_projection_semantic_coverage": model_choice_rate,
+        },
+    }
+    projection["projection_hash"] = decision_relevant_impact_choice_projection_hash(projection)
+    return projection
+
+
+build_impact_decision_choice_projection = build_decision_relevant_impact_choice_projection
+build_impact_choice_projection = build_decision_relevant_impact_choice_projection
+
+
+def decision_relevant_impact_choice_projection_hash(projection):
+    value = copy.deepcopy(projection if isinstance(projection, dict) else {})
+    value.pop("projection_hash", None)
+    return _impact_decision_hash(value)
+
+
+impact_choice_projection_hash = decision_relevant_impact_choice_projection_hash
+
+
+def validate_decision_relevant_impact_choice_projection(projection, frame):
+    """Validate projection integrity against the authoritative full frame."""
+    value = projection if isinstance(projection, dict) else {}
+    errors = []
+    source = frame if isinstance(frame, dict) else {}
+    frame_check = validate_impact_decision_frame(source)
+    if not frame_check.get("valid"):
+        errors.append(IMPACT_DECISION_FRAME_INCOMPLETE)
+    expected = build_decision_relevant_impact_choice_projection(source)
+    if value.get("artifact_type") != expected.get("artifact_type"):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID)
+    if value.get("version") != expected.get("version"):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID)
+    if value.get("source_frame_hash") != source.get("frame_hash"):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID + ": source frame hash")
+    if value.get("projection_hash") != decision_relevant_impact_choice_projection_hash(value):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID + ": projection hash")
+    for field in (
+        "source_frame_version", "source_planning_context_hash", "source_mandatory_core_hash",
+        "required_choice_slot_ids", "excluded_choice_slot_ids", "slot_classification",
+        "fixed_constraints", "support_context", "provenance_map", "model_payload",
+        "response_contract", "projection_semantic_coverage", "metrics",
+        "model_choice_semantic_coverage", "full_authority_provenance_coverage",
+        "required_model_choice_slots_total", "required_model_choice_slots_rendered",
+        "required_model_choice_slot_coverage_rate", "full_frame_semantic_coverage",
+        "full_provenance_reachable",
+    ):
+        if value.get(field) != expected.get(field):
+            errors.append(IMPACT_DECISION_PROJECTION_INVALID + f": {field}")
+    required_ids = [
+        str(item.get("slot_id")) for item in list(value.get("slot_classification", []) or [])
+        if isinstance(item, dict) and item.get("classification") == "MODEL_CHOICE_REQUIRED"
+    ]
+    if required_ids != list(value.get("required_choice_slot_ids", []) or []):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID + ": required choice slot cardinality")
+    model_payload = value.get("model_payload")
+    model_payload = model_payload if isinstance(model_payload, dict) else {}
+    response = model_payload.get("response_bounds", {})
+    if response.get("required_slot_count") != len(required_ids):
+        errors.append(IMPACT_DECISION_PROJECTION_INVALID + ": response bounds")
+    return {
+        "valid": not errors,
+        "status": "READY" if not errors else IMPACT_DECISION_PROJECTION_INVALID,
+        "errors": list(dict.fromkeys(errors)),
+        "required_choice_slot_ids": list(value.get("required_choice_slot_ids", []) or []),
+        "excluded_choice_slot_ids": list(value.get("excluded_choice_slot_ids", []) or []),
+        "slot_count": len(list(value.get("slot_classification", []) or [])),
+        "model_choice_semantic_coverage": value.get("model_choice_semantic_coverage", 0.0),
+        "full_authority_provenance_coverage": value.get("full_authority_provenance_coverage", 0.0),
+        "required_model_choice_slots_total": value.get(
+            "required_model_choice_slots_total", 0,
+        ),
+        "required_model_choice_slots_rendered": value.get(
+            "required_model_choice_slots_rendered", 0,
+        ),
+        "required_model_choice_slot_coverage_rate": value.get(
+            "required_model_choice_slot_coverage_rate", 0.0,
+        ),
+        "full_frame_semantic_coverage": value.get(
+            "full_frame_semantic_coverage", 0.0,
+        ),
+        "full_provenance_reachable": value.get("full_provenance_reachable", 0.0),
+        "coverage": copy.deepcopy(value.get("projection_semantic_coverage", {})),
+        "projection_hash": value.get("projection_hash"),
+        "model_calls": 0,
+    }
+
+
+validate_impact_decision_choice_projection = validate_decision_relevant_impact_choice_projection
+validate_impact_choice_projection = validate_decision_relevant_impact_choice_projection
+
+
+def audit_impact_decision_frame_model_payload(frame, payload=None, rendered=None):
+    """Audit the pre-V24.4.3 full-slot payload before compacting it."""
+    value = payload if isinstance(payload, dict) else _impact_decision_frame_payload(frame)
+    serialized = _compact_json(value)
+    rendered_text = rendered if isinstance(rendered, str) else serialized
+    slots = [item for item in list(value.get("decision_slots", []) or []) if isinstance(item, dict)]
+
+    def fragment_chars(keys, source=None):
+        source_value = source if isinstance(source, dict) else value
+        return len(_compact_json({key: source_value.get(key) for key in keys if key in source_value}))
+
+    slot_categories = {
+        "surface_identities": ("slot_id", "surface_id"),
+        "slot_identities": ("slot_id",),
+        "allowed_decisions": ("allowed_decisions",),
+        "decision_capabilities": ("decision_capabilities",),
+        "obligation_mappings": (
+            "candidate_obligation_ids", "obligations_satisfied_by_decision",
+        ),
+        "inherited_obligations": ("inherited_obligation_ids",),
+        "authority_metadata": (
+            "allowed_targets", "authority_change_targets", "current_owner",
+            "required_interfaces", "interface_provenance",
+        ),
+        "authority_change_metadata": ("authority_change_targets",),
+        "preservation_promises": ("required_preservation_promises",),
+        "verification_contracts": ("required_verification_contracts",),
+        "dnt_prohibitions": ("dnt", "prohibitions"),
+        "paths_and_surface_roles": (),
+        "provenance_refs": (),
+        "evidence_refs": (),
+        "absolute_paths": (),
+        "source_hashes": (),
+    }
+    contributions = {
+        "role_envelope_instructions": max(0, len(rendered_text) - len(serialized)),
+        "atomic_obligations": fragment_chars(("active_obligations",)),
+        "response_schema_and_bounds": fragment_chars(("response_bounds",)),
+        "response_schema_example": fragment_chars(("response_bounds",)),
+    }
+    for category, keys in slot_categories.items():
+        if category == "provenance_refs":
+            contributions[category] = 0
+            continue
+        if category == "evidence_refs":
+            contributions[category] = 0
+            continue
+        if category == "absolute_paths":
+            contributions[category] = 0
+            continue
+        if category == "source_hashes":
+            contributions[category] = fragment_chars(
+                ("source_planning_context_hash", "source_mandatory_core_hash",
+                 "impact_decision_frame_hash"),
+            )
+            continue
+        contributions[category] = sum(fragment_chars(keys, slot) for slot in slots)
+    repeated_constraints = {}
+    for slot in slots:
+        for field in ("dnt", "prohibitions"):
+            for text in list(slot.get(field, []) or []):
+                normalized = _core_normalize_text(text)
+                if normalized:
+                    repeated_constraints.setdefault(normalized, {"text": str(text), "occurrences": 0})
+                    repeated_constraints[normalized]["occurrences"] += 1
+    repeated = [item for item in repeated_constraints.values() if item["occurrences"] > 1]
+    contributions["repeated_constraints"] = sum(
+        len(_compact_json(item)) for item in repeated
+    )
+    return {
+        "artifact_type": "ImpactDecisionFramePayloadAudit",
+        "representation": "V24.4.2_FULL_SLOT_PAYLOAD",
+        "payload_chars": len(serialized),
+        "serialized_payload_chars": len(serialized),
+        "rendered_chars": len(rendered_text),
+        "role_envelope_instruction_chars": contributions["role_envelope_instructions"],
+        "category_contributions": contributions,
+        "repeated_constraint_records": repeated,
+        "decision_slot_count": len(slots),
+        "model_choice_cardinality": len(slots),
+        "model_calls": 0,
+    }
+
+
+audit_impact_decision_payload = audit_impact_decision_frame_model_payload
+audit_legacy_impact_decision_payload = audit_impact_decision_frame_model_payload
+
+
 def build_impact_decision_packet(
     frame, *, role="ImpactPlanner", max_chars=MAX_PLANNER_CONTEXT_CHARS,
-    render=None, base_render=None, mandatory_core=None,
+    render=None, base_render=None, mandatory_core=None, legacy_render=None,
 ):
-    """Compile the exact, compact model-facing choice packet."""
+    """Compile the exact V24.4.3 choice projection packet.
+
+    The full frame is validated first and is returned unchanged as the
+    authoritative artifact.  Only the separate decision-relevant projection
+    is rendered for the weak model.
+    """
     frame_check = validate_impact_decision_frame(frame)
     if not frame_check.get("valid"):
         status = frame_check.get("status") or IMPACT_DECISION_FRAME_INCOMPLETE
@@ -6614,16 +7321,49 @@ def build_impact_decision_packet(
             "frame_validation": frame_check,
             "model_calls": 0,
         }
-    payload = _impact_decision_frame_payload(frame)
+    projection = build_decision_relevant_impact_choice_projection(frame)
+    projection_check = validate_decision_relevant_impact_choice_projection(
+        projection, frame,
+    )
+    if not projection_check.get("valid"):
+        status = IMPACT_DECISION_PROJECTION_INVALID
+        return {
+            "status": status,
+            "packet_complete": False,
+            "errors": list(dict.fromkeys([status] + projection_check.get("errors", []))),
+            "frame": copy.deepcopy(frame),
+            "frame_hash": frame.get("frame_hash"),
+            "projection": copy.deepcopy(projection),
+            "projection_validation": projection_check,
+            "model_calls": 0,
+        }
+    payload = copy.deepcopy(projection.get("model_payload", {}))
     core = mandatory_core if isinstance(mandatory_core, dict) else {}
     coverage = core.get("mandatory_semantic_coverage", [])
-    mandatory_ids = ["IMPACT_DECISION_FRAME", "IMPACT_DECISION_CONTRACT"]
-    mandatory_ids.extend(str(item.get("slot_id")) for item in frame.get("decision_slots", []) if item.get("slot_id"))
+    mandatory_ids = [
+        "IMPACT_DECISION_FRAME", "IMPACT_DECISION_CONTRACT",
+        "DECISION_RELEVANT_IMPACT_CHOICE_PROJECTION",
+    ]
+    mandatory_ids.extend(
+        str(item) for item in projection.get("required_choice_slot_ids", []) or []
+    )
     mandatory_ids.extend(
         str(item.get("canonical_semantic_id")) for item in coverage
         if isinstance(item, dict) and item.get("canonical_semantic_id")
     )
     mandatory_audit = audit_mandatory_planning_payload({**copy.deepcopy(payload), "packet_complete": True})
+    legacy_payload = _impact_decision_frame_payload(frame)
+    legacy_renderer = legacy_render if callable(legacy_render) else (
+        render if callable(render) else base_render
+    )
+    legacy_rendered = None
+    if callable(legacy_renderer):
+        legacy_rendered = legacy_renderer(legacy_payload)
+        if not isinstance(legacy_rendered, str):
+            legacy_rendered = str(legacy_rendered)
+    legacy_audit = audit_impact_decision_frame_model_payload(
+        frame, legacy_payload, rendered=legacy_rendered,
+    )
     role_packet = build_planning_role_packet(
         role, payload, [], hard_limit=max_chars, render=render, base_render=base_render,
         source_planning_context_hash=frame.get("source_planning_context_hash"),
@@ -6631,6 +7371,17 @@ def build_impact_decision_packet(
         mandatory_payload_audit=mandatory_audit,
         mandatory_semantic_coverage=coverage,
         mandatory_core_metrics=core.get("metrics") if isinstance(core, dict) else None,
+    )
+    role_packet["decision_relevant_impact_choice_projection"] = copy.deepcopy(projection)
+    role_packet["legacy_payload_audit"] = copy.deepcopy(legacy_audit)
+    role_packet["projection_validation"] = copy.deepcopy(projection_check)
+    role_packet["projection_hash"] = projection.get("projection_hash")
+    role_packet["full_frame_hash"] = frame.get("frame_hash")
+    role_packet["required_choice_slot_ids"] = list(
+        projection.get("required_choice_slot_ids", []) or []
+    )
+    role_packet["excluded_choice_slot_ids"] = list(
+        projection.get("excluded_choice_slot_ids", []) or []
     )
     complete = bool(role_packet.get("packet_complete"))
     return {
@@ -6640,6 +7391,32 @@ def build_impact_decision_packet(
         "role_packet": copy.deepcopy(role_packet),
         "frame": copy.deepcopy(frame),
         "frame_hash": frame.get("frame_hash"),
+        "projection": copy.deepcopy(projection),
+        "projection_hash": projection.get("projection_hash"),
+        "projection_validation": projection_check,
+        "legacy_payload_audit": legacy_audit,
+        "required_choice_slot_ids": list(projection.get("required_choice_slot_ids", []) or []),
+        "excluded_choice_slot_ids": list(projection.get("excluded_choice_slot_ids", []) or []),
+        "model_choice_semantic_coverage": projection.get("model_choice_semantic_coverage", 0.0),
+        "full_authority_provenance_coverage": projection.get(
+            "full_authority_provenance_coverage", 0.0,
+        ),
+        "required_model_choice_slots_total": projection.get(
+            "required_model_choice_slots_total", 0,
+        ),
+        "required_model_choice_slots_rendered": projection.get(
+            "required_model_choice_slots_rendered", 0,
+        ),
+        "required_model_choice_slot_coverage_rate": projection.get(
+            "required_model_choice_slot_coverage_rate", 0.0,
+        ),
+        "full_frame_semantic_coverage": projection.get(
+            "full_frame_semantic_coverage", 0.0,
+        ),
+        "full_provenance_reachable": projection.get(
+            "full_provenance_reachable", 0.0,
+        ),
+        "projection_metrics": copy.deepcopy(projection.get("metrics", {})),
         "mandatory_semantic_coverage": copy.deepcopy(coverage),
         "mandatory_semantic_coverage_rate": role_packet.get("mandatory_semantic_coverage_rate", 1.0),
         "packet_chars": role_packet.get("rendered_chars", 0),
@@ -6853,7 +7630,10 @@ def validate_impact_decision_choice_coverage(frame, choices):
     }
 
 
-def validate_impact_decision_choices(candidate, frame, *, include_coverage=True):
+def validate_impact_decision_choices(
+    candidate, frame, *, include_coverage=True, projection=None,
+    choice_projection=None,
+):
     """Validate the strict choice-only response against the frame.
 
     ``include_coverage`` is false only for the provider's structural JSON
@@ -6861,6 +7641,8 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
     keeping it out of the callback prevents a semantic coverage miss from
     entering the generic structured-output repair loop.
     """
+    if projection is None:
+        projection = choice_projection
     value = candidate if isinstance(candidate, dict) else {}
     errors = []
     if not isinstance(value.get("decisions"), list):
@@ -6878,6 +7660,19 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
         str(item.get("slot_id")): item for item in list(frame.get("decision_slots", []) or [])
         if isinstance(item, dict) and item.get("slot_id")
     }
+    projection_check = None
+    expected_slot_ids = set(slots)
+    excluded_slot_ids = set()
+    if projection is not None:
+        projection_check = validate_decision_relevant_impact_choice_projection(
+            projection, frame,
+        )
+        if not projection_check.get("valid"):
+            errors.append(IMPACT_DECISION_PROJECTION_INVALID)
+        expected_slot_ids = {
+            str(item) for item in projection.get("required_choice_slot_ids", []) or []
+        }
+        excluded_slot_ids = set(slots).difference(expected_slot_ids)
     seen = set()
     choices = []
     for item in value.get("decisions", [])[:MAX_IMPACT_SEEDS + 1]:
@@ -6899,6 +7694,9 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
         slot = slots.get(slot_id)
         if slot is None:
             errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
+            continue
+        if slot_id in excluded_slot_ids:
+            errors.append(EXCLUDED_IMPACT_DECISION_SLOT)
             continue
         if any(not isinstance(item.get(field), str) or not item.get(field).strip()
                for field in ("decision", "chosen_target", "reason_code", "bounded_rationale")):
@@ -6927,8 +7725,10 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
             "reason_code": str(item.get("reason_code")).strip(),
             "bounded_rationale": _compact(item.get("bounded_rationale"), 360),
         })
-    expected = set(slots)
-    if seen - expected:
+    expected = set(expected_slot_ids)
+    if seen.intersection(set(slots)).difference(expected):
+        errors.append(EXCLUDED_IMPACT_DECISION_SLOT)
+    if seen.difference(set(slots)):
         errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
     missing = expected - seen
     if missing:
@@ -6960,6 +7760,9 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
         "expected": len(expected),
         "model_calls": 0,
         "structural_valid": structural_valid,
+        "projection_validation": copy.deepcopy(projection_check),
+        "expected_slot_ids": sorted(expected),
+        "excluded_slot_ids": sorted(excluded_slot_ids),
         "coverage_valid": (
             choice_coverage.get("valid") if isinstance(choice_coverage, dict) else None
         ),
@@ -6987,10 +7790,19 @@ def validate_impact_decision_choices(candidate, frame, *, include_coverage=True)
 validate_impact_decision_output = validate_impact_decision_choices
 
 
-def deterministic_impact_decision_choices(frame):
+def deterministic_impact_decision_choices(frame, projection=None, *, required_only=None):
     """Produce a provider-free weak-choice fixture for architecture tests."""
+    if required_only is None:
+        required_only = projection is not None
+    required_ids = {
+        str(item) for item in list(
+            (projection or {}).get("required_choice_slot_ids", []) or []
+        )
+    } if isinstance(projection, dict) else set()
     result = []
     for slot in list((frame or {}).get("decision_slots", []) or []):
+        if required_only and str(slot.get("slot_id") or "") not in required_ids:
+            continue
         allowed = [str(item) for item in slot.get("allowed_decisions", []) or []]
         if not allowed:
             continue
@@ -7055,6 +7867,41 @@ def deterministic_impact_decision_choices(frame):
     return {"decisions": result}
 
 
+def _deterministic_nonrequired_choice(slot, classification):
+    """Materialize a safe non-model choice from an audited slot.
+
+    These choices are compiler inputs only.  They are never exposed in the
+    model response contract and they never create mutation authority.
+    """
+    value = slot if isinstance(slot, dict) else {}
+    allowed = [str(item) for item in list(value.get("allowed_decisions", []) or [])]
+    surface_id = str(value.get("surface_id") or "")
+    if "PRESERVATION_ONLY" in allowed and classification == "DETERMINISTIC_INHERITED_ONLY":
+        return {
+            "slot_id": str(value.get("slot_id")), "decision": "PRESERVATION_ONLY",
+            "chosen_target": surface_id, "reason_code": "PRESERVE_INHERITED_STATE",
+            "bounded_rationale": "Preserve the inherited verified state without mutation.",
+        }
+    if "INTERFACE_REUSE" in allowed and value.get("required_interfaces"):
+        return {
+            "slot_id": str(value.get("slot_id")), "decision": "INTERFACE_REUSE",
+            "chosen_target": str(value.get("required_interfaces")[0]),
+            "reason_code": "REUSE_INHERITED_INTERFACE",
+            "bounded_rationale": "Reuse the inherited verified interface without changing ownership.",
+        }
+    for decision, reason, rationale in (
+        ("VERIFY_ONLY", "VERIFY_INHERITED_STATE", "Verify the inherited verified state without mutation."),
+        ("INSPECT_ONLY", "INSPECT_INHERITED_STATE", "Inspect the verified context without mutation."),
+    ):
+        if decision in allowed:
+            return {
+                "slot_id": str(value.get("slot_id")), "decision": decision,
+                "chosen_target": surface_id, "reason_code": reason,
+                "bounded_rationale": rationale,
+            }
+    return None
+
+
 def _compiled_preservation_texts(slot):
     return _bounded_strings([
         item.get("text") if isinstance(item, dict) else item
@@ -7072,6 +7919,7 @@ def _compiled_verification_texts(slot):
 def compile_impact_map_from_choices(
     frame, choices, requirements, evidence, surface_registry=None,
     impact_seeds=None, *, task_goal=None, provider_generation_identity=None,
+    projection=None, choice_projection=None,
 ):
     """Compile validated choices into the existing canonical Impact Map.
 
@@ -7086,6 +7934,8 @@ def compile_impact_map_from_choices(
             "errors": list(dict.fromkeys([status] + frame_check.get("errors", []))),
             "impact_map": None, "model_calls": 0, "compiled": False,
         }
+    if projection is None:
+        projection = choice_projection
     choice_candidate = choices
     if isinstance(choices, dict) and "decisions" not in choices and isinstance(
         choices.get("choices"), list
@@ -7094,7 +7944,9 @@ def compile_impact_map_from_choices(
         # orchestration path, while still re-running the strict contract gate
         # before compilation.
         choice_candidate = {"decisions": choices.get("choices", [])}
-    choice_check = validate_impact_decision_choices(choice_candidate, frame)
+    choice_check = validate_impact_decision_choices(
+        choice_candidate, frame, projection=projection,
+    )
     if not choice_check.get("valid"):
         status = choice_check.get("status") or IMPACT_MAP_COMPILE_INVALID
         return {
@@ -7111,6 +7963,36 @@ def compile_impact_map_from_choices(
         str(item.get("slot_id")): item for item in list(frame.get("decision_slots", []) or [])
         if isinstance(item, dict)
     }
+    provided_choices = [
+        copy.deepcopy(item) for item in list(choice_check.get("choices", []) or [])
+        if isinstance(item, dict)
+    ]
+    effective_choices = list(provided_choices)
+    if projection is not None:
+        classifications = {
+            str(item.get("slot_id")): item
+            for item in list(projection.get("slot_classification", []) or [])
+            if isinstance(item, dict) and item.get("slot_id")
+        }
+        provided_ids = {str(item.get("slot_id")) for item in effective_choices}
+        for slot_id, slot in slots.items():
+            if slot_id in provided_ids:
+                continue
+            classification = classifications.get(slot_id, {}).get("classification")
+            if classification == "MODEL_CHOICE_REQUIRED":
+                continue
+            materialized = _deterministic_nonrequired_choice(slot, classification)
+            if materialized is None:
+                return {
+                    "valid": False,
+                    "status": IMPACT_DECISION_PROJECTION_INVALID,
+                    "errors": [
+                        f"{IMPACT_DECISION_PROJECTION_INVALID}: no safe deterministic choice for {slot_id}"
+                    ],
+                    "impact_map": None, "model_calls": 0, "compiled": False,
+                }
+            effective_choices.append(materialized)
+        effective_choices.sort(key=lambda item: str(item.get("slot_id") or ""))
     disposition_for_choice = {
         "INSPECT_ONLY": "VERIFY_ONLY", "AUTHORITY_CHANGE": "MUST_CHANGE",
     }
@@ -7118,7 +8000,7 @@ def compile_impact_map_from_choices(
     authority_changes_by_impact = {}
     inherited_by_impact = {}
     choice_hash = choice_check.get("choice_hash") or impact_decision_choice_hash(frame, choices)
-    choice_coverage = choice_check.get("choice_coverage") or {}
+    choice_coverage = _build_choice_coverage(frame, effective_choices)
     choice_assignments = list(choice_coverage.get("assignments", []) or [])
     assignments_by_slot = {}
     for assignment in choice_assignments:
@@ -7131,7 +8013,7 @@ def compile_impact_map_from_choices(
     }
     compiled_assignments_by_impact = {}
     errors = []
-    for choice in choice_check.get("choices", []):
+    for choice in effective_choices:
         slot = slots.get(str(choice.get("slot_id")))
         if not slot:
             errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
@@ -7360,7 +8242,7 @@ def compile_impact_map_from_choices(
                   if normalize_impact_id(slot.get("impact_id")) == impact_id), None),
         )
         choice_for_item = next(
-            (value for value in choice_check.get("choices", [])
+            (value for value in effective_choices
              if str(value.get("slot_id")) == str(item.get("decision_slot_id"))),
             None,
         )
@@ -7435,6 +8317,7 @@ def compile_impact_map_from_choices(
         "impact_map": hydrated, "hydration": hydrated,
         "semantic_validation": semantic_validation,
         "choice_validation": choice_check,
+        "effective_choices": {"decisions": copy.deepcopy(effective_choices)},
         "choice_hash": choice_hash,
         "choice_coverage": copy.deepcopy(choice_coverage),
         "coverage_hash": choice_coverage.get("coverage_hash") if isinstance(choice_coverage, dict) else None,
@@ -7523,12 +8406,19 @@ def impact_decision_frame_self_test():
         impact_seeds=seeds, mandatory_core=core,
     )
     frame_check = validate_impact_decision_frame(frame)
-    choices = deterministic_impact_decision_choices(frame)
-    choice_check = validate_impact_decision_choices(choices, frame)
+    projection = build_decision_relevant_impact_choice_projection(frame)
+    projection_check = validate_decision_relevant_impact_choice_projection(
+        projection, frame,
+    )
+    choices = deterministic_impact_decision_choices(frame, projection=projection)
+    choice_check = validate_impact_decision_choices(
+        choices, frame, projection=projection,
+    )
     compiled = compile_impact_map_from_choices(
         frame, choices, requirements, evidence, surface_registry=registry,
         impact_seeds=seeds, task_goal=requirement["text"],
         provider_generation_identity={"model": "gemma4:e4b", "generation": 0},
+        projection=projection,
     )
     legacy = {
         "impacts": [{
@@ -7542,15 +8432,21 @@ def impact_decision_frame_self_test():
     duplicate = copy.deepcopy(choices)
     if duplicate.get("decisions"):
         duplicate["decisions"] = [duplicate["decisions"][0], duplicate["decisions"][0]]
-    duplicate_check = validate_impact_decision_choices(duplicate, frame)
+    duplicate_check = validate_impact_decision_choices(
+        duplicate, frame, projection=projection,
+    )
     missing = copy.deepcopy(choices)
     if missing.get("decisions"):
         missing["decisions"] = missing["decisions"][:-1]
-    missing_check = validate_impact_decision_choices(missing, frame)
+    missing_check = validate_impact_decision_choices(
+        missing, frame, projection=projection,
+    )
     forbidden = copy.deepcopy(choices)
     if forbidden.get("decisions"):
         forbidden["decisions"][0]["decision"] = "NEW_OWNER"
-    forbidden_check = validate_impact_decision_choices(forbidden, frame)
+    forbidden_check = validate_impact_decision_choices(
+        forbidden, frame, projection=projection,
+    )
     packet = build_impact_decision_packet(
         frame, render=lambda value: "IMPACT DECISION PACKET:\n" + _compact_json(value),
         base_render=lambda value: "IMPACT DECISION PACKET:\n" + _compact_json(value),
@@ -7559,6 +8455,16 @@ def impact_decision_frame_self_test():
     checks = {
         "frame_complete": frame_check.get("valid") is True,
         "frame_zero_model": frame_check.get("model_calls") == 0,
+        "projection_valid": projection_check.get("valid") is True,
+        "projection_zero_model": projection_check.get("model_calls") == 0,
+        "projection_preserves_frame_hash": (
+            frame.get("frame_hash") == impact_decision_frame_hash(frame)
+        ),
+        "projection_required_choice_is_bounded": (
+            set(projection.get("required_choice_slot_ids", [])).issubset(
+                {str(item.get("slot_id")) for item in frame.get("decision_slots", [])}
+            )
+        ),
         "choices_valid": choice_check.get("valid") is True,
         "compiled_valid": compiled.get("valid") is True,
         "compiled_zero_model": compiled.get("model_calls") == 0,
@@ -7638,6 +8544,8 @@ def impact_decision_frame_self_test():
     # downstream role is involved.
     inspect_choices = {"decisions": []}
     for slot in frame.get("decision_slots", []):
+        if str(slot.get("slot_id")) not in set(projection.get("required_choice_slot_ids", [])):
+            continue
         if "INSPECT_ONLY" not in slot.get("allowed_decisions", []):
             continue
         inspect_choices["decisions"].append({
@@ -7647,7 +8555,9 @@ def impact_decision_frame_self_test():
             "reason_code": "INSPECT_CURRENT_SURFACE",
             "bounded_rationale": "Inspect the verified current surface.",
         })
-    inspect_check = validate_impact_decision_choices(inspect_choices, frame)
+    inspect_check = validate_impact_decision_choices(
+        inspect_choices, frame, projection=projection,
+    )
     challenge_types = {
         item.get("challenge_type")
         for item in deterministic_challenges(
