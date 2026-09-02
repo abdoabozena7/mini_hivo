@@ -87,6 +87,8 @@ IMPACT_DECISION_SLOT_CLASSIFICATIONS = (
 )
 DECISION_RELEVANT_IMPACT_CHOICE_PROJECTION_VERSION = "V24.4.3"
 CHALLENGER_REVIEW_PROJECTION_VERSION = "V24.4.4"
+CANONICAL_FINAL_PLAN_VERSION = 2
+CANONICAL_FINAL_PLAN_REPRESENTATION = "CANONICAL_FINAL_PLAN"
 CHALLENGER_REVIEW_PRIMARY = "CHALLENGER_REVIEW_PRIMARY"
 CHALLENGER_REVIEW_SUPPORT = "CHALLENGER_REVIEW_SUPPORT"
 DETERMINISTIC_FIXED_CONTEXT = "DETERMINISTIC_FIXED_CONTEXT"
@@ -12171,6 +12173,21 @@ def evaluate_requirement_obligations(source, requirements, evidence,
     ]
     global_prohibitions = _bounded_strings(value.get("prohibition_constraints"), 8, 320)
     integration = _bounded_strings(value.get("integration_verification"), 12, 320)
+    canonical_constraints = value.get("canonical_constraints")
+    if not isinstance(canonical_constraints, dict):
+        canonical_constraints = {}
+    shared_preservation = [
+        item for item in canonical_constraints.get("preservation", []) or []
+        if isinstance(item, dict) and item.get("text")
+    ]
+    shared_prohibitions = [
+        item for item in canonical_constraints.get("prohibitions", []) or []
+        if isinstance(item, dict) and item.get("text")
+    ]
+    global_prohibitions.extend(
+        item.get("text") for item in shared_prohibitions
+        if item.get("text") not in global_prohibitions
+    )
     result = []
     for obligation in obligation_records:
         requirement_id = str(obligation.get("requirement_id"))
@@ -12244,6 +12261,13 @@ def evaluate_requirement_obligations(source, requirements, evidence,
                         + list(item.get("preservation_constraints", []) or [])
                         + list(item.get("preserve", []) or [])
                     )
+                    constraints.extend(
+                        record.get("text") for record in shared_preservation
+                        if not record.get("requirement_ids")
+                        or requirement_id in {
+                            str(value) for value in record.get("requirement_ids", [])
+                        }
+                    )
                     explicit_surface = (
                         item.get("disposition") == "PRESERVATION_ONLY"
                         or item.get("necessity_status") == "PRESERVATION_ONLY"
@@ -12298,6 +12322,13 @@ def evaluate_requirement_obligations(source, requirements, evidence,
                         + list(item.get("preservation_constraints", []) or [])
                         + list(item.get("preserve", []) or [])
                     )
+                )
+                constraints.extend(
+                    record.get("text") for record in shared_preservation + shared_prohibitions
+                    if not record.get("requirement_ids")
+                    or requirement_id in {
+                        str(value) for value in record.get("requirement_ids", [])
+                    }
                 )
                 covered = any(_PROHIBITION_RE.search(str(item)) for item in constraints)
                 if covered:
@@ -14384,9 +14415,801 @@ def _plan_challenge_record(challenge):
 compact_challenge_record = _plan_challenge_record
 
 
+def _canonical_final_plan_unique(values, *, text=False):
+    """Return stable, duplicate-free values without lossy serialization."""
+    result = []
+    for value in list(values or []):
+        if value in (None, "", [], {}):
+            continue
+        item = _compact(value, MAX_TEXT_CHARS) if text else str(value)
+        if item and item not in result:
+            result.append(item)
+    return result
+
+
+def _canonical_final_plan_surface_kind(surface_by_id, surface_id):
+    surface = surface_by_id.get(str(surface_id), {}) if surface_by_id else {}
+    return str(surface.get("kind", "")).upper()
+
+
+def _canonical_final_plan_constraint_obligations(text, requirement_ids, ledger):
+    """Bind shared preservation text to matching atomic obligations.
+
+    The binding is deliberately conservative.  A generic preservation clause
+    is allowed to support every preservation atom for its requirement, while
+    a clause with a structured domain term is bound to the matching atom(s).
+    No obligation is invented when the source text has no preservation
+    meaning.
+    """
+    normalized = str(text or "").casefold()
+    wanted = {str(item) for item in requirement_ids or []}
+    result = []
+    for record in _obligation_records(ledger):
+        if wanted and str(record.get("requirement_id")) not in wanted:
+            continue
+        for atom in _atomic_obligations_for_requirement(record):
+            if atom.get("obligation_type") != "PRESERVATION":
+                continue
+            atom_id = str(atom.get("obligation_id") or "")
+            meaning = str(atom.get("meaning") or atom.get("text") or "").casefold()
+            relations = " ".join(str(item) for item in atom.get("structured_relations", []) or []).casefold()
+            relation_terms = set()
+            if "owner" in meaning or "ownership" in relations:
+                relation_terms.update({"owner", "ownership", "state"})
+            if "escape" in meaning or "escape" in relations:
+                relation_terms.add("escape")
+            if "movement" in meaning or "movement" in relations:
+                relation_terms.update({"movement", "input"})
+            atom_terms = _domain_tokens(f"{meaning} {relations}")
+            text_terms = _domain_tokens(normalized)
+            matches = bool(relation_terms.intersection(text_terms)) or bool(atom_terms.intersection(text_terms))
+            if not matches and re.search(r"\b(?:preserv|retain|keep|remain)\w*\b", normalized):
+                # A source preservation clause may be intentionally generic.
+                # Keeping it linked is safer than silently losing a required
+                # preservation obligation during representation compaction.
+                matches = True
+            if matches and atom_id and atom_id not in result:
+                result.append(atom_id)
+    return result
+
+
+def _canonical_final_plan_constraint_sources(plan, requirements, ledger,
+                                             impact_map=None):
+    """Collect shared constraint sources before canonical node grouping."""
+    value = plan if isinstance(plan, dict) else {}
+    req_ids = [item.get("requirement_id") for item in active_requirements(requirements)]
+    sources = {}
+
+    def add(kind, text, *, requirement_ids=None, node=None, surface_id=None):
+        bounded = _compact(text, MAX_TEXT_CHARS)
+        if not bounded:
+            return
+        key = (str(kind), bounded)
+        record = sources.setdefault(key, {
+            "kind": str(kind),
+            "text": bounded,
+            "requirement_ids": [],
+            "source_node_ids": [],
+            "source_surface_ids": [],
+            "source_impact_ids": [],
+            "obligation_ids": [],
+        })
+        for item in list(requirement_ids or []):
+            if item and str(item) not in record["requirement_ids"]:
+                record["requirement_ids"].append(str(item))
+        if node:
+            node_id = str(node.get("node_id") or "")
+            if node_id and node_id not in record["source_node_ids"]:
+                record["source_node_ids"].append(node_id)
+            for item in list(node.get("surface_ids", []) or []) + list(
+                node.get("target_surface_ids", []) or []
+            ) + list(node.get("inspect_surface_ids", []) or []):
+                if item and str(item) not in record["source_surface_ids"]:
+                    record["source_surface_ids"].append(str(item))
+            for item in node.get("impact_ids", []) or []:
+                if item and str(item) not in record["source_impact_ids"]:
+                    record["source_impact_ids"].append(str(item))
+            for item in node.get("obligation_ids", []) or []:
+                if item and str(item) not in record["obligation_ids"]:
+                    record["obligation_ids"].append(str(item))
+        if surface_id and str(surface_id) not in record["source_surface_ids"]:
+            record["source_surface_ids"].append(str(surface_id))
+
+    for node in value.get("approved_change_nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
+        node_requirements = node.get("requirement_ids") or req_ids
+        for field in ("local_preservation_constraints", "preservation_constraints", "preserve"):
+            for text in node.get(field, []) or []:
+                add("preservation", text, requirement_ids=node_requirements, node=node)
+        for text in node.get("prohibition_constraints", []) or []:
+            add("prohibition", text, requirement_ids=node_requirements, node=node)
+    for item in value.get("preservation_only_surfaces", []) or []:
+        if not isinstance(item, dict):
+            continue
+        node_requirements = item.get("requirement_ids") or req_ids
+        surface_id = item.get("surface_id") or item.get("canonical_surface_id")
+        for field in ("preservation_constraints", "reason"):
+            for text in ([item.get(field)] if item.get(field) else []):
+                add("preservation", text, requirement_ids=node_requirements, surface_id=surface_id)
+        for text in item.get("prohibition_constraints", []) or []:
+            add("prohibition", text, requirement_ids=node_requirements, surface_id=surface_id)
+    for text in value.get("prohibition_constraints", []) or []:
+        add("prohibition", text, requirement_ids=req_ids)
+    for impact in (impact_map or {}).get("impacts", []) if isinstance(impact_map, dict) else []:
+        if not isinstance(impact, dict):
+            continue
+        for field in ("dnt", "prohibitions", "prohibition_constraints"):
+            for text in impact.get(field, []) or []:
+                add(
+                    "prohibition", text,
+                    requirement_ids=impact.get("requirement_ids") or req_ids,
+                    surface_id=impact.get("surface_id"),
+                )
+    return sources
+
+
+def _canonical_final_plan_protected_surfaces(plan, constraints, surface_by_id):
+    """Resolve structured prohibition paths to canonical DNT surfaces."""
+    value = plan if isinstance(plan, dict) else {}
+    registry = surface_by_id if isinstance(surface_by_id, dict) else {}
+    by_path = {
+        _normal_path(item.get("path")).casefold(): str(surface_id)
+        for surface_id, item in registry.items()
+        if isinstance(item, dict) and item.get("path")
+    }
+    surface_ids = _canonical_final_plan_unique(
+        value.get("do_not_touch_surface_ids", []) or []
+    )
+    paths = _canonical_final_plan_unique(value.get("do_not_touch", []) or [])
+
+    def add_path(path):
+        normalized = _normal_path(path)
+        if not normalized:
+            return
+        surface_id = by_path.get(normalized.casefold())
+        if surface_id and surface_id not in surface_ids:
+            surface_ids.append(surface_id)
+        canonical_path = (
+            _normal_path(registry[surface_id].get("path"))
+            if surface_id in registry else normalized
+        )
+        if canonical_path and canonical_path not in paths:
+            paths.append(canonical_path)
+
+    for path in list(paths):
+        add_path(path)
+    for record in list((constraints or {}).get("prohibitions", []) or []):
+        text = record.get("text") if isinstance(record, dict) else record
+        match = re.search(
+            r"\b(?:do not|don't|must not|never)\s+"
+            r"(?:modify|touch|edit|change)\s+([^\s,;]+)",
+            str(text or ""),
+            re.IGNORECASE,
+        )
+        if match:
+            add_path(str(match.group(1)).rstrip("."))
+    return (
+        _canonical_final_plan_unique(surface_ids),
+        _canonical_final_plan_unique(paths),
+    )
+
+
+def _canonical_final_plan_group_key(node, index, surface_by_id):
+    value = node if isinstance(node, dict) else {}
+    kind = str(value.get("impact_kind") or "").upper()
+    disposition = str(value.get("disposition") or "").upper()
+    if kind == "TEST_CHANGE" or disposition == "TEST_CHANGE":
+        # Explicit test-change authority is kept as its own responsibility.
+        return ("TEST_CHANGE", index)
+    if bool(value.get("mutation_required")) and not bool(value.get("verification_only")):
+        return ("EXECUTION_CHANGE", index)
+    if kind == "INTERFACE_REUSE" or disposition == "INTERFACE_REUSE":
+        return ("INTERFACE_REUSE",)
+    if kind == "PRESERVATION_ONLY" or disposition == "PRESERVATION_ONLY":
+        return ("PRESERVATION_ONLY", index)
+    surface_ids = list(value.get("surface_ids", []) or []) + list(
+        value.get("inspect_surface_ids", []) or []
+    )
+    if any(
+        _canonical_final_plan_surface_kind(surface_by_id, item) == "TEST"
+        for item in surface_ids
+    ):
+        return ("EVIDENCE_ONLY",)
+    return ("DETERMINISTIC_CONTEXT",)
+
+
+def _canonical_final_plan_short_done_when(responsibility):
+    return {
+        "EXECUTION_CHANGE": "Apply the approved implementation change through the verified current surface.",
+        "TEST_CHANGE": "Run the approved test-change verification contract.",
+        "INTERFACE_REUSE": "Verify reuse of the existing interface without changing ownership.",
+        "PRESERVATION_ONLY": "Verify the approved preservation responsibility without mutation.",
+        "EVIDENCE_ONLY": "Run the shared verification contracts for the referenced evidence.",
+        "DETERMINISTIC_CONTEXT": "Verify the referenced evidence and shared preservation constraints.",
+    }.get(str(responsibility), "Verify the approved responsibility.")
+
+
+def _canonical_final_plan_semantic_projection(semantic):
+    """Keep semantic results auditable without repeating atomic prose."""
+    value = semantic if isinstance(semantic, dict) else {}
+    result = {
+        key: value.get(key)
+        for key in (
+            "requirements_covered", "requirements_uncovered", "behavior_obligations",
+            "behavior_obligations_covered", "behavior_obligations_uncovered",
+            "atomic_obligations_total", "atomic_behavior_change_obligations",
+            "atomic_behavior_change_obligations_covered",
+            "atomic_behavior_change_obligations_uncovered",
+        ) if key in value
+    }
+    result["requirements"] = []
+    for record in value.get("requirements", []) or []:
+        if not isinstance(record, dict):
+            continue
+        result["requirements"].append({
+            "requirement_id": record.get("requirement_id"),
+            "obligation_types": list(record.get("obligation_types", []) or []),
+            "obligations": [{
+                "obligation_type": item.get("obligation_type"),
+                "state": item.get("state"),
+                "support": list(item.get("support", []) or []),
+            } for item in record.get("obligations", []) or [] if isinstance(item, dict)],
+            "atomic_obligations": [{
+                key: item.get(key)
+                for key in ("obligation_id", "obligation_type", "state", "support")
+                if item.get(key) not in (None, "", [], {})
+            } for item in record.get("atomic_obligations", []) or [] if isinstance(item, dict)],
+            "state": record.get("state"),
+            "provenance": record.get("provenance", DERIVED_PLAN_DECISION),
+        })
+    result["provenance"] = DERIVED_PLAN_DECISION
+    return result
+
+
+def canonicalize_final_plan(plan, impact_map=None, requirements=None, evidence=None,
+                            surface_registry=None, source_impact_map=None):
+    """Build the bounded V24 canonical approval-plan representation.
+
+    This representation is enabled only for an explicit obligation-aware
+    artifact.  Legacy Stage 3 plans are returned byte-for-byte in structure,
+    so this compatibility repair cannot impose V24 continuation semantics on
+    earlier fixtures.  The function groups only non-authoritative repeated
+    context; mutation targets, test-change authority, DNT, requirements,
+    evidence references, and deterministic provenance remain explicit.
+    """
+    source = copy.deepcopy(plan if isinstance(plan, dict) else {})
+    if not _is_obligation_aware_artifact(source, source.get("requirement_obligation_ledger")):
+        return source
+    reqs = active_requirements(requirements or source.get("requirements", []))
+    ledger = source.get("requirement_obligation_ledger")
+    if not isinstance(ledger, dict):
+        ledger = build_requirement_obligation_ledger(reqs)
+    registry = surface_registry if isinstance(surface_registry, dict) else {}
+    surface_by_id = canonical_surface_by_id(registry) if registry else {}
+    raw_nodes = [item for item in source.get("approved_change_nodes", []) or [] if isinstance(item, dict)]
+    raw_by_id = {str(item.get("node_id")): item for item in raw_nodes if item.get("node_id")}
+    groups = []
+    group_by_key = {}
+    for index, node in enumerate(raw_nodes, 1):
+        key = _canonical_final_plan_group_key(node, index, surface_by_id)
+        group = group_by_key.get(key)
+        if group is None:
+            group = {"key": key, "nodes": []}
+            group_by_key[key] = group
+            groups.append(group)
+        group["nodes"].append(node)
+
+    node_id_map = {}
+    for position, group in enumerate(groups, 1):
+        canonical_id = f"NODE-{position:03d}"
+        group["canonical_id"] = canonical_id
+        for node in group["nodes"]:
+            if node.get("node_id"):
+                node_id_map[str(node.get("node_id"))] = canonical_id
+
+    def unique_field(nodes, field):
+        return _canonical_final_plan_unique(
+            value for node in nodes for value in (node.get(field, []) or [])
+        )
+
+    impact_by_id = {}
+    if isinstance(impact_map, dict):
+        impact_by_id = {
+            str(item.get("impact_id")): item
+            for item in impact_map.get("impacts", []) or []
+            if isinstance(item, dict) and item.get("impact_id")
+        }
+    source_impact_by_id = {}
+    if isinstance(source_impact_map, dict):
+        source_impact_by_id = {
+            str(item.get("impact_id")): item
+            for item in source_impact_map.get("impacts", []) or []
+            if isinstance(item, dict) and item.get("impact_id")
+        }
+    canonical_nodes = []
+    group_original_constraint_keys = {}
+    group_original_verification_keys = {}
+    constraint_sources = _canonical_final_plan_constraint_sources(
+        source, reqs, ledger, source_impact_map or impact_map,
+    )
+    verification_sources = {}
+
+    def add_verification(text, node):
+        bounded = _compact(text, MAX_TEXT_CHARS)
+        if not bounded:
+            return
+        key = bounded
+        record = verification_sources.setdefault(key, {
+            "text": bounded, "source_node_ids": [], "requirement_ids": [],
+            "evidence_ids": [], "surface_ids": [],
+        })
+        node_id = str(node.get("node_id") or "")
+        if node_id and node_id not in record["source_node_ids"]:
+            record["source_node_ids"].append(node_id)
+        for field, target in (
+            ("requirement_ids", "requirement_ids"),
+            ("evidence_ids", "evidence_ids"),
+            ("surface_ids", "surface_ids"),
+        ):
+            for item in node.get(field, []) or []:
+                if item and str(item) not in record[target]:
+                    record[target].append(str(item))
+
+    for node in raw_nodes:
+        contracts = list(node.get("local_test_contract", []) or []) + list(
+            node.get("test_contract", []) or []
+        )
+        if not contracts and (
+            str(node.get("impact_kind", "")).upper() == "TEST_CHANGE"
+            or str(node.get("disposition", "")).upper() == "TEST_CHANGE"
+        ):
+            contracts = list(node.get("done_when", []) or [])
+        for contract in contracts:
+            add_verification(contract, node)
+
+    for group in groups:
+        nodes = group["nodes"]
+        first = nodes[0]
+        key_name = group["key"][0]
+        if key_name == "EXECUTION_CHANGE":
+            responsibility = "EXECUTION_CHANGE"
+        elif key_name == "TEST_CHANGE":
+            responsibility = "TEST_CHANGE"
+        else:
+            responsibility = key_name
+        all_impact_ids = unique_field(nodes, "impact_ids")
+        obligations = unique_field(nodes, "obligation_ids")
+        for impact_id in all_impact_ids:
+            impact_record = impact_by_id.get(str(impact_id)) or source_impact_by_id.get(str(impact_id), {})
+            source_record = source_impact_by_id.get(str(impact_id), {})
+            obligations.extend(
+                str(item) for item in list(impact_record.get("obligation_ids", []) or [])
+                + list(source_record.get("obligation_ids", []) or [])
+                if item and str(item) not in obligations
+            )
+        obligations = _canonical_final_plan_unique(obligations)
+        target_surface_ids = unique_field(nodes, "target_surface_ids")
+        inspect_surface_ids = unique_field(nodes, "inspect_surface_ids")
+        surface_ids = unique_field(nodes, "surface_ids")
+        interface_surface_ids = unique_field(nodes, "interface_surface_ids")
+        candidate_targets = unique_field(nodes, "candidate_targets") if responsibility in {
+            "EXECUTION_CHANGE", "TEST_CHANGE"
+        } else []
+        inspect_targets = unique_field(nodes, "inspect_targets") if responsibility not in {
+            "EXECUTION_CHANGE", "TEST_CHANGE"
+        } else unique_field(nodes, "inspect_targets")
+        impact_kinds = _canonical_final_plan_unique(node.get("impact_kind") for node in nodes)
+        dispositions = _canonical_final_plan_unique(node.get("disposition") for node in nodes)
+        necessities = _canonical_final_plan_unique(node.get("necessity_status") for node in nodes)
+        if responsibility == "EXECUTION_CHANGE":
+            impact_kind = impact_kinds[0] if len(impact_kinds) == 1 else "CROSS_CUTTING_VERIFICATION"
+            disposition = "MUST_CHANGE" if "MUST_CHANGE" in dispositions else (dispositions[0] if dispositions else "MUST_CHANGE")
+            necessity = "MUST_CHANGE" if "MUST_CHANGE" in necessities else (necessities[0] if necessities else "MUST_CHANGE")
+        elif responsibility == "TEST_CHANGE":
+            impact_kind = "TEST_CHANGE"
+            disposition = "TEST_CHANGE"
+            necessity = "TEST_CHANGE"
+        elif responsibility == "INTERFACE_REUSE":
+            impact_kind = "INTERFACE_REUSE"
+            disposition = "INTERFACE_REUSE"
+            necessity = "CANDIDATE"
+        elif responsibility == "PRESERVATION_ONLY":
+            impact_kind = "PRESERVATION_ONLY"
+            disposition = "PRESERVATION_ONLY"
+            necessity = "PRESERVATION_ONLY"
+        else:
+            impact_kind = "CROSS_CUTTING_VERIFICATION"
+            disposition = "VERIFY_ONLY"
+            necessity = "CANDIDATE"
+        canonical_node = {
+            "node_id": group["canonical_id"],
+            # The model rationale is already bounded and hash-bound in the
+            # upstream choice artifact.  It is intentionally not copied into
+            # the approval authority for every grouped node; canonical goals
+            # are deterministic responsibility labels instead.
+            "goal": _canonical_final_plan_short_done_when(responsibility),
+            "requirement_ids": unique_field(nodes, "requirement_ids"),
+            "impact_ids": all_impact_ids,
+            "obligation_ids": obligations,
+            "evidence_ids": unique_field(nodes, "evidence_ids"),
+            "surface_ids": surface_ids,
+            "target_surface_ids": target_surface_ids,
+            "inspect_surface_ids": inspect_surface_ids,
+            "interface_surface_ids": interface_surface_ids,
+            "current_owner": _compact(
+                next((node.get("current_owner") for node in nodes if node.get("current_owner")), ""),
+                180,
+            ),
+            "interfaces_to_reuse": unique_field(nodes, "interfaces_to_reuse"),
+            "candidate_targets": candidate_targets,
+            "inspect_targets": inspect_targets,
+            "mutation_required": responsibility in {"EXECUTION_CHANGE", "TEST_CHANGE"}
+            and any(bool(node.get("mutation_required")) for node in nodes),
+            "verification_only": not (
+                responsibility in {"EXECUTION_CHANGE", "TEST_CHANGE"}
+                and any(bool(node.get("mutation_required")) for node in nodes)
+            ),
+            "done_when": [_canonical_final_plan_short_done_when(responsibility)],
+            "dependencies": [],
+            "impact_kind": impact_kind,
+            "necessity_status": necessity,
+            "disposition": disposition,
+            "responsibility_class": responsibility,
+            "source_node_ids": [str(node.get("node_id")) for node in nodes if node.get("node_id")],
+            "provenance": DERIVED_PLAN_DECISION,
+        }
+        for field in (
+            "new_surface_proposal_ids", "target_new_surface_proposal_ids",
+            "inspect_new_surface_proposal_ids", "parent_scopes",
+        ):
+            values = unique_field(nodes, field)
+            if values:
+                canonical_node[field] = values
+        proposals = [
+            copy.deepcopy(item) for node in nodes
+            for item in node.get("new_surface_proposals", []) or []
+            if isinstance(item, dict)
+        ]
+        if proposals:
+            canonical_node["new_surface_proposals"] = proposals
+        node_constraint_keys = []
+        node_verification_keys = []
+        for node in nodes:
+            node_id = str(node.get("node_id") or "")
+            for (kind, text), record in constraint_sources.items():
+                if node_id in record["source_node_ids"] and (kind, text) not in node_constraint_keys:
+                    node_constraint_keys.append((kind, text))
+            for text, record in verification_sources.items():
+                if node_id in record["source_node_ids"] and text not in node_verification_keys:
+                    node_verification_keys.append(text)
+        group_original_constraint_keys[group["canonical_id"]] = node_constraint_keys
+        group_original_verification_keys[group["canonical_id"]] = node_verification_keys
+        canonical_nodes.append(canonical_node)
+
+    # Create shared constraint records after canonical node IDs are known.
+    constraint_records = {"preservation": [], "prohibitions": []}
+    constraint_id_by_key = {}
+    for index, ((kind, text), record) in enumerate(constraint_sources.items(), 1):
+        constraint_id = f"CONSTRAINT-{index:03d}"
+        constraint_id_by_key[(kind, text)] = constraint_id
+        obligation_ids = _canonical_final_plan_unique(record.get("obligation_ids"))
+        if kind == "preservation":
+            for item in _canonical_final_plan_constraint_obligations(
+                text, record.get("requirement_ids"), ledger,
+            ):
+                if item not in obligation_ids:
+                    obligation_ids.append(item)
+        constraint = {
+            "constraint_id": constraint_id,
+            "text": text,
+            "requirement_ids": _canonical_final_plan_unique(record.get("requirement_ids")),
+            "obligation_ids": obligation_ids,
+            "provenance": DERIVED_PLAN_DECISION,
+        }
+        constraint_records["preservation" if kind == "preservation" else "prohibitions"].append(constraint)
+    for node in canonical_nodes:
+        source_keys = group_original_constraint_keys.get(node["node_id"], [])
+        node["constraint_ids"] = _canonical_final_plan_unique(
+            constraint_id_by_key.get(key) for key in source_keys
+        )
+        for impact_id in node.get("impact_ids", []) or []:
+            for impact_source in (
+                impact_by_id.get(str(impact_id), {}),
+                source_impact_by_id.get(str(impact_id), {}),
+            ):
+                for field in ("dnt", "prohibitions", "prohibition_constraints"):
+                    for text in impact_source.get(field, []) or []:
+                        constraint_id = constraint_id_by_key.get(
+                            ("prohibition", _compact(text, MAX_TEXT_CHARS))
+                        )
+                        if constraint_id and constraint_id not in node["constraint_ids"]:
+                            node["constraint_ids"].append(constraint_id)
+        node["verification_ids"] = []
+        for source_key in group_original_verification_keys.get(node["node_id"], []):
+            if source_key in verification_sources:
+                # Assigned below once verification IDs have been made stable.
+                node["verification_ids"].append(source_key)
+        node["verification_ids"] = _canonical_final_plan_unique(node["verification_ids"])
+
+    verification_records = []
+    verification_id_by_text = {}
+    for index, (text, record) in enumerate(verification_sources.items(), 1):
+        verification_id = f"VERIFICATION-{index:03d}"
+        verification_id_by_text[text] = verification_id
+        surface_ids = _canonical_final_plan_unique(record.get("surface_ids"))
+        verification_records.append({
+            "verification_id": verification_id,
+            "contract": [text],
+            "requirement_ids": _canonical_final_plan_unique(record.get("requirement_ids")),
+            "evidence_ids": _canonical_final_plan_unique(record.get("evidence_ids")),
+            "surface_ids": surface_ids,
+            "node_ids": _canonical_final_plan_unique(
+                node_id_map.get(item) for item in record.get("source_node_ids", [])
+            ),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+    for node in canonical_nodes:
+        node["verification_ids"] = [
+            verification_id_by_text[item]
+            for item in node.get("verification_ids", [])
+            if item in verification_id_by_text
+        ]
+
+    # Remap dependency and test responsibility references through the grouped
+    # nodes.  Explicit test-change nodes are never merged into evidence-only
+    # context, so their execution semantics remain distinguishable.
+    for node in canonical_nodes:
+        original_ids = set(node.get("source_node_ids", []))
+        dependencies = []
+        for source_id in original_ids:
+            original = raw_by_id.get(source_id, {})
+            for dependency in original.get("dependencies", []) or []:
+                mapped = node_id_map.get(str(dependency))
+                if mapped and mapped != node["node_id"] and mapped not in dependencies:
+                    dependencies.append(mapped)
+        node["dependencies"] = dependencies
+
+    canonical_tests = []
+    for item in source.get("tests_to_update_or_add", []) or []:
+        if not isinstance(item, dict):
+            continue
+        test = copy.deepcopy(item)
+        if test.get("node_id") in node_id_map:
+            test["node_id"] = node_id_map[str(test.get("node_id"))]
+        canonical_tests.append(test)
+
+    canonical_preservation = []
+    for item in source.get("preservation_only_surfaces", []) or []:
+        if not isinstance(item, dict):
+            continue
+        compact = copy.deepcopy(item)
+        compact.pop("preservation_constraints", None)
+        compact.pop("reason", None)
+        compact.pop("prohibition_constraints", None)
+        compact["constraint_ids"] = []
+        item_req_ids = item.get("requirement_ids") or [req.get("requirement_id") for req in reqs]
+        surface_id = item.get("surface_id") or item.get("canonical_surface_id")
+        for field, kind in (
+            ("preservation_constraints", "preservation"),
+            ("prohibition_constraints", "prohibition"),
+        ):
+            values = list(item.get(field, []) or [])
+            if field == "preservation_constraints" and item.get("reason"):
+                values.append(item.get("reason"))
+            for text in values:
+                key = (kind, _compact(text, MAX_TEXT_CHARS))
+                if key in constraint_id_by_key and constraint_id_by_key[key] not in compact["constraint_ids"]:
+                    compact["constraint_ids"].append(constraint_id_by_key[key])
+        canonical_preservation.append(compact)
+
+    # Every impact remains reachable from a canonical responsibility.  The
+    # references carry deterministic decision authority and provenance while
+    # avoiding a second copy of model prose for each repeated context node.
+    impact_references = []
+    source_impacts = list(impact_map.get("impacts", []) or []) if isinstance(impact_map, dict) else []
+    if not source_impacts:
+        source_impacts = [
+            {"impact_id": impact_id, "surface_id": surface_id}
+            for node in raw_nodes
+            for impact_id in node.get("impact_ids", []) or []
+            for surface_id in node.get("surface_ids", [])[:1]
+        ]
+    for item in source_impacts:
+        if not isinstance(item, dict) or not item.get("impact_id"):
+            continue
+        impact_id = str(item.get("impact_id"))
+        source_node = next(
+            (node for node in raw_nodes if impact_id in [str(value) for value in node.get("impact_ids", []) or []]),
+            {},
+        )
+        source_item = source_impact_by_id.get(impact_id, {})
+        ref = {
+            "impact_id": impact_id,
+            "node_id": node_id_map.get(str(source_node.get("node_id"))),
+            "surface_id": item.get("surface_id") or source_item.get("surface_id") or (source_node.get("surface_ids") or [None])[0],
+            "obligation_ids": _canonical_final_plan_unique(item.get("obligation_ids") or source_item.get("obligation_ids") or source_node.get("obligation_ids")),
+            "impact_kind": item.get("impact_kind") or source_item.get("impact_kind") or source_node.get("impact_kind"),
+            "disposition": item.get("disposition") or source_item.get("disposition") or source_node.get("disposition"),
+            "chosen_decision": item.get("chosen_decision") or source_item.get("chosen_decision"),
+            "decision_capabilities": _canonical_final_plan_unique(item.get("decision_capabilities") or source_item.get("decision_capabilities")),
+            "decision_slot_id": item.get("decision_slot_id") or source_item.get("decision_slot_id"),
+            "provenance": DERIVED_PLAN_DECISION,
+        }
+        impact_references.append({
+            key: value for key, value in ref.items()
+            if value not in (None, "", [], {})
+        })
+
+    resolved = list(source.get("resolved_challenges", []) or [])
+    unresolved = list(source.get("unresolved_challenges", []) or [])
+    upstream = {
+        "planning_mode": source.get("planning_mode"),
+        "requirements_hash": _impact_decision_hash(reqs),
+        "challenge_reconciliation_hash": _impact_decision_hash({
+            "resolved_challenges": resolved,
+            "unresolved_challenges": unresolved,
+        }),
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+    binding = source.get("verified_planning_context")
+    if isinstance(binding, dict):
+        for key in (
+            "planning_context_hash", "source_task_brain_hash", "source_project_brain_hash",
+            "source_repository_evidence_hash", "source_reentry_hash",
+        ):
+            if binding.get(key):
+                upstream[key] = binding.get(key)
+    if isinstance(impact_map, dict):
+        for source_key, target_key in (
+            ("impact_decision_frame_hash", "impact_decision_frame_hash"),
+            ("impact_decision_choice_hash", "impact_decision_choice_hash"),
+            ("source_planning_context_hash", "source_planning_context_hash"),
+            ("source_mandatory_core_hash", "source_mandatory_core_hash"),
+        ):
+            source_value = impact_map.get(source_key)
+            if not source_value and isinstance(source_impact_map, dict):
+                source_value = source_impact_map.get(source_key)
+            if source_value:
+                upstream[target_key] = source_value
+        upstream["impact_map_hash"] = challenger_review_source_map_hash(impact_map)
+
+    result = copy.deepcopy(source)
+    result["version"] = CANONICAL_FINAL_PLAN_VERSION
+    result["representation"] = CANONICAL_FINAL_PLAN_REPRESENTATION
+    result["approved_change_nodes"] = canonical_nodes
+    result["preservation_only_surfaces"] = canonical_preservation
+    result["tests_to_update_or_add"] = canonical_tests
+    result["prohibition_constraints"] = []
+    result["canonical_constraints"] = {
+        "version": 1,
+        "preservation": constraint_records["preservation"],
+        "prohibitions": constraint_records["prohibitions"],
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+    result["canonical_verification_contracts"] = verification_records
+    result["impact_references"] = impact_references
+    result["upstream_bindings"] = upstream
+    result["planning_provenance"] = [
+        {
+            key: copy.deepcopy(item.get(key))
+            for key in ("source", "ids", "paths")
+            if item.get(key) not in (None, "", [], {})
+        }
+        for item in result.get("planning_provenance", []) or []
+        if isinstance(item, dict) and (
+            item.get("ids") not in (None, "", [], {})
+            or item.get("paths") not in (None, "", [], {})
+        )
+    ]
+    dnt_surface_ids, dnt_paths = _canonical_final_plan_protected_surfaces(
+        result,
+        result["canonical_constraints"],
+        surface_by_id,
+    )
+    if dnt_surface_ids:
+        result["do_not_touch_surface_ids"] = dnt_surface_ids
+    else:
+        result.pop("do_not_touch_surface_ids", None)
+    if dnt_paths:
+        result["do_not_touch"] = dnt_paths
+    else:
+        result.pop("do_not_touch", None)
+    result["evidence_refs"] = _canonical_final_plan_unique(
+        value for node in canonical_nodes for value in node.get("evidence_ids", [])
+    ) + _canonical_final_plan_unique(
+        value for item in canonical_preservation for value in item.get("evidence_ids", [])
+    )
+    result["evidence_refs"] = _canonical_final_plan_unique(result["evidence_refs"])
+
+    # Rebuild requirement coverage against canonical node IDs and expose the
+    # deterministic semantic audit in compact form.  The evaluator consumes
+    # the shared catalog, so preservation atoms are not lost by node grouping.
+    semantic = evaluate_requirement_obligations(
+        {
+            "approved_change_nodes": canonical_nodes,
+            "preservation_only_surfaces": canonical_preservation,
+            "canonical_constraints": result["canonical_constraints"],
+            "integration_verification": result.get("integration_verification"),
+            "prohibition_constraints": result.get("prohibition_constraints"),
+        }, reqs, evidence or [], registry, ledger,
+    )
+    coverage = []
+    for requirement in reqs:
+        requirement_id = requirement.get("requirement_id")
+        record = next(
+            (item for item in semantic.get("requirements", [])
+             if item.get("requirement_id") == requirement_id),
+            {},
+        )
+        linked_nodes = [
+            node for node in canonical_nodes
+            if requirement_id in node.get("requirement_ids", [])
+        ]
+        types = set(record.get("obligation_types", []) or [])
+        if record.get("state") != "COVERED":
+            status = "UNASSIGNED"
+        elif "BEHAVIOR_CHANGE" in types:
+            status = "COVERED_BY_CHANGE"
+        elif "TEST" in types:
+            status = "COVERED_BY_TEST"
+        elif "PRESERVATION" in types:
+            status = "COVERED_BY_PRESERVATION"
+        else:
+            status = "CROSS_CUTTING"
+        coverage.append({
+            "requirement_id": requirement_id,
+            "status": status,
+            "node_ids": [node.get("node_id") for node in linked_nodes],
+            "impact_ids": _canonical_final_plan_unique(
+                impact_id for node in linked_nodes for impact_id in node.get("impact_ids", [])
+            ),
+            "preservation_surface_ids": _canonical_final_plan_unique(
+                item.get("surface_id") for item in canonical_preservation
+                if requirement_id in item.get("requirement_ids", [])
+            ),
+            "obligation_ids": _canonical_final_plan_unique(
+                obligation_id for node in linked_nodes for obligation_id in node.get("obligation_ids", [])
+            ),
+            "obligation_types": list(record.get("obligation_types", []) or []),
+            "semantic_state": record.get("state", "UNCOVERED"),
+            "provenance": DERIVED_PLAN_DECISION,
+        })
+    result["coverage"] = coverage
+    result["semantic_obligation_coverage"] = _canonical_final_plan_semantic_projection(semantic)
+    result["provenance"] = dict(result.get("provenance", {}) or {})
+    result["provenance"]["canonical_representation"] = DERIVED_PLAN_DECISION
+    # Empty legacy projection sections carry no authority in a canonical
+    # plan.  Omit only those empty containers; populated responsibilities and
+    # all shared authority catalogs remain explicit.
+    for field in (
+        "preservation_only_surfaces", "tests_to_update_or_add",
+        "new_surface_proposals", "unresolved_challenges",
+        "behavior_anchor_closure_actions", "prohibition_constraints",
+        "mutation_new_surface_proposal_ids",
+    ):
+        if not result.get(field):
+            result.pop(field, None)
+    if _json_size(result) > MAX_PLAN_CHARS:
+        # The semantic audit is derived and recomputed by the Plan Gate.  It
+        # may be omitted only when the complete canonical representation is
+        # still over the hard bound after structural compaction.
+        result.pop("semantic_obligation_coverage", None)
+    if _json_size(result) > MAX_PLAN_CHARS:
+        result = _fit_plan_to_serialized_bound(result)
+    return finalize_plan_identity(result)
+
+
+canonical_final_plan = canonicalize_final_plan
+
+
 def _fit_plan_to_serialized_bound(plan):
     """Trim only redundant compatibility projections when the plan is tight."""
     value = plan if isinstance(plan, dict) else {}
+    if value.get("representation") == CANONICAL_FINAL_PLAN_REPRESENTATION:
+        if _json_size(value) > MAX_PLAN_CHARS:
+            value.pop("semantic_obligation_coverage", None)
+        return value
     # These fields are retained in ordinary plans for compatibility, but are
     # exact projections of canonical fields already present in the node.  A
     # newly confirmed requirement can otherwise push an otherwise valid plan
@@ -14749,6 +15572,118 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
     }
     mutation_surface_ids = set()
     mutation_paths = set()
+    canonical_representation = value.get("representation") == CANONICAL_FINAL_PLAN_REPRESENTATION
+    canonical_constraints = value.get("canonical_constraints")
+    canonical_constraint_ids = set()
+    canonical_verification_ids = set()
+    canonical_obligation_ids = {
+        str(item.get("obligation_id"))
+        for item in _atomic_obligation_records(expected_obligation_ledger)
+        if item.get("obligation_id")
+    }
+    known_node_ids = {
+        str(item.get("node_id")) for item in nodes
+        if isinstance(item, dict) and item.get("node_id")
+    }
+    if canonical_representation:
+        if not isinstance(canonical_constraints, dict):
+            errors.append("canonical final plan constraints are required")
+        else:
+            for field in ("preservation", "prohibitions"):
+                records = canonical_constraints.get(field)
+                if not isinstance(records, list):
+                    errors.append(f"canonical final plan {field} constraints must be a list")
+                    continue
+                seen_constraint_ids = set()
+                for record in records:
+                    if not isinstance(record, dict) or not record.get("constraint_id") or not record.get("text"):
+                        errors.append(f"canonical final plan {field} constraint is incomplete")
+                        continue
+                    constraint_id = str(record.get("constraint_id"))
+                    if constraint_id in seen_constraint_ids:
+                        errors.append("canonical final plan constraint IDs must be unique")
+                    seen_constraint_ids.add(constraint_id)
+                    canonical_constraint_ids.add(constraint_id)
+                    if record.get("provenance") != DERIVED_PLAN_DECISION:
+                        errors.append(f"canonical final plan constraint {constraint_id} provenance is required")
+                    unknown_requirements = {
+                        str(item) for item in record.get("requirement_ids", []) or []
+                    } - req_ids
+                    if unknown_requirements:
+                        errors.append(f"canonical final plan constraint {constraint_id} references an unknown requirement")
+                    unknown_obligations = {
+                        str(item) for item in record.get("obligation_ids", []) or []
+                    } - canonical_obligation_ids
+                    if unknown_obligations:
+                        errors.append(f"canonical final plan constraint {constraint_id} references an unknown obligation")
+                    unknown_nodes = {
+                        str(item) for item in record.get("node_ids", []) or []
+                    } - known_node_ids
+                    if unknown_nodes:
+                        errors.append(f"canonical final plan constraint {constraint_id} references an unknown node")
+                    if strict_surface_binding:
+                        unknown_surfaces = {
+                            str(item) for item in record.get("surface_ids", []) or []
+                        } - set(surface_by_id)
+                        if unknown_surfaces:
+                            errors.append(f"canonical final plan constraint {constraint_id} references an unknown surface")
+        verifications = value.get("canonical_verification_contracts")
+        if not isinstance(verifications, list):
+            errors.append("canonical final plan verification contracts are required")
+        else:
+            verification_ids = [
+                str(item.get("verification_id")) for item in verifications
+                if isinstance(item, dict) and item.get("verification_id")
+            ]
+            if len(verification_ids) != len(set(verification_ids)):
+                errors.append("canonical final plan verification IDs must be unique")
+            canonical_verification_ids.update(verification_ids)
+            for item in verifications:
+                if not isinstance(item, dict) or not item.get("contract"):
+                    errors.append("canonical final plan verification contract is incomplete")
+                    continue
+                unknown_requirements = {
+                    str(value) for value in item.get("requirement_ids", []) or []
+                } - req_ids
+                unknown_evidence = {
+                    str(value) for value in item.get("evidence_ids", []) or []
+                } - evidence_ids
+                unknown_nodes = {
+                    str(value) for value in item.get("node_ids", []) or []
+                } - known_node_ids
+                if unknown_requirements:
+                    errors.append("canonical final plan verification references an unknown requirement")
+                if unknown_evidence:
+                    errors.append("canonical final plan verification references unknown evidence")
+                if unknown_nodes:
+                    errors.append("canonical final plan verification references an unknown node")
+                if strict_surface_binding:
+                    unknown_surfaces = {
+                        str(value) for value in item.get("surface_ids", []) or []
+                    } - set(surface_by_id)
+                    if unknown_surfaces:
+                        errors.append("canonical final plan verification references an unknown surface")
+        if not isinstance(value.get("impact_references"), list):
+            errors.append("canonical final plan impact references are required")
+        else:
+            seen_impact_ids = set()
+            for item in value.get("impact_references", []) or []:
+                if not isinstance(item, dict) or not item.get("impact_id"):
+                    errors.append("canonical final plan impact reference is incomplete")
+                    continue
+                impact_id = str(item.get("impact_id"))
+                if impact_id in seen_impact_ids:
+                    errors.append("canonical final plan impact IDs must be unique")
+                seen_impact_ids.add(impact_id)
+                unknown_obligations = {
+                    str(value) for value in item.get("obligation_ids", []) or []
+                } - canonical_obligation_ids
+                if unknown_obligations:
+                    errors.append(f"canonical final plan impact {impact_id} references an unknown obligation")
+                if item.get("node_id") and str(item.get("node_id")) not in known_node_ids:
+                    errors.append(f"canonical final plan impact {impact_id} references an unknown node")
+                if strict_surface_binding and item.get("surface_id") and str(item.get("surface_id")) not in surface_by_id:
+                    errors.append(f"canonical final plan impact {impact_id} references an unknown surface")
     for node in nodes:
         node_id = str(node.get("node_id", ""))
         node_requirements = set(str(item) for item in node.get("requirement_ids", []))
@@ -14840,6 +15775,17 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
             errors.append(f"{node_id}: verification-only responsibility cannot mutate")
         if node.get("provenance") != DERIVED_PLAN_DECISION:
             errors.append(f"{node_id}: plan-decision provenance is required")
+        if canonical_representation:
+            unknown_constraints = {
+                str(item) for item in node.get("constraint_ids", []) or []
+            } - canonical_constraint_ids
+            unknown_verifications = {
+                str(item) for item in node.get("verification_ids", []) or []
+            } - canonical_verification_ids
+            if unknown_constraints:
+                errors.append(f"{node_id}: unknown canonical constraint reference")
+            if unknown_verifications:
+                errors.append(f"{node_id}: unknown canonical verification reference")
         state_facts = [
             evidence_by_id[item] for item in node_evidence
             if item in evidence_by_id and evidence_by_id[item].get("category") == "CURRENT_STATE_OWNER"
@@ -14912,9 +15858,19 @@ def validate_change_plan(plan, requirements, evidence, project_mode=EXISTING_PRO
     if blocking:
         errors.append("unresolved blocking challenge")
     preservation_required = any(_PRESERVE_RE.search(item["text"]) for item in active_requirements(requirements))
+    has_canonical_preservation = bool(
+        isinstance(canonical_constraints, dict)
+        and any(
+            isinstance(item, dict) and item.get("text")
+            for item in canonical_constraints.get("preservation", []) or []
+        )
+    )
     if preservation_required and not value.get("preservation_only_surfaces") and not any(
-        node.get("preservation_constraints") for node in nodes
-    ):
+        node.get("preservation_constraints")
+        or node.get("local_preservation_constraints")
+        or node.get("constraint_ids")
+        for node in nodes
+    ) and not has_canonical_preservation:
         errors.append("preservation responsibility is missing")
     test_required = any(_TEST_RE.search(item["text"]) for item in active_requirements(requirements))
     current_test = any(item.get("category") == "CURRENT_TEST" for item in bounded_evidence(evidence, 24))
@@ -15022,7 +15978,15 @@ def plan_summary(plan):
         "changes": changes[:MAX_PLAN_NODES],
         "preserve": _bounded_strings([
             item for node in value.get("approved_change_nodes", []) or []
-            for item in node.get("preservation_constraints", [])
+            for item in (
+                list(node.get("preservation_constraints", []) or [])
+                + list(node.get("local_preservation_constraints", []) or [])
+            )
+        ] + [
+            item.get("text") for item in (
+                (value.get("canonical_constraints") or {}).get("preservation", [])
+                if isinstance(value.get("canonical_constraints"), dict) else []
+            ) if isinstance(item, dict)
         ] + [item.get("reason") for item in value.get("preservation_only_surfaces", []) or []], 8, 240),
         "tests": _bounded_strings([
             item.get("path") or "; ".join(item.get("contract", []))

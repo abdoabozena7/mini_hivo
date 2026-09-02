@@ -6109,10 +6109,45 @@ def reconcile_minimal_change_plan(impact_map, challenge_validation, contract,
         # computes plan identity. The full context remains outside the plan;
         # only source hashes and bounded provenance are carried forward.
         plan = stage6b.attach_plan_binding(plan, verified_planning_context)
-        # Stage 3 normally fits the plan before V24 metadata is attached.
-        # Reuse its bounded compatibility-field trimmer so provenance binding
-        # cannot turn an otherwise valid plan into an oversized plan.
+        chars_before_canonicalization = stage3._json_size(plan)
+        nodes_before_canonicalization = len(plan.get("approved_change_nodes", []) or [])
+        # V24.4.5 uses a canonical approval-plan representation only after
+        # the verified-state binding is present. Legacy Stage 3 callers keep
+        # the expanded compatibility representation and its old semantics.
+        plan = stage3.canonicalize_final_plan(
+            plan,
+            impact_map=reconciled,
+            requirements=requirements,
+            evidence=repository_evidence,
+            surface_registry=registry,
+            source_impact_map=impact_map,
+        )
+        # Keep the existing bounded compatibility trimmer as a final
+        # deterministic safety pass. It removes only redundant aliases; it
+        # never slices or repairs the canonical authority representation.
         plan = stage3._fit_plan_to_serialized_bound(plan)
+        RUN["final_plan_canonicalization_metrics"] = {
+            "final_plan_chars_before_canonicalization": chars_before_canonicalization,
+            "final_plan_chars_after_canonicalization": stage3._json_size(plan),
+            "final_plan_semantic_units": sum(
+                len(item.get("obligation_ids", []) or [])
+                for item in plan.get("approved_change_nodes", []) or []
+                if isinstance(item, dict)
+            ),
+            "final_plan_deduplicated_units": max(
+                0,
+                nodes_before_canonicalization
+                - len(plan.get("approved_change_nodes", []) or []),
+            ),
+            "final_plan_shared_constraints": sum(
+                len(item) for item in (plan.get("canonical_constraints") or {}).values()
+                if isinstance(item, list)
+            ),
+            "final_plan_shared_verification_contracts": len(
+                plan.get("canonical_verification_contracts", []) or []
+            ),
+            "final_plan_provenance_refs": len(plan.get("impact_references", []) or []),
+        }
     plan = stage3.finalize_plan_identity(plan)
     reconciled["challenge_lifecycle"] = final_lifecycle
     reconciled["challenges_resolved_post_reconciliation"] = len(resolved)

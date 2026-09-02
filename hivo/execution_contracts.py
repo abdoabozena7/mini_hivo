@@ -172,6 +172,62 @@ def _validate_plan_authority_bounds(plan, requirements, evidence, registry):
     _require_authority_list(value.get("prohibition_constraints"), MAX_PROHIBITIONS_PER_CONTRACT, "structured prohibitions")
     _require_authority_list(value.get("integration_verification"), MAX_TEST_CHECKS_PER_CONTRACT, "integration_contract")
     _require_authority_list(value.get("new_surface_proposals"), MAX_SNAPSHOT_PROPOSALS, "new_surface_proposals")
+    canonical_constraints = value.get("canonical_constraints")
+    if canonical_constraints is not None:
+        if not isinstance(canonical_constraints, dict):
+            raise ExecutionContractError(
+                EXECUTION_CONTRACT_BLOCKED,
+                "canonical_constraints must be an object",
+            )
+        for field, limit in (
+            ("preservation", MAX_PRESERVATION_PER_CONTRACT * 2),
+            ("prohibitions", MAX_PROHIBITIONS_PER_CONTRACT * 2),
+        ):
+            records = canonical_constraints.get(field, [])
+            _require_authority_list(records, limit, f"canonical_constraints.{field}")
+            seen_ids = set()
+            for index, record in enumerate(records or [], 1):
+                if not isinstance(record, dict) or not record.get("constraint_id"):
+                    raise ExecutionContractError(
+                        EXECUTION_CONTRACT_BLOCKED,
+                        f"canonical_constraints.{field}[{index}] requires constraint_id",
+                    )
+                constraint_id = str(record.get("constraint_id"))
+                if constraint_id in seen_ids:
+                    raise ExecutionContractError(
+                        EXECUTION_CONTRACT_BLOCKED,
+                        f"canonical_constraints.{field} contains duplicate constraint_id",
+                    )
+                seen_ids.add(constraint_id)
+                _require_authority_text(record.get("text"), MAX_TEXT_CHARS, f"canonical constraint {constraint_id} text")
+                for subfield, sublimit in (
+                    ("requirement_ids", MAX_REQUIREMENTS_PER_CONTRACT),
+                    ("obligation_ids", MAX_SURFACES_PER_CONTRACT),
+                    ("node_ids", MAX_PLAN_NODES),
+                    ("surface_ids", MAX_SURFACES_PER_CONTRACT),
+                ):
+                    _require_authority_list(record.get(subfield), sublimit, f"canonical constraint {constraint_id} {subfield}")
+    canonical_verifications = value.get("canonical_verification_contracts")
+    if canonical_verifications is not None:
+        _require_authority_list(
+            canonical_verifications, MAX_TEST_CHECKS_PER_CONTRACT * 2,
+            "canonical_verification_contracts",
+        )
+        for index, record in enumerate(canonical_verifications or [], 1):
+            if not isinstance(record, dict) or not record.get("verification_id"):
+                raise ExecutionContractError(
+                    EXECUTION_CONTRACT_BLOCKED,
+                    f"canonical_verification_contracts[{index}] requires verification_id",
+                )
+            _require_authority_list(record.get("contract"), MAX_TEST_CHECKS_PER_CONTRACT, f"canonical verification {index} contract")
+            _require_authority_list(record.get("requirement_ids"), MAX_REQUIREMENTS_PER_CONTRACT, f"canonical verification {index} requirement_ids")
+            _require_authority_list(record.get("evidence_ids"), MAX_REPOSITORY_FACTS_PER_CONTRACT, f"canonical verification {index} evidence_ids")
+            _require_authority_list(record.get("surface_ids"), MAX_SURFACES_PER_CONTRACT, f"canonical verification {index} surface_ids")
+            _require_authority_list(record.get("paths"), MAX_SURFACES_PER_CONTRACT, f"canonical verification {index} paths")
+            _require_authority_list(record.get("node_ids"), MAX_PLAN_NODES, f"canonical verification {index} node_ids")
+            for field in ("contract",):
+                for item_index, text in enumerate(record.get(field, []) or [], 1):
+                    _require_authority_text(text, MAX_TEXT_CHARS, f"canonical verification {index} {field}[{item_index}]")
     for index, item in enumerate(value.get("do_not_touch", []) or [], 1):
         _require_authority_text(item, MAX_PATH_CHARS, f"global do_not_touch[{index}]")
     for field in ("prohibition_constraints", "integration_verification"):
@@ -215,6 +271,10 @@ def _validate_plan_authority_bounds(plan, requirements, evidence, registry):
         "target_new_surface_proposal_ids": MAX_SNAPSHOT_PROPOSALS,
         "inspect_new_surface_proposal_ids": MAX_SNAPSHOT_PROPOSALS,
         "interfaces_to_reuse": MAX_INTERFACES_PER_CONTRACT,
+        "obligation_ids": MAX_SURFACES_PER_CONTRACT,
+        "constraint_ids": MAX_PRESERVATION_PER_CONTRACT * 2,
+        "verification_ids": MAX_TEST_CHECKS_PER_CONTRACT * 2,
+        "source_node_ids": MAX_PLAN_NODES,
         "local_preservation_constraints": MAX_PRESERVATION_PER_CONTRACT,
         "preservation_constraints": MAX_PRESERVATION_PER_CONTRACT,
         "prohibition_constraints": MAX_PROHIBITIONS_PER_CONTRACT,
@@ -637,10 +697,34 @@ def _obligation_records(plan, requirements):
 
 
 def _preservation_records(plan):
+    value = plan if isinstance(plan, dict) else {}
+    constraints = value.get("canonical_constraints")
+    constraint_by_id = {}
+    if isinstance(constraints, dict):
+        constraint_by_id = {
+            str(item.get("constraint_id")): item
+            for item in constraints.get("preservation", []) or []
+            if isinstance(item, dict) and item.get("constraint_id")
+        }
     records = []
-    for item in list((plan or {}).get("preservation_only_surfaces", []) or []):
+    for item in list(value.get("preservation_only_surfaces", []) or []):
         if not isinstance(item, dict):
             continue
+        shared_constraints = [
+            constraint_by_id[str(identifier)].get("text")
+            for identifier in item.get("constraint_ids", []) or []
+            if str(identifier) in constraint_by_id
+        ]
+        shared_prohibitions = {
+            str(entry.get("constraint_id")): entry
+            for entry in (constraints or {}).get("prohibitions", []) or []
+            if isinstance(entry, dict) and entry.get("constraint_id")
+        } if isinstance(constraints, dict) else {}
+        shared_prohibition_text = [
+            shared_prohibitions[str(identifier)].get("text")
+            for identifier in item.get("constraint_ids", []) or []
+            if str(identifier) in shared_prohibitions
+        ]
         records.append({
             "surface_id": item.get("surface_id") or item.get("canonical_surface_id"),
             "path": _path(item.get("path")),
@@ -648,10 +732,15 @@ def _preservation_records(plan):
             "requirement_ids": _ids(item.get("requirement_ids"), MAX_REQUIREMENTS_PER_CONTRACT),
             "evidence_ids": _ids(item.get("evidence_ids"), MAX_REPOSITORY_FACTS_PER_CONTRACT),
             "constraints": _unique(
-                list(item.get("preservation_constraints", []) or []) + ([item.get("reason")] if item.get("reason") else []),
+                shared_constraints
+                + list(item.get("preservation_constraints", []) or [])
+                + ([item.get("reason")] if item.get("reason") else []),
                 text_limit=MAX_TEXT_CHARS,
             ),
-            "prohibitions": _unique(item.get("prohibition_constraints"), text_limit=MAX_TEXT_CHARS),
+            "prohibitions": _unique(
+                shared_prohibition_text + list(item.get("prohibition_constraints", []) or []),
+                text_limit=MAX_TEXT_CHARS,
+            ),
             "provenance": APPROVED_PLAN,
         })
     return records
@@ -678,6 +767,13 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
     referenced_surface_ids.update(
         str(surface_id) for surface_id in list((plan or {}).get("do_not_touch_surface_ids", []) or [])
     )
+    canonical_verifications = list((plan or {}).get("canonical_verification_contracts", []) or [])
+    referenced_surface_ids.update(
+        str(surface_id)
+        for item in canonical_verifications
+        if isinstance(item, dict)
+        for surface_id in item.get("surface_ids", []) or []
+    )
     if referenced_surface_ids:
         surfaces = {
             key: item for key, item in surfaces.items()
@@ -702,11 +798,25 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
         + [value for item in preservation for value in item.get("prohibitions", [])],
         limit=MAX_PROHIBITIONS_PER_CONTRACT, text_limit=MAX_TEXT_CHARS,
     )
+    canonical_constraints = (plan or {}).get("canonical_constraints")
+    if isinstance(canonical_constraints, dict):
+        structured_prohibitions = _unique(
+            structured_prohibitions
+            + [item.get("text") for item in canonical_constraints.get("prohibitions", []) or []
+               if isinstance(item, dict)],
+            limit=MAX_PROHIBITIONS_PER_CONTRACT, text_limit=MAX_TEXT_CHARS,
+        )
     evidence_records = _compact_evidence(evidence)
     known_evidence = {item["evidence_id"] for item in evidence_records}
     evidence_ids = _ids(
         [item for node in nodes for item in node.get("evidence_ids", [])]
         + [item for record in preservation for item in record.get("evidence_ids", [])],
+        MAX_SNAPSHOT_EVIDENCE,
+    )
+    evidence_ids = _ids(
+        evidence_ids
+        + [evidence_id for item in canonical_verifications if isinstance(item, dict)
+           for evidence_id in item.get("evidence_ids", []) or []],
         MAX_SNAPSHOT_EVIDENCE,
     )
     evidence_ids = [item for item in evidence_ids if item in known_evidence or not evidence_records]
@@ -717,7 +827,7 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
         ) if approval.get(key) not in (None, "", [], {})
     }
     approval_record.setdefault("approval_status", _approval_status(approval))
-    return {
+    authority = {
         "schema_version": "4A",
         "plan_id": plan.get("plan_id"),
         "plan_hash": plan.get("plan_hash"),
@@ -752,6 +862,17 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
             "derived_contract": DERIVED_EXECUTION_CONTRACT,
         },
     }
+    # V24.4.5 canonical plans keep repeated preservation and verification
+    # material in shared, referenced catalogs.  Carry those catalogs into
+    # the immutable execution snapshot so Stage 4 contract compilation has
+    # the same authority and test context as the expanded legacy projection.
+    if isinstance(plan.get("canonical_constraints"), dict):
+        authority["canonical_constraints"] = _copy(plan.get("canonical_constraints"))
+    if isinstance(plan.get("canonical_verification_contracts"), list):
+        authority["canonical_verification_contracts"] = _copy(
+            plan.get("canonical_verification_contracts")
+        )
+    return authority
 
 
 def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goal=None):
@@ -767,6 +888,7 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         "global_do_not_touch_surface_ids", "global_do_not_touch", "structured_prohibitions",
         "integration_contract", "canonical_evidence_ids", "canonical_evidence",
         "canonical_surfaces", "new_surface_proposals", "provenance", "bounds",
+        "canonical_constraints", "canonical_verification_contracts",
         "snapshot_hash", "immutable",
     }
     errors.extend(
@@ -811,10 +933,11 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         "integration_contract": MAX_TEST_CHECKS_PER_CONTRACT,
         "new_surface_proposals": MAX_SNAPSHOT_PROPOSALS,
         "preservation_only_surfaces": MAX_PLAN_NODES,
+        "canonical_verification_contracts": MAX_TEST_CHECKS_PER_CONTRACT * 2,
     }
     list_fields = set(snapshot_limits) | {
         "canonical_mutation_surfaces", "canonical_test_surfaces", "canonical_reuse_surfaces",
-        "obligations",
+        "obligations", "canonical_verification_contracts",
     }
     for field in list_fields:
         if field in value and not isinstance(value.get(field), list):
@@ -823,6 +946,16 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         values = value.get(field)
         if isinstance(values, list) and len(values) > limit:
             errors.append(f"snapshot {field} bound exceeded ({len(values)} > {limit})")
+    canonical_constraints = value.get("canonical_constraints")
+    if canonical_constraints is not None and not isinstance(canonical_constraints, dict):
+        errors.append("snapshot canonical_constraints must be an object")
+    elif isinstance(canonical_constraints, dict):
+        for field in ("preservation", "prohibitions"):
+            records = canonical_constraints.get(field, [])
+            if not isinstance(records, list):
+                errors.append(f"snapshot canonical_constraints.{field} must be a list")
+            elif len(records) > (MAX_PRESERVATION_PER_CONTRACT * 2 if field == "preservation" else MAX_PROHIBITIONS_PER_CONTRACT * 2):
+                errors.append(f"snapshot canonical_constraints.{field} bound exceeded")
     plan_nodes = value.get("plan_nodes", [])
     if isinstance(plan_nodes, list):
         node_ids = []
@@ -1075,9 +1208,34 @@ def _build_contract(snapshot, node, contract_id, responsibility_type, attached_n
         mutation_paths = _unique(mutation_paths, text_limit=MAX_PATH_CHARS)
         inspection_paths = _unique(mutation_paths + inspection_paths, text_limit=MAX_PATH_CHARS)
     attached_preservation = _matching_preservation(snapshot, requirement_ids)
+    canonical_constraints = (snapshot or {}).get("canonical_constraints")
+    shared_preservation = []
+    shared_prohibitions = []
+    if isinstance(canonical_constraints, dict):
+        wanted_requirements = set(str(item) for item in requirement_ids)
+        shared_preservation = [
+            item.get("text") for item in canonical_constraints.get("preservation", []) or []
+            if isinstance(item, dict) and item.get("text") and (
+                not item.get("requirement_ids")
+                or wanted_requirements.intersection(str(value) for value in item.get("requirement_ids", []))
+            )
+        ]
+        shared_prohibitions = [
+            item.get("text") for item in canonical_constraints.get("prohibitions", []) or []
+            if isinstance(item, dict) and item.get("text") and (
+                not item.get("requirement_ids")
+                or wanted_requirements.intersection(str(value) for value in item.get("requirement_ids", []))
+            )
+        ]
     preservation = _unique(
         [value for item in all_nodes for value in (item.get("local_preservation_constraints", []) or item.get("preservation_constraints", []) or [])]
         + [value for item in attached_preservation for value in item.get("constraints", [])],
+        # Shared canonical constraints are authority, not advice. They are
+        # hydrated once here for the contract that owns the responsibility.
+        text_limit=MAX_TEXT_CHARS,
+    )
+    preservation = _unique(
+        preservation + shared_preservation,
         text_limit=MAX_TEXT_CHARS,
     )
     prohibitions = _unique(
@@ -1086,6 +1244,7 @@ def _build_contract(snapshot, node, contract_id, responsibility_type, attached_n
         + [value for item in attached_preservation for value in item.get("prohibitions", [])],
         text_limit=MAX_TEXT_CHARS,
     )
+    prohibitions = _unique(prohibitions + shared_prohibitions, text_limit=MAX_TEXT_CHARS)
     interfaces = _unique(
         [value for item in all_nodes for value in item.get("interfaces_to_reuse", [])]
         + [_surface_by_id(snapshot).get(item, {}).get("symbol") for item in interface_surface_ids],
@@ -1095,6 +1254,43 @@ def _build_contract(snapshot, node, contract_id, responsibility_type, attached_n
         [value for item in all_nodes for value in (item.get("local_test_contract", []) or item.get("test_contract", []) or [])],
         text_limit=MAX_TEXT_CHARS,
     )
+    shared_verifications = (snapshot or {}).get("canonical_verification_contracts")
+    if isinstance(shared_verifications, list):
+        node_id_set = {str(item.get("node_id")) for item in all_nodes if item.get("node_id")}
+        wanted_requirements = set(str(item) for item in requirement_ids)
+        for verification in shared_verifications:
+            if not isinstance(verification, dict):
+                continue
+            verification_requirements = {
+                str(item) for item in verification.get("requirement_ids", []) or []
+            }
+            verification_nodes = {
+                str(item) for item in verification.get("node_ids", []) or []
+            }
+            if (
+                not wanted_requirements
+                or not verification_requirements
+                or wanted_requirements.intersection(verification_requirements)
+                or node_id_set.intersection(verification_nodes)
+            ):
+                test_contract = _unique(
+                    test_contract + list(verification.get("contract", []) or []),
+                    text_limit=MAX_TEXT_CHARS,
+                )
+                evidence_ids = _ids(
+                    evidence_ids + list(verification.get("evidence_ids", []) or []),
+                    MAX_REPOSITORY_FACTS_PER_CONTRACT,
+                )
+                surface_ids = _ids(
+                    surface_ids + list(verification.get("surface_ids", []) or []),
+                )
+                inspect_surface_ids = _ids(
+                    inspect_surface_ids + list(verification.get("surface_ids", []) or []),
+                )
+        inspection_paths = _unique(
+            inspection_paths + _surface_paths(snapshot, inspect_surface_ids),
+            text_limit=MAX_PATH_CHARS,
+        )
     done_when = _unique(
         [value for item in all_nodes for value in item.get("done_when", [])]
         or [node.get("goal")], text_limit=MAX_TEXT_CHARS,
