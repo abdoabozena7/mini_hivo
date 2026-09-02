@@ -37,6 +37,34 @@ DISPOSITIONS = (
     "MUST_CHANGE", "INTERFACE_REUSE", "TEST_CHANGE", "PRESERVATION_ONLY",
     "VERIFY_ONLY", "INSUFFICIENT_EVIDENCE",
 )
+# V24.3 deliberately uses a separate, smaller model contract.  These values
+# are not added to the legacy Impact Map disposition enum: the legacy map is
+# still the downstream canonical artifact, while the choice object is only a
+# bounded input to its deterministic compiler.
+IMPACT_DECISION_CHOICES = (
+    "MUST_CHANGE", "INTERFACE_REUSE", "TEST_CHANGE", "PRESERVATION_ONLY",
+    "VERIFY_ONLY", "INSPECT_ONLY", "AUTHORITY_CHANGE",
+)
+IMPACT_DECISION_MODEL_FIELDS = (
+    "slot_id", "decision", "chosen_target", "reason_code", "bounded_rationale",
+)
+IMPACT_DECISION_AUTHORITY_FIELDS = frozenset({
+    "impact_id", "seed_id", "surface_id", "current_owner", "owner",
+    "required_interfaces", "preservation_promises", "required_preservation_promises",
+    "verification_contracts", "required_verification_contracts", "dnt",
+    "prohibitions", "authority_refs", "evidence_refs", "path", "symbol",
+    "symbols", "repository_evidence_ids", "requirement_ids", "scope_notes",
+    "risk_notes", "mutation_target", "reuse_target", "provider_generation_identity",
+})
+IMPACT_DECISION_FRAME_VERSION = "V24.3"
+IMPACT_DECISION_FRAME_INCOMPLETE = "IMPACT_DECISION_FRAME_INCOMPLETE"
+IMPACT_DECISION_OUTPUT_MALFORMED = "IMPACT_DECISION_OUTPUT_MALFORMED"
+DUPLICATE_IMPACT_DECISION_SLOT = "DUPLICATE_IMPACT_DECISION_SLOT"
+MISSING_IMPACT_DECISION_SLOT = "MISSING_IMPACT_DECISION_SLOT"
+UNKNOWN_IMPACT_DECISION_SLOT = "UNKNOWN_IMPACT_DECISION_SLOT"
+IMPACT_DECISION_NOT_ALLOWED = "IMPACT_DECISION_NOT_ALLOWED"
+IMPACT_DECISION_TARGET_NOT_ALLOWED = "IMPACT_DECISION_TARGET_NOT_ALLOWED"
+IMPACT_MAP_COMPILE_INVALID = "IMPACT_MAP_COMPILE_INVALID"
 NEW_SURFACE_PROPOSAL = "NEW_SURFACE_PROPOSAL"
 MAX_CANONICAL_SURFACES = 32
 MAX_SURFACE_EVIDENCE_IDS = 8
@@ -3813,6 +3841,1662 @@ def _impact_kind_for_disposition(disposition, legacy_kind=""):
         "VERIFY_ONLY": "CROSS_CUTTING_VERIFICATION",
         "INSUFFICIENT_EVIDENCE": "INTEGRATION_CHANGE",
     }.get(disposition, "INTEGRATION_CHANGE")
+
+
+# ---------------------------------------------------------------------------
+# V24.3 AUTHORITY-INHERITED IMPACT DECISION FRAME
+# ---------------------------------------------------------------------------
+
+# This audit is intentionally data, rather than a comment in the prompt.  It
+# is used by tests and by the frame compiler to make a field's authority
+# visible before a model is invoked.
+_IMPACT_MAP_FIELD_OWNERSHIP = {
+    "impact_id": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "impact seed", "required": True,
+        "model_writable": False,
+    },
+    "seed_id": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "impact seed", "required": True,
+        "model_writable": False,
+    },
+    "surface_id": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "canonical surface registry / seed",
+        "required": True, "model_writable": False,
+    },
+    "decision_kind": {
+        "owner": "MODEL_DECISION", "source": "bounded frame decision", "required": True,
+        "model_writable": True,
+    },
+    "disposition": {
+        "owner": "MODEL_DECISION", "source": "bounded frame decision", "required": True,
+        "model_writable": True,
+    },
+    "preservation_promises": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "frame inheritance", "required": True,
+        "model_writable": False,
+    },
+    "preserve": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "frame inheritance", "required": True,
+        "model_writable": False,
+    },
+    "verification_contracts": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "frame inheritance", "required": True,
+        "model_writable": False,
+    },
+    "verification": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "frame inheritance", "required": True,
+        "model_writable": False,
+    },
+    "test_contract": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "frame inheritance", "required": False,
+        "model_writable": False,
+    },
+    "mutation_target": {
+        "owner": "MODEL_DECISION", "source": "chosen target constrained by frame",
+        "required": False, "model_writable": True,
+    },
+    "reuse_target": {
+        "owner": "MODEL_DECISION", "source": "chosen target constrained by frame",
+        "required": False, "model_writable": True,
+    },
+    "interfaces_to_reuse": {
+        "owner": "MODEL_DECISION", "source": "frame-authorized interface target",
+        "required": False, "model_writable": True,
+    },
+    "rationale": {
+        "owner": "MODEL_OPTIONAL", "source": "bounded_rationale", "required": False,
+        "model_writable": True,
+    },
+    "reason": {
+        "owner": "MODEL_OPTIONAL", "source": "bounded_rationale", "required": False,
+        "model_writable": True,
+    },
+    "action": {
+        "owner": "MODEL_DECISION", "source": "validated bounded rationale", "required": True,
+        "model_writable": True,
+    },
+    "candidate_change": {
+        "owner": "MODEL_DECISION", "source": "validated bounded rationale", "required": True,
+        "model_writable": True,
+    },
+    "scope_notes": {
+        "owner": "DETERMINISTIC_REPOSITORY_EVIDENCE", "source": "canonical surface / evidence",
+        "required": False, "model_writable": False,
+    },
+    "path": {
+        "owner": "DETERMINISTIC_REPOSITORY_EVIDENCE", "source": "canonical surface registry",
+        "required": True, "model_writable": False,
+    },
+    "symbols": {
+        "owner": "DETERMINISTIC_REPOSITORY_EVIDENCE", "source": "canonical surface registry",
+        "required": False, "model_writable": False,
+    },
+    "risk_notes": {
+        "owner": "MODEL_OPTIONAL", "source": "bounded model rationale", "required": False,
+        "model_writable": True,
+    },
+    "current_owner": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "verified ownership evidence",
+        "required": True, "model_writable": False,
+    },
+    "owner": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "verified ownership evidence",
+        "required": True, "model_writable": False,
+    },
+    "dnt": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "VerifiedPlanningContext",
+        "required": True, "model_writable": False,
+    },
+    "prohibitions": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "VerifiedPlanningContext",
+        "required": True, "model_writable": False,
+    },
+    "requirement_ids": {
+        "owner": "DETERMINISTIC_AUTHORITY", "source": "impact seed / Source Requirements",
+        "required": True, "model_writable": False,
+    },
+    "repository_evidence_ids": {
+        "owner": "DETERMINISTIC_REPOSITORY_EVIDENCE", "source": "canonical surface registry",
+        "required": True, "model_writable": False,
+    },
+}
+
+
+def impact_map_field_ownership():
+    """Return the V24.3 required-field authority audit."""
+    return copy.deepcopy(_IMPACT_MAP_FIELD_OWNERSHIP)
+
+
+audit_impact_map_field_ownership = impact_map_field_ownership
+field_ownership_audit = impact_map_field_ownership
+
+
+def impact_decision_frame_schema():
+    """Schema for the immutable authority-bound pre-model decision frame."""
+    obligation = {
+        "type": "object",
+        "properties": {
+            "obligation_id": {"type": "string"},
+            "text": {"type": "string"},
+            "requirement_ids": {"type": "array", "items": {"type": "string"}},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "provenance": {"type": "string"},
+        },
+        "required": ["obligation_id", "text", "requirement_ids", "evidence_refs"],
+        "additionalProperties": False,
+    }
+    slot = {
+        "type": "object",
+        "properties": {
+            "slot_id": {"type": "string"},
+            "separate_decision": {"type": "boolean"},
+            "seed_id": {"type": "string"},
+            "impact_id": {"type": "string"},
+            "surface_id": {"type": "string"},
+            "requirement_ids": {"type": "array", "items": {"type": "string"}},
+            "allowed_decisions": {"type": "array", "items": {"type": "string"}},
+            "allowed_targets": {"type": "array", "items": {"type": "string"}},
+            "authority_change_targets": {"type": "array", "items": {"type": "string"}},
+            "current_owner": {"type": ["object", "null"]},
+            "required_interfaces": {"type": "array", "items": {"type": "string"}},
+            "interface_provenance": {"type": "array", "items": {"type": "object"}},
+            "required_preservation_promises": {"type": "array", "items": obligation},
+            "required_verification_contracts": {"type": "array", "items": obligation},
+            "dnt": {"type": "array", "items": {"type": "string"}},
+            "prohibitions": {"type": "array", "items": {"type": "string"}},
+            "authority_refs": {"type": "array", "items": {"type": "string"}},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "slot_id", "seed_id", "impact_id", "surface_id", "requirement_ids",
+            "allowed_decisions", "allowed_targets", "current_owner", "required_interfaces",
+            "required_preservation_promises", "required_verification_contracts", "dnt",
+            "prohibitions", "authority_refs", "evidence_refs",
+        ],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "version": {"type": "string"},
+            "artifact_type": {"type": "string"},
+            "project_id": {"type": ["string", "null"]},
+            "task_id": {"type": ["string", "null"]},
+            "authority_change_authorized": {"type": "boolean"},
+            "authority_change_targets": {"type": "array", "items": {"type": "string"}},
+            "source_planning_context_hash": {"type": "string"},
+            "source_mandatory_core_hash": {"type": "string"},
+            "decision_slots": {"type": "array", "items": slot},
+            "frame_errors": {"type": "array", "items": {"type": "string"}},
+            "frame_complete": {"type": "boolean"},
+            "frame_hash": {"type": "string"},
+        },
+        "required": [
+            "version", "artifact_type", "project_id", "task_id",
+            "source_planning_context_hash", "source_mandatory_core_hash",
+            "decision_slots", "frame_errors", "frame_complete", "frame_hash",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def impact_decision_choice_schema():
+    """Schema for the small ImpactPlanner choice-only response."""
+    choice = {
+        "type": "object",
+        "properties": {
+            "slot_id": {"type": "string"},
+            "decision": {"type": "string", "enum": list(IMPACT_DECISION_CHOICES)},
+            "chosen_target": {"type": "string"},
+            "reason_code": {"type": "string"},
+            "bounded_rationale": {"type": "string"},
+        },
+        "required": list(IMPACT_DECISION_MODEL_FIELDS),
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "decisions": {
+                "type": "array", "items": choice, "minItems": 1,
+                "maxItems": MAX_IMPACT_SEEDS,
+            },
+        },
+        "required": ["decisions"],
+        "additionalProperties": False,
+    }
+
+
+def _impact_decision_hash(value):
+    return hashlib.sha256(_compact_json(value).encode("utf-8")).hexdigest()
+
+
+def impact_decision_frame_hash(frame):
+    value = copy.deepcopy(frame if isinstance(frame, dict) else {})
+    value.pop("frame_hash", None)
+    return _impact_decision_hash(value)
+
+
+def impact_decision_choice_hash(frame, choices):
+    value = choices if isinstance(choices, dict) else {"decisions": choices or []}
+    if isinstance(value, dict):
+        decisions = list(value.get("decisions", value.get("choices", [])) or [])
+    else:
+        decisions = []
+    decisions = [copy.deepcopy(item) for item in decisions if isinstance(item, dict)]
+    decisions.sort(key=lambda item: str(item.get("slot_id") or ""))
+    return _impact_decision_hash({
+        "frame_hash": (frame or {}).get("frame_hash") if isinstance(frame, dict) else None,
+        "decisions": decisions,
+    })
+
+
+impact_decision_choices_hash = impact_decision_choice_hash
+
+
+def _frame_text(value):
+    if isinstance(value, dict):
+        raw = value.get("text")
+        if raw in (None, ""):
+            raw = value.get("fact")
+        if isinstance(raw, dict):
+            raw = raw.get("text") or raw.get("fact") or raw.get("summary")
+        if raw in (None, ""):
+            raw = value.get("summary") or value.get("description") or value.get("condition")
+    else:
+        raw = value
+    return _compact(raw, 520)
+
+
+def _frame_ids(value, keys):
+    result = []
+    if not isinstance(value, dict):
+        return result
+    for key in keys:
+        raw = value.get(key)
+        values = raw if isinstance(raw, (list, tuple, set)) else ([] if raw in (None, "") else [raw])
+        for item in values:
+            if isinstance(item, dict):
+                item = item.get("id") or item.get("record_id") or item.get("evidence_id")
+            if item not in (None, ""):
+                text = str(item)
+                if text not in result:
+                    result.append(text)
+    return result
+
+
+def _frame_record_id(value, fallback=""):
+    if isinstance(value, dict):
+        for key in (
+            "obligation_id", "record_id", "authority_record_id", "evidence_id",
+            "constraint_id", "verification_id", "test_id", "acceptance_id",
+        ):
+            if value.get(key) not in (None, ""):
+                return str(value[key])
+    return str(fallback or "")
+
+
+def _frame_record_refs(value):
+    if not isinstance(value, dict):
+        return {"requirement_ids": [], "evidence_refs": [], "authority_refs": []}
+    requirement_ids = _frame_ids(value, ("requirement_ids", "source_requirement_ids"))
+    evidence_refs = _frame_ids(value, ("evidence_ids", "evidence_refs", "repository_evidence_ids"))
+    authority_refs = _frame_ids(value, (
+        "authority_refs", "source_ids", "source_references", "current_authority_ids",
+    ))
+    record_id = _frame_record_id(value)
+    if record_id and record_id not in authority_refs and not record_id.startswith("REPO-"):
+        authority_refs.append(record_id)
+    return {
+        "requirement_ids": requirement_ids[:MAX_REQUIREMENT_REFS_PER_IMPACT],
+        "evidence_refs": evidence_refs[:MAX_EVIDENCE_REFS_PER_IMPACT],
+        "authority_refs": authority_refs[:16],
+    }
+
+
+def _frame_surface_terms(surface, requirements=None, requirement_ids=None, include_requirements=False):
+    texts = [
+        surface.get("verified_fact", ""), surface.get("fact", ""), surface.get("path", ""),
+        surface.get("symbol", ""), surface.get("role", ""), surface.get("kind", ""),
+    ]
+    if include_requirements:
+        by_id = {item["requirement_id"]: item for item in active_requirements(requirements or [])}
+        for requirement_id in list(requirement_ids or []):
+            if requirement_id in by_id:
+                texts.append(by_id[requirement_id].get("text", ""))
+    return _domain_tokens(" ".join(str(item) for item in texts))
+
+
+def _frame_record_matches(record, surface, requirement_ids, requirements, *, global_record=False):
+    if not isinstance(record, dict) or not isinstance(surface, dict):
+        return False
+    refs = _frame_record_refs(record)
+    surface_id = str(surface.get("surface_id") or "")
+    explicit_surface_ids = set(_frame_ids(record, ("surface_id", "canonical_surface_id", "surface_ids")))
+    if surface_id and surface_id in explicit_surface_ids:
+        return True
+    surface_evidence = {str(item) for item in surface.get("evidence_ids", []) or []}
+    if surface_evidence.intersection(refs["evidence_refs"]):
+        return True
+    path = _normal_path(record.get("path"))
+    symbol = str(record.get("symbol") or "").strip()
+    surface_path = _normal_path(surface.get("path"))
+    surface_symbol = str(surface.get("symbol") or "").strip()
+    if path and path == surface_path:
+        if not symbol or symbol == surface_symbol or _surface_symbol_base(symbol) == _surface_symbol_base(surface_symbol):
+            return True
+    record_req_ids = set(refs["requirement_ids"])
+    selected_req_ids = set(str(item) for item in list(requirement_ids or []))
+    text = _frame_text(record)
+    if not text:
+        return bool(global_record and (not record_req_ids or record_req_ids.intersection(selected_req_ids)))
+    kind = str(surface.get("kind") or "").upper()
+    role = str(surface.get("role") or "").upper()
+    lower_text = text.casefold()
+    if re.search(r"\b(?:owner|ownership|sole|authoritative)\b", lower_text) and not (
+        kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER", "INTERFACE"}
+    ):
+        return False
+    if "pausecontroller" in lower_text and re.search(
+        r"\b(?:owner|ownership|sole|authoritative)\b", lower_text,
+    ) and kind == "OWNER" and _surface_symbol_base(surface.get("symbol")) != "PauseController":
+        return False
+    record_terms = _domain_tokens(text)
+    # Requirement identity is checked separately below.  Including the full
+    # compound task sentence here would make every slot appear related to
+    # every preservation clause and would defeat slot locality.
+    surface_terms = _frame_surface_terms(surface)
+    overlap = record_terms.intersection(surface_terms)
+    if record_req_ids.intersection(selected_req_ids) and overlap:
+        return True
+    # A global DNT/prohibition is authoritative for every selected slot.  It
+    # is not a guessed relationship and does not make preservation prose
+    # global; only the explicit constraint channel uses this branch.
+    if global_record and not path and not symbol and not record_req_ids:
+        return True
+    return bool(overlap and (len(overlap) >= 2 or any(
+        token in overlap for token in ("owner", "ownership", "pausecontroller", "escape", "movement", "togglepause")
+    )))
+
+
+def _frame_raw_records(task_brain, verified_planning_context, requirements, evidence):
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    source = verified_planning_context if isinstance(verified_planning_context, dict) else {}
+    preservation = []
+    verification = []
+    constraints = []
+
+    def split_preservation_record(value):
+        """Expose compound preservation clauses without inventing facts."""
+        if not isinstance(value, dict):
+            return [value]
+        text = _frame_text(value)
+        marker = re.search(r"\bpreserv(?:e|es|ed|ing)\b", text, re.IGNORECASE)
+        if not marker or "," not in text[marker.end():]:
+            return [value]
+        tail = text[marker.end():].strip()
+        tail = re.sub(r"^(?:current|the|while|and)\s+", "", tail, flags=re.IGNORECASE)
+        clauses = [
+            re.sub(r"^(?:and|while|the|current)\s+", "", part.strip(" ."), flags=re.IGNORECASE)
+            for part in re.split(r",\s*|\s+and\s+", tail)
+            if part.strip(" .")
+        ]
+        if len(clauses) < 2:
+            return [value]
+        result = []
+        for clause in clauses[:8]:
+            child = copy.deepcopy(value)
+            child["text"] = _compact("Preserve " + clause + ".", 520)
+            result.append(child)
+        return result
+
+    def add(target, values, channel, *, global_record=False):
+        for index, item in enumerate(list(values or [])[:24], 1):
+            if not isinstance(item, dict):
+                item = {"text": item}
+            records = split_preservation_record(item) if channel == "preservation" else [item]
+            for child_index, child in enumerate(records, 1):
+                value = copy.deepcopy(child)
+                value["_frame_channel"] = channel
+                value["_frame_global"] = bool(global_record)
+                value["_frame_index"] = index * 10 + child_index
+                target.append(value)
+
+    for value in (brain, source):
+        add(preservation, value.get("required_preservation_promises"), "preservation")
+        add(preservation, value.get("preservation_promises"), "preservation")
+        add(preservation, value.get("preservation_constraints"), "preservation")
+        add(verification, value.get("required_verification_contracts"), "verification")
+        add(verification, value.get("verification_contracts"), "verification")
+        add(verification, value.get("verification_obligations"), "verification")
+        add(verification, value.get("relevant_tests"), "verification")
+        add(verification, value.get("acceptance_conditions"), "verification")
+        add(constraints, value.get("dnt"), "dnt", global_record=True)
+        add(constraints, value.get("prohibitions"), "prohibition", global_record=True)
+
+    # The requirement is itself deterministic authority.  It is included only
+    # when its wording carries a preservation/prohibition obligation; no new
+    # test or preservation statement is generated here.
+    for index, item in enumerate(active_requirements(requirements), 1):
+        if _PRESERVE_RE.search(item.get("text", "")) or _PROHIBITION_RE.search(item.get("text", "")):
+            preservation.extend(split_preservation_record(copy.deepcopy(item)))
+            for value in preservation[-8:]:
+                value["_frame_channel"] = "preservation"
+                value["_frame_index"] = index
+        if _TEST_RE.search(item.get("text", "")):
+            value = copy.deepcopy(item)
+            value["_frame_channel"] = "verification"
+            value["_frame_index"] = index
+            verification.append(value)
+
+    # Accepted CURRENT_TEST evidence is structured repository evidence, not a
+    # model-generated test idea.  Keep it separate so the slot matcher can
+    # attach it only where the current test fact is relevant.
+    for index, item in enumerate(bounded_evidence(evidence, MAX_CANONICAL_SURFACES * 2), 1):
+        if str(item.get("category") or "").upper() == "CURRENT_TEST":
+            value = copy.deepcopy(item)
+            value["_frame_channel"] = "verification"
+            value["_frame_index"] = index
+            verification.append(value)
+    return preservation, verification, constraints
+
+
+def _frame_owner_for_surface(surface, by_surface_id, task_brain=None):
+    if not isinstance(surface, dict):
+        return None
+    owner_id = surface.get("owner_surface_id")
+    owner = by_surface_id.get(str(owner_id)) if owner_id else None
+    if owner is None and surface.get("kind") == "OWNER":
+        owner = surface
+    if owner is None and surface.get("kind") == "INTERFACE":
+        candidates = [
+            item for item in by_surface_id.values()
+            if item.get("kind") == "OWNER"
+            and _normal_path(item.get("path")) == _normal_path(surface.get("path"))
+            and _surface_symbol_base(item.get("symbol")) == _surface_symbol_base(surface.get("symbol"))
+        ]
+        if len(candidates) == 1:
+            owner = candidates[0]
+    if owner is None:
+        return None
+    return {
+        "surface_id": owner.get("surface_id"),
+        "symbol": str(owner.get("symbol") or ""),
+        "path": _normal_path(owner.get("path")),
+        "evidence_refs": _bounded_ids(owner.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
+    }
+
+
+def _frame_interfaces_for_surface(surface, surfaces, owner):
+    result = []
+    owner_id = str((owner or {}).get("surface_id") or "")
+    for candidate in surfaces:
+        if candidate.get("kind") != "INTERFACE":
+            continue
+        same_owner = owner_id and str(candidate.get("owner_surface_id") or "") == owner_id
+        same_path_owner = (
+            owner is not None
+            and _normal_path(candidate.get("path")) == _normal_path(owner.get("path"))
+            and _surface_symbol_base(candidate.get("symbol")) == _surface_symbol_base(owner.get("symbol"))
+        )
+        itself = str(candidate.get("surface_id")) == str(surface.get("surface_id"))
+        if same_owner or same_path_owner or itself:
+            result.append(candidate)
+    result.sort(key=lambda item: str(item.get("surface_id") or ""))
+    return result[:6]
+
+
+def _frame_authority_change(requirements):
+    targets = []
+    authorized = False
+    for item in list(requirements or []):
+        if not isinstance(item, dict):
+            continue
+        change = item.get("authority_change") if isinstance(item.get("authority_change"), dict) else item
+        flag = any(item.get(key) is True for key in (
+            "authority_change_authorized", "allows_authority_change", "change_authority",
+            "explicit_authority_change",
+        ))
+        flag = flag or any(change.get(key) is True for key in ("authorized", "explicit", "requested"))
+        if change.get("from") and change.get("to") and change.get("type") in {
+            "AUTHORITY_CHANGE", "OWNERSHIP_CHANGE", "STATE_OWNERSHIP_CHANGE",
+        }:
+            flag = True
+        if not flag:
+            continue
+        authorized = True
+        for key in ("to", "target_owner", "new_owner", "object"):
+            if change.get(key) not in (None, "") and str(change[key]) not in targets:
+                targets.append(str(change[key]))
+    return authorized, targets[:4]
+
+
+def _frame_allowed_decisions(surface, requirement_ids, requirements, authority_change=False):
+    by_req = {item["requirement_id"]: item for item in active_requirements(requirements or [])}
+    text = " ".join(by_req[item].get("text", "") for item in requirement_ids if item in by_req)
+    kind = str(surface.get("kind") or "OTHER").upper()
+    role = str(surface.get("role") or "").upper()
+    change = bool(_CHANGE_RE.search(text))
+    preserve = bool(_PRESERVE_RE.search(text) or _PROHIBITION_RE.search(text))
+    if kind == "INTERFACE" or role == "INTERFACE":
+        result = ["INTERFACE_REUSE", "INSPECT_ONLY"]
+    elif kind == "TEST" or role == "CURRENT_TEST":
+        result = ["TEST_CHANGE", "INSPECT_ONLY"]
+    elif kind == "PERSISTENCE" or role == "PERSISTENCE_OWNER":
+        result = ["PRESERVATION_ONLY", "INSPECT_ONLY"]
+    elif kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}:
+        result = ["MUST_CHANGE", "INTERFACE_REUSE", "INSPECT_ONLY"] if change else [
+            "PRESERVATION_ONLY", "INTERFACE_REUSE", "INSPECT_ONLY",
+        ]
+    elif kind == "ENTRYPOINT" or role == "ENTRYPOINT":
+        result = ["VERIFY_ONLY", "INSPECT_ONLY"]
+    else:
+        result = ["MUST_CHANGE", "INSPECT_ONLY"] if change and not preserve else [
+            "VERIFY_ONLY", "INSPECT_ONLY",
+        ]
+    if authority_change and (kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}):
+        result.append("AUTHORITY_CHANGE")
+    return list(dict.fromkeys(item for item in result if item in IMPACT_DECISION_CHOICES))
+
+
+def _frame_obligation(value, channel, ordinal, surface, requirement_ids, requirements):
+    text = _frame_text(value)
+    if not text:
+        return None
+    refs = _frame_record_refs(value)
+    reqs = list(refs["requirement_ids"])
+    if not reqs and _frame_record_id(value).startswith("REQ-"):
+        reqs = [_frame_record_id(value)]
+    reqs = _bounded_ids(list(dict.fromkeys(reqs + [str(item) for item in requirement_ids if str(item) in {
+        req.get("requirement_id") for req in active_requirements(requirements or [])
+    }])) if _frame_record_matches(
+        value, surface, requirement_ids, requirements, global_record=bool(value.get("_frame_global")),
+    ) else reqs, MAX_REQUIREMENT_REFS_PER_IMPACT)
+    evidence_refs = _bounded_ids(refs["evidence_refs"], MAX_EVIDENCE_REFS_PER_IMPACT)
+    record_id = _frame_record_id(value, f"{channel.upper()}-{ordinal:03d}")
+    return {
+        "obligation_id": record_id,
+        "text": text,
+        "requirement_ids": reqs,
+        "evidence_refs": evidence_refs,
+        "provenance": value.get("provenance") or (
+            REPOSITORY_EVIDENCE if channel == "verification" and value.get("evidence_id") else USER_STATED
+        ),
+    }
+
+
+def _frame_deduplicate_obligations(values):
+    result = []
+    by_text = {}
+    for item in values:
+        if not isinstance(item, dict) or not item.get("text"):
+            continue
+        key = str(item.get("text")).casefold()
+        existing = by_text.get(key)
+        if existing is not None:
+            existing["requirement_ids"] = _bounded_ids(
+                list(existing.get("requirement_ids", []) or [])
+                + list(item.get("requirement_ids", []) or []),
+                MAX_REQUIREMENT_REFS_PER_IMPACT,
+            )
+            existing["evidence_refs"] = _bounded_ids(
+                list(existing.get("evidence_refs", []) or [])
+                + list(item.get("evidence_refs", []) or []),
+                MAX_EVIDENCE_REFS_PER_IMPACT,
+            )
+            continue
+        by_text[key] = item
+        result.append(item)
+    return result[:8]
+
+
+def build_impact_decision_frame(
+    task_brain=None, requirements=None, evidence=None, surface_registry=None,
+    impact_seeds=None, verified_planning_context=None, mandatory_core=None,
+    *, registry=None, seeds=None, core=None, planning_context=None,
+):
+    """Build the immutable V24.3 authority-bound decision frame.
+
+    The builder consumes only existing Stage 1/2/V24 authority.  It never
+    calls a provider and it never fills a missing obligation with a guessed
+    sentence.  An incomplete artifact is returned with a deterministic error
+    so callers can fail before the ImpactPlanner invocation.
+    """
+    if surface_registry is None:
+        surface_registry = registry
+    if impact_seeds is None:
+        impact_seeds = seeds
+    if mandatory_core is None:
+        mandatory_core = core
+    if verified_planning_context is None:
+        verified_planning_context = planning_context
+    brain = task_brain if isinstance(task_brain, dict) else {}
+    source = verified_planning_context if isinstance(verified_planning_context, dict) else {}
+    raw_requirements = [item for item in list(requirements or []) if isinstance(item, dict)]
+    reqs = active_requirements(raw_requirements)
+    registry_value = surface_registry if isinstance(surface_registry, dict) else build_canonical_surface_registry(
+        brain, evidence,
+    )
+    surfaces = [
+        copy.deepcopy(item) for item in list(registry_value.get("surfaces", []) or [])
+        if isinstance(item, dict) and item.get("surface_id")
+    ]
+    by_surface_id = canonical_surface_by_id(registry_value)
+    if impact_seeds is None:
+        impact_seeds = build_impact_seeds(brain, reqs, evidence, registry=registry_value)
+    raw_seeds = [copy.deepcopy(item) for item in list(impact_seeds or []) if isinstance(item, dict)]
+    raw_seeds.sort(key=lambda item: (
+        str(item.get("surface_id") or ""),
+        str(item.get("impact_id") or ""),
+        str(item.get("seed_id") or ""),
+    ))
+    # Duplicate canonical surfaces are not separate decisions by default.
+    # Only an explicit separate-decision marker permits two slots for one
+    # surface; this keeps a provenance collision from becoming a planner
+    # cardinality collision.
+    deduped_seeds = []
+    seen_surfaces = {}
+    for seed in raw_seeds[:MAX_IMPACT_SEEDS]:
+        surface_id = str(seed.get("surface_id") or "")
+        separate = bool(
+            seed.get("separate_decision") or seed.get("requires_separate_decision")
+            or seed.get("decision_scope")
+        )
+        if surface_id in seen_surfaces and not separate:
+            existing = seen_surfaces[surface_id]
+            existing["requirement_ids"] = _bounded_ids(
+                list(existing.get("requirement_ids", []) or []) + list(seed.get("requirement_ids", []) or []),
+                MAX_REQUIREMENT_REFS_PER_IMPACT,
+            )
+            existing["evidence_ids"] = _bounded_ids(
+                list(existing.get("evidence_ids", []) or []) + list(seed.get("evidence_ids", []) or []),
+                MAX_SURFACE_EVIDENCE_IDS,
+            )
+            continue
+        seen_surfaces[surface_id] = seed
+        deduped_seeds.append(seed)
+    raw_seeds = deduped_seeds
+
+    source_metadata = _planner_source_metadata(brain, verified_planning_context=source)
+    project_id = source.get("project_id") or brain.get("project_id")
+    task_id = source.get("task_id") or brain.get("task_id")
+    if mandatory_core is None:
+        core_payload = {
+            "project_id": project_id, "task_id": task_id,
+            "task_goal": copy.deepcopy(brain.get("task_goal", "")),
+            "requirements": copy.deepcopy(reqs), "surfaces": copy.deepcopy(surfaces),
+            "impact_seeds": copy.deepcopy(raw_seeds),
+            "preservation_constraints": copy.deepcopy(brain.get("preservation_constraints", [])),
+            "prohibitions": copy.deepcopy(source.get("prohibitions", brain.get("prohibitions", []))),
+            "dnt": copy.deepcopy(source.get("dnt", brain.get("dnt", []))),
+        }
+        mandatory_core = build_canonical_mandatory_planning_core(
+            core_payload, project_id=project_id, task_id=task_id,
+            source_planning_context_hash=source_metadata.get("source_planning_context_hash"),
+            source_task_brain_hash=source_metadata.get("source_task_brain_hash"),
+            source_reentry_hash=source_metadata.get("source_reentry_hash"),
+        )
+    core_value = mandatory_core if isinstance(mandatory_core, dict) else {}
+    core_hash = core_value.get("mandatory_core_hash") or core_value.get("canonical_mandatory_core_hash")
+    context_hash = (
+        source_metadata.get("source_planning_context_hash")
+        or core_value.get("source_planning_context_hash")
+    )
+    if not context_hash:
+        context_hash = _impact_decision_hash({
+            "project_id": project_id, "task_id": task_id, "requirements": reqs,
+            "surface_ids": [item.get("surface_id") for item in surfaces],
+            "evidence_ids": [item.get("evidence_id") for item in bounded_evidence(evidence, 64)],
+        })
+    if not core_hash:
+        core_hash = _impact_decision_hash(core_value or {"task_id": task_id, "requirements": reqs})
+
+    preservation_records, verification_records, constraint_records = _frame_raw_records(
+        brain, source, reqs, evidence,
+    )
+    # ``active_requirements`` intentionally returns a compact compatibility
+    # projection, so inspect the original records for an explicit authority
+    # transition authorization before that metadata is stripped.
+    authority_change, authority_targets = _frame_authority_change(raw_requirements)
+    slots = []
+    frame_errors = []
+    req_id_set = {item["requirement_id"] for item in reqs}
+    for index, seed in enumerate(raw_seeds, 1):
+        surface_id = str(seed.get("surface_id") or "")
+        surface = by_surface_id.get(surface_id)
+        if not surface:
+            frame_errors.append(f"seed {seed.get('seed_id') or index}: unknown canonical surface")
+            continue
+        seed_req_ids = [
+            str(item) for item in list(seed.get("requirement_ids", []) or [])
+            if str(item) in req_id_set
+        ]
+        owner = _frame_owner_for_surface(surface, by_surface_id, brain)
+        interfaces = _frame_interfaces_for_surface(surface, surfaces, owner)
+        slot_req_ids = list(dict.fromkeys(seed_req_ids))
+        # Explicit Stage 3 brain bindings can add a requirement without
+        # inventing one from surface prose.  The seed's lexical relation is
+        # still the normal path; this branch only consumes structured refs.
+        for field in (
+            "current_owners", "current_state_ownership", "current_interfaces",
+            "relevant_tests", "preservation_constraints", "acceptance_conditions",
+        ):
+            for item in list(brain.get(field, []) or []):
+                if not isinstance(item, dict):
+                    continue
+                refs = _frame_record_refs(item)
+                if _frame_record_matches(item, surface, slot_req_ids, reqs):
+                    slot_req_ids.extend(item_id for item_id in refs["requirement_ids"] if item_id in req_id_set)
+        slot_req_ids = _bounded_ids(slot_req_ids, MAX_REQUIREMENT_REFS_PER_IMPACT)
+        allowed_decisions = _frame_allowed_decisions(
+            surface, slot_req_ids, reqs, authority_change=authority_change,
+        )
+        allowed_targets = [surface_id]
+        allowed_targets.extend(str(item.get("surface_id")) for item in interfaces if item.get("surface_id"))
+        allowed_targets.extend(authority_targets if authority_change and surface.get("kind") == "OWNER" else [])
+        allowed_targets = list(dict.fromkeys(item for item in allowed_targets if item))[:8]
+        slot_preservation = _frame_deduplicate_obligations([
+            obligation for ordinal, record in enumerate(preservation_records, 1)
+            if _frame_record_matches(
+                record, surface, slot_req_ids, reqs,
+                global_record=bool(record.get("_frame_global")),
+            )
+            for obligation in [_frame_obligation(record, "preservation", ordinal, surface, slot_req_ids, reqs)]
+            if obligation
+        ])
+        slot_verification = _frame_deduplicate_obligations([
+            obligation for ordinal, record in enumerate(verification_records, 1)
+            if _frame_record_matches(
+                record, surface, slot_req_ids, reqs,
+                global_record=bool(record.get("_frame_global")),
+            )
+            for obligation in [_frame_obligation(record, "verification", ordinal, surface, slot_req_ids, reqs)]
+            if obligation
+        ])
+        dnt_texts = []
+        prohibition_texts = []
+        constraint_refs = []
+        for ordinal, record in enumerate(constraint_records, 1):
+            if not _frame_record_matches(
+                record, surface, slot_req_ids, reqs,
+                global_record=True,
+            ):
+                continue
+            text = _frame_text(record)
+            if not text:
+                continue
+            if text not in dnt_texts:
+                dnt_texts.append(text)
+            if str(record.get("_frame_channel")) == "prohibition" and text not in prohibition_texts:
+                prohibition_texts.append(text)
+            constraint_refs.extend(_frame_record_refs(record).get("authority_refs", []))
+        # An explicitly typed DNT preservation record is also a prohibition,
+        # while ordinary preservation remains slot-local and is not copied to
+        # unrelated surfaces.
+        for obligation in slot_preservation:
+            source_record = next(
+                (record for record in preservation_records if _frame_record_id(record) == obligation.get("obligation_id")),
+                {},
+            )
+            if source_record.get("constraint_type") == "DNT" or _PROHIBITION_RE.search(obligation.get("text", "")):
+                if obligation.get("text") not in prohibition_texts:
+                    prohibition_texts.append(obligation.get("text"))
+                if obligation.get("text") not in dnt_texts:
+                    dnt_texts.append(obligation.get("text"))
+        authority_refs = [
+            str(seed.get("seed_id") or ""), str(seed.get("impact_id") or ""), surface_id,
+            *slot_req_ids, *list(surface.get("evidence_ids", []) or []),
+        ]
+        for item in slot_preservation + slot_verification:
+            authority_refs.extend(_frame_record_refs(item).get("authority_refs", []))
+            authority_refs.extend(item.get("requirement_ids", []) or [])
+            authority_refs.extend(item.get("evidence_refs", []) or [])
+        authority_refs.extend(constraint_refs)
+        # Retain canonical-core refs when they are explicitly tied to this
+        # slot.  This does not deduplicate distinct semantic IDs by prose.
+        for unit in list(core_value.get("semantic_units", []) or []):
+            if not isinstance(unit, dict):
+                continue
+            unit_reqs = set(str(item) for item in unit.get("requirement_ids", []) or [])
+            unit_evidence = set(str(item) for item in unit.get("evidence_ids", []) or [])
+            if unit_reqs.intersection(slot_req_ids) or unit_evidence.intersection(surface.get("evidence_ids", [])):
+                authority_refs.append(str(unit.get("semantic_id") or ""))
+                authority_refs.extend(str(item) for item in unit.get("aliases", []) or [])
+        authority_refs = _bounded_ids([item for item in authority_refs if item], 32)
+        evidence_refs = _bounded_ids(
+            list(surface.get("evidence_ids", []) or [])
+            + [ref for item in slot_preservation + slot_verification for ref in item.get("evidence_refs", [])]
+            + [ref for ref in constraint_refs if ref.startswith("REPO-")],
+            MAX_EVIDENCE_REFS_PER_IMPACT,
+        )
+        interface_provenance = [{
+            "surface_id": item.get("surface_id"), "symbol": item.get("symbol"),
+            "path": _normal_path(item.get("path")),
+            "evidence_refs": _bounded_ids(item.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
+        } for item in interfaces]
+        slot = {
+            "slot_id": f"SLOT-{len(slots) + 1:03d}",
+            "seed_id": str(seed.get("seed_id") or f"SEED-{index:03d}"),
+            "impact_id": normalize_impact_id(seed.get("impact_id") or f"IMPACT-{index:03d}"),
+            "surface_id": surface_id,
+            "requirement_ids": slot_req_ids,
+            "allowed_decisions": allowed_decisions,
+            "allowed_targets": allowed_targets,
+            "authority_change_targets": authority_targets if authority_change else [],
+            "current_owner": owner,
+            "required_interfaces": [str(item.get("surface_id")) for item in interfaces],
+            "interface_provenance": interface_provenance,
+            "required_preservation_promises": slot_preservation,
+            "required_verification_contracts": slot_verification,
+            "dnt": _bounded_strings(dnt_texts, 8, 320),
+            "prohibitions": _bounded_strings(prohibition_texts, 8, 320),
+            "authority_refs": authority_refs,
+            "evidence_refs": evidence_refs,
+        }
+        if separate:
+            slot["separate_decision"] = True
+        if not slot_req_ids:
+            frame_errors.append(f"{slot['slot_id']}: required Source Requirement binding is missing")
+        if not allowed_decisions:
+            frame_errors.append(f"{slot['slot_id']}: allowed decision set is empty")
+        if not allowed_targets:
+            frame_errors.append(f"{slot['slot_id']}: allowed target set is empty")
+        if surface.get("kind") == "OWNER" and not owner:
+            frame_errors.append(f"{slot['slot_id']}: current owner authority is missing")
+        slots.append(slot)
+
+    explicit_preservation_required = any(
+        isinstance(value, dict) and value.get("required_preservation_promises") not in (None, [], "")
+        for value in (brain, source)
+    )
+    explicit_verification_required = any(
+        isinstance(value, dict) and value.get("required_verification_contracts") not in (None, [], "")
+        for value in (brain, source)
+    )
+    requirement_preservation_required = any(
+        _PRESERVE_RE.search(item.get("text", "")) or _PROHIBITION_RE.search(item.get("text", ""))
+        for item in reqs
+    )
+    requirement_verification_required = any(_TEST_RE.search(item.get("text", "")) for item in reqs)
+    if not slots:
+        frame_errors.append("required decision slots are missing")
+    if not reqs:
+        frame_errors.append("active Source Requirements are missing")
+    if explicit_preservation_required and not any(_frame_text(item) for item in preservation_records):
+        frame_errors.append("required preservation authority is unavailable")
+    if explicit_verification_required and not any(_frame_text(item) for item in verification_records):
+        frame_errors.append("required verification authority is unavailable")
+    if requirement_preservation_required and not any(
+        slot.get("required_preservation_promises") for slot in slots
+    ):
+        frame_errors.append("required preservation authority could not be bound to a decision slot")
+    if requirement_verification_required and not any(
+        slot.get("required_verification_contracts") for slot in slots
+    ):
+        frame_errors.append("required verification authority could not be bound to a decision slot")
+    registry_check = validate_canonical_surface_registry(registry_value, evidence)
+    if not registry_check.get("valid"):
+        frame_errors.extend(registry_check.get("errors", [])[:8])
+    seed_check = validate_impact_seeds(raw_seeds, registry_value)
+    if not seed_check.get("valid"):
+        frame_errors.extend(seed_check.get("errors", [])[:8])
+    if core_value and not validate_canonical_mandatory_planning_core(core_value).get("valid"):
+        frame_errors.append("canonical mandatory planning core is invalid")
+    frame_errors = list(dict.fromkeys(
+        str(item) for item in frame_errors if str(item)
+    ))[:24]
+    frame = {
+        "version": IMPACT_DECISION_FRAME_VERSION,
+        "artifact_type": "ImpactDecisionFrame",
+        "project_id": project_id,
+        "task_id": task_id,
+        "authority_change_authorized": bool(authority_change),
+        "authority_change_targets": list(authority_targets if authority_change else []),
+        "source_planning_context_hash": str(context_hash),
+        "source_mandatory_core_hash": str(core_hash),
+        "decision_slots": slots,
+        "frame_errors": frame_errors,
+        "frame_complete": not frame_errors,
+    }
+    frame["frame_hash"] = impact_decision_frame_hash(frame)
+    return frame
+
+
+def validate_impact_decision_frame(frame):
+    """Validate frame integrity and authority completeness without a model."""
+    value = frame if isinstance(frame, dict) else {}
+    errors = []
+    if value.get("version") != IMPACT_DECISION_FRAME_VERSION:
+        errors.append("unsupported ImpactDecisionFrame version")
+    if value.get("artifact_type") != "ImpactDecisionFrame":
+        errors.append("wrong ImpactDecisionFrame artifact type")
+    if not value.get("source_planning_context_hash"):
+        errors.append("source planning context hash is missing")
+    if not value.get("source_mandatory_core_hash"):
+        errors.append("source mandatory core hash is missing")
+    if not value.get("project_id"):
+        errors.append("project ID is missing")
+    if not value.get("task_id"):
+        errors.append("task ID is missing")
+    if value.get("frame_hash") != impact_decision_frame_hash(value):
+        errors.append("ImpactDecisionFrame hash does not match canonical contents")
+    slots = value.get("decision_slots")
+    if not isinstance(slots, list) or not slots:
+        errors.append("required decision slots are missing")
+        slots = []
+    seen_slot_ids = set()
+    seen_surfaces = {}
+    for slot in slots[:MAX_IMPACT_SEEDS]:
+        if not isinstance(slot, dict):
+            errors.append("decision slot must be an object")
+            continue
+        slot_id = str(slot.get("slot_id") or "")
+        if not slot_id or slot_id in seen_slot_ids:
+            errors.append("decision slot IDs must be present and unique")
+        seen_slot_ids.add(slot_id)
+        surface_id = str(slot.get("surface_id") or "")
+        if surface_id in seen_surfaces and not slot.get("separate_decision"):
+            errors.append(f"{slot_id}: duplicate canonical surface requires explicit separate decision")
+        seen_surfaces[surface_id] = slot_id
+        for field in (
+            "seed_id", "impact_id", "surface_id", "requirement_ids", "allowed_decisions",
+            "allowed_targets", "required_interfaces", "required_preservation_promises",
+            "required_verification_contracts", "dnt", "prohibitions", "authority_refs",
+            "evidence_refs",
+        ):
+            raw = slot.get(field)
+            if field in {"seed_id", "impact_id", "surface_id"} and not raw:
+                errors.append(f"{slot_id or '<missing>'}: {field} is missing")
+            if field not in {"seed_id", "impact_id", "surface_id"} and not isinstance(raw, list):
+                errors.append(f"{slot_id or '<missing>'}: {field} must be a bounded list")
+        allowed = set(str(item) for item in slot.get("allowed_decisions", []) or [])
+        if "NEW_OWNER" in allowed or "OWNER_MIGRATION" in allowed:
+            errors.append(f"{slot_id}: forbidden ownership migration is exposed without explicit authority")
+        if "AUTHORITY_CHANGE" in allowed and value.get("authority_change_authorized") is not True:
+            errors.append(f"{slot_id}: authority change is not explicitly authorized")
+        if not allowed.intersection(IMPACT_DECISION_CHOICES):
+            errors.append(f"{slot_id}: allowed decision set is empty")
+        targets = [str(item) for item in slot.get("allowed_targets", []) or []]
+        if not targets or str(slot.get("surface_id")) not in targets:
+            errors.append(f"{slot_id}: target authority is not bound to its canonical surface")
+        for obligation_field in ("required_preservation_promises", "required_verification_contracts"):
+            for obligation in slot.get(obligation_field, []) or []:
+                if not isinstance(obligation, dict) or not obligation.get("text") or not obligation.get("obligation_id"):
+                    errors.append(f"{slot_id}: malformed {obligation_field}")
+    errors.extend(str(item) for item in list(value.get("frame_errors", []) or []))
+    errors = list(dict.fromkeys(errors))[:32]
+    incomplete = bool(errors) or value.get("frame_complete") is not True
+    return {
+        "valid": not incomplete,
+        "status": "READY" if not incomplete else IMPACT_DECISION_FRAME_INCOMPLETE,
+        "errors": errors if errors else [],
+        "slot_count": len(slots),
+        "required_slot_ids": [str(item.get("slot_id")) for item in slots if isinstance(item, dict)],
+        "model_calls": 0,
+        "frame_hash": value.get("frame_hash"),
+    }
+
+
+validate_impact_decision_frame_artifact = validate_impact_decision_frame
+
+
+def _impact_decision_frame_payload(frame):
+    value = frame if isinstance(frame, dict) else {}
+
+    def compact_obligation(item):
+        if not isinstance(item, dict):
+            return {"obligation_id": "", "text": _compact(item, 220)}
+        # Requirement/evidence refs remain in the immutable local frame.  The
+        # provider only needs the bounded obligation text and its stable local
+        # label to understand what is fixed; repeating every provenance ref in
+        # every slot recreates the V24.2 context burden.
+        return {
+            "obligation_id": str(item.get("obligation_id") or ""),
+            "text": _compact(item.get("text"), 220),
+        }
+
+    def compact_slot(slot):
+        owner = slot.get("current_owner")
+        compact_owner = None
+        if isinstance(owner, dict):
+            compact_owner = {
+                "surface_id": owner.get("surface_id"),
+                "symbol": _compact(owner.get("symbol"), 120),
+            }
+        interfaces = []
+        for item in list(slot.get("interface_provenance", []) or [])[:6]:
+            if not isinstance(item, dict):
+                continue
+            interfaces.append({
+                "surface_id": item.get("surface_id"),
+                "symbol": _compact(item.get("symbol"), 140),
+            })
+        return {
+            "slot_id": slot.get("slot_id"),
+            "surface_id": slot.get("surface_id"),
+            "allowed_decisions": list(slot.get("allowed_decisions", []) or []),
+            "allowed_targets": list(slot.get("allowed_targets", []) or []),
+            "authority_change_targets": list(slot.get("authority_change_targets", []) or []),
+            "current_owner": compact_owner,
+            "required_interfaces": list(slot.get("required_interfaces", []) or []),
+            "interface_provenance": interfaces,
+            "required_preservation_promises": [
+                compact_obligation(item)
+                for item in list(slot.get("required_preservation_promises", []) or [])[:8]
+            ],
+            "required_verification_contracts": [
+                compact_obligation(item)
+                for item in list(slot.get("required_verification_contracts", []) or [])[:8]
+            ],
+            "dnt": _bounded_strings(slot.get("dnt"), 6, 220),
+            "prohibitions": _bounded_strings(slot.get("prohibitions"), 6, 220),
+        }
+
+    return {
+        "version": 1,
+        "artifact_type": "ImpactDecisionChoiceRequest",
+        "project_id": value.get("project_id"),
+        "task_id": value.get("task_id"),
+        "source_planning_context_hash": value.get("source_planning_context_hash"),
+        "source_mandatory_core_hash": value.get("source_mandatory_core_hash"),
+        "impact_decision_frame_hash": value.get("frame_hash"),
+        "what_is_fixed": [
+            "slot identity", "surface identity", "current ownership", "required interfaces",
+            "preservation obligations", "verification obligations", "DNT", "prohibitions",
+        ],
+        "what_must_be_decided": [
+            "one decision per slot", "one authorized target per slot", "reason_code", "bounded_rationale",
+        ],
+        "what_must_not_be_repeated": [
+            "impact IDs", "seed IDs", "surface IDs", "owners", "preservation_promises",
+            "verification_contracts", "DNT", "prohibitions", "repository paths", "repository evidence",
+        ],
+        "decision_slots": [
+            compact_slot(item) for item in list(value.get("decision_slots", []) or [])
+            if isinstance(item, dict)
+        ],
+        "response_bounds": {
+            "required_slot_count": len(value.get("decision_slots", []) or []),
+            "exactly_one_choice_per_slot": True,
+            "model_owned_fields": list(IMPACT_DECISION_MODEL_FIELDS),
+        },
+    }
+
+
+def build_impact_decision_packet(
+    frame, *, role="ImpactPlanner", max_chars=MAX_PLANNER_CONTEXT_CHARS,
+    render=None, base_render=None, mandatory_core=None,
+):
+    """Compile the exact, compact model-facing choice packet."""
+    frame_check = validate_impact_decision_frame(frame)
+    if not frame_check.get("valid"):
+        return {
+            "status": IMPACT_DECISION_FRAME_INCOMPLETE,
+            "packet_complete": False,
+            "errors": [IMPACT_DECISION_FRAME_INCOMPLETE] + frame_check.get("errors", []),
+            "frame": copy.deepcopy(frame),
+            "frame_validation": frame_check,
+            "model_calls": 0,
+        }
+    payload = _impact_decision_frame_payload(frame)
+    core = mandatory_core if isinstance(mandatory_core, dict) else {}
+    coverage = core.get("mandatory_semantic_coverage", [])
+    mandatory_ids = ["IMPACT_DECISION_FRAME", "IMPACT_DECISION_CONTRACT"]
+    mandatory_ids.extend(str(item.get("slot_id")) for item in frame.get("decision_slots", []) if item.get("slot_id"))
+    mandatory_ids.extend(
+        str(item.get("canonical_semantic_id")) for item in coverage
+        if isinstance(item, dict) and item.get("canonical_semantic_id")
+    )
+    mandatory_audit = audit_mandatory_planning_payload({**copy.deepcopy(payload), "packet_complete": True})
+    role_packet = build_planning_role_packet(
+        role, payload, [], hard_limit=max_chars, render=render, base_render=base_render,
+        source_planning_context_hash=frame.get("source_planning_context_hash"),
+        mandatory_items=mandatory_ids, planning_core_hash=frame.get("source_mandatory_core_hash"),
+        mandatory_payload_audit=mandatory_audit,
+        mandatory_semantic_coverage=coverage,
+        mandatory_core_metrics=core.get("metrics") if isinstance(core, dict) else None,
+    )
+    complete = bool(role_packet.get("packet_complete"))
+    return {
+        "version": 1,
+        "artifact_type": "ImpactDecisionChoiceRequest",
+        "packet": copy.deepcopy(role_packet.get("payload", payload)),
+        "role_packet": copy.deepcopy(role_packet),
+        "frame": copy.deepcopy(frame),
+        "frame_hash": frame.get("frame_hash"),
+        "mandatory_semantic_coverage": copy.deepcopy(coverage),
+        "mandatory_semantic_coverage_rate": role_packet.get("mandatory_semantic_coverage_rate", 1.0),
+        "packet_chars": role_packet.get("rendered_chars", 0),
+        "packet_complete": complete,
+        "status": "READY" if complete else role_packet.get("status"),
+        "errors": list(role_packet.get("errors", [])),
+        "model_calls": 0,
+    }
+
+
+build_impact_decision_role_packet = build_impact_decision_packet
+
+
+def validate_impact_decision_choices(candidate, frame):
+    """Validate the strict choice-only response against the frame."""
+    value = candidate if isinstance(candidate, dict) else {}
+    errors = []
+    if not isinstance(value.get("decisions"), list):
+        return {
+            "valid": False, "status": IMPACT_DECISION_OUTPUT_MALFORMED,
+            "errors": [IMPACT_DECISION_OUTPUT_MALFORMED], "choices": [], "model_calls": 0,
+        }
+    if set(value.keys()) != {"decisions"}:
+        errors.append(IMPACT_DECISION_OUTPUT_MALFORMED + ": authority fields are not model-writable")
+    frame_check = validate_impact_decision_frame(frame)
+    if not frame_check.get("valid"):
+        errors.append(IMPACT_DECISION_FRAME_INCOMPLETE)
+    slots = {
+        str(item.get("slot_id")): item for item in list(frame.get("decision_slots", []) or [])
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+    seen = set()
+    choices = []
+    for item in value.get("decisions", [])[:MAX_IMPACT_SEEDS + 1]:
+        if not isinstance(item, dict):
+            errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
+            continue
+        keys = set(item.keys())
+        if keys != set(IMPACT_DECISION_MODEL_FIELDS):
+            if keys.intersection(IMPACT_DECISION_AUTHORITY_FIELDS):
+                errors.append(IMPACT_DECISION_OUTPUT_MALFORMED + ": authority field supplied by model")
+            else:
+                errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
+            continue
+        slot_id = str(item.get("slot_id") or "")
+        if slot_id in seen:
+            errors.append(DUPLICATE_IMPACT_DECISION_SLOT)
+            continue
+        seen.add(slot_id)
+        slot = slots.get(slot_id)
+        if slot is None:
+            errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
+            continue
+        if any(not isinstance(item.get(field), str) or not item.get(field).strip()
+               for field in ("decision", "chosen_target", "reason_code", "bounded_rationale")):
+            errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
+            continue
+        decision = str(item.get("decision")).upper().strip()
+        if decision not in set(str(value) for value in slot.get("allowed_decisions", []) or []):
+            errors.append(IMPACT_DECISION_NOT_ALLOWED)
+        target = str(item.get("chosen_target")).strip()
+        if target not in set(str(value) for value in slot.get("allowed_targets", []) or []):
+            errors.append(IMPACT_DECISION_TARGET_NOT_ALLOWED)
+        if decision == "INTERFACE_REUSE" and target not in set(
+            str(value) for value in slot.get("required_interfaces", []) or []
+        ):
+            errors.append(IMPACT_DECISION_TARGET_NOT_ALLOWED)
+        if decision in {
+            "MUST_CHANGE", "TEST_CHANGE", "PRESERVATION_ONLY", "VERIFY_ONLY", "INSPECT_ONLY",
+        } and target != str(slot.get("surface_id")):
+            errors.append(IMPACT_DECISION_TARGET_NOT_ALLOWED)
+        if decision == "AUTHORITY_CHANGE" and target not in set(
+            str(value) for value in slot.get("authority_change_targets", []) or []
+        ):
+            errors.append(IMPACT_DECISION_TARGET_NOT_ALLOWED)
+        choices.append({
+            "slot_id": slot_id, "decision": decision, "chosen_target": target,
+            "reason_code": str(item.get("reason_code")).strip(),
+            "bounded_rationale": _compact(item.get("bounded_rationale"), 360),
+        })
+    expected = set(slots)
+    if seen - expected:
+        errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
+    missing = expected - seen
+    if missing:
+        errors.append(MISSING_IMPACT_DECISION_SLOT)
+    if len(value.get("decisions", [])) > len(expected):
+        # Unknown/duplicate is more informative when available; malformed
+        # cardinality is retained for an array that only overflows.
+        if not any(item in errors for item in (DUPLICATE_IMPACT_DECISION_SLOT, UNKNOWN_IMPACT_DECISION_SLOT)):
+            errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
+    errors = list(dict.fromkeys(errors))
+    valid = not errors and len(seen) == len(expected) and len(choices) == len(expected)
+    choices.sort(key=lambda item: str(item.get("slot_id") or ""))
+    return {
+        "valid": valid,
+        "status": "READY" if valid else (errors[0] if errors else IMPACT_DECISION_OUTPUT_MALFORMED),
+        "errors": errors,
+        "choices": choices if valid else [],
+        "received": len(value.get("decisions", [])),
+        "expected": len(expected),
+        "model_calls": 0,
+        "choice_hash": impact_decision_choice_hash(frame, {"decisions": choices}) if valid else None,
+    }
+
+
+validate_impact_decision_output = validate_impact_decision_choices
+
+
+def deterministic_impact_decision_choices(frame):
+    """Produce a provider-free weak-choice fixture for architecture tests."""
+    result = []
+    for slot in list((frame or {}).get("decision_slots", []) or []):
+        allowed = [str(item) for item in slot.get("allowed_decisions", []) or []]
+        if not allowed:
+            continue
+        if "INTERFACE_REUSE" in allowed and slot.get("required_interfaces"):
+            decision = "INTERFACE_REUSE"
+            target = str(slot.get("required_interfaces")[0])
+            reason_code = "REUSE_CURRENT_INTERFACE"
+            rationale = "Reuse the verified current interface for this bounded slot."
+        elif "TEST_CHANGE" in allowed:
+            decision = "TEST_CHANGE"
+            target = str(slot.get("surface_id"))
+            reason_code = "TEST_BOUNDARY"
+            rationale = "Keep the decision at the verified test boundary."
+        elif "MUST_CHANGE" in allowed:
+            decision = "MUST_CHANGE"
+            target = str(slot.get("surface_id"))
+            reason_code = "CHANGE_REQUIRED"
+            rationale = "Apply the requirement through the verified current surface."
+        elif "PRESERVATION_ONLY" in allowed:
+            decision = "PRESERVATION_ONLY"
+            target = str(slot.get("surface_id"))
+            reason_code = "PRESERVE_CURRENT_BEHAVIOR"
+            rationale = "Preserve the verified current behavior without mutation."
+        elif "VERIFY_ONLY" in allowed:
+            decision = "VERIFY_ONLY"
+            target = str(slot.get("surface_id"))
+            reason_code = "INSPECT_CURRENT_SURFACE"
+            rationale = "Inspect the verified current surface without mutation."
+        else:
+            decision = allowed[0]
+            target = str(slot.get("surface_id"))
+            reason_code = "INSPECT_CURRENT_SURFACE"
+            rationale = "Keep the choice bounded to the verified surface."
+        result.append({
+            "slot_id": slot.get("slot_id"), "decision": decision, "chosen_target": target,
+            "reason_code": reason_code, "bounded_rationale": rationale,
+        })
+    return {"decisions": result}
+
+
+def _compiled_preservation_texts(slot):
+    return _bounded_strings([
+        item.get("text") if isinstance(item, dict) else item
+        for item in list(slot.get("required_preservation_promises", []) or [])
+    ], 8, 300)
+
+
+def _compiled_verification_texts(slot):
+    return _bounded_strings([
+        item.get("text") if isinstance(item, dict) else item
+        for item in list(slot.get("required_verification_contracts", []) or [])
+    ], 8, 300)
+
+
+def compile_impact_map_from_choices(
+    frame, choices, requirements, evidence, surface_registry=None,
+    impact_seeds=None, *, task_goal=None, provider_generation_identity=None,
+):
+    """Compile validated choices into the existing canonical Impact Map.
+
+    This function is deliberately fail-closed.  It never calls a provider and
+    it never hydrates an invalid or legacy response into a valid map.
+    """
+    frame_check = validate_impact_decision_frame(frame)
+    if not frame_check.get("valid"):
+        return {
+            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
+            "errors": [IMPACT_DECISION_FRAME_INCOMPLETE] + frame_check.get("errors", []),
+            "impact_map": None, "model_calls": 0, "compiled": False,
+        }
+    choice_candidate = choices
+    if isinstance(choices, dict) and "decisions" not in choices and isinstance(
+        choices.get("choices"), list
+    ):
+        # Accept the deterministic validator artifact produced by the normal
+        # orchestration path, while still re-running the strict contract gate
+        # before compilation.
+        choice_candidate = {"decisions": choices.get("choices", [])}
+    choice_check = validate_impact_decision_choices(choice_candidate, frame)
+    if not choice_check.get("valid"):
+        return {
+            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
+            "errors": list(choice_check.get("errors", [])) or [IMPACT_MAP_COMPILE_INVALID],
+            "impact_map": None, "model_calls": 0, "compiled": False,
+        }
+    registry = surface_registry if isinstance(surface_registry, dict) else {}
+    reqs = active_requirements(requirements or [])
+    by_surface = canonical_surface_by_id(registry)
+    seeds = [item for item in list(impact_seeds or []) if isinstance(item, dict)]
+    seed_by_id = {str(item.get("seed_id")): item for item in seeds if item.get("seed_id")}
+    slots = {
+        str(item.get("slot_id")): item for item in list(frame.get("decision_slots", []) or [])
+        if isinstance(item, dict)
+    }
+    disposition_for_choice = {
+        "INSPECT_ONLY": "VERIFY_ONLY", "AUTHORITY_CHANGE": "MUST_CHANGE",
+    }
+    raw_impacts = []
+    authority_changes_by_impact = {}
+    inherited_by_impact = {}
+    errors = []
+    for choice in choice_check.get("choices", []):
+        slot = slots.get(str(choice.get("slot_id")))
+        if not slot:
+            errors.append(UNKNOWN_IMPACT_DECISION_SLOT)
+            continue
+        surface = by_surface.get(str(slot.get("surface_id")))
+        seed = seed_by_id.get(str(slot.get("seed_id")))
+        if not surface or not seed:
+            errors.append(f"{slot.get('slot_id')}: deterministic surface/seed binding is missing")
+            continue
+        decision = str(choice.get("decision") or "").upper()
+        disposition = disposition_for_choice.get(decision, decision)
+        if disposition not in DISPOSITIONS:
+            errors.append(f"{slot.get('slot_id')}: unsupported compiled disposition")
+            continue
+        rationale = _compact(choice.get("bounded_rationale"), MAX_TEXT_CHARS)
+        reason_code = _compact(choice.get("reason_code"), 120)
+        if not rationale or not reason_code:
+            errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
+            continue
+        interface_ids = []
+        interface_names = []
+        target = str(choice.get("chosen_target") or "")
+        if decision == "INTERFACE_REUSE":
+            candidates = [
+                item for item in list(slot.get("interface_provenance", []) or [])
+                if str(item.get("surface_id")) == target
+            ]
+            if candidates:
+                interface_ids = [target]
+                interface_names = [str(candidates[0].get("symbol") or "")]
+            elif target in set(str(item) for item in slot.get("required_interfaces", []) or []):
+                interface_ids = [target]
+                interface = by_surface.get(target)
+                interface_names = [str((interface or {}).get("symbol") or "")]
+        req_ids = [
+            str(item) for item in list(slot.get("requirement_ids", []) or [])
+            if str(item) in {req["requirement_id"] for req in reqs}
+        ]
+        evidence_refs = _bounded_ids(surface.get("evidence_ids"), MAX_EVIDENCE_REFS_PER_IMPACT)
+        raw_impacts.append({
+            "impact_id": normalize_impact_id(seed.get("impact_id")),
+            "surface_id": str(slot.get("surface_id")),
+            "seed_id": str(slot.get("seed_id")),
+            "disposition": disposition,
+            "requirement_ids": req_ids,
+            "repository_evidence_ids": evidence_refs,
+            "interfaces_to_reuse": interface_ids,
+            "existing_interfaces_to_reuse": interface_names,
+            "action": rationale,
+            "candidate_change": rationale,
+            "reason": f"{reason_code}: {rationale}",
+            "preserve": _compiled_preservation_texts(slot),
+            "local_preservation_constraints": _compiled_preservation_texts(slot),
+            "prohibition_constraints": _bounded_strings(slot.get("prohibitions"), 8, 320),
+            "verification": _compiled_verification_texts(slot),
+            "local_verification": _compiled_verification_texts(slot),
+            "test_contract": _compiled_verification_texts(slot),
+            "local_test_contract": _compiled_verification_texts(slot),
+            "necessity_status": {
+                "MUST_CHANGE": "MUST_CHANGE", "PRESERVATION_ONLY": "PRESERVATION_ONLY",
+                "INSUFFICIENT_EVIDENCE": "INSUFFICIENT_EVIDENCE",
+            }.get(disposition, "CANDIDATE"),
+        })
+        if decision == "AUTHORITY_CHANGE":
+            authority_changes_by_impact[normalize_impact_id(seed.get("impact_id"))] = {
+                "type": "AUTHORITY_CHANGE",
+                "from": (slot.get("current_owner") or {}).get("symbol")
+                if isinstance(slot.get("current_owner"), dict) else None,
+                "to": target,
+                "authorized": True,
+                "provenance": "EXPLICIT_REQUIREMENT_AUTHORITY",
+            }
+        inherited_by_impact[normalize_impact_id(seed.get("impact_id"))] = {
+            "seed_id": str(slot.get("seed_id")),
+            "surface_id": str(slot.get("surface_id")),
+            "current_owner": copy.deepcopy(slot.get("current_owner")),
+            "required_interfaces": copy.deepcopy(slot.get("required_interfaces", [])),
+            "required_preservation_promises": copy.deepcopy(slot.get("required_preservation_promises", [])),
+            "required_verification_contracts": copy.deepcopy(slot.get("required_verification_contracts", [])),
+            "dnt": copy.deepcopy(slot.get("dnt", [])),
+            "prohibitions": copy.deepcopy(slot.get("prohibitions", [])),
+        }
+    if errors or len(raw_impacts) != len(slots):
+        return {
+            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
+            "errors": list(dict.fromkeys(errors + ([IMPACT_MAP_COMPILE_INVALID] if not errors else []))),
+            "impact_map": None, "model_calls": 0, "compiled": False,
+        }
+    choice_hash = choice_check.get("choice_hash") or impact_decision_choice_hash(frame, choices)
+    raw_map = {
+        "version": 1,
+        "task_goal": task_goal or "",
+        "impacts": raw_impacts,
+        "integration_verification": [],
+        "insufficient_evidence": [],
+        "new_surface_proposals": [],
+        "bounds": {
+            "max_impact_entries": MAX_IMPACT_ENTRIES,
+            "max_requirement_refs_per_impact": MAX_REQUIREMENT_REFS_PER_IMPACT,
+            "max_evidence_refs_per_impact": MAX_EVIDENCE_REFS_PER_IMPACT,
+        },
+        "provenance": DERIVED_PLAN_DECISION,
+    }
+    hydrated = hydrate_impact_map(
+        raw_map, registry, reqs, evidence,
+        allow_legacy_exact=False, impact_seeds=seeds,
+    )
+    if not hydrated.get("hydration_valid") or not hydrated.get("impacts"):
+        return {
+            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
+            "errors": list(hydrated.get("hydration_errors", [])) or [IMPACT_MAP_COMPILE_INVALID],
+            "impact_map": None, "hydration": hydrated, "model_calls": 0, "compiled": False,
+        }
+    for item in hydrated.get("impacts", []):
+        impact_id = normalize_impact_id(item.get("impact_id"))
+        inherited = inherited_by_impact.get(impact_id, {})
+        item["seed_id"] = inherited.get("seed_id")
+        item["current_owner"] = copy.deepcopy(inherited.get("current_owner"))
+        item["required_interfaces"] = copy.deepcopy(inherited.get("required_interfaces", []))
+        item["preservation_promises"] = copy.deepcopy(inherited.get("required_preservation_promises", []))
+        item["required_preservation_promises"] = copy.deepcopy(inherited.get("required_preservation_promises", []))
+        item["verification_contracts"] = copy.deepcopy(inherited.get("required_verification_contracts", []))
+        item["required_verification_contracts"] = copy.deepcopy(inherited.get("required_verification_contracts", []))
+        item["dnt"] = copy.deepcopy(inherited.get("dnt", []))
+        item["prohibitions"] = copy.deepcopy(inherited.get("prohibitions", []))
+        if impact_id in authority_changes_by_impact:
+            item["authority_change"] = copy.deepcopy(authority_changes_by_impact[impact_id])
+        item["impact_decision_frame_hash"] = frame.get("frame_hash")
+        item["impact_decision_choice_hash"] = choice_hash
+        item["source_planning_context_hash"] = frame.get("source_planning_context_hash")
+        item["source_mandatory_core_hash"] = frame.get("source_mandatory_core_hash")
+        item["provider_generation_identity"] = copy.deepcopy(
+            provider_generation_identity if provider_generation_identity is not None else "UNSPECIFIED"
+        )
+    hydrated["task_goal"] = _compact(task_goal or hydrated.get("task_goal"), 1000)
+    hydrated["impact_decision_frame_hash"] = frame.get("frame_hash")
+    hydrated["impact_decision_choice_hash"] = choice_hash
+    hydrated["source_planning_context_hash"] = frame.get("source_planning_context_hash")
+    hydrated["source_mandatory_core_hash"] = frame.get("source_mandatory_core_hash")
+    hydrated["provider_generation_identity"] = copy.deepcopy(
+        provider_generation_identity if provider_generation_identity is not None else "UNSPECIFIED"
+    )
+    hydrated["planning_provenance"] = {
+        "source_planning_context_hash": frame.get("source_planning_context_hash"),
+        "source_mandatory_core_hash": frame.get("source_mandatory_core_hash"),
+        "impact_decision_frame_hash": frame.get("frame_hash"),
+        "impact_decision_choice_hash": choice_hash,
+        "provider_generation_identity": copy.deepcopy(
+            provider_generation_identity if provider_generation_identity is not None else "UNSPECIFIED"
+        ),
+    }
+    semantic_validation = validate_impact_map(
+        hydrated, reqs, evidence, EXISTING_PROJECT, surface_registry=registry,
+    )
+    if not semantic_validation.get("valid"):
+        return {
+            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
+            "errors": semantic_validation.get("errors", []) or [IMPACT_MAP_COMPILE_INVALID],
+            "impact_map": None, "hydration": hydrated,
+            "semantic_validation": semantic_validation, "model_calls": 0, "compiled": False,
+        }
+    return {
+        "valid": True, "status": "READY", "errors": [],
+        "impact_map": hydrated, "hydration": hydrated,
+        "semantic_validation": semantic_validation,
+        "choice_validation": choice_check,
+        "choice_hash": choice_hash, "model_calls": 0, "compiled": True,
+        "inherited_preservation_count": sum(
+            len(item.get("preservation_promises", []) or []) for item in hydrated.get("impacts", [])
+        ),
+        "inherited_verification_count": sum(
+            len(item.get("verification_contracts", []) or []) for item in hydrated.get("impacts", [])
+        ),
+    }
+
+
+compile_impact_map_from_decisions = compile_impact_map_from_choices
+compile_impact_decision_map = compile_impact_map_from_choices
+
+
+def impact_decision_frame_self_test():
+    """Provider-free V24.3 architecture self-test and diagnostics."""
+    requirement = {
+        "requirement_id": "REQ-SELF-PAUSE",
+        "text": (
+            "Add a pause indicator while preserving PauseController as the sole pause-state owner, "
+            "Escape behavior, and movement behavior."
+        ),
+        "provenance": USER_STATED,
+    }
+    evidence = [
+        {
+            "evidence_id": "REPO-SELF-OWNER", "category": "CURRENT_STATE_OWNER",
+            "path": "src/pause_controller.js", "symbol": "PauseController",
+            "fact": "PauseController owns pause state", "file_sha256": "a" * 64,
+        },
+        {
+            "evidence_id": "REPO-SELF-INTERFACE", "category": "CURRENT_INTERFACE",
+            "path": "src/pause_controller.js", "symbol": "PauseController.togglePause",
+            "fact": "PauseController.togglePause is the current pause transition interface",
+            "file_sha256": "b" * 64,
+        },
+        {
+            "evidence_id": "REPO-SELF-TEST", "category": "CURRENT_TEST",
+            "path": "tests/pause.test.js", "symbol": "pause flow",
+            "fact": "focused tests cover Escape and movement behavior", "file_sha256": "c" * 64,
+        },
+    ]
+    brain = {
+        "project_id": "self-test-project", "task_id": "self-test-task",
+        "task_goal": {"text": requirement["text"]},
+        "current_owners": [{
+            "text": "PauseController owns pause state", "path": "src/pause_controller.js",
+            "symbol": "PauseController", "category": "CURRENT_STATE_OWNER",
+            "evidence_ids": ["REPO-SELF-OWNER"],
+        }],
+        "current_state_ownership": [{
+            "text": "PauseController owns pause state", "path": "src/pause_controller.js",
+            "symbol": "PauseController", "category": "CURRENT_STATE_OWNER",
+            "evidence_ids": ["REPO-SELF-OWNER"],
+        }],
+        "current_interfaces": [{
+            "text": "PauseController.togglePause is current", "path": "src/pause_controller.js",
+            "symbol": "PauseController.togglePause", "category": "CURRENT_INTERFACE",
+            "evidence_ids": ["REPO-SELF-INTERFACE"],
+        }],
+        "relevant_tests": [{
+            "text": "focused tests cover Escape and movement behavior", "path": "tests/pause.test.js",
+            "symbol": "pause flow", "category": "CURRENT_TEST",
+            "evidence_ids": ["REPO-SELF-TEST"],
+        }],
+        "preservation_constraints": [{"text": requirement["text"], "provenance": USER_STATED}],
+        "dnt": ["Do not create a second pause-state owner."],
+        "prohibitions": ["Do not create a second pause-state owner."],
+    }
+    requirements = [requirement]
+    registry = build_canonical_surface_registry(brain, evidence)
+    seeds = build_impact_seeds(brain, requirements, evidence, registry=registry)
+    core = build_canonical_mandatory_planning_core({
+        "project_id": brain["project_id"], "task_id": brain["task_id"],
+        "task_goal": brain["task_goal"], "requirements": requirements,
+        "surfaces": registry.get("surfaces", []), "impact_seeds": seeds,
+        "preservation_constraints": brain["preservation_constraints"],
+        "dnt": brain["dnt"], "prohibitions": brain["prohibitions"],
+    })
+    frame = build_impact_decision_frame(
+        brain, requirements, evidence, surface_registry=registry,
+        impact_seeds=seeds, mandatory_core=core,
+    )
+    frame_check = validate_impact_decision_frame(frame)
+    choices = deterministic_impact_decision_choices(frame)
+    choice_check = validate_impact_decision_choices(choices, frame)
+    compiled = compile_impact_map_from_choices(
+        frame, choices, requirements, evidence, surface_registry=registry,
+        impact_seeds=seeds, task_goal=requirement["text"],
+        provider_generation_identity={"model": "gemma4:e4b", "generation": 0},
+    )
+    legacy = {
+        "impacts": [{
+            "impact_id": "IMPACT-001", "disposition": "INTERFACE_REUSE",
+            "requirement_ids": [requirement["requirement_id"]],
+            "preservation_promises": [], "verification_contracts": [],
+            "action": "Reuse IFACE-1",
+        }],
+    }
+    legacy_check = validate_impact_decision_choices(legacy, frame)
+    duplicate = copy.deepcopy(choices)
+    if duplicate.get("decisions"):
+        duplicate["decisions"] = [duplicate["decisions"][0], duplicate["decisions"][0]]
+    duplicate_check = validate_impact_decision_choices(duplicate, frame)
+    missing = copy.deepcopy(choices)
+    if missing.get("decisions"):
+        missing["decisions"] = missing["decisions"][:-1]
+    missing_check = validate_impact_decision_choices(missing, frame)
+    forbidden = copy.deepcopy(choices)
+    if forbidden.get("decisions"):
+        forbidden["decisions"][0]["decision"] = "NEW_OWNER"
+    forbidden_check = validate_impact_decision_choices(forbidden, frame)
+    packet = build_impact_decision_packet(
+        frame, render=lambda value: "IMPACT DECISION PACKET:\n" + _compact_json(value),
+        base_render=lambda value: "IMPACT DECISION PACKET:\n" + _compact_json(value),
+        mandatory_core=core,
+    )
+    checks = {
+        "frame_complete": frame_check.get("valid") is True,
+        "frame_zero_model": frame_check.get("model_calls") == 0,
+        "choices_valid": choice_check.get("valid") is True,
+        "compiled_valid": compiled.get("valid") is True,
+        "compiled_zero_model": compiled.get("model_calls") == 0,
+        "compiled_semantic_validation": compiled.get("semantic_validation", {}).get("valid") is True,
+        "inherited_preservation": bool(compiled.get("inherited_preservation_count")),
+        "inherited_verification": bool(compiled.get("inherited_verification_count")),
+        "legacy_failed_output_rejected": (
+            legacy_check.get("valid") is False
+            and legacy_check.get("status") == IMPACT_DECISION_OUTPUT_MALFORMED
+        ),
+        "duplicate_rejected": DUPLICATE_IMPACT_DECISION_SLOT in duplicate_check.get("errors", []),
+        "missing_rejected": MISSING_IMPACT_DECISION_SLOT in missing_check.get("errors", []),
+        "forbidden_rejected": IMPACT_DECISION_NOT_ALLOWED in forbidden_check.get("errors", []),
+        "packet_fits": packet.get("packet_complete") is True and packet.get("packet_chars", 0) <= MAX_PLANNER_CONTEXT_CHARS,
+        "packet_exact_render": (
+            packet.get("role_packet", {}).get("exact_model_input")
+            == packet.get("role_packet", {}).get("rendered_packet")
+        ),
+    }
+    return {
+        "passed": all(checks.values()), "checks": checks, "model_calls": 0,
+        "frame": frame, "choices": choices, "compiled": compiled,
+        "diagnostics": {
+            "frame_hash": frame.get("frame_hash"),
+            "choice_hash": choice_check.get("choice_hash"),
+            "slot_count": len(frame.get("decision_slots", []) or []),
+            "packet_chars": packet.get("packet_chars"),
+        },
+    }
+
+
+run_impact_decision_frame_self_test = impact_decision_frame_self_test
 
 
 def normalize_new_surface_proposals(values):

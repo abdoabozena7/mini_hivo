@@ -1526,6 +1526,8 @@ def run_verified_planning_self_test() -> dict:
     # VerifiedPlanningContext artifact.
     from hivo import impact_planning as impact
 
+    decision_frame_self_test = impact.impact_decision_frame_self_test()
+
     stage3_brain = build_stage3_task_brain(context)
     stage3_requirements = context.get("new_requirements", [])
     stage3_evidence = context.get("current_repository_evidence", [])
@@ -1693,6 +1695,7 @@ def run_verified_planning_self_test() -> dict:
         "confirmed_drift_retained_in_packet": bool(
             drift_packet.get("packet", {}).get("confirmed_conflicts")
         ),
+        "impact_decision_frame_architecture": decision_frame_self_test.get("passed") is True,
     }
     return {
         "passed": all(checks.values()), "checks": checks, "model_calls": 0,
@@ -1709,5 +1712,6 @@ def run_verified_planning_self_test() -> dict:
             },
             "optional_dropped": optional_overflow.get("optional_items_dropped_ids", []),
             "mandatory_overflow_status": mandatory_overflow.get("status"),
+            "impact_decision_frame": decision_frame_self_test.get("diagnostics", {}),
         },
     }

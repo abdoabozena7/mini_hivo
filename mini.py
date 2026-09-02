@@ -1754,6 +1754,19 @@ def new_metrics(mode):
         "mandatory_semantic_coverage": 1.0,
         "planning_core_builds": 0,
         "planning_core_model_calls": 0,
+        # V24.3 authority-inherited ImpactPlanner choice accounting.  Frame
+        # construction, validation, and compilation are all zero-model
+        # operations; these counters make that boundary observable.
+        "impact_decision_frames_created": 0,
+        "impact_decision_frame_incomplete": 0,
+        "impact_decision_slots_required": 0,
+        "impact_decision_choices_received": 0,
+        "impact_decision_duplicate_slots": 0,
+        "impact_decision_missing_slots": 0,
+        "impact_decision_unknown_slots": 0,
+        "impact_decision_invalid_choices": 0,
+        "impact_maps_compiled_from_choices": 0,
+        "impact_map_compile_failures": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -2686,17 +2699,32 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     raise ProviderError(last_error)
 
 
+class _DuplicateJSONKeyError(ValueError):
+    """A structured response repeated an object key instead of choosing one."""
+
+
+def _reject_duplicate_json_keys(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise _DuplicateJSONKeyError(f"duplicate JSON object key: {key}")
+        value[key] = item
+    return value
+
+
 def _parse_json_content(content):
     text = str(content).strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
     try:
-        return json.loads(text)
+        return json.loads(text, object_pairs_hook=_reject_duplicate_json_keys)
+    except _DuplicateJSONKeyError:
+        raise
     except json.JSONDecodeError:
         left, right = text.find("{"), text.rfind("}")
         if left >= 0 and right > left:
-            return json.loads(text[left:right + 1])
+            return json.loads(text[left:right + 1], object_pairs_hook=_reject_duplicate_json_keys)
         raise
 
 
@@ -2751,9 +2779,19 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
                                  role=("Quality" if label == "quality-review" else role))
             last_content = message.get("content", "")
             data = _parse_json_content(last_content)
-            if validator(data):
+            validation = validator(data)
+            validation_valid = (
+                bool(validation.get("valid")) if isinstance(validation, dict)
+                else bool(validation)
+            )
+            if validation_valid:
                 return data
-            last_error = f"semantic validation failed: {compact_text(data, 700)}"
+            if isinstance(validation, dict) and validation.get("errors"):
+                last_error = "semantic validation failed: " + "; ".join(
+                    str(item) for item in validation.get("errors", [])[:8]
+                )
+            else:
+                last_error = f"semantic validation failed: {compact_text(data, 700)}"
         except ProviderError:
             raise
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -5023,6 +5061,18 @@ def prepare_stage2_context(raw_goal, contract, repo_snapshot=None, interactive=T
 # ---------------------------------------------------------------------------
 
 impact_map_schema = stage3.impact_map_schema
+impact_decision_frame_schema = stage3.impact_decision_frame_schema
+impact_decision_choice_schema = stage3.impact_decision_choice_schema
+impact_map_field_ownership = stage3.impact_map_field_ownership
+audit_impact_map_field_ownership = stage3.audit_impact_map_field_ownership
+IMPACT_DECISION_FRAME_INCOMPLETE = stage3.IMPACT_DECISION_FRAME_INCOMPLETE
+IMPACT_DECISION_OUTPUT_MALFORMED = stage3.IMPACT_DECISION_OUTPUT_MALFORMED
+DUPLICATE_IMPACT_DECISION_SLOT = stage3.DUPLICATE_IMPACT_DECISION_SLOT
+MISSING_IMPACT_DECISION_SLOT = stage3.MISSING_IMPACT_DECISION_SLOT
+UNKNOWN_IMPACT_DECISION_SLOT = stage3.UNKNOWN_IMPACT_DECISION_SLOT
+IMPACT_DECISION_NOT_ALLOWED = stage3.IMPACT_DECISION_NOT_ALLOWED
+IMPACT_DECISION_TARGET_NOT_ALLOWED = stage3.IMPACT_DECISION_TARGET_NOT_ALLOWED
+IMPACT_MAP_COMPILE_INVALID = stage3.IMPACT_MAP_COMPILE_INVALID
 impact_challenge_schema = stage3.challenge_schema
 canonical_surface_registry_schema = stage3.canonical_surface_registry_schema
 build_canonical_surface_registry = stage3.build_canonical_surface_registry
@@ -5055,6 +5105,18 @@ build_challenger_packet = stage3.build_challenger_packet
 build_revision_packet = stage3.build_revision_packet
 build_minimal_plan_packet = stage3.build_minimal_plan_packet
 validate_planning_packet = stage3.validate_planning_packet
+build_impact_decision_frame = stage3.build_impact_decision_frame
+validate_impact_decision_frame = stage3.validate_impact_decision_frame
+build_impact_decision_packet = stage3.build_impact_decision_packet
+validate_impact_decision_choices = stage3.validate_impact_decision_choices
+validate_impact_decision_output = stage3.validate_impact_decision_output
+deterministic_impact_decision_choices = stage3.deterministic_impact_decision_choices
+compile_impact_map_from_choices = stage3.compile_impact_map_from_choices
+compile_impact_map_from_decisions = stage3.compile_impact_map_from_decisions
+impact_decision_frame_hash = stage3.impact_decision_frame_hash
+impact_decision_choice_hash = stage3.impact_decision_choice_hash
+impact_decision_choices_hash = stage3.impact_decision_choices_hash
+impact_decision_frame_self_test = stage3.impact_decision_frame_self_test
 bind_impact_decisions_to_seeds = stage3.bind_impact_decisions_to_seeds
 hydrate_impact_map = stage3.hydrate_impact_map
 audit_impact_surfaces = stage3.audit_impact_surfaces
@@ -5221,6 +5283,269 @@ COMPLETE CANONICAL PLANNING PACKET:
 {json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
 
 
+def _impact_decision_frame_prompt(context):
+    """Render the compact V24.3 choice-only ImpactPlanner envelope."""
+    return f"""You are IMPACT PLANNER, a bounded read-only role in a weak-model coding orchestrator.
+The ImpactDecisionFrame below is authoritative and was constructed before this call.
+
+WHAT IS FIXED:
+- slot, seed, impact, surface, owner, interface, DNT, prohibition, preservation, and verification identity.
+
+WHAT YOU MUST DECIDE:
+- return exactly one choice for every required slot;
+- choose only an allowed decision and an allowed target;
+- provide a short reason_code and bounded_rationale.
+
+WHAT YOU MUST NOT REPEAT OR CHANGE:
+- do not return or rewrite preservation_promises, verification_contracts, DNT, prohibitions, owners,
+  repository paths, repository evidence, seed IDs, impact IDs, or surface IDs;
+- do not add a slot, omit a slot, duplicate a slot, invent a target, or migrate ownership unless the
+  frame explicitly exposes AUTHORITY_CHANGE.
+
+Return only {{"decisions":[{{"slot_id":"...","decision":"...","chosen_target":"...",
+"reason_code":"...","bounded_rationale":"..."}}]}}. Do not write code, inspect files, call tools,
+or reproduce raw source.
+
+AUTHORITY-BOUND DECISION FRAME:
+{json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
+
+
+def _record_impact_decision_validation(result):
+    """Publish compact V24.3 choice-validation metrics without model work."""
+    value = result if isinstance(result, dict) else {}
+    RUN["impact_decision_choices_received"] = RUN.get(
+        "impact_decision_choices_received", 0,
+    ) + int(value.get("received", 0) or 0)
+    errors = set(str(item) for item in value.get("errors", []) or [])
+    if stage3.DUPLICATE_IMPACT_DECISION_SLOT in errors:
+        RUN["impact_decision_duplicate_slots"] = RUN.get(
+            "impact_decision_duplicate_slots", 0,
+        ) + 1
+    if stage3.MISSING_IMPACT_DECISION_SLOT in errors:
+        RUN["impact_decision_missing_slots"] = RUN.get(
+            "impact_decision_missing_slots", 0,
+        ) + 1
+    if stage3.UNKNOWN_IMPACT_DECISION_SLOT in errors:
+        RUN["impact_decision_unknown_slots"] = RUN.get(
+            "impact_decision_unknown_slots", 0,
+        ) + 1
+    if not value.get("valid"):
+        RUN["impact_decision_invalid_choices"] = RUN.get(
+            "impact_decision_invalid_choices", 0,
+        ) + 1
+
+
+def _create_impact_map_from_decision_frame(
+    task_brain, contract, repository_evidence, requirements, registry,
+    seeds, planning_packet, structured_call, verified_planning_context,
+):
+    """Run the V24.3 frame -> choice -> compiled-map path."""
+    core = planning_packet.get("canonical_mandatory_planning_core", {})
+    frame = stage3.build_impact_decision_frame(
+        task_brain, requirements, repository_evidence,
+        surface_registry=registry, impact_seeds=seeds,
+        verified_planning_context=verified_planning_context,
+        mandatory_core=core,
+    )
+    RUN["impact_decision_frame"] = copy.deepcopy(frame)
+    RUN["impact_decision_frames_created"] = RUN.get(
+        "impact_decision_frames_created", 0,
+    ) + 1
+    RUN["impact_decision_slots_required"] = RUN.get(
+        "impact_decision_slots_required", 0,
+    ) + len(frame.get("decision_slots", []) or [])
+    record_run_event(
+        "impact_decision_frame_created", frame_hash=frame.get("frame_hash"),
+        slot_count=len(frame.get("decision_slots", []) or []),
+        frame_complete=frame.get("frame_complete"), frame_errors=frame.get("frame_errors", []),
+        model_calls=0,
+    )
+    frame_validation = stage3.validate_impact_decision_frame(frame)
+    RUN["impact_decision_frame_validation"] = copy.deepcopy(frame_validation)
+    if not frame_validation.get("valid"):
+        RUN["impact_decision_frame_incomplete"] = RUN.get(
+            "impact_decision_frame_incomplete", 0,
+        ) + 1
+        RUN["orchestration_failure"] = stage3.IMPACT_DECISION_FRAME_INCOMPLETE
+        RUN["planning_packet_status"] = stage3.IMPACT_DECISION_FRAME_INCOMPLETE
+        record_run_event(
+            "impact_decision_frame_incomplete",
+            errors=frame_validation.get("errors", []), model_calls=0,
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_DECISION_FRAME_INCOMPLETE}: "
+            + "; ".join(frame_validation.get("errors", [])),
+            status=stage3.IMPACT_DECISION_FRAME_INCOMPLETE,
+        )
+
+    decision_packet = stage3.build_impact_decision_packet(
+        frame, role="ImpactPlanner", max_chars=stage3.MAX_PLANNER_CONTEXT_CHARS,
+        render=_planning_provider_renderer(
+            _impact_decision_frame_prompt, stage3.impact_decision_choice_schema(),
+        ),
+        base_render=_impact_decision_frame_prompt,
+        mandatory_core=core,
+    )
+    decision_role_packet = decision_packet.get("role_packet")
+    RUN["impact_decision_packet"] = copy.deepcopy(decision_packet.get("packet", {}))
+    RUN["impact_decision_packet_observability"] = copy.deepcopy(
+        decision_role_packet or {}
+    )
+    _record_planning_role_packet(decision_role_packet)
+    RUN["impact_planning_role_packet"] = copy.deepcopy(decision_role_packet)
+    RUN["impact_planning_packet"] = copy.deepcopy(decision_packet.get("packet", {}))
+    RUN["impact_planning_packet_observability"] = copy.deepcopy(
+        decision_packet.get("role_packet", {})
+    )
+    record_run_event(
+        "impact_decision_packet_created",
+        frame_hash=frame.get("frame_hash"),
+        packet_chars=decision_packet.get("packet_chars"),
+        packet_complete=decision_packet.get("packet_complete"),
+        packet_hash=(decision_role_packet or {}).get("packet_hash"),
+        exact_model_input=(decision_role_packet or {}).get("exact_model_input"),
+    )
+    if not decision_packet.get("packet_complete"):
+        RUN["impact_planning_context_incomplete"] = RUN.get(
+            "impact_planning_context_incomplete", 0,
+        ) + 1
+        status = decision_packet.get("status") or stage3.PLANNING_PACKET_PROVIDER_OVERFLOW
+        RUN["planning_packet_status"] = status
+        RUN["orchestration_failure"] = status
+        raise ImpactPlanningError(
+            f"{status}: " + "; ".join(decision_packet.get("errors", [])),
+            status=status,
+        )
+
+    context = decision_packet.get("packet", {})
+    RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
+    RUN["impact_planner_calls"] = RUN.get("impact_planner_calls", 0) + 1
+    RUN["impact_planner_context"] = copy.deepcopy(context)
+    prompt_text = (
+        decision_role_packet.get("base_rendered_packet")
+        if isinstance(decision_role_packet, dict)
+        else _impact_decision_frame_prompt(context)
+    )
+    last_validation = {"valid": False, "errors": [stage3.IMPACT_DECISION_OUTPUT_MALFORMED]}
+
+    def validator(data):
+        nonlocal last_validation
+        last_validation = stage3.validate_impact_decision_choices(data, frame)
+        _record_impact_decision_validation(last_validation)
+        return last_validation
+
+    try:
+        if structured_call is None:
+            candidate = structured_model_call(
+                prompt_text, validator, "impact-decision", stage3.impact_decision_choice_schema(),
+                retries=1, role="ImpactPlanner", role_packet=decision_role_packet,
+            )
+        else:
+            candidate = structured_call(
+                prompt_text, validator, "impact-decision", stage3.impact_decision_choice_schema(),
+            )
+    except PlanningPacketBudgetError as exc:
+        status = getattr(exc, "code", stage3.PLANNING_PACKET_PROVIDER_OVERFLOW)
+        RUN["planning_packet_status"] = status
+        RUN["orchestration_failure"] = status
+        raise ImpactPlanningError(str(exc), status=status) from exc
+    except StructuredOutputError as exc:
+        RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        record_run_event(
+            "impact_decision_output_invalid", error=str(exc),
+            validation=last_validation,
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_DECISION_OUTPUT_MALFORMED}: {exc}",
+            status=stage3.IMPACT_DECISION_OUTPUT_MALFORMED,
+        ) from exc
+
+    choice_validation = stage3.validate_impact_decision_choices(candidate, frame)
+    if not last_validation.get("valid") or last_validation.get("choices") != choice_validation.get("choices"):
+        # A callback may not have called the supplied validator.  Count this
+        # deterministic final gate exactly once for that callback path.
+        if last_validation.get("choices") != choice_validation.get("choices"):
+            _record_impact_decision_validation(choice_validation)
+    RUN["impact_decision_choice_validation"] = copy.deepcopy(choice_validation)
+    RUN["raw_impact_decision_choices"] = copy.deepcopy(candidate)
+    RUN["raw_impact_planner_output"] = copy.deepcopy(candidate)
+    record_run_event(
+        "impact_decision_choices_captured", choices=candidate,
+        validation=choice_validation,
+    )
+    if not choice_validation.get("valid"):
+        RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        raise ImpactPlanningError(
+            f"{choice_validation.get('status') or stage3.IMPACT_DECISION_OUTPUT_MALFORMED}: "
+            + "; ".join(choice_validation.get("errors", [])),
+            status=choice_validation.get("status") or stage3.IMPACT_DECISION_OUTPUT_MALFORMED,
+        )
+
+    provider_generation_identity = {
+        "model": MODEL,
+        "provider": "ollama",
+        "role": "ImpactPlanner",
+        "run_id": RUN_ID,
+        "generation": RUN.get("impact_planner_calls", 0),
+    }
+    compiled = stage3.compile_impact_map_from_choices(
+        frame, choice_validation, requirements, repository_evidence,
+        surface_registry=registry, impact_seeds=seeds,
+        task_goal=_authoritative_stage3_task_goal(contract, task_brain),
+        provider_generation_identity=provider_generation_identity,
+    )
+    RUN["impact_decision_compilation"] = copy.deepcopy(compiled)
+    if not compiled.get("valid"):
+        RUN["impact_map_compile_failures"] = RUN.get(
+            "impact_map_compile_failures", 0,
+        ) + 1
+        RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        record_run_event(
+            "impact_map_compile_invalid", errors=compiled.get("errors", []),
+            model_calls=compiled.get("model_calls", 0),
+        )
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_MAP_COMPILE_INVALID}: "
+            + "; ".join(compiled.get("errors", [])),
+            status=stage3.IMPACT_MAP_COMPILE_INVALID,
+        )
+    impact_map = compiled.get("impact_map")
+    validation = stage3.validate_impact_map(
+        impact_map, requirements, repository_evidence, EXISTING_PROJECT,
+        surface_registry=registry,
+    )
+    RUN["impact_map_hydration"] = compiled.get("hydration")
+    RUN["impact_map_validation"] = validation
+    if not validation.get("valid"):
+        RUN["impact_map_compile_failures"] = RUN.get(
+            "impact_map_compile_failures", 0,
+        ) + 1
+        RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        raise ImpactPlanningError(
+            f"{stage3.IMPACT_MAP_COMPILE_INVALID}: "
+            + "; ".join(validation.get("errors", [])),
+            status=stage3.IMPACT_MAP_COMPILE_INVALID,
+        )
+    RUN["impact_maps_compiled_from_choices"] = RUN.get(
+        "impact_maps_compiled_from_choices", 0,
+    ) + 1
+    RUN.setdefault("control_flow", []).append("IMPACT_MAP")
+    RUN["impact_map"] = impact_map
+    RUN["canonical_impact_map"] = impact_map
+    RUN["impact_candidates"] = RUN.get("impact_candidates", 0) + validation.get("impact_candidates", 0)
+    RUN["impact_supported"] = RUN.get("impact_supported", 0) + validation.get("impact_supported", 0)
+    RUN["impact_preservation_only"] = RUN.get("impact_preservation_only", 0) + validation.get(
+        "impact_preservation_only", 0,
+    )
+    record_run_event(
+        "impact_map_created_from_choices", impact_count=len(impact_map.get("impacts", [])),
+        serialized_chars=validation.get("serialized_chars"),
+        frame_hash=frame.get("frame_hash"), choice_hash=compiled.get("choice_hash"),
+        model_calls=compiled.get("model_calls", 0),
+    )
+    return impact_map
+
+
 def create_impact_map(task_brain, contract, repository_evidence, structured_call=None,
                       verified_planning_context=None):
     """Invoke one bounded ImpactPlanner call and deterministically gate its map."""
@@ -5256,11 +5581,20 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     RUN["canonical_surface_registry"] = registry
     seeds = copy.deepcopy(planning_packet.get("impact_seeds", []))
     RUN["impact_seeds"] = seeds
-    RUN["impact_planning_packet"] = copy.deepcopy(packet)
-    RUN["impact_planning_packet_observability"] = copy.deepcopy(packet_observability)
+    use_decision_frame = isinstance(verified_planning_context, dict)
+    if use_decision_frame:
+        # V24.2 remains the source of the canonical surface/seed/core audit;
+        # the provider-facing packet is replaced below by the smaller choice
+        # contract only after the old core has validated successfully.
+        RUN["impact_planning_packet_v24_2"] = copy.deepcopy(packet)
+        RUN["impact_planning_packet_observability_v24_2"] = copy.deepcopy(packet_observability)
+    else:
+        RUN["impact_planning_packet"] = copy.deepcopy(packet)
+        RUN["impact_planning_packet_observability"] = copy.deepcopy(packet_observability)
     role_packet = planning_packet.get("role_packet")
-    _record_planning_role_packet(role_packet)
-    RUN["impact_planning_role_packet"] = copy.deepcopy(role_packet)
+    if not use_decision_frame:
+        _record_planning_role_packet(role_packet)
+        RUN["impact_planning_role_packet"] = copy.deepcopy(role_packet)
     for metric, key in (
         ("impact_planning_surfaces_selected", "selected_surface_ids"),
         ("impact_planning_surfaces_serialized", "serialized_surface_ids"),
@@ -5303,6 +5637,11 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         raise ImpactPlanningError(
             f"{stage3.IMPACT_PLANNING_CONTEXT_INCOMPLETE}: "
             + "; ".join(packet_validation.get("errors", []))
+        )
+    if use_decision_frame:
+        return _create_impact_map_from_decision_frame(
+            task_brain, contract, repository_evidence, requirements, registry,
+            seeds, planning_packet, structured_call, verified_planning_context,
         )
     context = packet
     RUN.setdefault("control_flow", []).append("IMPACT_PLANNER")
@@ -6348,6 +6687,28 @@ def run_verified_state_aware_planning(
         }
 
         def deterministic_planner(*_args):
+            frame = RUN.get("impact_decision_frame")
+            if isinstance(frame, dict):
+                result = stage3.deterministic_impact_decision_choices(frame)
+                slots = {
+                    str(item.get("slot_id")): item
+                    for item in frame.get("decision_slots", []) or []
+                    if isinstance(item, dict)
+                }
+                # The deterministic fixture respects an already-frozen DNT
+                # by choosing the non-mutating bounded option when available.
+                for decision in result.get("decisions", []) or []:
+                    slot = slots.get(str(decision.get("slot_id")))
+                    dnt = " ".join(str(item) for item in (slot or {}).get("dnt", []) or [])
+                    if dnt and re.search(r"\b(?:do not|don't|must not|never)\b", dnt, re.IGNORECASE):
+                        if "INSPECT_ONLY" in (slot or {}).get("allowed_decisions", []):
+                            decision["decision"] = "INSPECT_ONLY"
+                            decision["chosen_target"] = str(slot.get("surface_id"))
+                            decision["reason_code"] = "INSPECT_CURRENT_SURFACE"
+                            decision["bounded_rationale"] = (
+                                "Inspect the verified prohibited surface without mutation."
+                            )
+                return result
             result = stage3.deterministic_impact_map(
                 stage3_task_brain.get("task_goal", {}).get("text", task_goal or "coding task"),
                 requirements, repository_evidence,
