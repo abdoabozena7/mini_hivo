@@ -31,7 +31,7 @@ CANONICAL_SURFACE_KINDS = (
 )
 CANONICAL_SURFACE_ROLES = (
     "INPUT_OWNER", "STATE_OWNER", "OWNER", "INTERFACE", "PERSISTENCE_OWNER",
-    "CURRENT_TEST", "ENTRYPOINT", "REPOSITORY_SURFACE",
+    "RENDER_SURFACE", "CURRENT_TEST", "ENTRYPOINT", "REPOSITORY_SURFACE",
 )
 DISPOSITIONS = (
     "MUST_CHANGE", "INTERFACE_REUSE", "TEST_CHANGE", "PRESERVATION_ONLY",
@@ -94,6 +94,21 @@ DECISION_CAPABILITY_TAXONOMY = {
     # explicit-authority gate exposes this decision in a slot.
     "AUTHORITY_CHANGE": ("AUTHORITY_CHANGE", "IMPLEMENTATION_CHANGE"),
 }
+# Structured evidence relations used by the V24.4.2 binding boundary.  These
+# are semantic identities, not filename or keyword matches.
+STRUCTURED_SURFACE_RELATIONS = frozenset({
+    "CURRENT_IMPLEMENTATION_SURFACE",
+    "CURRENT_BEHAVIOR_OWNER",
+    "CURRENT_RENDER_SURFACE",
+    "CURRENT_INTERFACE_IMPLEMENTATION",
+    "CURRENT_TEST",
+    "CURRENT_STATE_OWNER",
+    "TEST_TO_SOURCE_IMPORT",
+    "PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW",
+    "PRESERVE_BEHAVIOR:MOVEMENT_INPUT",
+    "PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER",
+    "USER_FACING_PAUSE_INDICATOR",
+})
 NEW_SURFACE_PROPOSAL = "NEW_SURFACE_PROPOSAL"
 MAX_CANONICAL_SURFACES = 32
 MAX_SURFACE_EVIDENCE_IDS = 8
@@ -916,6 +931,9 @@ def _explicit_obligation_records(requirement, requirement_id, text):
                 # This keeps the source ledger authoritative without making
                 # surface identity depend on prose.
                 value[key] = copy.deepcopy(requirement.get(key))
+        relations = _obligation_structured_relations(value)
+        if relations:
+            value["structured_relations"] = relations
         result.append(value)
     return result
 
@@ -1050,6 +1068,9 @@ def _atomic_obligations_for_requirement(requirement, requirement_types=None):
             ):
                 if requirement.get(key) not in (None, "", [], {}):
                     value[key] = copy.deepcopy(requirement.get(key))
+            relations = _obligation_structured_relations(value)
+            if relations:
+                value["structured_relations"] = relations
             values.append(value)
     behavior_values = [
         item for item in values if item.get("obligation_type") == "BEHAVIOR_CHANGE"
@@ -1185,9 +1206,10 @@ def compact_requirement_obligation_ledger(ledger_or_requirements):
                      "authority_change", "authority_change_authorized", "allows_authority_change",
                      "change_authority", "explicit_authority_change", "authorized", "explicit",
                      "requested", "from", "to", "target", "target_owner", "new_owner", "object",
-                     "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
-                     "do_not_touch_surface_ids", "do_not_modify_surface_ids",
-                     "source", "provenance",
+                    "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+                    "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+                    "structured_relations",
+                    "source", "provenance",
                     "classification_provenance",
                 ) if value.get(key) not in (None, "", [], {})
             } for value in obligations],
@@ -1322,7 +1344,7 @@ def bounded_evidence(evidence, max_items=12):
     for item in list(evidence or [])[:max_items]:
         if not isinstance(item, dict) or not item.get("evidence_id"):
             continue
-        result.append({
+        value = {
             "evidence_id": str(item.get("evidence_id")),
             "category": _compact(item.get("category"), 80),
             "fact": _compact(item.get("fact"), 300),
@@ -1332,7 +1354,24 @@ def bounded_evidence(evidence, max_items=12):
             "line_end": item.get("line_end"),
             "file_sha256": _compact(item.get("file_sha256"), 80),
             "provenance": REPOSITORY_EVIDENCE,
-        })
+        }
+        relations = item.get("structured_relations")
+        if isinstance(relations, (list, tuple, set)):
+            value["structured_relations"] = [
+                str(relation) for relation in list(relations)[:8] if str(relation)
+            ]
+        elif isinstance(relations, str) and relations.strip():
+            value["structured_relations"] = [relations.strip()]
+        source_links = item.get("source_links")
+        if isinstance(source_links, list) and source_links:
+            value["source_links"] = copy.deepcopy(source_links[:8])
+        if item.get("linked_from_paths"):
+            value["linked_from_paths"] = _bounded_strings(
+                item.get("linked_from_paths"), 8, 240,
+            )
+        if item.get("link_depth") is not None:
+            value["link_depth"] = int(item.get("link_depth") or 0)
+        result.append(value)
     return result
 
 
@@ -1344,11 +1383,80 @@ def _surface_symbol_base(symbol):
     return re.split(r"::|[.#:]", text, maxsplit=1)[0]
 
 
-def _surface_role(category, symbol="", fact=""):
+def _structured_relation_names(value):
+    """Return only the bounded named relations carried by an evidence record."""
+    if not isinstance(value, dict):
+        return []
+    pending = []
+    for key in ("structured_relations", "structured_relation", "semantic_relations"):
+        raw = value.get(key)
+        if isinstance(raw, (list, tuple, set)):
+            pending.extend(raw)
+        elif isinstance(raw, str):
+            pending.append(raw)
+    result = []
+    while pending:
+        raw = pending.pop(0)
+        if isinstance(raw, (list, tuple, set)):
+            pending[0:0] = list(raw)
+            continue
+        if not isinstance(raw, str):
+            continue
+        name = raw.strip().upper()
+        if name in STRUCTURED_SURFACE_RELATIONS and name not in result:
+            result.append(name)
+    return result[:8]
+
+
+def _obligation_structured_relations(obligation):
+    """Map known obligation meanings to explicit semantic identities.
+
+    This is intentionally a small fail-closed vocabulary.  It does not
+    select a path from prose; it only identifies the obligation concept that a
+    structurally typed repository surface may satisfy.
+    """
+    value = obligation if isinstance(obligation, dict) else {}
+    result = _structured_relation_names(value)
+    meaning = str(value.get("meaning") or value.get("text") or "")
+    normalized = " ".join(meaning.casefold().split())
+    obligation_type = str(value.get("obligation_type") or "").upper()
+    if obligation_type == "BEHAVIOR_CHANGE" and re.search(
+        r"\bpause\s+indicator\b", normalized,
+    ):
+        result.append("USER_FACING_PAUSE_INDICATOR")
+    if obligation_type == "PRESERVATION":
+        if re.search(r"\bescape\b", normalized) and re.search(
+            r"\b(?:pause|flow|behavior|behaviour)\b", normalized,
+        ):
+            result.append("PRESERVE_BEHAVIOR:ESCAPE_PAUSE_FLOW")
+        if re.search(r"\bmovement\b", normalized) and re.search(
+            r"\b(?:behavior|behaviour|input|controls?)\b", normalized,
+        ):
+            result.append("PRESERVE_BEHAVIOR:MOVEMENT_INPUT")
+        if re.search(r"\bpausecontroller\b", normalized) and re.search(
+            r"\b(?:owner|ownership|state)\b", normalized,
+        ):
+            result.append("PRESERVE_OWNERSHIP:PAUSE_STATE_OWNER")
+    return list(dict.fromkeys(
+        item for item in result if item in STRUCTURED_SURFACE_RELATIONS
+    ))[:8]
+
+
+def _surface_structured_relations(surface):
+    return _structured_relation_names(surface if isinstance(surface, dict) else {})
+
+
+def _surface_role(category, symbol="", fact="", structured_relations=None):
     category = str(category or "").upper()
     text = f"{symbol} {fact}".casefold()
+    relations = set(
+        item for item in (structured_relations or [])
+        if str(item).upper() in STRUCTURED_SURFACE_RELATIONS
+    )
     if category == "CURRENT_TEST":
         return "CURRENT_TEST"
+    if "CURRENT_RENDER_SURFACE" in relations:
+        return "RENDER_SURFACE"
     if category == "CURRENT_PERSISTENCE":
         return "PERSISTENCE_OWNER"
     if category == "CURRENT_INTERFACE":
@@ -1390,12 +1498,13 @@ def _surface_group_sort_key(group):
     role_order = {
         "INPUT_OWNER": 0,
         "STATE_OWNER": 1,
-        "OWNER": 2,
-        "INTERFACE": 3,
-        "PERSISTENCE_OWNER": 4,
-        "CURRENT_TEST": 5,
-        "ENTRYPOINT": 6,
-        "REPOSITORY_SURFACE": 7,
+        "RENDER_SURFACE": 2,
+        "OWNER": 3,
+        "INTERFACE": 4,
+        "PERSISTENCE_OWNER": 5,
+        "CURRENT_TEST": 6,
+        "ENTRYPOINT": 7,
+        "REPOSITORY_SURFACE": 8,
     }
     return (
         role_order.get(role, 9),
@@ -1403,6 +1512,35 @@ def _surface_group_sort_key(group):
         str(group.get("symbol") or "").casefold(),
         str(group.get("first_evidence_id") or "").casefold(),
     )
+
+
+def _group_structured_relations(records):
+    result = []
+    for record in records or []:
+        for relation in _structured_relation_names(record):
+            if relation not in result:
+                result.append(relation)
+    return result[:8]
+
+
+def _group_source_links(records):
+    result = []
+    seen = set()
+    for record in records or []:
+        for link in list(record.get("source_links", []) or [])[:8]:
+            if not isinstance(link, dict):
+                continue
+            identity = (
+                str(link.get("path") or ""), str(link.get("module") or ""),
+                int(link.get("line", 0) or 0), int(link.get("hop", 0) or 0),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(copy.deepcopy(link))
+            if len(result) >= 8:
+                return result
+    return result
 
 
 def canonical_surface_registry_schema():
@@ -1417,6 +1555,8 @@ def canonical_surface_registry_schema():
             "symbol": {"type": "string"},
             "verified_fact": {"type": "string"},
             "evidence_ids": {"type": "array", "items": {"type": "string"}},
+            "structured_relations": {"type": "array", "items": {"type": "string"}},
+            "source_links": {"type": "array", "items": {"type": "object"}},
             "owner_surface_id": {"type": ["string", "null"]},
         },
         "required": [
@@ -1469,6 +1609,8 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
                     "line_start": item.get("line_start"), "line_end": item.get("line_end"),
                     "file_sha256": item.get("file_sha256"),
                     "provenance": REPOSITORY_EVIDENCE,
+                    "structured_relations": copy.deepcopy(item.get("structured_relations", [])),
+                    "source_links": copy.deepcopy(item.get("source_links", [])),
                 })
                 seen_evidence.add(evidence_id)
                 if len(facts) >= max(MAX_CANONICAL_SURFACES * 2, 16):
@@ -1506,7 +1648,10 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
         first = records[0]
         groups.append({
             "kind": "OWNER",
-            "role": _surface_role(first.get("category"), first.get("symbol"), first.get("fact")),
+            "role": _surface_role(
+                first.get("category"), first.get("symbol"), first.get("fact"),
+                _group_structured_relations(records),
+            ),
             "path": str(first.get("path") or "").replace("\\", "/"),
             "symbol": _surface_symbol_base(first.get("symbol")),
             "verified_fact": _compact(" ".join(item.get("fact", "") for item in records), 360),
@@ -1514,6 +1659,8 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
                 [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
             ),
             "first_evidence_id": records[0].get("evidence_id"),
+            "structured_relations": _group_structured_relations(records),
+            "source_links": _group_source_links(records),
         })
     for records in interface_groups.values():
         first = records[0]
@@ -1527,13 +1674,18 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
                 [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
             ),
             "first_evidence_id": records[0].get("evidence_id"),
+            "structured_relations": _group_structured_relations(records),
+            "source_links": _group_source_links(records),
         })
     for records in simple_groups.values():
         first = records[0]
         category = str(first.get("category") or "").upper()
         groups.append({
             "kind": _surface_kind(category),
-            "role": _surface_role(category, first.get("symbol"), first.get("fact")),
+            "role": _surface_role(
+                category, first.get("symbol"), first.get("fact"),
+                _group_structured_relations(records),
+            ),
             "path": str(first.get("path") or "").replace("\\", "/"),
             "symbol": str(first.get("symbol") or ""),
             "verified_fact": _compact(" ".join(item.get("fact", "") for item in records), 360),
@@ -1541,6 +1693,8 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
                 [item.get("evidence_id") for item in records], MAX_SURFACE_EVIDENCE_IDS,
             ),
             "first_evidence_id": records[0].get("evidence_id"),
+            "structured_relations": _group_structured_relations(records),
+            "source_links": _group_source_links(records),
         })
 
     groups.sort(key=_surface_group_sort_key)
@@ -1560,6 +1714,8 @@ def build_canonical_surface_registry(task_brain=None, evidence=None,
             "evidence_ids": list(group["evidence_ids"]),
             "task_relevance_role": group["role"],
             "provenance": REPOSITORY_EVIDENCE,
+            "structured_relations": list(group.get("structured_relations", []) or []),
+            "source_links": copy.deepcopy(group.get("source_links", []))[:8],
         }
         surfaces.append(value)
     by_owner = {
@@ -1682,6 +1838,19 @@ def _task_brain_surface_signals(task_brain):
     }
 
 
+def _requirement_surface_relations(requirements):
+    result = {}
+    ledger = build_requirement_obligation_ledger(requirements)
+    for obligation in _atomic_obligation_records(ledger):
+        requirement_id = str(obligation.get("requirement_id") or "")
+        if not requirement_id:
+            continue
+        result.setdefault(requirement_id, set()).update(
+            _obligation_structured_relations(obligation)
+        )
+    return result
+
+
 def select_task_relevant_surfaces(task_brain, requirements, evidence, registry=None,
                                   max_surfaces=MAX_CANONICAL_SURFACES):
     """Select canonical surfaces before any packet serialization.
@@ -1705,6 +1874,8 @@ def select_task_relevant_surfaces(task_brain, requirements, evidence, registry=N
     if isinstance(goal, dict):
         goal = goal.get("text", "")
     goal_terms = _tokens(goal)
+    requirement_relations = _requirement_surface_relations(reqs)
+    all_requirement_relations = set().union(*requirement_relations.values()) if requirement_relations else set()
     scored = []
     for index, surface in enumerate(surfaces):
         surface_id = str(surface.get("surface_id"))
@@ -1715,6 +1886,7 @@ def select_task_relevant_surfaces(task_brain, requirements, evidence, registry=N
             str(surface.get("verified_fact", "")), symbol, str(surface.get("role", "")),
             str(surface.get("kind", "")), path,
         ]))
+        surface_relations = set(_surface_structured_relations(surface))
         score = 0
         required = False
         reasons = []
@@ -1735,6 +1907,11 @@ def select_task_relevant_surfaces(task_brain, requirements, evidence, registry=N
             score += 2500
             required = True
             reasons.append("task_brain_symbol")
+        relation_overlap = surface_relations.intersection(all_requirement_relations)
+        if relation_overlap:
+            score += 6000 + min(400, len(relation_overlap) * 100)
+            required = True
+            reasons.append("structured_requirement_relation")
         requirement_overlap = 0
         for requirement in reqs:
             requirement_overlap = max(
@@ -1817,6 +1994,7 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None,
         selected = {str(item) for item in list(selected_surface_ids or [])}
     brain_ids = set(_task_brain_evidence_ids(task_brain))
     reqs = active_requirements(requirements)
+    requirement_relations = _requirement_surface_relations(reqs)
     seeds = []
     for registry_index, surface in enumerate(list(registry.get("surfaces", []) or []), 1):
         if selected is not None and str(surface.get("surface_id")) not in selected:
@@ -1828,9 +2006,14 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None,
         terms = _tokens(
             " ".join([surface.get("verified_fact", ""), surface.get("symbol", ""), surface.get("role", "")])
         )
+        surface_relations = set(_surface_structured_relations(surface))
         req_ids = []
         for requirement in reqs:
-            if terms.intersection(_tokens(requirement.get("text"))):
+            requirement_id = str(requirement["requirement_id"])
+            relation_match = surface_relations.intersection(
+                requirement_relations.get(requirement_id, set())
+            )
+            if relation_match or terms.intersection(_tokens(requirement.get("text"))):
                 req_ids.append(requirement["requirement_id"])
         seeds.append({
             # Keep slot identity stable when relevance selection omits an
@@ -1853,6 +2036,7 @@ def build_impact_seeds(task_brain, requirements, evidence, registry=None,
             "owner_surface_id": surface.get("owner_surface_id"),
             "surface_kind": surface.get("kind"),
             "surface_role": surface.get("role"),
+            "structured_relations": list(surface_relations),
             "provenance": REPOSITORY_EVIDENCE,
         })
     # A behavior requirement and an architecture-reuse requirement may be
@@ -4561,6 +4745,7 @@ def impact_decision_frame_schema():
             "text": {"type": "string"},
             "requirement_ids": {"type": "array", "items": {"type": "string"}},
             "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "structured_relations": {"type": "array", "items": {"type": "string"}},
             "provenance": {"type": "string"},
         },
         "required": ["obligation_id", "text", "requirement_ids", "evidence_refs"],
@@ -4578,6 +4763,8 @@ def impact_decision_frame_schema():
             "surface_role": {"type": "string"},
             "surface_path": {"type": "string"},
             "surface_symbol": {"type": "string"},
+            "surface_structured_relations": {"type": "array", "items": {"type": "string"}},
+            "structured_obligation_binding": {"type": "boolean"},
             "requirement_ids": {"type": "array", "items": {"type": "string"}},
             "allowed_decisions": {"type": "array", "items": {"type": "string"}},
             "candidate_obligation_ids": {"type": "array", "items": {"type": "string"}},
@@ -4637,6 +4824,7 @@ def impact_decision_frame_schema():
             "frame_errors": {"type": "array", "items": {"type": "string"}},
             "frame_complete": {"type": "boolean"},
             "frame_coverage_ready": {"type": "boolean"},
+            "structured_obligation_binding": {"type": "boolean"},
             "frame_hash": {"type": "string"},
         },
         "required": [
@@ -4767,6 +4955,23 @@ def _frame_record_refs(value):
     }
 
 
+def _frame_record_is_current(value):
+    """Reject explicitly stale or contradicted facts at the frame boundary."""
+    if not isinstance(value, dict):
+        return False
+    stale_markers = {
+        "STALE", "STALE_VERIFIED", "STALE_WARNING", "STALE_VERIFIED_EVIDENCE",
+        "CONFIRMED_DRIFT", "AUTHORITY_IMPLEMENTATION_DRIFT",
+    }
+    for key in ("classification", "status", "drift_classification", "kind"):
+        raw = value.get(key)
+        if isinstance(raw, str) and raw.strip().upper() in stale_markers:
+            return False
+    if value.get("stale") is True or value.get("drift_confirmed") is True:
+        return False
+    return True
+
+
 def _frame_surface_terms(surface, requirements=None, requirement_ids=None, include_requirements=False):
     texts = [
         surface.get("verified_fact", ""), surface.get("fact", ""), surface.get("path", ""),
@@ -4782,6 +4987,8 @@ def _frame_surface_terms(surface, requirements=None, requirement_ids=None, inclu
 
 def _frame_record_matches(record, surface, requirement_ids, requirements, *, global_record=False):
     if not isinstance(record, dict) or not isinstance(surface, dict):
+        return False
+    if not _frame_record_is_current(record):
         return False
     refs = _frame_record_refs(record)
     surface_id = str(surface.get("surface_id") or "")
@@ -4800,6 +5007,24 @@ def _frame_record_matches(record, surface, requirement_ids, requirements, *, glo
     symbol = str(record.get("symbol") or "").strip()
     surface_path = _normal_path(surface.get("path"))
     surface_symbol = str(surface.get("symbol") or "").strip()
+    record_relations = set(_structured_relation_names(record))
+    surface_relations = set(_surface_structured_relations(surface))
+    preservation_relations = {
+        item for item in record_relations
+        if item.startswith("PRESERVE_")
+    }
+    if preservation_relations and surface_relations:
+        # A typed preservation record is fail-closed: a matching path or
+        # shared prose cannot bind it to a different semantic surface.
+        if not preservation_relations.intersection(surface_relations):
+            return False
+        if refs["requirement_ids"] and not refs["requirement_ids"].intersection(
+            {str(item) for item in list(requirement_ids or [])}
+        ):
+            return False
+        return True
+    if record_relations.intersection(surface_relations) and record.get("evidence_id"):
+        return True
     if path and path == surface_path:
         if not symbol or symbol == surface_symbol or _surface_symbol_base(symbol) == _surface_symbol_base(surface_symbol):
             return True
@@ -4887,6 +5112,28 @@ def _frame_raw_records(task_brain, verified_planning_context, requirements, evid
         add(verification, value.get("acceptance_conditions"), "verification")
         add(constraints, value.get("dnt"), "dnt", global_record=True)
         add(constraints, value.get("prohibitions"), "prohibition", global_record=True)
+
+    # Current verified/ repository facts may carry a structured preservation
+    # identity even when they are not copied into the legacy preservation
+    # field.  Project only those explicit identities into the frame; prose,
+    # filenames, and stale/drift records are not promoted here.
+    structured_current_fields = (
+        "relevant_project_brain_projection", "current_verified_facts",
+        "current_durable_authority", "current_authority", "current_owners",
+        "current_state_ownership", "current_interfaces",
+        "current_repository_evidence",
+    )
+    for value in (brain, source):
+        for field in structured_current_fields:
+            current_values = value.get(field, [])
+            for item in list(current_values or [])[:24]:
+                if not isinstance(item, dict) or not _frame_record_is_current(item):
+                    continue
+                if any(
+                    relation.startswith("PRESERVE_")
+                    for relation in _structured_relation_names(item)
+                ):
+                    add(preservation, [item], "preservation")
 
     # The requirement is itself deterministic authority.  It is included only
     # when its wording carries a preservation/prohibition obligation; no new
@@ -4998,7 +5245,10 @@ def _frame_authority_change(requirements):
     return authorized, targets[:4]
 
 
-def _frame_allowed_decisions(surface, requirement_ids, requirements, authority_change=False):
+def _frame_allowed_decisions(
+    surface, requirement_ids, requirements, authority_change=False,
+    surface_forbidden=False,
+):
     by_req = {item["requirement_id"]: item for item in active_requirements(requirements or [])}
     text = " ".join(by_req[item].get("text", "") for item in requirement_ids if item in by_req)
     kind = str(surface.get("kind") or "OTHER").upper()
@@ -5023,6 +5273,15 @@ def _frame_allowed_decisions(surface, requirement_ids, requirements, authority_c
         ]
     if authority_change and (kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}):
         result.append("AUTHORITY_CHANGE")
+    if surface_forbidden:
+        # DNT/prohibition is a mutation-scope constraint.  Keep inspect,
+        # reuse, and preservation decisions available as appropriate, but do
+        # not expose an implementation-capable choice for the forbidden
+        # surface.
+        result = [
+            item for item in result
+            if item in {"INTERFACE_REUSE", "INSPECT_ONLY", "PRESERVATION_ONLY", "VERIFY_ONLY"}
+        ]
     return list(dict.fromkeys(item for item in result if item in IMPACT_DECISION_CHOICES))
 
 
@@ -5041,7 +5300,7 @@ def _frame_obligation(value, channel, ordinal, surface, requirement_ids, require
     ) else reqs, MAX_REQUIREMENT_REFS_PER_IMPACT)
     evidence_refs = _bounded_ids(refs["evidence_refs"], MAX_EVIDENCE_REFS_PER_IMPACT)
     record_id = _frame_record_id(value, f"{channel.upper()}-{ordinal:03d}")
-    return {
+    result = {
         "obligation_id": record_id,
         "text": text,
         "requirement_ids": reqs,
@@ -5050,6 +5309,10 @@ def _frame_obligation(value, channel, ordinal, surface, requirement_ids, require
             REPOSITORY_EVIDENCE if channel == "verification" and value.get("evidence_id") else USER_STATED
         ),
     }
+    relations = _structured_relation_names(value)
+    if relations:
+        result["structured_relations"] = relations
+    return result
 
 
 def _frame_deduplicate_obligations(values):
@@ -5070,6 +5333,13 @@ def _frame_deduplicate_obligations(values):
                 list(existing.get("evidence_refs", []) or [])
                 + list(item.get("evidence_refs", []) or []),
                 MAX_EVIDENCE_REFS_PER_IMPACT,
+            )
+            existing["structured_relations"] = _bounded_ids(
+                list(dict.fromkeys(
+                    list(existing.get("structured_relations", []) or [])
+                    + list(item.get("structured_relations", []) or [])
+                )),
+                8,
             )
             continue
         by_text[key] = item
@@ -5096,6 +5366,8 @@ def _surface_capabilities(surface):
     kind = str(value.get("kind") or "OTHER").upper()
     role = str(value.get("role") or "").upper()
     if kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}:
+        return ["IMPLEMENTATION_CHANGE", "PRESERVATION_ONLY"]
+    if role == "RENDER_SURFACE":
         return ["IMPLEMENTATION_CHANGE", "PRESERVATION_ONLY"]
     if kind == "TEST" or role == "CURRENT_TEST":
         return ["TEST_CHANGE"]
@@ -5168,7 +5440,6 @@ def _frame_surface_is_forbidden(surface, slot):
     }
     if surface_id and (surface_id in explicit_dnt or surface_id in explicit_prohibited):
         return True
-    identity_terms = _domain_tokens(" ".join([surface_id, path, symbol]))
     for text in list(slot.get("dnt", []) or []) + list(slot.get("prohibitions", []) or []):
         text = str(text or "")
         lower = text.casefold()
@@ -5179,8 +5450,30 @@ def _frame_surface_is_forbidden(surface, slot):
             r"\b(?:prohibited|forbidden)\b",
             lower,
         )
-        if targeted and identity_terms.intersection(_domain_tokens(text)):
+        if not targeted:
+            continue
+        normalized_text = lower.replace("\\", "/")
+        normalized_path = path.casefold().replace("\\", "/")
+        # Match an explicitly named canonical path/symbol/slot.  Do not use
+        # broad token overlap here: a shared token such as ``src`` or
+        # ``pause`` would incorrectly prohibit every neighboring surface.
+        if normalized_path and re.search(
+            rf"(?<![a-z0-9_]){re.escape(normalized_path)}(?![a-z0-9_])",
+            normalized_text,
+        ):
             return True
+        if surface_id and surface_id.casefold() in normalized_text:
+            return True
+        symbol_base = _surface_symbol_base(symbol).casefold()
+        if symbol_base and re.search(
+            rf"(?<![a-z0-9_]){re.escape(symbol_base)}(?![a-z0-9_])",
+            normalized_text,
+        ):
+            return True
+        # Do not infer a target from shared prose tokens.  A path, surface
+        # ID, or symbol is required for a mutation prohibition to bind to a
+        # canonical surface; otherwise this constraint remains a general
+        # preservation/authority rule rather than a surface prohibition.
     return False
 
 
@@ -5207,6 +5500,11 @@ def _frame_obligation_relevant(obligation, slot, surface):
         return False
     if obligation_type != "PROHIBITION" and _frame_surface_is_forbidden(surface, slot):
         return False
+    required_relations = set(_obligation_structured_relations(value))
+    if slot.get("structured_obligation_binding") and required_relations:
+        surface_relations = set(_surface_structured_relations(surface))
+        if not required_relations.intersection(surface_relations):
+            return False
     kind = str(surface.get("kind") or "OTHER").upper()
     role = str(surface.get("role") or "").upper()
     if obligation_type == "BEHAVIOR_CHANGE":
@@ -5245,6 +5543,26 @@ def _frame_inherited_obligation(obligation, slot):
         and surface_id in set(_obligation_forbidden_surface_ids(value))
     ):
         return False
+    required_relations = set(_obligation_structured_relations(value))
+    if slot.get("structured_obligation_binding") and required_relations:
+        matched_current_record = False
+        for item in list(slot.get("required_preservation_promises", []) or []):
+            if not isinstance(item, dict) or not _frame_record_is_current(item):
+                continue
+            item_requirement_ids = {
+                str(ref) for ref in item.get("requirement_ids", []) or []
+            }
+            if item_requirement_ids and requirement_id not in item_requirement_ids:
+                continue
+            if required_relations.intersection(_structured_relation_names(item)):
+                matched_current_record = True
+                break
+        if not matched_current_record:
+            return False
+        # A named current-state relation is the complete inheritance proof in
+        # V24.4.2 structured mode.  Do not require the source observation to
+        # repeat the exact natural-language wording of the obligation.
+        return True
     if value.get("inherited") is True or value.get("inherited_satisfaction") is True:
         return True
     if obligation_type == "PROHIBITION":
@@ -5282,7 +5600,7 @@ def _frame_decision_satisfies_obligation(obligation, slot, decision, surface):
     role = str(surface.get("role") or "").upper()
     if obligation_type == "BEHAVIOR_CHANGE":
         return "IMPLEMENTATION_CHANGE" in capabilities and (
-            kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}
+            kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER", "RENDER_SURFACE"}
         )
     if obligation_type == "TEST":
         return "TEST_CHANGE" in capabilities and (kind == "TEST" or role == "CURRENT_TEST")
@@ -5335,6 +5653,9 @@ def _build_frame_coverage(frame):
                 "role": slot.get("surface_role"),
                 "path": slot.get("surface_path"),
                 "symbol": slot.get("surface_symbol"),
+                "structured_relations": list(
+                    slot.get("surface_structured_relations", []) or []
+                ),
             }
             # Frame construction stores the surface capability projection on
             # each slot; the fallback makes the artifact useful with a small
@@ -5370,11 +5691,35 @@ def _build_frame_coverage(frame):
             )
         else:
             ready = bool(candidate_decisions) or inherited
+        coverage_reasons = []
+        if inherited:
+            coverage_reasons.append("INHERITED_CURRENT")
+        if any(
+            "IMPLEMENTATION_CHANGE" in _decision_capabilities(decision)
+            for decision in candidate_decisions
+        ):
+            coverage_reasons.append("CANDIDATE_IMPLEMENTATION")
+        if any(
+            "TEST_CHANGE" in _decision_capabilities(decision)
+            for decision in candidate_decisions
+        ):
+            coverage_reasons.append("TEST_SUPPORTED")
+        if not ready:
+            coverage_reasons.append("UNCOVERED")
+        evidence_refs = []
+        for slot in slots:
+            if str(slot.get("slot_id") or "") in set(candidate_slots + inherited_slots):
+                evidence_refs.extend(slot.get("evidence_refs", []) or [])
+        evidence_refs = _bounded_ids(
+            list(obligation.get("evidence_refs", []) or []) + evidence_refs,
+            MAX_EVIDENCE_REFS_PER_IMPACT,
+        )
         obligation_records.append({
             "obligation_id": obligation_id,
             "requirement_id": requirement_id,
             "obligation_type": obligation_type,
             "meaning": _compact(obligation.get("meaning") or obligation.get("text"), 520),
+            "structured_relations": _structured_relation_names(obligation),
             "candidate_slots": list(dict.fromkeys(candidate_slots)),
             "candidate_decisions": candidate_decisions,
             "inherited_satisfaction": inherited,
@@ -5384,6 +5729,8 @@ def _build_frame_coverage(frame):
                 key: list(dict.fromkeys(value))
                 for key, value in sorted(satisfied_by_decision.items())
             },
+            "coverage_reasons": coverage_reasons,
+            "evidence_refs": evidence_refs,
         })
     grouped = []
     by_requirement = {}
@@ -5584,6 +5931,30 @@ def build_impact_decision_frame(
     preservation_records, verification_records, constraint_records = _frame_raw_records(
         brain, source, reqs, evidence,
     )
+    # The strict V24.4 binding mode is enabled only by a named relation on a
+    # repository/surface observation that can actually bind a requirement to
+    # a current code surface.  A planning-context projection may add exact
+    # legacy Brain fact identities (for example, the current owner); those
+    # identities preserve the older fixture path but do not, by themselves,
+    # establish a V24.4 requirement-to-surface mapping.
+    structured_sources = [
+        item for item in list(evidence or []) if isinstance(item, dict)
+    ]
+    structured_sources.extend(
+        item for item in list((registry_value or {}).get("surfaces", []) or [])
+        if isinstance(item, dict)
+    )
+    for container in (brain, source):
+        for field in ("current_repository_evidence", "repository_evidence", "evidence"):
+            structured_sources.extend(
+                item for item in list(container.get(field, []) or [])
+                if isinstance(item, dict)
+            )
+    structured_obligation_binding = any(
+        isinstance(item.get("structured_relations"), (list, tuple, set))
+        and _structured_relation_names(item)
+        for item in structured_sources
+    )
     # ``active_requirements`` intentionally returns a compact compatibility
     # projection, so inspect the original records for an explicit authority
     # transition authorization before that metadata is stripped.
@@ -5633,9 +6004,6 @@ def build_impact_decision_frame(
         separate = bool(
             seed.get("separate_decision") or seed.get("requires_separate_decision")
             or seed.get("decision_scope")
-        )
-        allowed_decisions = _frame_allowed_decisions(
-            surface, slot_req_ids, reqs, authority_change=authority_change,
         )
         allowed_targets = [surface_id]
         allowed_targets.extend(str(item.get("surface_id")) for item in interfaces if item.get("surface_id"))
@@ -5716,6 +6084,19 @@ def build_impact_decision_frame(
         prohibited_surface_ids = list(dict.fromkeys(
             str(item) for item in prohibited_surface_ids if item
         ))[:8]
+        provisional_constraint_slot = {
+            "surface_id": surface_id,
+            "dnt": _bounded_strings(dnt_texts, 8, 320),
+            "prohibitions": _bounded_strings(prohibition_texts, 8, 320),
+            "dnt_surface_ids": dnt_surface_ids,
+            "prohibited_surface_ids": prohibited_surface_ids,
+        }
+        allowed_decisions = _frame_allowed_decisions(
+            surface, slot_req_ids, reqs, authority_change=authority_change,
+            surface_forbidden=_frame_surface_is_forbidden(
+                surface, provisional_constraint_slot,
+            ),
+        )
         surface_capabilities = _surface_capabilities(surface)
         decision_capabilities = {
             str(decision): _decision_capabilities(decision)
@@ -5734,6 +6115,10 @@ def build_impact_decision_frame(
             "surface_role": surface.get("role"),
             "surface_path": _normal_path(surface.get("path")),
             "surface_symbol": str(surface.get("symbol") or ""),
+            "surface_structured_relations": list(
+                _surface_structured_relations(surface)
+            ),
+            "structured_obligation_binding": structured_obligation_binding,
             "required_preservation_promises": slot_preservation,
             "required_verification_contracts": slot_verification,
         }
@@ -5800,6 +6185,10 @@ def build_impact_decision_frame(
             "surface_role": surface.get("role"),
             "surface_path": _normal_path(surface.get("path")),
             "surface_symbol": str(surface.get("symbol") or ""),
+            "surface_structured_relations": list(
+                _surface_structured_relations(surface)
+            ),
+            "structured_obligation_binding": structured_obligation_binding,
             "candidate_obligation_ids": candidate_obligation_ids,
             "surface_capabilities": surface_capabilities,
             "decision_capabilities": decision_capabilities,
@@ -5890,6 +6279,7 @@ def build_impact_decision_frame(
         "task_id": task_id,
         "authority_change_authorized": bool(authority_change),
         "authority_change_targets": list(authority_targets if authority_change else []),
+        "structured_obligation_binding": structured_obligation_binding,
         "source_planning_context_hash": str(context_hash),
         "source_mandatory_core_hash": str(core_hash),
         "requirement_obligation_ledger": copy.deepcopy(obligation_ledger_value),
@@ -5972,6 +6362,10 @@ def validate_impact_decision_frame(frame):
                 errors.append(f"{slot_id or '<missing>'}: {field} is missing")
             if field not in {"seed_id", "impact_id", "surface_id"} and not isinstance(raw, list):
                 errors.append(f"{slot_id or '<missing>'}: {field} must be a bounded list")
+        if "structured_obligation_binding" in slot and not isinstance(
+            slot.get("structured_obligation_binding"), bool
+        ):
+            errors.append(f"{slot_id or '<missing>'}: structured obligation binding must be boolean")
         for field in ("surface_kind", "surface_role", "surface_path", "surface_symbol"):
             if not isinstance(slot.get(field), str) or not slot.get(field):
                 # Symbols may legitimately be empty for an entrypoint or
@@ -5981,6 +6375,10 @@ def validate_impact_decision_frame(frame):
                 if field == "surface_symbol" and isinstance(slot.get(field), str):
                     continue
                 errors.append(f"{slot_id or '<missing>'}: {field} is missing")
+        if "surface_structured_relations" in slot and not isinstance(
+            slot.get("surface_structured_relations"), list
+        ):
+            errors.append(f"{slot_id or '<missing>'}: surface structured relations must be a bounded list")
         for field in ("decision_capabilities", "obligations_satisfied_by_decision"):
             if not isinstance(slot.get(field), dict):
                 errors.append(f"{slot_id or '<missing>'}: {field} must be an object")
@@ -6007,6 +6405,9 @@ def validate_impact_decision_frame(frame):
             "role": slot.get("surface_role"),
             "path": slot.get("surface_path"),
             "symbol": slot.get("surface_symbol"),
+            "structured_relations": list(
+                slot.get("surface_structured_relations", []) or []
+            ),
         }
         if slot.get("surface_capabilities") != _surface_capabilities(surface):
             errors.append(f"{slot_id}: surface capability projection is not canonical")
@@ -6297,6 +6698,9 @@ def _build_choice_coverage(frame, choices):
                 "role": slot.get("surface_role"),
                 "path": slot.get("surface_path"),
                 "symbol": slot.get("surface_symbol"),
+                "structured_relations": list(
+                    slot.get("surface_structured_relations", []) or []
+                ),
             }
             # Recompute the contribution from canonical source obligation,
             # slot authority, and the existing decision taxonomy.  A copied
@@ -6614,11 +7018,6 @@ def deterministic_impact_decision_choices(frame):
             target = str(slot.get("surface_id"))
             reason_code = "TEST_BOUNDARY"
             rationale = "Keep the decision at the verified test boundary."
-        elif "MUST_CHANGE" in allowed:
-            decision = "MUST_CHANGE"
-            target = str(slot.get("surface_id"))
-            reason_code = "CHANGE_REQUIRED"
-            rationale = "Apply the requirement through the verified current surface."
         elif "PRESERVATION_ONLY" in allowed:
             decision = "PRESERVATION_ONLY"
             target = str(slot.get("surface_id"))
@@ -6629,6 +7028,21 @@ def deterministic_impact_decision_choices(frame):
             target = str(slot.get("surface_id"))
             reason_code = "INSPECT_CURRENT_SURFACE"
             rationale = "Inspect the verified current surface without mutation."
+        elif "INSPECT_ONLY" in allowed:
+            decision = "INSPECT_ONLY"
+            target = str(slot.get("surface_id"))
+            reason_code = "INSPECT_CURRENT_SURFACE"
+            rationale = "Inspect the verified current surface without mutation."
+        elif "MUST_CHANGE" in allowed:
+            # A MUST_CHANGE fallback is used only when the frame did not
+            # expose a safer bounded choice.  In obligation-aware mode a
+            # behavior obligation reaches this branch only after the
+            # capability-bearing MUST_CHANGE decision was explicitly linked
+            # above; an unbound surface should never be mutated by default.
+            decision = "MUST_CHANGE"
+            target = str(slot.get("surface_id"))
+            reason_code = "CHANGE_REQUIRED"
+            rationale = "Apply the requirement through the verified current surface."
         else:
             decision = allowed[0]
             target = str(slot.get("surface_id"))
