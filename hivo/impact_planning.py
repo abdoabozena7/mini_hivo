@@ -55,8 +55,12 @@ IMPACT_DECISION_AUTHORITY_FIELDS = frozenset({
     "prohibitions", "authority_refs", "evidence_refs", "path", "symbol",
     "symbols", "repository_evidence_ids", "requirement_ids", "scope_notes",
     "risk_notes", "mutation_target", "reuse_target", "provider_generation_identity",
+    "candidate_obligation_ids", "surface_capabilities", "allowed_decisions",
+    "decision_capabilities", "obligations_satisfied_by_decision",
+    "inherited_obligation_ids", "obligation_assignments", "dnt_surface_ids",
+    "prohibited_surface_ids", "allowed_targets", "authority_change_targets",
 })
-IMPACT_DECISION_FRAME_VERSION = "V24.3"
+IMPACT_DECISION_FRAME_VERSION = "V24.4"
 IMPACT_DECISION_FRAME_INCOMPLETE = "IMPACT_DECISION_FRAME_INCOMPLETE"
 IMPACT_DECISION_OUTPUT_MALFORMED = "IMPACT_DECISION_OUTPUT_MALFORMED"
 DUPLICATE_IMPACT_DECISION_SLOT = "DUPLICATE_IMPACT_DECISION_SLOT"
@@ -65,6 +69,31 @@ UNKNOWN_IMPACT_DECISION_SLOT = "UNKNOWN_IMPACT_DECISION_SLOT"
 IMPACT_DECISION_NOT_ALLOWED = "IMPACT_DECISION_NOT_ALLOWED"
 IMPACT_DECISION_TARGET_NOT_ALLOWED = "IMPACT_DECISION_TARGET_NOT_ALLOWED"
 IMPACT_MAP_COMPILE_INVALID = "IMPACT_MAP_COMPILE_INVALID"
+IMPACT_FRAME_COVERAGE_READY = "IMPACT_FRAME_COVERAGE_READY"
+IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP = "IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP"
+IMPACT_CHOICE_COVERAGE_READY = "IMPACT_CHOICE_COVERAGE_READY"
+IMPACT_CHOICE_REQUIREMENT_GAP = "IMPACT_CHOICE_REQUIREMENT_GAP"
+BEHAVIOR_CHANGE_UNCOVERED = "BEHAVIOR_CHANGE_UNCOVERED"
+DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE = (
+    "DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE"
+)
+DECISION_CAPABILITY_NAMES = (
+    "IMPLEMENTATION_CHANGE", "TEST_CHANGE", "INSPECTION_ONLY", "REUSE_ONLY",
+    "PRESERVATION_ONLY", "AUTHORITY_CHANGE",
+)
+DECISION_CAPABILITY_TAXONOMY = {
+    # Keep the existing choice/disposition names.  This is a capability
+    # projection, not a new model-facing decision enum.
+    "MUST_CHANGE": ("IMPLEMENTATION_CHANGE",),
+    "INTERFACE_REUSE": ("REUSE_ONLY",),
+    "TEST_CHANGE": ("TEST_CHANGE",),
+    "PRESERVATION_ONLY": ("PRESERVATION_ONLY",),
+    "VERIFY_ONLY": ("INSPECTION_ONLY",),
+    "INSPECT_ONLY": ("INSPECTION_ONLY",),
+    # Authority change is implementation-capable only after the existing
+    # explicit-authority gate exposes this decision in a slot.
+    "AUTHORITY_CHANGE": ("AUTHORITY_CHANGE", "IMPLEMENTATION_CHANGE"),
+}
 NEW_SURFACE_PROPOSAL = "NEW_SURFACE_PROPOSAL"
 MAX_CANONICAL_SURFACES = 32
 MAX_SURFACE_EVIDENCE_IDS = 8
@@ -95,6 +124,7 @@ REQUIREMENT_OBLIGATION_TYPES = (
     "TEST",
     "PROHIBITION",
     "CROSS_CUTTING",
+    "AUTHORITY_CHANGE",
 )
 OBLIGATION_COVERAGE_STATES = ("COVERED", "UNCOVERED")
 CHALLENGE_LIFECYCLE_STATES = ("OPEN", "RESOLVED", "SUPERSEDED", "REJECTED")
@@ -623,12 +653,33 @@ def active_requirements(requirements):
         status = str(item.get("status", "active")).casefold()
         if not requirement_id or not text or status in {"deferred", "cancelled", "canceled"}:
             continue
-        result.append({
+        record = {
             "requirement_id": requirement_id,
             "text": _compact(text, 700),
             "provenance": str(item.get("provenance") or USER_STATED),
             "status": "active",
-        })
+        }
+        # Preserve only structured authority that later deterministic gates
+        # can consume.  In particular, an atomic obligation ledger may carry
+        # explicit surface bindings; free-form model rationale is never
+        # admitted through this projection.
+        for key in (
+            "obligations", "obligation_types", "candidate_surface_ids",
+            "authorized_surface_ids", "surface_ids", "surface_id",
+            "candidate_surfaces", "authorized_surfaces", "candidate_slot_ids",
+            "slot_ids", "target_surface_ids", "implementation_surface_ids",
+            "authorized_implementation_surface_ids", "candidate_implementation_surface_ids",
+            "inherited", "inherited_satisfaction", "authority_change",
+            "authority_change_authorized", "allows_authority_change",
+            "change_authority", "explicit_authority_change",
+            "authorized", "explicit", "requested", "from", "to", "target",
+            "target_owner", "new_owner", "object",
+            "dnt", "prohibitions", "dnt_surface_ids", "prohibited_surface_ids",
+            "forbidden_surface_ids", "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+        ):
+            if key in item and item.get(key) not in (None, "", [], {}):
+                record[key] = copy.deepcopy(item.get(key))
+        result.append(record)
     return result
 
 
@@ -657,54 +708,444 @@ def _domain_tokens(value):
     return result
 
 
-def build_requirement_obligation_ledger(requirements):
-    """Classify active source requirements into deterministic obligations."""
-    records = []
-    for requirement in active_requirements(requirements):
-        text = requirement["text"]
-        obligation_types = []
-        is_test = bool(_TEST_RE.search(text))
-        is_preservation = bool(_PRESERVE_RE.search(text))
-        is_reuse = bool(_REUSE_RE.search(text))
-        is_prohibition = bool(_PROHIBITION_RE.search(text))
-        # A test-only sentence is not a product behavior mutation merely
-        # because it contains "add" or "update".  A compound sentence such
-        # as "add export and tests" retains both obligations.
-        non_test_terms = _domain_tokens(text) - {
-            "assert", "coverage", "spec", "test", "tests", "verification", "verify",
+def _obligation_slug(value, limit=42):
+    text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").upper()).strip("-")
+    return (text or "REQ")[:limit].strip("-")
+
+
+def _split_obligation_clauses(value):
+    """Split only source-language conjunctions into atomic clauses."""
+    text = _compact(value, 700).strip(" .")
+    if not text:
+        return []
+    parts = re.split(
+        r",\s*|\s+and\s+(?=(?:the\s+)?[A-Za-z])",
+        text,
+        flags=re.IGNORECASE,
+    )
+    result = []
+    for part in parts:
+        part = re.sub(
+            r"^(?:and|while|the|current)\s+", "", part.strip(), flags=re.IGNORECASE,
+        )
+        if part and part not in result:
+            result.append(part)
+    return result or [text]
+
+
+def _source_behavior_clauses(text):
+    """Return behavior clauses from the user/source requirement only."""
+    value = str(text or "").strip()
+
+    def has_non_test_subject(clause):
+        payload = _CHANGE_RE.sub(" ", str(clause or ""))
+        payload = re.sub(r"\b(?:and|or|but|while)\b", " ", payload, flags=re.IGNORECASE)
+        return bool(_domain_tokens(payload) - {
+            "assert", "coverage", "focused", "integration", "spec", "test", "tests",
+            "unit", "verification", "verify",
+        })
+
+    # Preservation tails are separate obligations.  This projection is
+    # deterministic source parsing; it never examines model rationale.
+    value = re.split(
+        r"\bwhile\s+(?:preserv\w*|keep\w*|retain\w*)\b|"
+        r"\b(?:and|but)\s+(?:preserv\w*|keep\w*|retain\w*)\b",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" ,.;")
+    # Keep independently requested mutations distinct when the source repeats
+    # an action verb ("add X and update Y"), while excluding action words that
+    # occur inside a negative DNT/prohibition clause.
+    action_matches = list(_CHANGE_RE.finditer(value))
+    negative_spans = [match.span() for match in re.finditer(
+        r"\b(?:do not|don't|must not|never)\s+(?:\w+\s+){0,3}"
+        r"(?:add|change|create|edit|extend|fix|implement|introduce|migrate|modify|"
+        r"remove|replace|support|update)\b",
+        value,
+        re.IGNORECASE,
+    )]
+    positive_matches = [
+        match for match in action_matches
+        if not any(start <= match.start() < end for start, end in negative_spans)
+    ]
+    result = []
+    for index, match in enumerate(positive_matches):
+        end = positive_matches[index + 1].start() if index + 1 < len(positive_matches) else len(value)
+        part = value[match.start():end]
+        # A negative clause following a positive one is a separate
+        # prohibition/preservation obligation, not part of the behavior
+        # meaning assigned to the positive mutation.
+        part = re.split(
+            r"\s+(?:and|but|while)\s+(?=(?:do not|don't|must not|never)\b)",
+            part,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        # A test clause is a separate TEST obligation, not product behavior.
+        # Trim a trailing "and tests" from a preceding action and discard an
+        # action whose only subject is the test boundary (for example,
+        # "update tests").
+        part = re.split(
+            r"\s+(?:and|or|but|while)\s+(?=(?:(?:the|relevant|focused|unit|integration)\s+)*"
+            r"(?:test|tests|spec|verification)\b)",
+            part,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        part = re.sub(r"\s+(?:and|or|but|while)\s*$", "", part, flags=re.IGNORECASE)
+        part = part.strip(" ,.;")
+        if (
+            part
+            and _CHANGE_RE.search(part)
+            and has_non_test_subject(part)
+            and part not in result
+        ):
+            result.append(part)
+    return result or ([value] if value else [])
+
+
+def _source_preservation_clauses(text):
+    value = str(text or "").strip()
+    marker = re.search(
+        r"\b(?:preserv\w*|keep\w*|retain\w*)\b", value, re.IGNORECASE,
+    )
+    if not marker:
+        return []
+    tail = value[marker.end():].strip(" ,.;:")
+    tail = re.sub(r"^(?:the|current|existing)\s+", "", tail, flags=re.IGNORECASE)
+    clauses = _split_obligation_clauses(tail)
+    # Preserve a shared terminal noun in source coordination (for example,
+    # "Escape and movement behavior") so each atomic record keeps the same
+    # obligation meaning instead of reducing the first item to "Escape".
+    if len(clauses) > 1:
+        suffix_match = re.search(
+            r"\b(behavio(?:u)?r)\s*\.?$", clauses[-1], re.IGNORECASE,
+        )
+        if suffix_match:
+            suffix = suffix_match.group(1)
+            for index, clause in enumerate(clauses[:-1]):
+                normalized = re.sub(
+                    r"^(?:preserv\w*|keep\w*|retain\w*)\s+",
+                    "", clause.strip(), flags=re.IGNORECASE,
+                )
+                normalized = re.sub(
+                    r"^(?:the|current|existing)\s+",
+                    "", normalized, flags=re.IGNORECASE,
+                )
+                if len(re.findall(r"[A-Za-z0-9_$-]+", normalized)) == 1:
+                    clauses[index] = f"{normalized.strip(' .')} {suffix}"
+    result = []
+    for clause in clauses:
+        clause = re.sub(
+            r"^(?:preserv\w*|keep\w*|retain\w*)\s+",
+            "", clause.strip(), flags=re.IGNORECASE,
+        )
+        clause = re.sub(
+            r"^(?:the|current|existing)\s+", "", clause, flags=re.IGNORECASE,
+        )
+        if clause.strip(" ."):
+            result.append(_compact(f"Preserve {clause.strip(' .')}.", 520))
+    return result
+
+
+def _source_obligation_meaning(text, obligation_type):
+    value = str(text or "").strip()
+    if obligation_type == "BEHAVIOR_CHANGE":
+        clauses = _source_behavior_clauses(value)
+        return _compact(clauses[0] if clauses else value, 520)
+    if obligation_type == "PRESERVATION":
+        clauses = _source_preservation_clauses(value)
+        return _compact(clauses[0] if clauses else value, 520)
+    return _compact(value, 520)
+
+
+def _obligation_id(requirement_id, obligation_type, ordinal):
+    return "OBL-{}-{}-{:02d}".format(
+        _obligation_slug(requirement_id),
+        _obligation_slug(obligation_type, 28),
+        int(ordinal),
+    )
+
+
+def _explicit_obligation_records(requirement, requirement_id, text):
+    explicit = requirement.get("obligations")
+    if not isinstance(explicit, list):
+        return []
+    result = []
+    for ordinal, item in enumerate(explicit, 1):
+        if not isinstance(item, dict):
+            continue
+        obligation_type = str(
+            item.get("obligation_type") or item.get("type") or ""
+        ).upper().strip()
+        if obligation_type not in REQUIREMENT_OBLIGATION_TYPES:
+            continue
+        meaning = _compact(item.get("meaning") or item.get("text") or text, 520)
+        if not meaning:
+            continue
+        value = {
+            "obligation_id": str(item.get("obligation_id") or _obligation_id(
+                requirement_id, obligation_type, ordinal,
+            )),
+            "requirement_id": requirement_id,
+            "obligation_type": obligation_type,
+            "meaning": meaning,
+            "text": meaning,
+            "source": "SOURCE_REQUIREMENT",
+            "provenance": requirement.get("provenance", USER_STATED),
+            "classification_provenance": DERIVED_PLAN_DECISION,
         }
-        behavior = bool(_CHANGE_RE.search(text)) and not (is_test and not non_test_terms)
-        if behavior:
-            obligation_types.append("BEHAVIOR_CHANGE")
-        if is_reuse:
-            obligation_types.append("ARCHITECTURE_REUSE")
-        if is_preservation:
-            obligation_types.append("PRESERVATION")
-        if is_test:
-            obligation_types.append("TEST")
-        if is_prohibition:
-            obligation_types.append("PROHIBITION")
-        if _CROSS_CUTTING_RE.search(text):
-            obligation_types.append("CROSS_CUTTING")
-        if not obligation_types:
-            # An active declarative requirement still needs a concrete
-            # semantic home.  Treat it as behavior unless it is explicitly a
-            # non-mutating constraint.
-            obligation_types.append("BEHAVIOR_CHANGE")
-        records.append({
+        for key in (
+            "candidate_surface_ids", "authorized_surface_ids", "surface_ids",
+            "surface_id", "candidate_surfaces", "authorized_surfaces",
+            "target_surface_ids", "implementation_surface_ids",
+            "authorized_implementation_surface_ids", "candidate_implementation_surface_ids",
+            "candidate_slot_ids", "slot_ids", "inherited", "inherited_satisfaction",
+            "authority_change", "authority_change_authorized", "allows_authority_change",
+            "change_authority", "explicit_authority_change", "authorized", "explicit",
+            "requested", "from", "to", "target", "target_owner", "new_owner", "object",
+            "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+            "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+        ):
+            if key in item and item.get(key) not in (None, "", [], {}):
+                value[key] = copy.deepcopy(item.get(key))
+            elif key in requirement and requirement.get(key) not in (None, "", [], {}):
+                # Requirement-level structured bindings are inherited by an
+                # explicit atomic record unless that record overrides them.
+                # This keeps the source ledger authoritative without making
+                # surface identity depend on prose.
+                value[key] = copy.deepcopy(requirement.get(key))
+        result.append(value)
+    return result
+
+
+def _atomic_obligations_for_requirement(requirement, requirement_types=None):
+    """Build stable atomic obligations from one structured source record."""
+    requirement = requirement if isinstance(requirement, dict) else {}
+    requirement_id = str(requirement.get("requirement_id") or "").strip()
+    text = _compact(requirement.get("text"), 700)
+    explicit_types = [
+        str(item).upper().strip() for item in list(
+            requirement.get("obligation_types") or requirement_types or [],
+        ) if str(item).upper().strip() in REQUIREMENT_OBLIGATION_TYPES
+    ]
+    explicit = _explicit_obligation_records(requirement, requirement_id, text)
+    if explicit:
+        behavior_values = [
+            item for item in explicit if item.get("obligation_type") == "BEHAVIOR_CHANGE"
+        ]
+        if len(behavior_values) > 1:
+            for item in behavior_values:
+                if not any(item.get(key) not in (None, "", [], {}) for key in (
+                    "candidate_surface_ids", "authorized_surface_ids", "surface_ids",
+                    "candidate_slot_ids",
+                )):
+                    item["requires_explicit_surface_binding"] = True
+        return explicit
+
+    is_test = bool(_TEST_RE.search(text))
+    is_preservation = bool(_PRESERVE_RE.search(text))
+    is_reuse = bool(_REUSE_RE.search(text))
+    is_prohibition = bool(_PROHIBITION_RE.search(text))
+    # A test-only sentence is not a product behavior mutation merely because
+    # it contains "add" or "update".  A compound sentence such as
+    # "add export and tests" retains both obligations.
+    change_clauses = re.split(r"\s+(?:and|or|;)\s+|,\s*", text, flags=re.IGNORECASE)
+    def has_change_subject(clause):
+        payload = _CHANGE_RE.sub(" ", str(clause or ""))
+        payload = re.sub(r"\b(?:and|or|but|while)\b", " ", payload, flags=re.IGNORECASE)
+        return bool(_domain_tokens(payload))
+
+    non_test_change_clause = any(
+        _CHANGE_RE.search(clause) and not _TEST_RE.search(clause)
+        and has_change_subject(clause)
+        for clause in change_clauses
+    )
+    behavior = bool(_CHANGE_RE.search(text)) and (
+        not is_test or non_test_change_clause
+    )
+    # A negative instruction such as "do not modify the owner" is a
+    # prohibition, not a request to mutate that surface.  Compound source
+    # requirements still retain a behavior obligation when they contain an
+    # independent positive change clause (for example, "add an indicator but
+    # do not modify the owner").
+    negative_action_spans = [match.span() for match in re.finditer(
+        r"\b(?:do not|don't|must not|never)\s+(?:\w+\s+){0,3}"
+        r"(?:add|change|create|edit|extend|fix|implement|introduce|migrate|modify|"
+        r"remove|replace|support|update)\b",
+        text,
+        re.IGNORECASE,
+    )]
+    positive_change = any(
+        not any(start <= match.start() < end for start, end in negative_action_spans)
+        for match in _CHANGE_RE.finditer(text)
+    )
+    if negative_action_spans and not positive_change:
+        behavior = False
+    if is_prohibition and is_reuse and not re.search(
+        r"\b(?:add|change|implement|modify|update|replace|remove)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        behavior = False
+
+    detected = []
+    if behavior:
+        detected.append("BEHAVIOR_CHANGE")
+    if is_reuse:
+        detected.append("ARCHITECTURE_REUSE")
+    if is_preservation:
+        detected.append("PRESERVATION")
+    if is_test:
+        detected.append("TEST")
+    if is_prohibition:
+        detected.append("PROHIBITION")
+    if _CROSS_CUTTING_RE.search(text):
+        detected.append("CROSS_CUTTING")
+    types = explicit_types or [
+        item for item in REQUIREMENT_OBLIGATION_TYPES if item in detected
+    ]
+    if not types:
+        # An active declarative requirement still needs a concrete semantic
+        # home. Treat it as behavior unless it was explicitly non-mutating.
+        types = ["BEHAVIOR_CHANGE"]
+
+    clauses_by_type = {}
+    if "BEHAVIOR_CHANGE" in types:
+        clauses_by_type["BEHAVIOR_CHANGE"] = _source_behavior_clauses(text)
+    if "PRESERVATION" in types:
+        clauses_by_type["PRESERVATION"] = _source_preservation_clauses(text)
+    values = []
+    for obligation_type in REQUIREMENT_OBLIGATION_TYPES:
+        if obligation_type not in types:
+            continue
+        clauses = clauses_by_type.get(obligation_type) or [
+            _source_obligation_meaning(text, obligation_type)
+        ]
+        for clause in clauses:
+            value = {
+                "obligation_id": _obligation_id(
+                    requirement_id, obligation_type, len(values) + 1,
+                ),
+                "requirement_id": requirement_id,
+                "obligation_type": obligation_type,
+                "meaning": _compact(clause, 520),
+                "text": _compact(clause, 520),
+                "source": "SOURCE_REQUIREMENT",
+                "provenance": requirement.get("provenance", USER_STATED),
+                "classification_provenance": DERIVED_PLAN_DECISION,
+            }
+            for key in (
+                "candidate_surface_ids", "authorized_surface_ids", "surface_ids",
+                "surface_id", "candidate_surfaces", "authorized_surfaces",
+                "target_surface_ids", "implementation_surface_ids",
+                "authorized_implementation_surface_ids", "candidate_implementation_surface_ids",
+                "candidate_slot_ids", "slot_ids", "inherited", "inherited_satisfaction",
+                "authority_change", "authority_change_authorized", "allows_authority_change",
+                "change_authority", "explicit_authority_change", "authorized", "explicit",
+                "requested", "from", "to", "target", "target_owner", "new_owner", "object",
+                "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+                "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+            ):
+                if requirement.get(key) not in (None, "", [], {}):
+                    value[key] = copy.deepcopy(requirement.get(key))
+            values.append(value)
+    behavior_values = [
+        item for item in values if item.get("obligation_type") == "BEHAVIOR_CHANGE"
+    ]
+    if len(behavior_values) > 1:
+        # Distinct source behavior clauses cannot share every owner candidate
+        # by lexical coincidence.  They must arrive with an explicit
+        # structured surface/slot binding (or an equivalent future capability
+        # proof) before one decision is allowed to cover more than one clause.
+        for item in behavior_values:
+            if not any(item.get(key) not in (None, "", [], {}) for key in (
+                "candidate_surface_ids", "authorized_surface_ids", "surface_ids",
+                "candidate_slot_ids",
+            )):
+                item["requires_explicit_surface_binding"] = True
+    return values
+
+
+def _atomic_obligation_records(ledger_or_requirements):
+    """Return normalized atomic records without changing legacy type views."""
+    records = _obligation_records(ledger_or_requirements)
+    result = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        explicit = record.get("obligations")
+        values = explicit if isinstance(explicit, list) and explicit else [
+            *_atomic_obligations_for_requirement(record)
+        ]
+        for ordinal, item in enumerate(values, 1):
+            if not isinstance(item, dict):
+                continue
+            value = copy.deepcopy(item)
+            value.setdefault("requirement_id", record.get("requirement_id"))
+            value.setdefault("obligation_type", "BEHAVIOR_CHANGE")
+            value.setdefault("meaning", value.get("text") or record.get("text", ""))
+            value.setdefault("text", value.get("meaning", ""))
+            value.setdefault(
+                "obligation_id",
+                _obligation_id(
+                    value.get("requirement_id"), value.get("obligation_type"), ordinal,
+                ),
+            )
+            result.append(value)
+    return result
+
+
+def build_requirement_obligation_ledger(requirements):
+    """Classify source requirements into deterministic atomic obligations."""
+    raw = (
+        requirements.get("requirements", [])
+        if isinstance(requirements, dict) else list(requirements or [])
+    )
+    records = []
+    for requirement in active_requirements(raw):
+        obligation_values = _atomic_obligations_for_requirement(requirement)
+        types = []
+        for item in obligation_values:
+            obligation_type = item.get("obligation_type")
+            if obligation_type not in types:
+                types.append(obligation_type)
+        record = {
             "requirement_id": requirement["requirement_id"],
-            "text": text,
+            "text": requirement["text"],
             "obligation_types": [
-                item for item in REQUIREMENT_OBLIGATION_TYPES if item in obligation_types
+                item for item in REQUIREMENT_OBLIGATION_TYPES if item in types
             ],
+            "obligations": obligation_values,
             "source_provenance": requirement.get("provenance", USER_STATED),
             "classification_provenance": DERIVED_PLAN_DECISION,
-        })
+        }
+        for key in (
+            "candidate_surface_ids", "authorized_surface_ids", "surface_ids",
+            "surface_id", "candidate_surfaces", "authorized_surfaces",
+            "target_surface_ids", "implementation_surface_ids",
+            "authorized_implementation_surface_ids", "candidate_implementation_surface_ids",
+            "candidate_slot_ids", "slot_ids", "inherited", "inherited_satisfaction",
+            "authority_change", "authority_change_authorized", "allows_authority_change",
+            "change_authority", "explicit_authority_change", "authorized", "explicit",
+            "requested", "from", "to", "target", "target_owner", "new_owner", "object",
+            "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+            "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+        ):
+            if key in requirement and requirement.get(key) not in (None, "", [], {}):
+                record[key] = copy.deepcopy(requirement.get(key))
+        records.append(record)
+    obligation_count = sum(len(item.get("obligations", [])) for item in records)
     return {
-        "version": 1,
+        "version": 2,
         "requirements": records,
-        "obligation_count": sum(len(item["obligation_types"]) for item in records),
-        "bounds": {"max_requirements": len(records), "allowed_types": list(REQUIREMENT_OBLIGATION_TYPES)},
+        "obligation_count": obligation_count,
+        "bounds": {
+            "max_requirements": len(records),
+            "max_obligations": obligation_count,
+            "allowed_types": list(REQUIREMENT_OBLIGATION_TYPES),
+        },
         "provenance": DERIVED_PLAN_DECISION,
     }
 
@@ -722,15 +1163,41 @@ def _obligation_records(ledger_or_requirements):
 
 def compact_requirement_obligation_ledger(ledger_or_requirements):
     records = _obligation_records(ledger_or_requirements)
-    return {
-        "version": 1,
-        "requirements": [{
+    compact_records = []
+    for item in records:
+        obligations = _atomic_obligations_for_requirement(item)
+        compact_records.append({
             "requirement_id": item.get("requirement_id"),
-            "obligation_types": list(item.get("obligation_types", [])),
+            "obligation_types": list(dict.fromkeys(
+                str(value.get("obligation_type")) for value in obligations
+                if value.get("obligation_type")
+            )) or list(item.get("obligation_types", [])),
+            "obligations": [{
+                key: copy.deepcopy(value.get(key))
+                for key in (
+                    "obligation_id", "obligation_type", "meaning", "text",
+                    "candidate_surface_ids", "authorized_surface_ids",
+                    "surface_ids", "surface_id", "candidate_surfaces",
+                    "authorized_surfaces", "target_surface_ids",
+                     "implementation_surface_ids", "authorized_implementation_surface_ids",
+                     "candidate_implementation_surface_ids", "candidate_slot_ids", "slot_ids", "inherited",
+                     "inherited_satisfaction", "requires_explicit_surface_binding",
+                     "authority_change", "authority_change_authorized", "allows_authority_change",
+                     "change_authority", "explicit_authority_change", "authorized", "explicit",
+                     "requested", "from", "to", "target", "target_owner", "new_owner", "object",
+                     "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+                     "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+                     "source", "provenance",
+                    "classification_provenance",
+                ) if value.get(key) not in (None, "", [], {})
+            } for value in obligations],
             "source_provenance": item.get("source_provenance", USER_STATED),
             "classification_provenance": DERIVED_PLAN_DECISION,
-        } for item in records],
-        "obligation_count": sum(len(item.get("obligation_types", [])) for item in records),
+        })
+    return {
+        "version": 2,
+        "requirements": compact_records,
+        "obligation_count": sum(len(item.get("obligations", [])) for item in compact_records),
         "provenance": DERIVED_PLAN_DECISION,
     }
 
@@ -3993,8 +4460,25 @@ def impact_decision_frame_schema():
             "seed_id": {"type": "string"},
             "impact_id": {"type": "string"},
             "surface_id": {"type": "string"},
+            "surface_kind": {"type": "string"},
+            "surface_role": {"type": "string"},
+            "surface_path": {"type": "string"},
+            "surface_symbol": {"type": "string"},
             "requirement_ids": {"type": "array", "items": {"type": "string"}},
             "allowed_decisions": {"type": "array", "items": {"type": "string"}},
+            "candidate_obligation_ids": {"type": "array", "items": {"type": "string"}},
+            "surface_capabilities": {
+                "type": "array", "items": {"type": "string", "enum": list(DECISION_CAPABILITY_NAMES)},
+            },
+            "decision_capabilities": {
+                "type": "object",
+                "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
+            "obligations_satisfied_by_decision": {
+                "type": "object",
+                "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
+            "inherited_obligation_ids": {"type": "array", "items": {"type": "string"}},
             "allowed_targets": {"type": "array", "items": {"type": "string"}},
             "authority_change_targets": {"type": "array", "items": {"type": "string"}},
             "current_owner": {"type": ["object", "null"]},
@@ -4004,14 +4488,20 @@ def impact_decision_frame_schema():
             "required_verification_contracts": {"type": "array", "items": obligation},
             "dnt": {"type": "array", "items": {"type": "string"}},
             "prohibitions": {"type": "array", "items": {"type": "string"}},
+            "dnt_surface_ids": {"type": "array", "items": {"type": "string"}},
+            "prohibited_surface_ids": {"type": "array", "items": {"type": "string"}},
             "authority_refs": {"type": "array", "items": {"type": "string"}},
             "evidence_refs": {"type": "array", "items": {"type": "string"}},
         },
         "required": [
             "slot_id", "seed_id", "impact_id", "surface_id", "requirement_ids",
-            "allowed_decisions", "allowed_targets", "current_owner", "required_interfaces",
+            "surface_kind", "surface_role", "surface_path", "surface_symbol",
+            "allowed_decisions", "candidate_obligation_ids", "surface_capabilities",
+            "decision_capabilities", "obligations_satisfied_by_decision",
+            "inherited_obligation_ids", "allowed_targets", "current_owner", "required_interfaces",
             "required_preservation_promises", "required_verification_contracts", "dnt",
-            "prohibitions", "authority_refs", "evidence_refs",
+            "prohibitions", "dnt_surface_ids", "prohibited_surface_ids",
+            "authority_refs", "evidence_refs",
         ],
         "additionalProperties": False,
     }
@@ -4026,15 +4516,21 @@ def impact_decision_frame_schema():
             "authority_change_targets": {"type": "array", "items": {"type": "string"}},
             "source_planning_context_hash": {"type": "string"},
             "source_mandatory_core_hash": {"type": "string"},
+            "requirement_obligation_ledger": {"type": "object"},
+            "impact_decision_frame_coverage": {"type": "object"},
+            "coverage": {"type": "object"},
             "decision_slots": {"type": "array", "items": slot},
             "frame_errors": {"type": "array", "items": {"type": "string"}},
             "frame_complete": {"type": "boolean"},
+            "frame_coverage_ready": {"type": "boolean"},
             "frame_hash": {"type": "string"},
         },
         "required": [
             "version", "artifact_type", "project_id", "task_id",
             "source_planning_context_hash", "source_mandatory_core_hash",
-            "decision_slots", "frame_errors", "frame_complete", "frame_hash",
+            "requirement_obligation_ledger", "impact_decision_frame_coverage", "coverage",
+            "decision_slots", "frame_errors", "frame_complete", "frame_coverage_ready",
+            "frame_hash",
         ],
         "additionalProperties": False,
     }
@@ -4117,7 +4613,10 @@ def _frame_ids(value, keys):
         values = raw if isinstance(raw, (list, tuple, set)) else ([] if raw in (None, "") else [raw])
         for item in values:
             if isinstance(item, dict):
-                item = item.get("id") or item.get("record_id") or item.get("evidence_id")
+                item = (
+                    item.get("id") or item.get("record_id") or item.get("evidence_id")
+                    or item.get("surface_id") or item.get("slot_id")
+                )
             if item not in (None, ""):
                 text = str(item)
                 if text not in result:
@@ -4172,7 +4671,12 @@ def _frame_record_matches(record, surface, requirement_ids, requirements, *, glo
         return False
     refs = _frame_record_refs(record)
     surface_id = str(surface.get("surface_id") or "")
-    explicit_surface_ids = set(_frame_ids(record, ("surface_id", "canonical_surface_id", "surface_ids")))
+    explicit_surface_ids = set(_frame_ids(record, (
+        "surface_id", "canonical_surface_id", "surface_ids", "target_surface_ids",
+        "candidate_surface_ids", "authorized_surface_ids", "implementation_surface_ids",
+        "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+        "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+    )))
     if surface_id and surface_id in explicit_surface_ids:
         return True
     surface_evidence = {str(item) for item in surface.get("evidence_ids", []) or []}
@@ -4231,22 +4735,18 @@ def _frame_raw_records(task_brain, verified_planning_context, requirements, evid
         if not isinstance(value, dict):
             return [value]
         text = _frame_text(value)
-        marker = re.search(r"\bpreserv(?:e|es|ed|ing)\b", text, re.IGNORECASE)
-        if not marker or "," not in text[marker.end():]:
+        marker = re.search(
+            r"\b(?:preserv\w*|keep\w*|retain\w*)\b", text, re.IGNORECASE,
+        )
+        if not marker:
             return [value]
-        tail = text[marker.end():].strip()
-        tail = re.sub(r"^(?:current|the|while|and)\s+", "", tail, flags=re.IGNORECASE)
-        clauses = [
-            re.sub(r"^(?:and|while|the|current)\s+", "", part.strip(" ."), flags=re.IGNORECASE)
-            for part in re.split(r",\s*|\s+and\s+", tail)
-            if part.strip(" .")
-        ]
+        clauses = _source_preservation_clauses(text)
         if len(clauses) < 2:
             return [value]
         result = []
         for clause in clauses[:8]:
             child = copy.deepcopy(value)
-            child["text"] = _compact("Preserve " + clause + ".", 520)
+            child["text"] = clause
             result.append(child)
         return result
 
@@ -4352,22 +4852,35 @@ def _frame_authority_change(requirements):
     for item in list(requirements or []):
         if not isinstance(item, dict):
             continue
-        change = item.get("authority_change") if isinstance(item.get("authority_change"), dict) else item
-        flag = any(item.get(key) is True for key in (
-            "authority_change_authorized", "allows_authority_change", "change_authority",
-            "explicit_authority_change",
-        ))
-        flag = flag or any(change.get(key) is True for key in ("authorized", "explicit", "requested"))
-        if change.get("from") and change.get("to") and change.get("type") in {
-            "AUTHORITY_CHANGE", "OWNERSHIP_CHANGE", "STATE_OWNERSHIP_CHANGE",
-        }:
-            flag = True
-        if not flag:
-            continue
-        authorized = True
-        for key in ("to", "target_owner", "new_owner", "object"):
-            if change.get(key) not in (None, "") and str(change[key]) not in targets:
-                targets.append(str(change[key]))
+        changes = [item]
+        nested = item.get("authority_change")
+        if isinstance(nested, dict):
+            changes.append(nested)
+        for obligation in list(item.get("obligations", []) or []):
+            if not isinstance(obligation, dict):
+                continue
+            changes.append(obligation)
+            nested = obligation.get("authority_change")
+            if isinstance(nested, dict):
+                changes.append(nested)
+        for change in changes:
+            flag = any(change.get(key) is True for key in (
+                "authority_change_authorized", "allows_authority_change", "change_authority",
+                "explicit_authority_change",
+            ))
+            flag = flag or any(change.get(key) is True for key in (
+                "authorized", "explicit", "requested",
+            ))
+            if change.get("from") and change.get("to") and str(change.get("type", "")).upper() in {
+                "AUTHORITY_CHANGE", "OWNERSHIP_CHANGE", "STATE_OWNERSHIP_CHANGE",
+            }:
+                flag = True
+            if not flag:
+                continue
+            authorized = True
+            for key in ("to", "target", "target_owner", "new_owner", "object"):
+                if change.get(key) not in (None, "") and str(change[key]) not in targets:
+                    targets.append(str(change[key]))
     return authorized, targets[:4]
 
 
@@ -4450,12 +4963,404 @@ def _frame_deduplicate_obligations(values):
     return result[:8]
 
 
+def impact_decision_capability_taxonomy():
+    """Return the deterministic capability projection of existing choices."""
+    return {
+        key: list(value) for key, value in DECISION_CAPABILITY_TAXONOMY.items()
+    }
+
+
+decision_capability_taxonomy = impact_decision_capability_taxonomy
+
+
+def _decision_capabilities(decision):
+    return list(DECISION_CAPABILITY_TAXONOMY.get(str(decision or "").upper(), ()))
+
+
+def _surface_capabilities(surface):
+    value = surface if isinstance(surface, dict) else {}
+    kind = str(value.get("kind") or "OTHER").upper()
+    role = str(value.get("role") or "").upper()
+    if kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}:
+        return ["IMPLEMENTATION_CHANGE", "PRESERVATION_ONLY"]
+    if kind == "TEST" or role == "CURRENT_TEST":
+        return ["TEST_CHANGE"]
+    if kind == "INTERFACE" or role == "INTERFACE":
+        return ["REUSE_ONLY"]
+    if kind == "PERSISTENCE" or role == "PERSISTENCE_OWNER":
+        return ["PRESERVATION_ONLY"]
+    # Generic accepted evidence is still inspectable, but is not promoted to
+    # an implementation surface without a typed OWNER/current-behavior fact.
+    return []
+
+
+def _obligation_surface_ids(obligation):
+    value = obligation if isinstance(obligation, dict) else {}
+    result = []
+    for key in (
+        "candidate_surface_ids", "authorized_surface_ids", "surface_ids", "surface_id",
+        "candidate_surfaces", "authorized_surfaces", "target_surface_ids",
+        "implementation_surface_ids", "authorized_implementation_surface_ids",
+        "candidate_implementation_surface_ids",
+    ):
+        raw = value.get(key)
+        values = raw if isinstance(raw, (list, tuple, set)) else ([] if raw in (None, "", {}) else [raw])
+        for item in values:
+            if isinstance(item, dict):
+                item = item.get("surface_id") or item.get("id")
+            if item not in (None, "") and str(item) not in result:
+                result.append(str(item))
+    return result[:8]
+
+
+def _obligation_forbidden_surface_ids(obligation):
+    value = obligation if isinstance(obligation, dict) else {}
+    result = []
+    for key in (
+        "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+        "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+    ):
+        raw = value.get(key)
+        values = raw if isinstance(raw, (list, tuple, set)) else (
+            [] if raw in (None, "", {}) else [raw]
+        )
+        for item in values:
+            if isinstance(item, dict):
+                item = item.get("surface_id") or item.get("id")
+            if item not in (None, "") and str(item) not in result:
+                result.append(str(item))
+    return result[:8]
+
+
+def _obligation_slot_ids(obligation):
+    value = obligation if isinstance(obligation, dict) else {}
+    raw = value.get("candidate_slot_ids") or value.get("slot_ids")
+    values = raw if isinstance(raw, (list, tuple, set)) else ([] if raw in (None, "", {}) else [raw])
+    return [str(item) for item in values if item not in (None, "")][:8]
+
+
+def _frame_surface_is_forbidden(surface, slot):
+    """Check only explicit DNT/prohibition targeting, not generic preservation."""
+    value = surface if isinstance(surface, dict) else {}
+    slot = slot if isinstance(slot, dict) else {}
+    surface_id = str(value.get("surface_id") or "")
+    path = _normal_path(value.get("path"))
+    symbol = str(value.get("symbol") or "")
+    explicit_dnt = {
+        str(item) for item in list(slot.get("dnt_surface_ids", []) or [])
+    }
+    explicit_prohibited = {
+        str(item) for item in list(slot.get("prohibited_surface_ids", []) or [])
+    }
+    if surface_id and (surface_id in explicit_dnt or surface_id in explicit_prohibited):
+        return True
+    identity_terms = _domain_tokens(" ".join([surface_id, path, symbol]))
+    for text in list(slot.get("dnt", []) or []) + list(slot.get("prohibitions", []) or []):
+        text = str(text or "")
+        lower = text.casefold()
+        # "Do not create a second owner" constrains ownership migration but
+        # does not prohibit changing the verified owner surface itself.
+        targeted = re.search(
+            r"\b(?:do not|don't|must not|never)\s+(?:touch|modify|change|mutate|use)\b|"
+            r"\b(?:prohibited|forbidden)\b",
+            lower,
+        )
+        if targeted and identity_terms.intersection(_domain_tokens(text)):
+            return True
+    return False
+
+
+def _frame_obligation_relevant(obligation, slot, surface):
+    value = obligation if isinstance(obligation, dict) else {}
+    slot = slot if isinstance(slot, dict) else {}
+    surface = surface if isinstance(surface, dict) else {}
+    requirement_id = str(value.get("requirement_id") or "")
+    if requirement_id not in {str(item) for item in slot.get("requirement_ids", []) or []}:
+        return False
+    obligation_type = str(value.get("obligation_type") or "").upper()
+    surface_ids = _obligation_surface_ids(value)
+    if surface_ids and str(surface.get("surface_id")) not in set(surface_ids):
+        return False
+    if (
+        obligation_type != "PROHIBITION"
+        and str(surface.get("surface_id")) in set(_obligation_forbidden_surface_ids(value))
+    ):
+        return False
+    slot_ids = _obligation_slot_ids(value)
+    if slot_ids and str(slot.get("slot_id")) not in set(slot_ids):
+        return False
+    if value.get("requires_explicit_surface_binding") and not surface_ids and not slot_ids:
+        return False
+    if obligation_type != "PROHIBITION" and _frame_surface_is_forbidden(surface, slot):
+        return False
+    kind = str(surface.get("kind") or "OTHER").upper()
+    role = str(surface.get("role") or "").upper()
+    if obligation_type == "BEHAVIOR_CHANGE":
+        return "IMPLEMENTATION_CHANGE" in _surface_capabilities(surface)
+    if obligation_type == "TEST":
+        return kind == "TEST" or role == "CURRENT_TEST"
+    if obligation_type == "ARCHITECTURE_REUSE":
+        return kind == "INTERFACE" or role == "INTERFACE"
+    if obligation_type == "PRESERVATION":
+        return True
+    if obligation_type == "PROHIBITION":
+        return True
+    if obligation_type == "AUTHORITY_CHANGE":
+        return kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}
+    if obligation_type == "CROSS_CUTTING":
+        return True
+    return False
+
+
+def _frame_inherited_obligation(obligation, slot):
+    value = obligation if isinstance(obligation, dict) else {}
+    slot = slot if isinstance(slot, dict) else {}
+    obligation_type = str(value.get("obligation_type") or "").upper()
+    requirement_id = str(value.get("requirement_id") or "")
+    if requirement_id not in {str(item) for item in slot.get("requirement_ids", []) or []}:
+        return False
+    surface_id = str(slot.get("surface_id") or "")
+    bound_surfaces = _obligation_surface_ids(value)
+    if bound_surfaces and surface_id not in set(bound_surfaces):
+        return False
+    bound_slots = _obligation_slot_ids(value)
+    if bound_slots and str(slot.get("slot_id") or "") not in set(bound_slots):
+        return False
+    if (
+        obligation_type != "PROHIBITION"
+        and surface_id in set(_obligation_forbidden_surface_ids(value))
+    ):
+        return False
+    if value.get("inherited") is True or value.get("inherited_satisfaction") is True:
+        return True
+    if obligation_type == "PROHIBITION":
+        return bool(slot.get("dnt") or slot.get("prohibitions"))
+    if obligation_type != "PRESERVATION":
+        return False
+    meaning_terms = _domain_tokens(re.sub(
+        r"^\s*(?:preserv\w*|keep\w*|retain\w*)\s+", "",
+        str(value.get("meaning") or value.get("text") or ""),
+        flags=re.IGNORECASE,
+    ))
+    for item in list(slot.get("required_preservation_promises", []) or []):
+        if not isinstance(item, dict):
+            continue
+        item_requirement_ids = {str(ref) for ref in item.get("requirement_ids", []) or []}
+        if item_requirement_ids and requirement_id not in item_requirement_ids:
+            continue
+        item_terms = _domain_tokens(re.sub(
+            r"^\s*(?:preserv\w*|keep\w*|retain\w*)\s+", "",
+            str(item.get("text") or ""),
+            flags=re.IGNORECASE,
+        ))
+        if meaning_terms.intersection(item_terms):
+            return True
+    return False
+
+
+def _frame_decision_satisfies_obligation(obligation, slot, decision, surface):
+    if not _frame_obligation_relevant(obligation, slot, surface):
+        return False
+    decision = str(decision or "").upper()
+    capabilities = set(_decision_capabilities(decision))
+    obligation_type = str(obligation.get("obligation_type") or "").upper()
+    kind = str(surface.get("kind") or "OTHER").upper()
+    role = str(surface.get("role") or "").upper()
+    if obligation_type == "BEHAVIOR_CHANGE":
+        return "IMPLEMENTATION_CHANGE" in capabilities and (
+            kind == "OWNER" or role in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}
+        )
+    if obligation_type == "TEST":
+        return "TEST_CHANGE" in capabilities and (kind == "TEST" or role == "CURRENT_TEST")
+    if obligation_type == "ARCHITECTURE_REUSE":
+        return "REUSE_ONLY" in capabilities and (kind == "INTERFACE" or role == "INTERFACE")
+    if obligation_type == "PRESERVATION":
+        return "PRESERVATION_ONLY" in capabilities
+    if obligation_type == "AUTHORITY_CHANGE":
+        return "AUTHORITY_CHANGE" in capabilities
+    if obligation_type == "CROSS_CUTTING":
+        return bool(capabilities.intersection({"TEST_CHANGE", "INSPECTION_ONLY"}))
+    # Prohibitions are inherited constraints; no selected decision is allowed
+    # to claim a prohibition as its implementation.
+    return False
+
+
+def _coverage_hash(value):
+    material = copy.deepcopy(value if isinstance(value, dict) else {})
+    material.pop("coverage_hash", None)
+    return _impact_decision_hash(material)
+
+
+def impact_decision_coverage_hash(coverage):
+    return _coverage_hash(coverage)
+
+
+def _build_frame_coverage(frame):
+    value = frame if isinstance(frame, dict) else {}
+    ledger = value.get("requirement_obligation_ledger")
+    obligations = _atomic_obligation_records(ledger or [])
+    slots = [
+        item for item in list(value.get("decision_slots", []) or [])
+        if isinstance(item, dict)
+    ]
+    obligation_records = []
+    for obligation in obligations:
+        obligation_id = str(obligation.get("obligation_id") or "")
+        requirement_id = str(obligation.get("requirement_id") or "")
+        candidate_slots = []
+        candidate_decisions = []
+        inherited_slots = []
+        satisfied_by_decision = {}
+        for slot in slots:
+            slot_id = str(slot.get("slot_id") or "")
+            if not slot_id:
+                continue
+            surface = {
+                "surface_id": slot.get("surface_id"),
+                "kind": slot.get("surface_kind"),
+                "role": slot.get("surface_role"),
+                "path": slot.get("surface_path"),
+                "symbol": slot.get("surface_symbol"),
+            }
+            # Frame construction stores the surface capability projection on
+            # each slot; the fallback makes the artifact useful with a small
+            # hand-built frame in architecture tests.
+            if _frame_obligation_relevant(obligation, slot, surface):
+                candidate_slots.append(slot_id)
+            if _frame_inherited_obligation(obligation, slot):
+                inherited_slots.append(slot_id)
+            # Derive every decision contribution from typed obligation,
+            # surface capability, and the existing allowed-decision enum.  A
+            # copied/tampered mapping in the frame is never treated as a
+            # semantic shortcut.
+            for decision in list(slot.get("allowed_decisions", []) or []):
+                if _frame_decision_satisfies_obligation(obligation, slot, decision, surface):
+                    decision = str(decision)
+                    satisfied_by_decision.setdefault(decision, []).append(slot_id)
+                    if decision not in candidate_decisions:
+                        candidate_decisions.append(decision)
+        candidate_slots = list(dict.fromkeys(candidate_slots + [
+            slot_id for ids in satisfied_by_decision.values() for slot_id in ids
+        ]))
+        candidate_decisions = list(dict.fromkeys(candidate_decisions))
+        obligation_type = str(obligation.get("obligation_type") or "").upper()
+        inherited = bool(inherited_slots)
+        if obligation_type == "PROHIBITION":
+            ready = inherited
+        elif obligation_type == "PRESERVATION":
+            ready = inherited or "PRESERVATION_ONLY" in set(candidate_decisions)
+        elif obligation_type == "BEHAVIOR_CHANGE":
+            ready = any(
+                "IMPLEMENTATION_CHANGE" in _decision_capabilities(decision)
+                for decision in candidate_decisions
+            )
+        else:
+            ready = bool(candidate_decisions) or inherited
+        obligation_records.append({
+            "obligation_id": obligation_id,
+            "requirement_id": requirement_id,
+            "obligation_type": obligation_type,
+            "meaning": _compact(obligation.get("meaning") or obligation.get("text"), 520),
+            "candidate_slots": list(dict.fromkeys(candidate_slots)),
+            "candidate_decisions": candidate_decisions,
+            "inherited_satisfaction": inherited,
+            "inherited_slots": list(dict.fromkeys(inherited_slots)),
+            "coverage_ready": bool(ready),
+            "satisfied_by_decision": {
+                key: list(dict.fromkeys(value))
+                for key, value in sorted(satisfied_by_decision.items())
+            },
+        })
+    grouped = []
+    by_requirement = {}
+    for item in obligation_records:
+        by_requirement.setdefault(item["requirement_id"], []).append(item)
+    for requirement_id in sorted(by_requirement):
+        grouped.append({
+            "requirement_id": requirement_id,
+            "obligations": by_requirement[requirement_id],
+        })
+    uncovered = [
+        item["obligation_id"] for item in obligation_records
+        if not item.get("coverage_ready")
+    ]
+    artifact = {
+        "version": 1,
+        "artifact_type": "ImpactDecisionFrameCoverage",
+        "requirements": grouped,
+        "obligations": obligation_records,
+        "uncovered_obligations": uncovered,
+        "uncovered_requirement_ids": list(dict.fromkeys(
+            item["requirement_id"] for item in obligation_records
+            if not item.get("coverage_ready")
+        )),
+        "coverage_status": (
+            IMPACT_FRAME_COVERAGE_READY if not uncovered
+            else IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+        ),
+        "metrics": {
+            "impact_obligations_total": len(obligation_records),
+            "impact_behavior_change_obligations": sum(
+                item.get("obligation_type") == "BEHAVIOR_CHANGE"
+                for item in obligation_records
+            ),
+            "impact_frame_covered_obligations": sum(
+                bool(item.get("coverage_ready")) for item in obligation_records
+            ),
+            "impact_frame_uncovered_obligations": len(uncovered),
+        },
+    }
+    artifact["coverage_hash"] = _coverage_hash(artifact)
+    return artifact
+
+
+def build_impact_decision_frame_coverage(frame):
+    """Build the immutable zero-model pre-choice coverage artifact."""
+    return _build_frame_coverage(frame)
+
+
+def validate_impact_decision_frame_coverage(frame):
+    value = frame if isinstance(frame, dict) else {}
+    artifact = value.get("impact_decision_frame_coverage") or value.get("coverage")
+    errors = []
+    expected = _build_frame_coverage(value)
+    if not isinstance(artifact, dict):
+        errors.append("ImpactDecisionFrame coverage artifact is missing")
+    else:
+        if artifact.get("coverage_hash") != _coverage_hash(artifact):
+            errors.append("ImpactDecisionFrame coverage hash does not match canonical contents")
+        if artifact.get("coverage_hash") != expected.get("coverage_hash"):
+            errors.append("ImpactDecisionFrame coverage does not match canonical frame contents")
+        if artifact.get("uncovered_obligations") != expected.get("uncovered_obligations"):
+            errors.append("ImpactDecisionFrame uncovered obligation projection is stale")
+    if expected.get("coverage_status") != IMPACT_FRAME_COVERAGE_READY:
+        errors.append(
+            f"{IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP}: "
+            + ", ".join(expected.get("uncovered_obligations", []))
+        )
+    return {
+        "valid": not errors,
+        "status": expected.get("coverage_status"),
+        "errors": list(dict.fromkeys(errors))[:24],
+        "coverage": copy.deepcopy(artifact if isinstance(artifact, dict) else expected),
+        "uncovered_obligations": list(expected.get("uncovered_obligations", [])),
+        "covered_obligations": sum(
+            item.get("coverage_ready") is True
+            for item in expected.get("obligations", [])
+        ),
+        "obligations_total": len(expected.get("obligations", [])),
+        "model_calls": 0,
+        "coverage_hash": expected.get("coverage_hash"),
+    }
+
+
 def build_impact_decision_frame(
     task_brain=None, requirements=None, evidence=None, surface_registry=None,
     impact_seeds=None, verified_planning_context=None, mandatory_core=None,
     *, registry=None, seeds=None, core=None, planning_context=None,
+    obligation_ledger=None,
 ):
-    """Build the immutable V24.3 authority-bound decision frame.
+    """Build the immutable V24.4 authority-bound decision frame.
 
     The builder consumes only existing Stage 1/2/V24 authority.  It never
     calls a provider and it never fills a missing obligation with a guessed
@@ -4474,6 +5379,17 @@ def build_impact_decision_frame(
     source = verified_planning_context if isinstance(verified_planning_context, dict) else {}
     raw_requirements = [item for item in list(requirements or []) if isinstance(item, dict)]
     reqs = active_requirements(raw_requirements)
+    obligation_ledger_value = (
+        copy.deepcopy(obligation_ledger)
+        if isinstance(obligation_ledger, dict)
+        else build_requirement_obligation_ledger(raw_requirements)
+    )
+    atomic_obligations = [
+        item for item in _atomic_obligation_records(obligation_ledger_value)
+        if str(item.get("requirement_id")) in {
+            str(value.get("requirement_id")) for value in reqs
+        }
+    ]
     registry_value = surface_registry if isinstance(surface_registry, dict) else build_canonical_surface_registry(
         brain, evidence,
     )
@@ -4571,6 +5487,18 @@ def build_impact_decision_frame(
             str(item) for item in list(seed.get("requirement_ids", []) or [])
             if str(item) in req_id_set
         ]
+        slot_id = f"SLOT-{len(slots) + 1:03d}"
+        # Structured obligation bindings are authoritative even when a seed
+        # carries no lexical requirement reference.  This is the explicit
+        # requirement-to-surface path; prose matching remains a fallback only.
+        for obligation in atomic_obligations:
+            requirement_id = str(obligation.get("requirement_id") or "")
+            if not requirement_id:
+                continue
+            bound_surfaces = set(_obligation_surface_ids(obligation))
+            bound_slots = set(_obligation_slot_ids(obligation))
+            if surface_id in bound_surfaces or slot_id in bound_slots:
+                seed_req_ids.append(requirement_id)
         owner = _frame_owner_for_surface(surface, by_surface_id, brain)
         interfaces = _frame_interfaces_for_surface(surface, surfaces, owner)
         slot_req_ids = list(dict.fromkeys(seed_req_ids))
@@ -4588,6 +5516,10 @@ def build_impact_decision_frame(
                 if _frame_record_matches(item, surface, slot_req_ids, reqs):
                     slot_req_ids.extend(item_id for item_id in refs["requirement_ids"] if item_id in req_id_set)
         slot_req_ids = _bounded_ids(slot_req_ids, MAX_REQUIREMENT_REFS_PER_IMPACT)
+        separate = bool(
+            seed.get("separate_decision") or seed.get("requires_separate_decision")
+            or seed.get("decision_scope")
+        )
         allowed_decisions = _frame_allowed_decisions(
             surface, slot_req_ids, reqs, authority_change=authority_change,
         )
@@ -4616,6 +5548,8 @@ def build_impact_decision_frame(
         dnt_texts = []
         prohibition_texts = []
         constraint_refs = []
+        dnt_surface_ids = []
+        prohibited_surface_ids = []
         for ordinal, record in enumerate(constraint_records, 1):
             if not _frame_record_matches(
                 record, surface, slot_req_ids, reqs,
@@ -4627,8 +5561,20 @@ def build_impact_decision_frame(
                 continue
             if text not in dnt_texts:
                 dnt_texts.append(text)
-            if str(record.get("_frame_channel")) == "prohibition" and text not in prohibition_texts:
-                prohibition_texts.append(text)
+            record_surface_ids = _frame_ids(
+                record, (
+                    "surface_id", "canonical_surface_id", "surface_ids", "target_surface_ids",
+                    "candidate_surface_ids", "authorized_surface_ids", "implementation_surface_ids",
+                    "dnt_surface_ids", "prohibited_surface_ids", "forbidden_surface_ids",
+                    "do_not_touch_surface_ids", "do_not_modify_surface_ids",
+                ),
+            )
+            if str(record.get("_frame_channel")) == "prohibition":
+                if text not in prohibition_texts:
+                    prohibition_texts.append(text)
+                prohibited_surface_ids.extend(record_surface_ids)
+            else:
+                dnt_surface_ids.extend(record_surface_ids)
             constraint_refs.extend(_frame_record_refs(record).get("authority_refs", []))
         # An explicitly typed DNT preservation record is also a prohibition,
         # while ordinary preservation remains slot-local and is not copied to
@@ -4652,6 +5598,61 @@ def build_impact_decision_frame(
             authority_refs.extend(item.get("requirement_ids", []) or [])
             authority_refs.extend(item.get("evidence_refs", []) or [])
         authority_refs.extend(constraint_refs)
+        dnt_surface_ids = list(dict.fromkeys(str(item) for item in dnt_surface_ids if item))[:8]
+        prohibited_surface_ids = list(dict.fromkeys(
+            str(item) for item in prohibited_surface_ids if item
+        ))[:8]
+        surface_capabilities = _surface_capabilities(surface)
+        decision_capabilities = {
+            str(decision): _decision_capabilities(decision)
+            for decision in allowed_decisions
+        }
+        provisional_slot = {
+            "slot_id": slot_id,
+            "surface_id": surface_id,
+            "requirement_ids": slot_req_ids,
+            "dnt": _bounded_strings(dnt_texts, 8, 320),
+            "prohibitions": _bounded_strings(prohibition_texts, 8, 320),
+            "dnt_surface_ids": dnt_surface_ids,
+            "prohibited_surface_ids": prohibited_surface_ids,
+            "allowed_decisions": allowed_decisions,
+            "surface_kind": surface.get("kind"),
+            "surface_role": surface.get("role"),
+            "surface_path": _normal_path(surface.get("path")),
+            "surface_symbol": str(surface.get("symbol") or ""),
+            "required_preservation_promises": slot_preservation,
+            "required_verification_contracts": slot_verification,
+        }
+        candidate_obligation_ids = []
+        inherited_obligation_ids = []
+        obligations_satisfied_by_decision = {
+            str(decision): [] for decision in allowed_decisions
+        }
+        for obligation in atomic_obligations:
+            obligation_id = str(obligation.get("obligation_id") or "")
+            if obligation_id and _frame_inherited_obligation(
+                obligation, provisional_slot,
+            ):
+                inherited_obligation_ids.append(obligation_id)
+            if not obligation_id or not _frame_obligation_relevant(
+                obligation, provisional_slot, surface,
+            ):
+                continue
+            candidate_obligation_ids.append(obligation_id)
+            for decision in allowed_decisions:
+                if _frame_decision_satisfies_obligation(
+                    obligation, provisional_slot, decision, surface,
+                ):
+                    obligations_satisfied_by_decision[str(decision)].append(obligation_id)
+        candidate_obligation_ids = list(dict.fromkeys(candidate_obligation_ids))
+        inherited_obligation_ids = list(dict.fromkeys(inherited_obligation_ids))
+        obligations_satisfied_by_decision = {
+            key: list(dict.fromkeys(value))
+            for key, value in obligations_satisfied_by_decision.items()
+        }
+        authority_refs.extend(candidate_obligation_ids)
+        authority_refs.extend(inherited_obligation_ids)
+        authority_refs = _bounded_ids([item for item in authority_refs if item], 32)
         # Retain canonical-core refs when they are explicitly tied to this
         # slot.  This does not deduplicate distinct semantic IDs by prose.
         for unit in list(core_value.get("semantic_units", []) or []):
@@ -4675,12 +5676,21 @@ def build_impact_decision_frame(
             "evidence_refs": _bounded_ids(item.get("evidence_ids"), MAX_SURFACE_EVIDENCE_IDS),
         } for item in interfaces]
         slot = {
-            "slot_id": f"SLOT-{len(slots) + 1:03d}",
+            "slot_id": slot_id,
             "seed_id": str(seed.get("seed_id") or f"SEED-{index:03d}"),
             "impact_id": normalize_impact_id(seed.get("impact_id") or f"IMPACT-{index:03d}"),
             "surface_id": surface_id,
             "requirement_ids": slot_req_ids,
             "allowed_decisions": allowed_decisions,
+            "surface_kind": surface.get("kind"),
+            "surface_role": surface.get("role"),
+            "surface_path": _normal_path(surface.get("path")),
+            "surface_symbol": str(surface.get("symbol") or ""),
+            "candidate_obligation_ids": candidate_obligation_ids,
+            "surface_capabilities": surface_capabilities,
+            "decision_capabilities": decision_capabilities,
+            "obligations_satisfied_by_decision": obligations_satisfied_by_decision,
+            "inherited_obligation_ids": inherited_obligation_ids,
             "allowed_targets": allowed_targets,
             "authority_change_targets": authority_targets if authority_change else [],
             "current_owner": owner,
@@ -4690,6 +5700,8 @@ def build_impact_decision_frame(
             "required_verification_contracts": slot_verification,
             "dnt": _bounded_strings(dnt_texts, 8, 320),
             "prohibitions": _bounded_strings(prohibition_texts, 8, 320),
+            "dnt_surface_ids": dnt_surface_ids,
+            "prohibited_surface_ids": prohibited_surface_ids,
             "authority_refs": authority_refs,
             "evidence_refs": evidence_refs,
         }
@@ -4714,10 +5726,20 @@ def build_impact_decision_frame(
         for value in (brain, source)
     )
     requirement_preservation_required = any(
-        _PRESERVE_RE.search(item.get("text", "")) or _PROHIBITION_RE.search(item.get("text", ""))
-        for item in reqs
+        item.get("obligation_type") in {"PRESERVATION", "PROHIBITION"}
+        for item in atomic_obligations
     )
-    requirement_verification_required = any(_TEST_RE.search(item.get("text", "")) for item in reqs)
+    explicit_inherited_preservation = any(
+        item.get("obligation_type") in {"PRESERVATION", "PROHIBITION"}
+        and (
+            item.get("inherited") is True
+            or item.get("inherited_satisfaction") is True
+        )
+        for item in atomic_obligations
+    )
+    requirement_verification_required = any(
+        item.get("obligation_type") == "TEST" for item in atomic_obligations
+    )
     if not slots:
         frame_errors.append("required decision slots are missing")
     if not reqs:
@@ -4726,8 +5748,10 @@ def build_impact_decision_frame(
         frame_errors.append("required preservation authority is unavailable")
     if explicit_verification_required and not any(_frame_text(item) for item in verification_records):
         frame_errors.append("required verification authority is unavailable")
-    if requirement_preservation_required and not any(
-        slot.get("required_preservation_promises") for slot in slots
+    if (
+        requirement_preservation_required
+        and not any(slot.get("required_preservation_promises") for slot in slots)
+        and not explicit_inherited_preservation
     ):
         frame_errors.append("required preservation authority could not be bound to a decision slot")
     if requirement_verification_required and not any(
@@ -4754,16 +5778,33 @@ def build_impact_decision_frame(
         "authority_change_targets": list(authority_targets if authority_change else []),
         "source_planning_context_hash": str(context_hash),
         "source_mandatory_core_hash": str(core_hash),
+        "requirement_obligation_ledger": copy.deepcopy(obligation_ledger_value),
         "decision_slots": slots,
         "frame_errors": frame_errors,
-        "frame_complete": not frame_errors,
+        "frame_complete": False,
+        "frame_coverage_ready": False,
     }
+    coverage = _build_frame_coverage(frame)
+    if coverage.get("uncovered_obligations"):
+        frame_errors.append(
+            f"{IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP}: "
+            + ", ".join(coverage.get("uncovered_obligations", []))
+        )
+    frame["impact_decision_frame_coverage"] = copy.deepcopy(coverage)
+    frame["coverage"] = copy.deepcopy(coverage)
+    frame["frame_errors"] = list(dict.fromkeys(
+        str(item) for item in frame_errors if str(item)
+    ))[:24]
+    frame["frame_coverage_ready"] = (
+        coverage.get("coverage_status") == IMPACT_FRAME_COVERAGE_READY
+    )
+    frame["frame_complete"] = not frame["frame_errors"] and frame["frame_coverage_ready"]
     frame["frame_hash"] = impact_decision_frame_hash(frame)
     return frame
 
 
 def validate_impact_decision_frame(frame):
-    """Validate frame integrity and authority completeness without a model."""
+    """Validate frame integrity, authority, and pre-model coverage."""
     value = frame if isinstance(frame, dict) else {}
     errors = []
     if value.get("version") != IMPACT_DECISION_FRAME_VERSION:
@@ -4778,12 +5819,19 @@ def validate_impact_decision_frame(frame):
         errors.append("project ID is missing")
     if not value.get("task_id"):
         errors.append("task ID is missing")
+    if not isinstance(value.get("requirement_obligation_ledger"), dict):
+        errors.append("requirement obligation ledger is missing")
+    if not isinstance(value.get("frame_coverage_ready"), bool):
+        errors.append("frame coverage readiness is missing")
     if value.get("frame_hash") != impact_decision_frame_hash(value):
         errors.append("ImpactDecisionFrame hash does not match canonical contents")
     slots = value.get("decision_slots")
     if not isinstance(slots, list) or not slots:
         errors.append("required decision slots are missing")
         slots = []
+    frame_obligations = _atomic_obligation_records(
+        value.get("requirement_obligation_ledger") or []
+    )
     seen_slot_ids = set()
     seen_surfaces = {}
     for slot in slots[:MAX_IMPACT_SEEDS]:
@@ -4800,22 +5848,84 @@ def validate_impact_decision_frame(frame):
         seen_surfaces[surface_id] = slot_id
         for field in (
             "seed_id", "impact_id", "surface_id", "requirement_ids", "allowed_decisions",
+            "candidate_obligation_ids", "surface_capabilities", "inherited_obligation_ids",
             "allowed_targets", "required_interfaces", "required_preservation_promises",
             "required_verification_contracts", "dnt", "prohibitions", "authority_refs",
-            "evidence_refs",
+            "dnt_surface_ids", "prohibited_surface_ids", "evidence_refs",
         ):
             raw = slot.get(field)
             if field in {"seed_id", "impact_id", "surface_id"} and not raw:
                 errors.append(f"{slot_id or '<missing>'}: {field} is missing")
             if field not in {"seed_id", "impact_id", "surface_id"} and not isinstance(raw, list):
                 errors.append(f"{slot_id or '<missing>'}: {field} must be a bounded list")
+        for field in ("surface_kind", "surface_role", "surface_path", "surface_symbol"):
+            if not isinstance(slot.get(field), str) or not slot.get(field):
+                # Symbols may legitimately be empty for an entrypoint or
+                # other evidence surface, but the derived path remains
+                # mandatory authority.  Keep the old role/kind requirement
+                # strict and validate symbol as a string.
+                if field == "surface_symbol" and isinstance(slot.get(field), str):
+                    continue
+                errors.append(f"{slot_id or '<missing>'}: {field} is missing")
+        for field in ("decision_capabilities", "obligations_satisfied_by_decision"):
+            if not isinstance(slot.get(field), dict):
+                errors.append(f"{slot_id or '<missing>'}: {field} must be an object")
         allowed = set(str(item) for item in slot.get("allowed_decisions", []) or [])
+        unknown_decisions = allowed.difference(IMPACT_DECISION_CHOICES)
+        if unknown_decisions:
+            errors.append(f"{slot_id}: unknown allowed decision kind")
         if "NEW_OWNER" in allowed or "OWNER_MIGRATION" in allowed:
             errors.append(f"{slot_id}: forbidden ownership migration is exposed without explicit authority")
         if "AUTHORITY_CHANGE" in allowed and value.get("authority_change_authorized") is not True:
             errors.append(f"{slot_id}: authority change is not explicitly authorized")
+        if "AUTHORITY_CHANGE" in allowed and str(slot.get("surface_kind")) != "OWNER" and str(
+            slot.get("surface_role")
+        ) not in {"OWNER", "STATE_OWNER", "INPUT_OWNER"}:
+            errors.append(f"{slot_id}: authority change is not bound to an owner surface")
         if not allowed.intersection(IMPACT_DECISION_CHOICES):
             errors.append(f"{slot_id}: allowed decision set is empty")
+        candidate_ids = {
+            str(item) for item in slot.get("candidate_obligation_ids", []) or []
+        }
+        surface = {
+            "surface_id": slot.get("surface_id"),
+            "kind": slot.get("surface_kind"),
+            "role": slot.get("surface_role"),
+            "path": slot.get("surface_path"),
+            "symbol": slot.get("surface_symbol"),
+        }
+        if slot.get("surface_capabilities") != _surface_capabilities(surface):
+            errors.append(f"{slot_id}: surface capability projection is not canonical")
+        for decision in allowed.intersection(IMPACT_DECISION_CHOICES):
+            expected_capabilities = _decision_capabilities(decision)
+            actual_capabilities = slot.get("decision_capabilities", {}).get(decision)
+            if actual_capabilities != expected_capabilities:
+                errors.append(f"{slot_id}: decision capability projection is not canonical")
+        expected_candidate_ids = [
+            str(item.get("obligation_id")) for item in frame_obligations
+            if item.get("obligation_id") and _frame_obligation_relevant(item, slot, surface)
+        ]
+        expected_inherited_ids = [
+            str(item.get("obligation_id")) for item in frame_obligations
+            if item.get("obligation_id") and _frame_inherited_obligation(item, slot)
+        ]
+        if candidate_ids != set(expected_candidate_ids):
+            errors.append(f"{slot_id}: candidate obligation projection is not canonical")
+        if set(str(item) for item in slot.get("inherited_obligation_ids", []) or []) != set(
+            expected_inherited_ids
+        ):
+            errors.append(f"{slot_id}: inherited obligation projection is not canonical")
+        actual_mapping = slot.get("obligations_satisfied_by_decision", {})
+        expected_mapping = {
+            str(decision): [
+                str(item.get("obligation_id")) for item in frame_obligations
+                if item.get("obligation_id") and _frame_decision_satisfies_obligation(
+                    item, slot, decision, surface,
+                )
+            ] for decision in slot.get("allowed_decisions", []) or []
+        }
+        if actual_mapping != expected_mapping:
+            errors.append(f"{slot_id}: obligation decision capability projection is not canonical")
         targets = [str(item) for item in slot.get("allowed_targets", []) or []]
         if not targets or str(slot.get("surface_id")) not in targets:
             errors.append(f"{slot_id}: target authority is not bound to its canonical surface")
@@ -4823,17 +5933,46 @@ def validate_impact_decision_frame(frame):
             for obligation in slot.get(obligation_field, []) or []:
                 if not isinstance(obligation, dict) or not obligation.get("text") or not obligation.get("obligation_id"):
                     errors.append(f"{slot_id}: malformed {obligation_field}")
-    errors.extend(str(item) for item in list(value.get("frame_errors", []) or []))
+    frame_errors = [str(item) for item in list(value.get("frame_errors", []) or [])]
+    errors.extend(frame_errors)
+    coverage_check = validate_impact_decision_frame_coverage(value)
+    if not coverage_check.get("valid"):
+        for item in coverage_check.get("errors", [])[:8]:
+            if str(item) not in errors:
+                errors.append(str(item))
     errors = list(dict.fromkeys(errors))[:32]
     incomplete = bool(errors) or value.get("frame_complete") is not True
+    coverage_gap = (
+        coverage_check.get("status") == IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+        and not any(
+            str(item).startswith("required ") and " authority is unavailable" in str(item)
+            for item in errors
+        )
+        and any(
+            item.get("obligation_type") == "BEHAVIOR_CHANGE"
+            and not item.get("coverage_ready")
+            for item in list((coverage_check.get("coverage") or {}).get("obligations", []) or [])
+            if isinstance(item, dict)
+        )
+    )
+    status = (
+        IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP if coverage_gap
+        else ("READY" if not incomplete else IMPACT_DECISION_FRAME_INCOMPLETE)
+    )
     return {
         "valid": not incomplete,
-        "status": "READY" if not incomplete else IMPACT_DECISION_FRAME_INCOMPLETE,
+        "status": status,
         "errors": errors if errors else [],
         "slot_count": len(slots),
         "required_slot_ids": [str(item.get("slot_id")) for item in slots if isinstance(item, dict)],
         "model_calls": 0,
         "frame_hash": value.get("frame_hash"),
+        "coverage": copy.deepcopy(coverage_check.get("coverage", {})),
+        "uncovered_obligations": list(coverage_check.get("uncovered_obligations", [])),
+        "covered_obligations": int(coverage_check.get("covered_obligations", 0) or 0),
+        "obligations_total": int(coverage_check.get("obligations_total", 0) or 0),
+        "coverage_status": coverage_check.get("status"),
+        "coverage_hash": coverage_check.get("coverage_hash"),
     }
 
 
@@ -4875,6 +6014,13 @@ def _impact_decision_frame_payload(frame):
             "slot_id": slot.get("slot_id"),
             "surface_id": slot.get("surface_id"),
             "allowed_decisions": list(slot.get("allowed_decisions", []) or []),
+            "candidate_obligation_ids": list(slot.get("candidate_obligation_ids", []) or []),
+            "surface_capabilities": list(slot.get("surface_capabilities", []) or []),
+            "decision_capabilities": copy.deepcopy(slot.get("decision_capabilities", {})),
+            "obligations_satisfied_by_decision": copy.deepcopy(
+                slot.get("obligations_satisfied_by_decision", {})
+            ),
+            "inherited_obligation_ids": list(slot.get("inherited_obligation_ids", []) or []),
             "allowed_targets": list(slot.get("allowed_targets", []) or []),
             "authority_change_targets": list(slot.get("authority_change_targets", []) or []),
             "current_owner": compact_owner,
@@ -4911,6 +6057,20 @@ def _impact_decision_frame_payload(frame):
             "impact IDs", "seed IDs", "surface IDs", "owners", "preservation_promises",
             "verification_contracts", "DNT", "prohibitions", "repository paths", "repository evidence",
         ],
+        "active_obligations": [
+            {
+                "obligation_id": item.get("obligation_id"),
+                "requirement_id": item.get("requirement_id"),
+                "obligation_type": item.get("obligation_type"),
+                "meaning": _compact(item.get("meaning") or item.get("text"), 220),
+                "inherited_satisfaction": bool(item.get("inherited_satisfaction")),
+            }
+            for item in list(
+                ((value.get("impact_decision_frame_coverage") or {}).get("obligations", []))
+                or []
+            )[:MAX_IMPACT_SEEDS * 2]
+            if isinstance(item, dict)
+        ],
         "decision_slots": [
             compact_slot(item) for item in list(value.get("decision_slots", []) or [])
             if isinstance(item, dict)
@@ -4930,10 +6090,11 @@ def build_impact_decision_packet(
     """Compile the exact, compact model-facing choice packet."""
     frame_check = validate_impact_decision_frame(frame)
     if not frame_check.get("valid"):
+        status = frame_check.get("status") or IMPACT_DECISION_FRAME_INCOMPLETE
         return {
-            "status": IMPACT_DECISION_FRAME_INCOMPLETE,
+            "status": status,
             "packet_complete": False,
-            "errors": [IMPACT_DECISION_FRAME_INCOMPLETE] + frame_check.get("errors", []),
+            "errors": list(dict.fromkeys([status] + frame_check.get("errors", []))),
             "frame": copy.deepcopy(frame),
             "frame_validation": frame_check,
             "model_calls": 0,
@@ -4977,14 +6138,218 @@ def build_impact_decision_packet(
 build_impact_decision_role_packet = build_impact_decision_packet
 
 
-def validate_impact_decision_choices(candidate, frame):
-    """Validate the strict choice-only response against the frame."""
+def _build_choice_coverage(frame, choices):
+    """Compute selected-choice coverage from frame capability mappings."""
+    value = frame if isinstance(frame, dict) else {}
+    frame_coverage = _build_frame_coverage(value)
+    if isinstance(choices, dict):
+        selected = choices.get("decisions")
+        if not isinstance(selected, list):
+            selected = choices.get("choices", [])
+    else:
+        selected = choices if isinstance(choices, list) else []
+    selected = list(selected or [])
+    selected_by_slot = {
+        str(item.get("slot_id")): item for item in selected
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+    slots = {
+        str(item.get("slot_id")): item for item in list(value.get("decision_slots", []) or [])
+        if isinstance(item, dict) and item.get("slot_id")
+    }
+    atomic_by_id = {
+        str(item.get("obligation_id")): item
+        for item in _atomic_obligation_records(value.get("requirement_obligation_ledger", {}))
+        if item.get("obligation_id")
+    }
+    records = []
+    assignments = []
+    for obligation in list(frame_coverage.get("obligations", []) or []):
+        obligation_id = str(obligation.get("obligation_id") or "")
+        selected_slots = []
+        selected_decisions = []
+        covered_by = []
+        for slot_id, choice in sorted(selected_by_slot.items()):
+            slot = slots.get(slot_id, {})
+            decision = str(choice.get("decision") or "").upper()
+            if decision not in {
+                str(item) for item in slot.get("allowed_decisions", []) or []
+            }:
+                continue
+            obligation_source = atomic_by_id.get(obligation_id, obligation)
+            surface = {
+                "surface_id": slot.get("surface_id"),
+                "kind": slot.get("surface_kind"),
+                "role": slot.get("surface_role"),
+                "path": slot.get("surface_path"),
+                "symbol": slot.get("surface_symbol"),
+            }
+            # Recompute the contribution from canonical source obligation,
+            # slot authority, and the existing decision taxonomy.  A copied
+            # frame mapping is not a semantic shortcut for post-choice gate.
+            if not _frame_decision_satisfies_obligation(
+                obligation_source, slot, decision, surface,
+            ):
+                continue
+            selected_slots.append(slot_id)
+            selected_decisions.append(decision)
+            capabilities = list(
+                (slot.get("decision_capabilities", {}) or {}).get(decision)
+                or _decision_capabilities(decision)
+            )
+            covered_by.append({
+                "slot_id": slot_id,
+                "surface_id": str(slot.get("surface_id") or ""),
+                "decision": decision,
+                "decision_capabilities": capabilities,
+            })
+        inherited_slots = list(obligation.get("inherited_slots", []) or [])
+        inherited = bool(obligation.get("inherited_satisfaction"))
+        inherited_assignment = None
+        if inherited:
+            for slot_id in inherited_slots:
+                choice = selected_by_slot.get(str(slot_id))
+                if not choice:
+                    continue
+                decision = str(choice.get("decision") or "").upper()
+                inherited_assignment = {
+                    "slot_id": str(slot_id),
+                    "surface_id": str(slots.get(str(slot_id), {}).get("surface_id") or ""),
+                    "decision": decision,
+                    "decision_capabilities": _decision_capabilities(decision),
+                }
+                break
+        obligation_type = str(obligation.get("obligation_type") or "").upper()
+        if obligation_type == "BEHAVIOR_CHANGE":
+            covered = any(
+                "IMPLEMENTATION_CHANGE" in item.get("decision_capabilities", [])
+                for item in covered_by
+            )
+        elif obligation_type == "PROHIBITION":
+            covered = inherited
+        else:
+            covered = bool(covered_by) or inherited
+        assignment = None
+        if covered_by:
+            assignment = covered_by[0]
+            assignment = {
+                **assignment,
+                "coverage_contribution": assignment["decision_capabilities"][0]
+                if assignment["decision_capabilities"] else "DECISION",
+            }
+        elif inherited_assignment and inherited:
+            assignment = {
+                **inherited_assignment,
+                "coverage_contribution": (
+                    "INHERITED_PRESERVATION"
+                    if obligation_type == "PRESERVATION"
+                    else "INHERITED_CONSTRAINT"
+                ),
+            }
+        if assignment:
+            assignments.append({
+                "requirement_id": obligation.get("requirement_id"),
+                "obligation_id": obligation_id,
+                "obligation_type": obligation_type,
+                "slot_id": assignment.get("slot_id"),
+                "chosen_decision": assignment.get("decision"),
+                "decision_capability": list(assignment.get("decision_capabilities", [])),
+                "coverage_contribution": assignment.get("coverage_contribution"),
+            })
+        records.append({
+            "obligation_id": obligation_id,
+            "requirement_id": obligation.get("requirement_id"),
+            "obligation_type": obligation_type,
+            "meaning": obligation.get("meaning"),
+            "candidate_slots": list(obligation.get("candidate_slots", []) or []),
+            "candidate_decisions": list(obligation.get("candidate_decisions", []) or []),
+            "selected_slots": list(dict.fromkeys(selected_slots)),
+            "selected_decisions": list(dict.fromkeys(selected_decisions)),
+            "inherited_satisfaction": inherited,
+            "coverage_ready": bool(covered),
+            "covered_by": covered_by,
+            "assignment": copy.deepcopy(assignment),
+        })
+    uncovered = [
+        item["obligation_id"] for item in records if not item.get("coverage_ready")
+    ]
+    artifact = {
+        "version": 1,
+        "artifact_type": "ImpactDecisionChoiceCoverage",
+        "frame_coverage_hash": frame_coverage.get("coverage_hash"),
+        "obligations": records,
+        "assignments": assignments,
+        "uncovered_obligations": uncovered,
+        "uncovered_requirement_ids": list(dict.fromkeys(
+            str(item.get("requirement_id")) for item in records
+            if not item.get("coverage_ready")
+        )),
+        "coverage_status": IMPACT_CHOICE_COVERAGE_READY if not uncovered else IMPACT_CHOICE_REQUIREMENT_GAP,
+        "metrics": {
+            "impact_choice_covered_obligations": sum(
+                bool(item.get("coverage_ready")) for item in records
+            ),
+            "impact_choice_uncovered_obligations": len(uncovered),
+            "impact_requirements_assigned": len({
+                str(item.get("requirement_id")) for item in assignments
+                if item.get("requirement_id")
+            }),
+        },
+    }
+    artifact["choice_hash"] = impact_decision_choice_hash(
+        frame, {"decisions": selected},
+    )
+    artifact["coverage_hash"] = _coverage_hash(artifact)
+    return artifact
+
+
+def build_impact_decision_choice_coverage(frame, choices):
+    """Build the immutable zero-model post-choice coverage artifact."""
+    return _build_choice_coverage(frame, choices)
+
+
+def validate_impact_decision_choice_coverage(frame, choices):
+    artifact = _build_choice_coverage(frame, choices)
+    errors = []
+    if artifact.get("uncovered_obligations"):
+        errors.append(
+            f"{IMPACT_CHOICE_REQUIREMENT_GAP}: "
+            + ", ".join(artifact.get("uncovered_obligations", []))
+        )
+        if any(
+            item.get("obligation_type") == "BEHAVIOR_CHANGE"
+            for item in artifact.get("obligations", [])
+            if not item.get("coverage_ready")
+        ):
+            errors.append(BEHAVIOR_CHANGE_UNCOVERED)
+    return {
+        "valid": not errors,
+        "status": IMPACT_CHOICE_COVERAGE_READY if not errors else IMPACT_CHOICE_REQUIREMENT_GAP,
+        "errors": errors,
+        "coverage": artifact,
+        "uncovered_obligations": list(artifact.get("uncovered_obligations", [])),
+        "covered_obligations": artifact.get("metrics", {}).get("impact_choice_covered_obligations", 0),
+        "obligations_total": len(artifact.get("obligations", [])),
+        "model_calls": 0,
+        "coverage_hash": artifact.get("coverage_hash"),
+    }
+
+
+def validate_impact_decision_choices(candidate, frame, *, include_coverage=True):
+    """Validate the strict choice-only response against the frame.
+
+    ``include_coverage`` is false only for the provider's structural JSON
+    callback.  Requirement coverage is a deterministic post-provider gate;
+    keeping it out of the callback prevents a semantic coverage miss from
+    entering the generic structured-output repair loop.
+    """
     value = candidate if isinstance(candidate, dict) else {}
     errors = []
     if not isinstance(value.get("decisions"), list):
         return {
             "valid": False, "status": IMPACT_DECISION_OUTPUT_MALFORMED,
             "errors": [IMPACT_DECISION_OUTPUT_MALFORMED], "choices": [], "model_calls": 0,
+            "structural_valid": False, "coverage_valid": None,
         }
     if set(value.keys()) != {"decisions"}:
         errors.append(IMPACT_DECISION_OUTPUT_MALFORMED + ": authority fields are not model-writable")
@@ -5056,8 +6421,18 @@ def validate_impact_decision_choices(candidate, frame):
         if not any(item in errors for item in (DUPLICATE_IMPACT_DECISION_SLOT, UNKNOWN_IMPACT_DECISION_SLOT)):
             errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
     errors = list(dict.fromkeys(errors))
-    valid = not errors and len(seen) == len(expected) and len(choices) == len(expected)
     choices.sort(key=lambda item: str(item.get("slot_id") or ""))
+    structural_valid = not errors and len(seen) == len(expected) and len(choices) == len(expected)
+    choice_coverage = None
+    if (
+        include_coverage
+        and structural_valid
+    ):
+        choice_coverage = validate_impact_decision_choice_coverage(frame, choices)
+        if not choice_coverage.get("valid"):
+            errors.extend(choice_coverage.get("errors", []))
+    errors = list(dict.fromkeys(errors))
+    valid = not errors and structural_valid
     return {
         "valid": valid,
         "status": "READY" if valid else (errors[0] if errors else IMPACT_DECISION_OUTPUT_MALFORMED),
@@ -5066,7 +6441,28 @@ def validate_impact_decision_choices(candidate, frame):
         "received": len(value.get("decisions", [])),
         "expected": len(expected),
         "model_calls": 0,
+        "structural_valid": structural_valid,
+        "coverage_valid": (
+            choice_coverage.get("valid") if isinstance(choice_coverage, dict) else None
+        ),
         "choice_hash": impact_decision_choice_hash(frame, {"decisions": choices}) if valid else None,
+        "choice_coverage": copy.deepcopy(
+            choice_coverage.get("coverage") if isinstance(choice_coverage, dict) else None
+        ),
+        "coverage": copy.deepcopy(
+            choice_coverage.get("coverage") if isinstance(choice_coverage, dict) else None
+        ),
+        "uncovered_obligations": list(
+            choice_coverage.get("uncovered_obligations", [])
+            if isinstance(choice_coverage, dict) else []
+        ),
+        "coverage_status": (
+            choice_coverage.get("status") if isinstance(choice_coverage, dict) else None
+        ),
+        "coverage_hash": (
+            choice_coverage.get("coverage_hash")
+            if isinstance(choice_coverage, dict) else None
+        ),
     }
 
 
@@ -5080,7 +6476,21 @@ def deterministic_impact_decision_choices(frame):
         allowed = [str(item) for item in slot.get("allowed_decisions", []) or []]
         if not allowed:
             continue
-        if "INTERFACE_REUSE" in allowed and slot.get("required_interfaces"):
+        # This helper is a provider-free architecture fixture, not a model
+        # repair path.  Keep its default output planning-complete when the
+        # frame explicitly proves that MUST_CHANGE is the only capability
+        # that can satisfy an active behavior obligation.
+        behavior_ids = set(
+            str(item) for item in (slot.get("obligations_satisfied_by_decision", {}) or {}).get(
+                "MUST_CHANGE", []
+            )
+        )
+        if "MUST_CHANGE" in allowed and behavior_ids:
+            decision = "MUST_CHANGE"
+            target = str(slot.get("surface_id"))
+            reason_code = "CHANGE_REQUIRED"
+            rationale = "Apply the requirement through the verified current surface."
+        elif "INTERFACE_REUSE" in allowed and slot.get("required_interfaces"):
             decision = "INTERFACE_REUSE"
             target = str(slot.get("required_interfaces")[0])
             reason_code = "REUSE_CURRENT_INTERFACE"
@@ -5142,9 +6552,10 @@ def compile_impact_map_from_choices(
     """
     frame_check = validate_impact_decision_frame(frame)
     if not frame_check.get("valid"):
+        status = frame_check.get("status") or IMPACT_MAP_COMPILE_INVALID
         return {
-            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
-            "errors": [IMPACT_DECISION_FRAME_INCOMPLETE] + frame_check.get("errors", []),
+            "valid": False, "status": status,
+            "errors": list(dict.fromkeys([status] + frame_check.get("errors", []))),
             "impact_map": None, "model_calls": 0, "compiled": False,
         }
     choice_candidate = choices
@@ -5157,9 +6568,10 @@ def compile_impact_map_from_choices(
         choice_candidate = {"decisions": choices.get("choices", [])}
     choice_check = validate_impact_decision_choices(choice_candidate, frame)
     if not choice_check.get("valid"):
+        status = choice_check.get("status") or IMPACT_MAP_COMPILE_INVALID
         return {
-            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
-            "errors": list(choice_check.get("errors", [])) or [IMPACT_MAP_COMPILE_INVALID],
+            "valid": False, "status": status,
+            "errors": list(choice_check.get("errors", [])) or [status],
             "impact_map": None, "model_calls": 0, "compiled": False,
         }
     registry = surface_registry if isinstance(surface_registry, dict) else {}
@@ -5177,6 +6589,19 @@ def compile_impact_map_from_choices(
     raw_impacts = []
     authority_changes_by_impact = {}
     inherited_by_impact = {}
+    choice_hash = choice_check.get("choice_hash") or impact_decision_choice_hash(frame, choices)
+    choice_coverage = choice_check.get("choice_coverage") or {}
+    choice_assignments = list(choice_coverage.get("assignments", []) or [])
+    assignments_by_slot = {}
+    for assignment in choice_assignments:
+        if isinstance(assignment, dict) and assignment.get("slot_id"):
+            assignments_by_slot.setdefault(str(assignment.get("slot_id")), []).append(assignment)
+    atomic_by_id = {
+        str(item.get("obligation_id")): item
+        for item in _atomic_obligation_records(frame.get("requirement_obligation_ledger", {}))
+        if item.get("obligation_id")
+    }
+    compiled_assignments_by_impact = {}
     errors = []
     for choice in choice_check.get("choices", []):
         slot = slots.get(str(choice.get("slot_id")))
@@ -5198,6 +6623,40 @@ def compile_impact_map_from_choices(
         if not rationale or not reason_code:
             errors.append(IMPACT_DECISION_OUTPUT_MALFORMED)
             continue
+        selected_capabilities = list(
+            (slot.get("decision_capabilities", {}) or {}).get(decision)
+            or _decision_capabilities(decision)
+        )
+        slot_assignments = []
+        for assignment in assignments_by_slot.get(str(slot.get("slot_id")), []):
+            obligation_id = str(assignment.get("obligation_id") or "")
+            obligation = atomic_by_id.get(obligation_id, {})
+            slot_assignments.append({
+                "requirement_id": assignment.get("requirement_id") or obligation.get("requirement_id"),
+                "obligation_id": obligation_id,
+                "obligation_type": assignment.get("obligation_type") or obligation.get("obligation_type"),
+                "surface_id": str(slot.get("surface_id")),
+                "slot_id": str(slot.get("slot_id")),
+                "chosen_decision": assignment.get("chosen_decision") or decision,
+                "decision_capability": list(
+                    assignment.get("decision_capability") or selected_capabilities
+                ),
+                "coverage_contribution": assignment.get("coverage_contribution") or (
+                    selected_capabilities[0] if selected_capabilities else "DECISION"
+                ),
+                "frame_provenance": {
+                    "impact_decision_frame_hash": frame.get("frame_hash"),
+                    "slot_id": str(slot.get("slot_id")),
+                    "surface_id": str(slot.get("surface_id")),
+                    "source_planning_context_hash": frame.get("source_planning_context_hash"),
+                    "source_mandatory_core_hash": frame.get("source_mandatory_core_hash"),
+                },
+                "choice_provenance": {
+                    "impact_decision_choice_hash": choice_hash,
+                    "slot_id": str(slot.get("slot_id")),
+                },
+            })
+        compiled_assignments_by_impact[normalize_impact_id(seed.get("impact_id"))] = slot_assignments
         interface_ids = []
         interface_names = []
         target = str(choice.get("chosen_target") or "")
@@ -5224,6 +6683,27 @@ def compile_impact_map_from_choices(
             "seed_id": str(slot.get("seed_id")),
             "disposition": disposition,
             "requirement_ids": req_ids,
+            "obligation_ids": [
+                str(item.get("obligation_id")) for item in slot_assignments
+                if item.get("obligation_id")
+            ],
+            "obligation_assignments": copy.deepcopy(slot_assignments),
+            "decision_slot_id": str(slot.get("slot_id")),
+            "chosen_decision": decision,
+            "decision_capabilities": selected_capabilities,
+            "coverage_contribution": list(dict.fromkeys(
+                str(item.get("coverage_contribution")) for item in slot_assignments
+                if item.get("coverage_contribution")
+            )),
+            "frame_provenance": {
+                "impact_decision_frame_hash": frame.get("frame_hash"),
+                "slot_id": str(slot.get("slot_id")),
+                "surface_id": str(slot.get("surface_id")),
+            },
+            "choice_provenance": {
+                "impact_decision_choice_hash": choice_hash,
+                "slot_id": str(slot.get("slot_id")),
+            },
             "repository_evidence_ids": evidence_refs,
             "interfaces_to_reuse": interface_ids,
             "existing_interfaces_to_reuse": interface_names,
@@ -5261,13 +6741,38 @@ def compile_impact_map_from_choices(
             "dnt": copy.deepcopy(slot.get("dnt", [])),
             "prohibitions": copy.deepcopy(slot.get("prohibitions", [])),
         }
+    compiled_obligation_assignments = [
+        assignment
+        for slot in slots.values()
+        for assignment in compiled_assignments_by_impact.get(
+            normalize_impact_id(slot.get("impact_id")), []
+        )
+    ]
+    behavior_requirement_ids = {
+        str(item.get("requirement_id")) for item in atomic_by_id.values()
+        if item.get("obligation_type") == "BEHAVIOR_CHANGE"
+    }
+    assigned_requirement_ids = {
+        str(item.get("requirement_id")) for item in choice_assignments
+        if item.get("requirement_id")
+    }
+    missing_assigned_requirements = sorted(behavior_requirement_ids - assigned_requirement_ids)
+    if missing_assigned_requirements:
+        errors.append(
+            f"{IMPACT_CHOICE_REQUIREMENT_GAP}: active changed requirements have no assigned impact: "
+            + ", ".join(missing_assigned_requirements)
+        )
     if errors or len(raw_impacts) != len(slots):
+        status = (
+            IMPACT_CHOICE_REQUIREMENT_GAP
+            if any(str(item).startswith(IMPACT_CHOICE_REQUIREMENT_GAP) for item in errors)
+            else IMPACT_MAP_COMPILE_INVALID
+        )
         return {
-            "valid": False, "status": IMPACT_MAP_COMPILE_INVALID,
-            "errors": list(dict.fromkeys(errors + ([IMPACT_MAP_COMPILE_INVALID] if not errors else []))),
+            "valid": False, "status": status,
+            "errors": list(dict.fromkeys(errors + ([status] if not errors else []))),
             "impact_map": None, "model_calls": 0, "compiled": False,
         }
-    choice_hash = choice_check.get("choice_hash") or impact_decision_choice_hash(frame, choices)
     raw_map = {
         "version": 1,
         "task_goal": task_goal or "",
@@ -5275,6 +6780,14 @@ def compile_impact_map_from_choices(
         "integration_verification": [],
         "insufficient_evidence": [],
         "new_surface_proposals": [],
+        "requirement_obligation_ledger": compact_requirement_obligation_ledger(
+            frame.get("requirement_obligation_ledger", {})
+        ),
+        "impact_decision_frame_coverage": copy.deepcopy(
+            frame.get("impact_decision_frame_coverage", {})
+        ),
+        "impact_decision_choice_coverage": copy.deepcopy(choice_coverage),
+        "obligation_assignments": copy.deepcopy(compiled_obligation_assignments),
         "bounds": {
             "max_impact_entries": MAX_IMPACT_ENTRIES,
             "max_requirement_refs_per_impact": MAX_REQUIREMENT_REFS_PER_IMPACT,
@@ -5304,6 +6817,43 @@ def compile_impact_map_from_choices(
         item["required_verification_contracts"] = copy.deepcopy(inherited.get("required_verification_contracts", []))
         item["dnt"] = copy.deepcopy(inherited.get("dnt", []))
         item["prohibitions"] = copy.deepcopy(inherited.get("prohibitions", []))
+        item_assignments = copy.deepcopy(compiled_assignments_by_impact.get(impact_id, []))
+        item["obligation_ids"] = [
+            str(value.get("obligation_id")) for value in item_assignments
+            if value.get("obligation_id")
+        ]
+        item["obligation_assignments"] = item_assignments
+        item["decision_slot_id"] = next(
+            (
+                str(value.get("slot_id")) for value in item_assignments
+                if value.get("slot_id")
+            ),
+            next((str(slot.get("slot_id")) for slot in slots.values()
+                  if normalize_impact_id(slot.get("impact_id")) == impact_id), None),
+        )
+        choice_for_item = next(
+            (value for value in choice_check.get("choices", [])
+             if str(value.get("slot_id")) == str(item.get("decision_slot_id"))),
+            None,
+        )
+        if choice_for_item:
+            item["chosen_decision"] = choice_for_item.get("decision")
+            item["decision_capabilities"] = _decision_capabilities(
+                choice_for_item.get("decision")
+            )
+        item["coverage_contribution"] = list(dict.fromkeys(
+            str(value.get("coverage_contribution")) for value in item_assignments
+            if value.get("coverage_contribution")
+        ))
+        item["frame_provenance"] = {
+            "impact_decision_frame_hash": frame.get("frame_hash"),
+            "slot_id": item.get("decision_slot_id"),
+            "surface_id": item.get("surface_id"),
+        }
+        item["choice_provenance"] = {
+            "impact_decision_choice_hash": choice_hash,
+            "slot_id": item.get("decision_slot_id"),
+        }
         if impact_id in authority_changes_by_impact:
             item["authority_change"] = copy.deepcopy(authority_changes_by_impact[impact_id])
         item["impact_decision_frame_hash"] = frame.get("frame_hash")
@@ -5318,6 +6868,18 @@ def compile_impact_map_from_choices(
     hydrated["impact_decision_choice_hash"] = choice_hash
     hydrated["source_planning_context_hash"] = frame.get("source_planning_context_hash")
     hydrated["source_mandatory_core_hash"] = frame.get("source_mandatory_core_hash")
+    hydrated["requirement_obligation_ledger"] = compact_requirement_obligation_ledger(
+        frame.get("requirement_obligation_ledger", {})
+    )
+    hydrated["impact_decision_frame_coverage"] = copy.deepcopy(
+        frame.get("impact_decision_frame_coverage", {})
+    )
+    hydrated["impact_decision_choice_coverage"] = copy.deepcopy(choice_coverage)
+    hydrated["obligation_assignments"] = copy.deepcopy(compiled_obligation_assignments)
+    hydrated["obligation_assignment_requirement_ids"] = sorted({
+        str(item.get("requirement_id")) for item in choice_assignments
+        if item.get("requirement_id")
+    })
     hydrated["provider_generation_identity"] = copy.deepcopy(
         provider_generation_identity if provider_generation_identity is not None else "UNSPECIFIED"
     )
@@ -5345,7 +6907,11 @@ def compile_impact_map_from_choices(
         "impact_map": hydrated, "hydration": hydrated,
         "semantic_validation": semantic_validation,
         "choice_validation": choice_check,
-        "choice_hash": choice_hash, "model_calls": 0, "compiled": True,
+        "choice_hash": choice_hash,
+        "choice_coverage": copy.deepcopy(choice_coverage),
+        "coverage_hash": choice_coverage.get("coverage_hash") if isinstance(choice_coverage, dict) else None,
+        "assigned_requirement_ids": sorted(assigned_requirement_ids),
+        "model_calls": 0, "compiled": True,
         "inherited_preservation_count": sum(
             len(item.get("preservation_promises", []) or []) for item in hydrated.get("impacts", [])
         ),
@@ -5360,7 +6926,7 @@ compile_impact_decision_map = compile_impact_map_from_choices
 
 
 def impact_decision_frame_self_test():
-    """Provider-free V24.3 architecture self-test and diagnostics."""
+    """Provider-free V24.4 architecture self-test and diagnostics."""
     requirement = {
         "requirement_id": "REQ-SELF-PAUSE",
         "text": (
@@ -5484,6 +7050,170 @@ def impact_decision_frame_self_test():
             == packet.get("role_packet", {}).get("rendered_packet")
         ),
     }
+    # Scientific regression cases: each is deterministic and provider-free.
+    # Case A intentionally has only TEST evidence, so the frame cannot expose
+    # an implementation-capable decision for the active behavior obligation.
+    bad_frame_requirement = {
+        "requirement_id": "REQ-SELF-LIVE-BAD",
+        "text": "Add a user-facing pause indicator.",
+        "provenance": USER_STATED,
+        "status": "active",
+    }
+    bad_frame_evidence = [{
+        "evidence_id": "REPO-SELF-LIVE-TEST-1",
+        "category": "CURRENT_TEST",
+        "path": "tests/pause.test.js",
+        "symbol": "pause flow",
+        "fact": "focused pause tests cover the current boundary",
+        "file_sha256": "d" * 64,
+    }, {
+        "evidence_id": "REPO-SELF-LIVE-TEST-2",
+        "category": "CURRENT_TEST",
+        "path": "tests/pause-extra.test.js",
+        "symbol": "pause indicator flow",
+        "fact": "focused pause indicator tests cover the current boundary",
+        "file_sha256": "e" * 64,
+    }]
+    bad_frame_brain = {
+        "project_id": "self-test-project",
+        "task_id": "self-test-live-bad",
+        "task_goal": {"text": bad_frame_requirement["text"]},
+        "relevant_tests": [{
+            "text": "focused pause tests cover the current boundary",
+            "path": "tests/pause.test.js", "symbol": "pause flow",
+            "category": "CURRENT_TEST",
+            "evidence_ids": ["REPO-SELF-LIVE-TEST-1"],
+        }],
+    }
+    bad_registry = build_canonical_surface_registry(bad_frame_brain, bad_frame_evidence)
+    bad_seeds = build_impact_seeds(
+        bad_frame_brain, [bad_frame_requirement], bad_frame_evidence,
+        registry=bad_registry,
+    )
+    bad_core = build_canonical_mandatory_planning_core({
+        "project_id": bad_frame_brain["project_id"],
+        "task_id": bad_frame_brain["task_id"],
+        "task_goal": bad_frame_brain["task_goal"],
+        "requirements": [bad_frame_requirement],
+        "surfaces": bad_registry.get("surfaces", []),
+        "impact_seeds": bad_seeds,
+    })
+    bad_frame = build_impact_decision_frame(
+        bad_frame_brain, [bad_frame_requirement], bad_frame_evidence,
+        surface_registry=bad_registry, impact_seeds=bad_seeds,
+        mandatory_core=bad_core,
+    )
+    bad_frame_check = validate_impact_decision_frame(bad_frame)
+
+    # Case B selects INSPECT_ONLY in every structurally valid slot despite the
+    # ready frame exposing MUST_CHANGE.  The choice gate must reject it and no
+    # downstream role is involved.
+    inspect_choices = {"decisions": []}
+    for slot in frame.get("decision_slots", []):
+        if "INSPECT_ONLY" not in slot.get("allowed_decisions", []):
+            continue
+        inspect_choices["decisions"].append({
+            "slot_id": slot.get("slot_id"),
+            "decision": "INSPECT_ONLY",
+            "chosen_target": slot.get("surface_id"),
+            "reason_code": "INSPECT_CURRENT_SURFACE",
+            "bounded_rationale": "Inspect the verified current surface.",
+        })
+    inspect_check = validate_impact_decision_choices(inspect_choices, frame)
+    challenge_types = {
+        item.get("challenge_type")
+        for item in deterministic_challenges(
+            compiled.get("impact_map", {}), requirements, evidence, registry,
+        )
+        if isinstance(item, dict)
+    } if compiled.get("valid") else {"COMPILE_INVALID"}
+
+    # Case D contains preservation authority only.  It must be satisfiable by
+    # inherited preservation or PRESERVATION_ONLY without a forced mutation.
+    preserve_requirement = [{
+        "requirement_id": "REQ-SELF-PRESERVE",
+        "text": "Preserve the current pause-state owner.",
+        "provenance": USER_STATED,
+        "status": "active",
+    }]
+    preserve_evidence = [{
+        "evidence_id": "REPO-SELF-PRESERVE-OWNER",
+        "category": "CURRENT_STATE_OWNER",
+        "path": "src/pause_controller.js",
+        "symbol": "PauseController",
+        "fact": "PauseController owns pause state",
+        "file_sha256": "f" * 64,
+    }]
+    preserve_brain = {
+        "project_id": "self-test-project",
+        "task_id": "self-test-preserve",
+        "task_goal": {"text": preserve_requirement[0]["text"]},
+        "current_owners": [{
+            "text": "PauseController owns pause state",
+            "path": "src/pause_controller.js", "symbol": "PauseController",
+            "category": "CURRENT_STATE_OWNER",
+            "evidence_ids": ["REPO-SELF-PRESERVE-OWNER"],
+        }],
+        "current_state_ownership": [{
+            "text": "PauseController owns pause state",
+            "path": "src/pause_controller.js", "symbol": "PauseController",
+            "category": "CURRENT_STATE_OWNER",
+            "evidence_ids": ["REPO-SELF-PRESERVE-OWNER"],
+        }],
+        "preservation_constraints": [{
+            "text": preserve_requirement[0]["text"],
+            "requirement_ids": ["REQ-SELF-PRESERVE"],
+        }],
+    }
+    preserve_registry = build_canonical_surface_registry(preserve_brain, preserve_evidence)
+    preserve_seeds = build_impact_seeds(
+        preserve_brain, preserve_requirement, preserve_evidence,
+        registry=preserve_registry,
+    )
+    preserve_core = build_canonical_mandatory_planning_core({
+        "project_id": preserve_brain["project_id"],
+        "task_id": preserve_brain["task_id"],
+        "task_goal": preserve_brain["task_goal"],
+        "requirements": preserve_requirement,
+        "surfaces": preserve_registry.get("surfaces", []),
+        "impact_seeds": preserve_seeds,
+        "preservation_constraints": preserve_brain["preservation_constraints"],
+    })
+    preserve_frame = build_impact_decision_frame(
+        preserve_brain, preserve_requirement, preserve_evidence,
+        surface_registry=preserve_registry, impact_seeds=preserve_seeds,
+        mandatory_core=preserve_core,
+    )
+    preserve_choices = deterministic_impact_decision_choices(preserve_frame)
+    preserve_compiled = compile_impact_map_from_choices(
+        preserve_frame, preserve_choices, preserve_requirement, preserve_evidence,
+        surface_registry=preserve_registry, impact_seeds=preserve_seeds,
+    )
+    checks.update({
+        "case_a_live_bad_frame": (
+            bad_frame_check.get("status") == IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+            and bad_frame_check.get("model_calls") == 0
+            and bool(bad_frame_check.get("uncovered_obligations"))
+        ),
+        "case_b_weak_bad_choice": (
+            inspect_check.get("status", "").startswith(IMPACT_CHOICE_REQUIREMENT_GAP)
+            and inspect_check.get("model_calls") == 0
+            and bool(inspect_check.get("uncovered_obligations"))
+        ),
+        "case_c_valid_choice_assignment": (
+            compiled.get("valid") is True
+            and compiled.get("semantic_validation", {}).get("valid") is True
+            and bool(compiled.get("impact_map", {}).get("obligation_assignments"))
+            and "REQUIREMENT_GAP" not in challenge_types
+        ),
+        "case_d_preservation_only": (
+            preserve_compiled.get("valid") is True
+            and all(
+                item.get("disposition") != "MUST_CHANGE"
+                for item in preserve_compiled.get("impact_map", {}).get("impacts", [])
+            )
+        ),
+    })
     return {
         "passed": all(checks.values()), "checks": checks, "model_calls": 0,
         "frame": frame, "choices": choices, "compiled": compiled,
@@ -7791,6 +9521,25 @@ def evaluate_requirement_obligations(source, requirements, evidence,
                 covered = any(_PROHIBITION_RE.search(str(item)) for item in constraints)
                 if covered:
                     support.extend(_bounded_strings(constraints, 3, 120))
+            elif obligation_type == "AUTHORITY_CHANGE":
+                for item in linked:
+                    authority = item.get("authority_change")
+                    authorized = isinstance(authority, dict) and authority.get("authorized") is True
+                    if not authorized:
+                        authorized = any(
+                            item.get(key) is True for key in (
+                                "authority_change_authorized", "allows_authority_change",
+                                "explicit_authority_change",
+                            )
+                        )
+                    mutation = (
+                        bool(item.get("mutation_required")) if is_plan else
+                        item.get("disposition") == "MUST_CHANGE"
+                        or item.get("necessity_status") == "MUST_CHANGE"
+                    )
+                    if authorized and mutation:
+                        covered = True
+                        support.append(str(item.get("node_id") or item.get("impact_id")))
             elif obligation_type == "CROSS_CUTTING":
                 covered = bool(linked and integration)
                 if covered:
@@ -7800,10 +9549,56 @@ def evaluate_requirement_obligations(source, requirements, evidence,
                 "state": "COVERED" if covered else "UNCOVERED",
                 "support": _bounded_strings(support, 6, 180),
             })
+        structured_assignment_ids = {
+            str(identifier)
+            for item in linked + linked_preservation
+            for identifier in (
+                list(item.get("obligation_ids", []) or [])
+                + [
+                    assignment.get("obligation_id")
+                    for assignment in list(item.get("obligation_assignments", []) or [])
+                    if isinstance(assignment, dict)
+                ]
+            )
+            if identifier
+        }
+        has_structured_assignments = bool(structured_assignment_ids)
+        atomic_projection = []
+        for atomic in _atomic_obligations_for_requirement(obligation):
+            type_record = next(
+                (
+                    item for item in type_records
+                    if item.get("obligation_type") == atomic.get("obligation_type")
+                ),
+                {},
+            )
+            state = type_record.get("state", "UNCOVERED")
+            support = list(type_record.get("support", []) or [])
+            if has_structured_assignments and str(atomic.get("obligation_id")) not in structured_assignment_ids:
+                # A new compiled map carries atomic IDs by construction.  If
+                # it carries assignments for this requirement but omits this
+                # clause, do not let an aggregate type-level hit conceal the
+                # missing atomic obligation.
+                state = "UNCOVERED"
+                support = []
+            atomic_projection.append({
+                "obligation_id": atomic.get("obligation_id"),
+                "requirement_id": requirement_id,
+                "obligation_type": atomic.get("obligation_type"),
+                "meaning": atomic.get("meaning") or atomic.get("text"),
+                "state": state,
+                "support": support,
+                "provenance": DERIVED_PLAN_DECISION,
+            })
         result.append({
             "requirement_id": requirement_id,
             "obligation_types": list(obligation.get("obligation_types", [])),
             "obligations": type_records,
+            # Keep the legacy type-level view above for existing reconciliation
+            # callers, while exposing the atomic source assignments explicitly
+            # for V24.4 audit consumers.  No atomic clause is collapsed into a
+            # generic requirement label here.
+            "atomic_obligations": atomic_projection,
             "state": "COVERED" if type_records and all(
                 item["state"] == "COVERED" for item in type_records
             ) else "UNCOVERED",
@@ -7824,6 +9619,23 @@ def evaluate_requirement_obligations(source, requirements, evidence,
         "behavior_obligations_uncovered": sum(
             item["obligation_type"] == "BEHAVIOR_CHANGE" and item["state"] != "COVERED"
             for record in result for item in record["obligations"]
+        ),
+        "atomic_obligations_total": sum(
+            len(record.get("atomic_obligations", []) or []) for record in result
+        ),
+        "atomic_behavior_change_obligations": sum(
+            item.get("obligation_type") == "BEHAVIOR_CHANGE"
+            for record in result for item in record.get("atomic_obligations", []) or []
+        ),
+        "atomic_behavior_change_obligations_covered": sum(
+            item.get("obligation_type") == "BEHAVIOR_CHANGE"
+            and item.get("state") == "COVERED"
+            for record in result for item in record.get("atomic_obligations", []) or []
+        ),
+        "atomic_behavior_change_obligations_uncovered": sum(
+            item.get("obligation_type") == "BEHAVIOR_CHANGE"
+            and item.get("state") != "COVERED"
+            for record in result for item in record.get("atomic_obligations", []) or []
         ),
     }
 
