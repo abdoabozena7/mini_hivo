@@ -1767,6 +1767,17 @@ def new_metrics(mode):
         "impact_decision_invalid_choices": 0,
         "impact_maps_compiled_from_choices": 0,
         "impact_map_compile_failures": 0,
+        # V24.4 obligation-to-decision coverage accounting.  These are
+        # deterministic counters; none represents a model role or retry.
+        "impact_obligations_total": 0,
+        "impact_behavior_change_obligations": 0,
+        "impact_frame_covered_obligations": 0,
+        "impact_frame_uncovered_obligations": 0,
+        "impact_choice_covered_obligations": 0,
+        "impact_choice_uncovered_obligations": 0,
+        "impact_frame_capability_gaps": 0,
+        "impact_choice_requirement_gaps": 0,
+        "impact_requirements_assigned": 0,
         "impact_challenges": 0,
         "impact_challenges_validated": 0,
         "impact_challenges_rejected": 0,
@@ -5073,11 +5084,18 @@ UNKNOWN_IMPACT_DECISION_SLOT = stage3.UNKNOWN_IMPACT_DECISION_SLOT
 IMPACT_DECISION_NOT_ALLOWED = stage3.IMPACT_DECISION_NOT_ALLOWED
 IMPACT_DECISION_TARGET_NOT_ALLOWED = stage3.IMPACT_DECISION_TARGET_NOT_ALLOWED
 IMPACT_MAP_COMPILE_INVALID = stage3.IMPACT_MAP_COMPILE_INVALID
+IMPACT_FRAME_COVERAGE_READY = stage3.IMPACT_FRAME_COVERAGE_READY
+IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP = stage3.IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+IMPACT_CHOICE_COVERAGE_READY = stage3.IMPACT_CHOICE_COVERAGE_READY
+IMPACT_CHOICE_REQUIREMENT_GAP = stage3.IMPACT_CHOICE_REQUIREMENT_GAP
+BEHAVIOR_CHANGE_UNCOVERED = stage3.BEHAVIOR_CHANGE_UNCOVERED
+DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE = stage3.DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE
 impact_challenge_schema = stage3.challenge_schema
 canonical_surface_registry_schema = stage3.canonical_surface_registry_schema
 build_canonical_surface_registry = stage3.build_canonical_surface_registry
 build_impact_seeds = stage3.build_impact_seeds
 build_requirement_obligation_ledger = stage3.build_requirement_obligation_ledger
+compact_requirement_obligation_ledger = stage3.compact_requirement_obligation_ledger
 evaluate_requirement_obligations = stage3.evaluate_requirement_obligations
 surface_bound_impact_seeds = stage3.surface_bound_impact_seeds
 select_task_relevant_surfaces = stage3.select_task_relevant_surfaces
@@ -5107,15 +5125,22 @@ build_minimal_plan_packet = stage3.build_minimal_plan_packet
 validate_planning_packet = stage3.validate_planning_packet
 build_impact_decision_frame = stage3.build_impact_decision_frame
 validate_impact_decision_frame = stage3.validate_impact_decision_frame
+build_impact_decision_frame_coverage = stage3.build_impact_decision_frame_coverage
+validate_impact_decision_frame_coverage = stage3.validate_impact_decision_frame_coverage
 build_impact_decision_packet = stage3.build_impact_decision_packet
 validate_impact_decision_choices = stage3.validate_impact_decision_choices
+build_impact_decision_choice_coverage = stage3.build_impact_decision_choice_coverage
+validate_impact_decision_choice_coverage = stage3.validate_impact_decision_choice_coverage
 validate_impact_decision_output = stage3.validate_impact_decision_output
 deterministic_impact_decision_choices = stage3.deterministic_impact_decision_choices
+impact_decision_capability_taxonomy = stage3.impact_decision_capability_taxonomy
+decision_capability_taxonomy = stage3.decision_capability_taxonomy
 compile_impact_map_from_choices = stage3.compile_impact_map_from_choices
 compile_impact_map_from_decisions = stage3.compile_impact_map_from_decisions
 impact_decision_frame_hash = stage3.impact_decision_frame_hash
 impact_decision_choice_hash = stage3.impact_decision_choice_hash
 impact_decision_choices_hash = stage3.impact_decision_choices_hash
+impact_decision_coverage_hash = stage3.impact_decision_coverage_hash
 impact_decision_frame_self_test = stage3.impact_decision_frame_self_test
 bind_impact_decisions_to_seeds = stage3.bind_impact_decisions_to_seeds
 hydrate_impact_map = stage3.hydrate_impact_map
@@ -5294,6 +5319,8 @@ WHAT IS FIXED:
 WHAT YOU MUST DECIDE:
 - return exactly one choice for every required slot;
 - choose only an allowed decision and an allowed target;
+- choose decisions sufficient to satisfy the listed active obligations according to
+  the frame's capability mapping;
 - provide a short reason_code and bounded_rationale.
 
 WHAT YOU MUST NOT REPEAT OR CHANGE:
@@ -5335,11 +5362,61 @@ def _record_impact_decision_validation(result):
         ) + 1
 
 
+def _record_impact_frame_coverage(result):
+    value = result if isinstance(result, dict) else {}
+    RUN["impact_obligations_total"] = max(
+        RUN.get("impact_obligations_total", 0), int(value.get("obligations_total", 0) or 0),
+    )
+    RUN["impact_frame_covered_obligations"] = max(
+        RUN.get("impact_frame_covered_obligations", 0),
+        int(value.get("covered_obligations", 0) or 0),
+    )
+    RUN["impact_frame_uncovered_obligations"] = max(
+        RUN.get("impact_frame_uncovered_obligations", 0),
+        len(value.get("uncovered_obligations", []) or []),
+    )
+    coverage = value.get("coverage") if isinstance(value.get("coverage"), dict) else {}
+    metrics = coverage.get("metrics") if isinstance(coverage.get("metrics"), dict) else {}
+    RUN["impact_behavior_change_obligations"] = max(
+        RUN.get("impact_behavior_change_obligations", 0),
+        int(metrics.get("impact_behavior_change_obligations", 0) or 0),
+    )
+    if (
+        value.get("status") == stage3.IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+        or value.get("coverage_status") == stage3.IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP
+    ):
+        RUN["impact_frame_capability_gaps"] = RUN.get(
+            "impact_frame_capability_gaps", 0,
+        ) + 1
+
+
+def _record_impact_choice_coverage(result):
+    value = result if isinstance(result, dict) else {}
+    coverage = value.get("coverage") if isinstance(value.get("coverage"), dict) else {}
+    metrics = coverage.get("metrics") if isinstance(coverage.get("metrics"), dict) else {}
+    RUN["impact_choice_covered_obligations"] = max(
+        RUN.get("impact_choice_covered_obligations", 0),
+        int(metrics.get("impact_choice_covered_obligations", 0) or 0),
+    )
+    RUN["impact_choice_uncovered_obligations"] = max(
+        RUN.get("impact_choice_uncovered_obligations", 0),
+        len(value.get("uncovered_obligations", []) or []),
+    )
+    RUN["impact_requirements_assigned"] = max(
+        RUN.get("impact_requirements_assigned", 0),
+        int(metrics.get("impact_requirements_assigned", 0) or 0),
+    )
+    if str(value.get("status") or "").startswith(stage3.IMPACT_CHOICE_REQUIREMENT_GAP):
+        RUN["impact_choice_requirement_gaps"] = RUN.get(
+            "impact_choice_requirement_gaps", 0,
+        ) + 1
+
+
 def _create_impact_map_from_decision_frame(
     task_brain, contract, repository_evidence, requirements, registry,
     seeds, planning_packet, structured_call, verified_planning_context,
 ):
-    """Run the V24.3 frame -> choice -> compiled-map path."""
+    """Run the V24.4 frame -> choice-coverage -> compiled-map path."""
     core = planning_packet.get("canonical_mandatory_planning_core", {})
     frame = stage3.build_impact_decision_frame(
         task_brain, requirements, repository_evidence,
@@ -5362,20 +5439,27 @@ def _create_impact_map_from_decision_frame(
     )
     frame_validation = stage3.validate_impact_decision_frame(frame)
     RUN["impact_decision_frame_validation"] = copy.deepcopy(frame_validation)
+    RUN["impact_decision_frame_coverage"] = copy.deepcopy(
+        frame_validation.get("coverage") or frame.get("impact_decision_frame_coverage", {})
+    )
+    _record_impact_frame_coverage(frame_validation)
     if not frame_validation.get("valid"):
         RUN["impact_decision_frame_incomplete"] = RUN.get(
             "impact_decision_frame_incomplete", 0,
         ) + 1
-        RUN["orchestration_failure"] = stage3.IMPACT_DECISION_FRAME_INCOMPLETE
-        RUN["planning_packet_status"] = stage3.IMPACT_DECISION_FRAME_INCOMPLETE
+        status = frame_validation.get("status") or stage3.IMPACT_DECISION_FRAME_INCOMPLETE
+        RUN["orchestration_failure"] = status
+        RUN["planning_packet_status"] = status
         record_run_event(
             "impact_decision_frame_incomplete",
+            status=status,
+            uncovered_obligations=frame_validation.get("uncovered_obligations", []),
             errors=frame_validation.get("errors", []), model_calls=0,
         )
         raise ImpactPlanningError(
-            f"{stage3.IMPACT_DECISION_FRAME_INCOMPLETE}: "
+            f"{status}: "
             + "; ".join(frame_validation.get("errors", [])),
-            status=stage3.IMPACT_DECISION_FRAME_INCOMPLETE,
+            status=status,
         )
 
     decision_packet = stage3.build_impact_decision_packet(
@@ -5430,7 +5514,13 @@ def _create_impact_map_from_decision_frame(
 
     def validator(data):
         nonlocal last_validation
-        last_validation = stage3.validate_impact_decision_choices(data, frame)
+        # The provider callback validates JSON shape, slot cardinality, and
+        # frame readiness.  Coverage is deliberately checked once after the
+        # provider returns, so a weak but structurally valid choice cannot
+        # trigger generic repair/retry behavior.
+        last_validation = stage3.validate_impact_decision_choices(
+            data, frame, include_coverage=False,
+        )
         _record_impact_decision_validation(last_validation)
         return last_validation
 
@@ -5467,6 +5557,10 @@ def _create_impact_map_from_decision_frame(
         if last_validation.get("choices") != choice_validation.get("choices"):
             _record_impact_decision_validation(choice_validation)
     RUN["impact_decision_choice_validation"] = copy.deepcopy(choice_validation)
+    RUN["impact_decision_choice_coverage"] = copy.deepcopy(
+        choice_validation.get("choice_coverage") or {}
+    )
+    _record_impact_choice_coverage(choice_validation)
     RUN["raw_impact_decision_choices"] = copy.deepcopy(candidate)
     RUN["raw_impact_planner_output"] = copy.deepcopy(candidate)
     record_run_event(
@@ -5475,6 +5569,21 @@ def _create_impact_map_from_decision_frame(
     )
     if not choice_validation.get("valid"):
         RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
+        if str(choice_validation.get("status") or "").startswith(
+            stage3.IMPACT_CHOICE_REQUIREMENT_GAP
+        ):
+            RUN["orchestration_failure"] = stage3.IMPACT_CHOICE_REQUIREMENT_GAP
+            RUN["planning_packet_status"] = stage3.IMPACT_CHOICE_REQUIREMENT_GAP
+            RUN["impact_choice_coverage_failure"] = (
+                stage3.DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE
+            )
+            record_run_event(
+                "impact_decision_choice_coverage_incomplete",
+                status=stage3.IMPACT_CHOICE_REQUIREMENT_GAP,
+                classification=stage3.DOWNSTREAM_WEAK_IMPACT_CHOICE_COVERAGE_FAILURE,
+                uncovered_obligations=choice_validation.get("uncovered_obligations", []),
+                model_calls=0,
+            )
         raise ImpactPlanningError(
             f"{choice_validation.get('status') or stage3.IMPACT_DECISION_OUTPUT_MALFORMED}: "
             + "; ".join(choice_validation.get("errors", [])),
@@ -5558,6 +5667,13 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     RUN["behavior_obligations"] = sum(
         "BEHAVIOR_CHANGE" in item.get("obligation_types", [])
         for item in obligation_ledger.get("requirements", [])
+    )
+    RUN["impact_obligations_total"] = int(obligation_ledger.get("obligation_count", 0) or 0)
+    RUN["impact_behavior_change_obligations"] = sum(
+        item.get("obligation_type") == "BEHAVIOR_CHANGE"
+        for record in obligation_ledger.get("requirements", [])
+        for item in record.get("obligations", []) or []
+        if isinstance(item, dict)
     )
     RUN["task_brain"] = copy.deepcopy(task_brain or {})
     registry = stage3.build_canonical_surface_registry(task_brain, repository_evidence)
