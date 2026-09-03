@@ -14,6 +14,7 @@ import hashlib
 import inspect
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -813,17 +814,21 @@ def _verification_contract_records(
                 texts = [texts]
             texts = [str(value) for value in (texts or []) if _text(value)]
             verification_id = str(item.get("verification_id") or f"VERIFICATION-{index:03d}")
+            # Preserve the complete approved authority card.  The previous
+            # adapter projected only ``verification_id`` and ``contract``,
+            # which discarded the direct oracle target/spec before routing.
+            record = _copy(item)
         else:
             texts = [str(item)] if _text(item) else []
             verification_id = f"VERIFICATION-{index:03d}"
+            record = {}
         identity = stage6c.canonical_hash({"verification_id": verification_id, "contract": texts})
         if identity in seen or not texts:
             continue
         seen.add(identity)
-        records.append({
-            "verification_id": verification_id,
-            "contract": texts,
-        })
+        record["verification_id"] = verification_id
+        record["contract"] = texts
+        records.append(record)
     return records
 
 
@@ -844,6 +849,11 @@ def _known_test_files(workspace: str | os.PathLike | None, paths: Iterable[Any])
 
 
 def _command_for_route(route: dict[str, Any]) -> str | None:
+    if (
+        route.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
+        or route.get("route_type") == verification_routing.DIRECT_ORACLE
+    ):
+        return None
     target = _path(route.get("target"))
     if not target:
         return None
@@ -867,7 +877,11 @@ def _default_verification_executor(command: str) -> Any:
     # Keep the existing run_tool executor authoritative.  Importing mini
     # lazily avoids a module cycle while preserving the existing workspace,
     # timeout, and command-safety policy.
-    from mini import run_tool
+    running_module = sys.modules.get("mini") or sys.modules.get("__main__")
+    if running_module is not None and callable(getattr(running_module, "run_tool", None)):
+        run_tool = running_module.run_tool
+    else:
+        from mini import run_tool
 
     return run_tool("run_command", {"command": command}, role="Builder")
 
@@ -887,8 +901,8 @@ def build_stage5a_verification_input(
     known_files = [item.get("path") for item in post_subject.get("paths", []) if isinstance(item, dict)]
     known_tests = _known_test_files(workspace, known_files)
     route_artifacts: list[dict[str, Any]] = []
-    merged_routes: list[dict[str, Any]] = []
-    route_keys: set[tuple[Any, ...]] = set()
+    approved_route_bindings: list[dict[str, Any]] = []
+    executable_routes: list[dict[str, Any]] = []
     for record in records:
         artifact = verification_routing.analyze_verification_applicability(
             task,
@@ -900,24 +914,35 @@ def build_stage5a_verification_input(
             workspace=workspace,
             known_test_files=known_tests,
             execution_evidence=execution_evidence or [],
+            approved_verification_authority=record,
         )
+        authority_routes = [
+            _copy(item) for item in artifact.get("verification_route_bindings", []) or []
+            if isinstance(item, dict)
+        ]
         route_artifacts.append({
+            **_copy(record),
             "verification_id": record.get("verification_id"),
             "contract": _copy(record.get("contract", [])),
             "applicability": _copy(artifact),
+            "route_bindings": authority_routes,
+            "route_audit": _copy(artifact.get("route_audit", [])),
         })
+        approved_route_bindings.extend(authority_routes)
         for route in artifact.get("verification_routes", []) or []:
             if not isinstance(route, dict):
                 continue
-            key = (
-                route.get("kind"), route.get("target"),
-                route.get("required"), route.get("applicable"),
-            )
-            if key in route_keys:
+            # Direct oracles are exact approved bindings but use their own
+            # verifier channel; they must never become a generic node command.
+            if (
+                route.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
+                or route.get("route_type") == verification_routing.DIRECT_ORACLE
+            ):
                 continue
-            route_keys.add(key)
-            merged_routes.append(_copy(route))
+            executable_routes.append(_copy(route))
     if not route_artifacts:
+        # Local/fallback contracts still receive the old generic behavior,
+        # but the result is enriched with the same canonical route shape.
         artifact = verification_routing.analyze_verification_applicability(
             task, contract, {"files": known_files, "tests": known_tests, "entrypoints": []},
             mutation_paths=contract.get("allowed_mutation_paths", []) or [],
@@ -925,12 +950,137 @@ def build_stage5a_verification_input(
             workspace=workspace, known_test_files=known_tests,
             execution_evidence=execution_evidence or [],
         )
-        merged_routes = list(artifact.get("verification_routes", []) or [])
+        executable_routes = [
+            _copy(item) for item in artifact.get("verification_routes", []) or []
+            if isinstance(item, dict)
+        ]
+
+    # Syntax is a deterministic Stage 5A safety route, not a newly approved
+    # verification contract.  Keep it exactly once and give it an explicit
+    # system authority so mandatory-route validation cannot accept a generic
+    # capability route.
+    system_task = _copy(task)
+    system_task.update({"goal": [], "done_when": [], "test_contract": [], "local_test_contract": []})
+    system_contract = _copy(contract)
+    system_contract["test_contract"] = []
+    system_artifact = verification_routing.analyze_verification_applicability(
+        system_task,
+        system_contract,
+        {"files": known_files, "tests": known_tests, "entrypoints": []},
+        test_contract=[],
+        mutation_paths=contract.get("allowed_mutation_paths", []) or [],
+        inspection_paths=contract.get("allowed_inspection_paths", []) or [],
+        workspace=workspace,
+        known_test_files=known_tests,
+        execution_evidence=[],
+    )
+    system_authority_ids: list[str] = []
+    system_routes: list[dict[str, Any]] = []
+    for route in system_artifact.get("verification_routes", []) or []:
+        if not isinstance(route, dict):
+            continue
+        if route.get("kind") == verification_routing.SYNTAX_STATIC_GATE:
+            target = _path(route.get("target"))
+            authority_id = "SYSTEM-SYNTAX-" + (target or "UNRESOLVED").replace("/", "_").replace(".", "_").upper()
+            system_authority_ids.append(authority_id)
+            system_route = _copy(route)
+            system_route["target_identity_upstream"] = bool(target)
+            system_route["upstream_target_exists"] = bool(target)
+            binding = verification_routing.build_verification_route_binding(
+                system_route,
+                authority_id=authority_id,
+                authority_type=verification_routing.DETERMINISTIC_SYSTEM_SAFETY_CHECK,
+                authority_source="STAGE5A_DETERMINISTIC_ROUTE",
+                authority_provenance="DETERMINISTIC_SYSTEM_SAFETY_CHECK",
+                route_type=verification_routing.DETERMINISTIC_SYSTEM_SAFETY_CHECK,
+                execution_channel=verification_routing.STAGE5A_COMMAND,
+                resolution_mode=verification_routing.DETERMINISTIC_SYSTEM_TARGET,
+                candidate_targets=[target] if target else [],
+                selected_target=target or None,
+                approved_target=None,
+                command=_command_for_route(route),
+                provenance_refs=["stage5a:deterministic_syntax_safety"],
+                responsibility_key=f"system:syntax:{target}",
+            )
+        else:
+            browser_target = _path(route.get("target")) or None
+            binding = verification_routing.build_verification_route_binding(
+                route,
+                authority_type=verification_routing.OPTIONAL_CAPABILITY,
+                authority_source="GENERIC_OPTIONAL_CAPABILITY",
+                authority_provenance="OPTIONAL_BROWSER_APPLICABILITY",
+                route_type=verification_routing.OPTIONAL_CAPABILITY,
+                execution_channel=verification_routing.STAGE5A_COMMAND,
+                resolution_mode=(
+                    verification_routing.SUPPORTED_TARGET_DISCOVERY
+                    if browser_target else verification_routing.UNRESOLVED
+                ),
+                candidate_targets=route.get("candidates", []) or ([browser_target] if browser_target else []),
+                selected_target=browser_target,
+                command_identity="verify_web_app",
+                provenance_refs=["stage5a:optional_browser_capability"],
+                responsibility_key="optional:browser",
+            )
+        system_routes.append(_copy(binding))
+    if route_artifacts:
+        executable_routes.extend(system_routes)
+    merged_routes = verification_routing.deduplicate_verification_routes(executable_routes)
+    all_bindings = verification_routing.deduplicate_verification_routes(
+        approved_route_bindings + merged_routes,
+    )
+    route_audit = []
+    for route in all_bindings:
+        route_audit.append({
+            "route_id": route.get("route_id"),
+            "verification_id": route.get("verification_id"),
+            "oracle_id": route.get("oracle_id"),
+            "authority_id": route.get("authority_id"),
+            "authority_source": route.get("authority_source"),
+            "authority_provenance": route.get("authority_provenance"),
+            "required": route.get("required"),
+            "applicable": route.get("applicable"),
+            "route_type": route.get("route_type"),
+            "candidate_targets": list(route.get("candidate_targets", []) or []),
+            "selected_target": route.get("selected_target"),
+            "target_resolution_reason": route.get("resolution_source"),
+            "resolution_mode": route.get("resolution_mode"),
+            "evidence_ids": list(route.get("evidence_refs", []) or []),
+            "target_identity_existed_upstream": bool(route.get("target_identity_upstream")),
+        })
+    route_validation = (
+        verification_routing.validate_verification_route_bindings(
+            all_bindings,
+            approved_authorities=records,
+            deterministic_system_authorities=system_authority_ids,
+        )
+        if route_artifacts else {
+            "valid": True,
+            "legacy_fallback": True,
+            "checked_routes": len(all_bindings),
+            "mandatory_routes": sum(1 for item in all_bindings if item.get("required") is True),
+            "errors": [],
+            "model_calls": 0,
+        }
+    )
     payload = {
         "schema_version": "V20.5A",
         "child_id": str(task.get("id") or contract.get("execution_contract_id") or "UNKNOWN"),
         "model_calls": 0,
-        "verification_routes": merged_routes,
+        "verification_routes": [_copy(item) for item in merged_routes if isinstance(item, dict) and not (
+            item.get("route_type") == verification_routing.DIRECT_ORACLE
+            or item.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
+        )],
+        "direct_oracle_routes": [
+            _copy(item) for item in all_bindings
+            if isinstance(item, dict) and (
+                item.get("route_type") == verification_routing.DIRECT_ORACLE
+                or item.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
+            )
+        ],
+        "verification_route_bindings": [_copy(item) for item in all_bindings],
+        "approved_verification_route_bindings": [_copy(item) for item in approved_route_bindings],
+        "route_audit": route_audit,
+        "route_validation": route_validation,
         "repository_evidence": {
             "known_entrypoints": [],
             "known_test_files": known_tests[:20],
@@ -945,6 +1095,8 @@ def build_stage5a_verification_input(
         "verification_input": {
             "approved_verification_contracts": _copy(route_artifacts),
             "verification_applicability": _copy(payload),
+            "verification_route_bindings": _copy(all_bindings),
+            "route_audit": _copy(route_audit),
             "post_worker_subject": _copy(post_subject),
             "execution_result": {
                 "execution_contract_hash": execution_result.get("execution_contract_hash"),

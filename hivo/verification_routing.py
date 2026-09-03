@@ -25,6 +25,23 @@ FOCUSED_TEST = "FOCUSED_TEST"
 SYNTAX_STATIC_GATE = "SYNTAX_STATIC_GATE"
 BROWSER = "BROWSER"
 
+# Route authority is deliberately separate from the legacy ``kind`` field.
+# ``kind`` remains compatible with the existing Stage 5 aggregator, while the
+# fields below make the execution authority and resolution decision explicit.
+APPROVED_VERIFICATION_CONTRACT = "APPROVED_VERIFICATION_CONTRACT"
+APPROVED_FOCUSED_TEST = "APPROVED_FOCUSED_TEST"
+DIRECT_ORACLE = "DIRECT_ORACLE"
+DETERMINISTIC_SYSTEM_SAFETY_CHECK = "DETERMINISTIC_SYSTEM_SAFETY_CHECK"
+OPTIONAL_CAPABILITY = "OPTIONAL_CAPABILITY"
+STAGE5A_COMMAND = "STAGE5A_COMMAND"
+DIRECT_ORACLE_EXECUTION = "DIRECT_ORACLE_EXECUTION"
+
+EXACT_APPROVED_TARGET = "EXACT_APPROVED_TARGET"
+DETERMINISTIC_CONTRACT_TARGET = "DETERMINISTIC_CONTRACT_TARGET"
+DETERMINISTIC_SYSTEM_TARGET = "DETERMINISTIC_SYSTEM_TARGET"
+SUPPORTED_TARGET_DISCOVERY = "SUPPORTED_TARGET_DISCOVERY"
+UNRESOLVED = "UNRESOLVED"
+
 PASS = "PASS"
 FAIL = "FAIL"
 PENDING = "PENDING"
@@ -78,6 +95,55 @@ _SYNTAX_EVIDENCE_MARKERS = re.compile(
     r"(?:--check|\b(?:py_compile|compileall|syntax(?:\s+check)?|static(?:\s+check)?|lint|typecheck)\b)",
     re.IGNORECASE,
 )
+
+
+class VerificationRouteBinding(dict):
+    """Mutable, JSON-safe canonical binding for one Stage 5A route.
+
+    The class intentionally adds no behavior to ``dict``.  It is a named
+    shape for callers and keeps old route consumers compatible with ordinary
+    dictionaries while making authority metadata impossible to confuse with
+    generic capability discovery.
+    """
+
+
+def _route_identity(value: dict[str, Any]) -> dict[str, Any]:
+    """Return only the stable fields that define route identity."""
+    command_identity = value.get("command_identity")
+    if not command_identity:
+        command_identity = value.get("command_spec_identity") or value.get("command")
+    if not command_identity:
+        command_identity = value.get("oracle_spec_identity")
+    return {
+        "authority_id": str(value.get("authority_id") or value.get("verification_id") or ""),
+        "authority_type": str(value.get("authority_type") or ""),
+        "authority_source": str(value.get("authority_source") or ""),
+        "kind": str(value.get("kind") or ""),
+        "route_type": str(value.get("route_type") or value.get("kind") or ""),
+        "execution_channel": str(value.get("execution_channel") or ""),
+        "target": _path(value.get("target")) if value.get("target") else None,
+        "command": str(value.get("command") or ""),
+        "command_identity": str(command_identity or ""),
+        "required": bool(value.get("required")),
+        "applicable": bool(value.get("applicable")),
+        "resolution_mode": str(value.get("resolution_mode") or ""),
+    }
+
+
+def canonical_route_hash(route: dict[str, Any] | None) -> str:
+    """Hash the stable authority/target/command identity of a route."""
+    return _json_hash(_route_identity(route if isinstance(route, dict) else {}))
+
+
+def _copy_route_list(value: Any, limit: int = _MAX_REFS) -> list[str]:
+    result: list[str] = []
+    for item in _as_list(value):
+        text = _compact(item, 180)
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def _compact(value: Any, limit: int = _MAX_TEXT) -> str:
@@ -347,10 +413,316 @@ def _route(kind: str, required: bool, applicable: bool, target: str | None, reas
     return value
 
 
-def _test_target(
+def _authority_id(authority: dict[str, Any] | None) -> str:
+    value = authority if isinstance(authority, dict) else {}
+    return str(value.get("verification_id") or value.get("oracle_id") or "")
+
+
+def is_direct_oracle_authority(authority: dict[str, Any] | None) -> bool:
+    """Recognize the plan-owned direct oracle without relying on oracle_type."""
+    value = authority if isinstance(authority, dict) else {}
+    route_type = str(value.get("route_type") or "").casefold()
+    authority_type = str(value.get("authority_type") or "").casefold()
+    authority_source = str(value.get("authority_source") or "").casefold()
+    return bool(
+        route_type == DIRECT_ORACLE.casefold()
+        or authority_type == DIRECT_ORACLE.casefold()
+        or value.get("oracle_id")
+        or value.get("oracle_hash")
+        or authority_source in {"hivo_verifier", "direct_oracle"}
+    )
+
+
+def _path_values(value: Any) -> list[str]:
+    values: list[str] = []
+    for item in _as_list(value):
+        if isinstance(item, dict):
+            item = item.get("path") or item.get("target") or item.get("file")
+        if isinstance(item, (str, os.PathLike)):
+            candidate = _path(item)
+            if candidate and _is_source_path(candidate):
+                values.append(candidate)
+    return values
+
+
+def _authority_target_candidates(
+    authority: dict[str, Any] | None,
+    test_files: Iterable[str] | None = None,
+    *,
+    direct: bool | None = None,
+) -> tuple[list[str], bool]:
+    """Return structurally named authority targets and whether they are upstream."""
+    value = authority if isinstance(authority, dict) else {}
+    direct = is_direct_oracle_authority(value) if direct is None else bool(direct)
+    candidates: list[str] = []
+    explicit_keys = (
+        "target", "approved_target", "test_target", "test_path",
+        "requested_target", "target_path", "target_module_path", "oracle_target",
+    )
+    collection_keys = ("targets", "approved_targets", "paths", "target_paths")
+    for key in explicit_keys + collection_keys:
+        candidates.extend(_path_values(value.get(key)))
+    # Direct oracles own their module target.  They never fall through to
+    # test-file discovery, even when their oracle_type happens to be
+    # FOCUSED_TEST.
+    if direct:
+        return _unique_paths(candidates), bool(candidates)
+    test_values = _unique_paths(test_files or [])
+    for text in _strings(value.get("contract")):
+        candidates.extend(
+            path for path in test_values
+            if path.casefold() in text.casefold()
+        )
+    return _unique_paths(candidates), bool(candidates)
+
+
+def build_verification_route_binding(
+    route: dict[str, Any] | None,
+    *,
+    authority: dict[str, Any] | None = None,
+    authority_id: str | None = None,
+    authority_type: str | None = None,
+    authority_source: str | None = None,
+    authority_provenance: Any = None,
+    route_type: str | None = None,
+    execution_channel: str | None = None,
+    resolution_mode: str | None = None,
+    candidate_targets: Iterable[Any] | None = None,
+    selected_target: str | None = None,
+    approved_target: str | None = None,
+    command: str | None = None,
+    command_identity: str | None = None,
+    provenance_refs: Iterable[Any] | None = None,
+    responsibility_key: str | None = None,
+) -> VerificationRouteBinding:
+    """Enrich a compatible route with immutable-authority routing metadata."""
+    value = dict(route) if isinstance(route, dict) else {}
+    record = authority if isinstance(authority, dict) else {}
+    direct = is_direct_oracle_authority(record) if record else (
+        str(route_type or "").casefold() == DIRECT_ORACLE.casefold()
+    )
+    resolved_authority_id = str(
+        authority_id or _authority_id(record) or value.get("authority_id") or ""
+    )
+    if not authority_type:
+        authority_type = (
+            DIRECT_ORACLE if direct else APPROVED_VERIFICATION_CONTRACT
+        ) if record else value.get("authority_type")
+    if not authority_source:
+        authority_source = (
+            str(record.get("authority_source") or "HIVO_VERIFIER")
+            if direct and record else
+            str(record.get("authority_source") or APPROVED_VERIFICATION_CONTRACT)
+            if record else str(value.get("authority_source") or "")
+        )
+    if authority_provenance is None and record:
+        authority_provenance = record.get("provenance") or record.get("authority_provenance")
+    if not route_type:
+        route_type = DIRECT_ORACLE if direct else value.get("kind")
+    if not execution_channel:
+        execution_channel = DIRECT_ORACLE_EXECUTION if direct else STAGE5A_COMMAND
+    if not resolution_mode:
+        resolution_mode = value.get("resolution_mode") or UNRESOLVED
+    if command is not None:
+        value["command"] = str(command)
+    if command_identity is None:
+        command_identity = value.get("command_identity") or value.get("command_spec_identity")
+    if command_identity is None and value.get("command"):
+        command_identity = value.get("command")
+    if command_identity is None and direct:
+        command_identity = "oracle:%s:%s" % (
+            str(record.get("oracle_id") or resolved_authority_id),
+            str(record.get("oracle_hash") or ""),
+        )
+    if command_identity is None:
+        target = _path(selected_target or value.get("target"))
+        suffix = Path(target).suffix.casefold()
+        if value.get("kind") == FOCUSED_TEST:
+            command_identity = (
+                f"node {target}" if suffix in {".js", ".mjs", ".cjs"}
+                else f"python {target}" if suffix == ".py"
+                else f"run {target}"
+            ) if target else ""
+        else:
+            command_identity = f"{value.get('kind') or route_type}:{target}"
+    if candidate_targets is None:
+        candidate_targets = value.get("candidate_targets") or value.get("candidates") or []
+    candidates = _unique_paths(candidate_targets)
+    selected = _path(selected_target or value.get("selected_target") or value.get("target")) or None
+    approved = _path(approved_target or value.get("approved_target")) or None
+    if approved and approved not in candidates:
+        candidates = _unique_paths(list(candidates) + [approved])
+    refs = _copy_route_list(
+        list(value.get("provenance_refs", []) or [])
+        + list(provenance_refs or [])
+    )
+    authority_refs = _copy_route_list(record.get("evidence_ids", [])) if record else []
+    if authority_refs:
+        refs = _copy_route_list(refs + [f"authority:{item}" for item in authority_refs])
+    value.update({
+        "verification_id": record.get("verification_id") if record else value.get("verification_id"),
+        "oracle_id": record.get("oracle_id") if record else value.get("oracle_id"),
+        "authority_id": resolved_authority_id or None,
+        "authority_type": authority_type,
+        "authority_source": authority_source or None,
+        "authority_provenance": authority_provenance,
+        "route_type": route_type,
+        "execution_channel": execution_channel,
+        "resolution_mode": resolution_mode,
+        "candidate_targets": candidates,
+        "selected_target": selected,
+        "approved_target": approved,
+        "command_identity": str(command_identity or ""),
+        "provenance_refs": refs,
+        "authority_ids": _copy_route_list(
+            list(value.get("authority_ids", []) or [])
+            + ([resolved_authority_id] if resolved_authority_id else [])
+        ),
+        "responsibility_key": responsibility_key or value.get("responsibility_key") or (
+            f"{resolved_authority_id}:{route_type}" if resolved_authority_id else f"{route_type}"
+        ),
+    })
+    # A binding is allowed to have no target only when it explicitly carries
+    # the fail-closed unresolved mode.  Validation enforces the authority
+    # rules; hashing remains useful for both resolved and unresolved cards.
+    route_hash = canonical_route_hash(value)
+    value["canonical_hash"] = route_hash
+    value["route_id"] = "ROUTE-" + route_hash[:24].upper()
+    return VerificationRouteBinding(value)
+
+
+def _route_semantic_key(route: dict[str, Any]) -> tuple[str, ...]:
+    command_identity = route.get("command_identity") or route.get("command_spec_identity") or route.get("command") or ""
+    return (
+        str(route.get("responsibility_key") or route.get("kind") or ""),
+        str(route.get("route_type") or route.get("kind") or ""),
+        _path(route.get("target")) if route.get("target") else "",
+        str(command_identity),
+    )
+
+
+def deduplicate_verification_routes(
+    routes: Iterable[dict[str, Any]] | None,
+) -> list[VerificationRouteBinding | dict[str, Any]]:
+    """Fan in identical semantic routes while preserving all provenance refs."""
+    result: list[VerificationRouteBinding | dict[str, Any]] = []
+    positions: dict[tuple[str, ...], int] = {}
+    for raw in routes or []:
+        if not isinstance(raw, dict):
+            continue
+        route = dict(raw)
+        key = _route_semantic_key(route)
+        if key not in positions:
+            result.append(route)
+            positions[key] = len(result) - 1
+            continue
+        index = positions[key]
+        existing = dict(result[index])
+        # Exact authority wins over discovery for the same semantic route.
+        modes = {str(existing.get("resolution_mode") or ""), str(route.get("resolution_mode") or "")}
+        if EXACT_APPROVED_TARGET in modes and existing.get("resolution_mode") != EXACT_APPROVED_TARGET:
+            base = dict(route)
+            base["result"] = existing.get("result", route.get("result", PENDING))
+            existing = base
+        elif existing.get("resolution_mode") != EXACT_APPROVED_TARGET and route.get("resolution_mode") == EXACT_APPROVED_TARGET:
+            base = dict(route)
+            base["result"] = existing.get("result", route.get("result", PENDING))
+            existing = base
+        for field in ("evidence_refs", "provenance_refs", "candidate_targets", "authority_ids", "source_verification_contract_ids"):
+            merged = _copy_route_list(
+                list(existing.get(field, []) or []) + list(route.get(field, []) or [])
+            )
+            if merged:
+                existing[field] = merged
+        for field in ("authority_id", "authority_type", "authority_source", "authority_provenance"):
+            if route.get(field) and existing.get(field) != route.get(field):
+                existing.setdefault("merged_" + field + "s", [])
+                existing["merged_" + field + "s"] = _copy_route_list(
+                    list(existing.get("merged_" + field + "s", []) or [])
+                    + [existing.get(field), route.get(field)]
+                )
+        result[index] = existing
+    return result
+
+
+def validate_verification_route_bindings(
+    routes_or_artifact: Any,
+    *,
+    approved_authorities: Iterable[dict[str, Any]] | None = None,
+    deterministic_system_authorities: Iterable[Any] | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate authority, target precedence, expansion, and route hashes."""
+    if isinstance(routes_or_artifact, dict):
+        routes = routes_or_artifact.get("verification_route_bindings")
+        if not isinstance(routes, list):
+            routes = routes_or_artifact.get("verification_routes", [])
+    else:
+        routes = routes_or_artifact or []
+    approved_map = {
+        _authority_id(item): item for item in (approved_authorities or [])
+        if isinstance(item, dict) and _authority_id(item)
+    }
+    if isinstance(deterministic_system_authorities, dict):
+        system_ids = {str(key) for key in deterministic_system_authorities}
+    else:
+        system_ids = {str(item) for item in (deterministic_system_authorities or [])}
+    errors: list[str] = []
+    seen: set[tuple[str, ...]] = set()
+    mandatory_count = 0
+    for index, route in enumerate(routes if isinstance(routes, list) else []):
+        if not isinstance(route, dict):
+            errors.append(f"route[{index}] is not an object")
+            continue
+        expected_hash = canonical_route_hash(route)
+        if route.get("canonical_hash") != expected_hash:
+            errors.append(f"route[{index}] canonical hash is invalid")
+        if route.get("required") is not True:
+            continue
+        mandatory_count += 1
+        authority_id = str(route.get("authority_id") or "")
+        authority_type = str(route.get("authority_type") or "")
+        authority_source = str(route.get("authority_source") or "")
+        if not authority_id or not authority_source:
+            errors.append(f"route[{index}] mandatory route has no authority provenance")
+        known_system = authority_id in system_ids or authority_type == DETERMINISTIC_SYSTEM_SAFETY_CHECK
+        authority = approved_map.get(authority_id)
+        if not known_system and authority is None:
+            errors.append(f"route[{index}] authority {authority_id or '<missing>'} is not approved")
+        if authority is not None:
+            explicit_targets = _authority_target_candidates(
+                authority, route.get("candidate_targets", []),
+            )[0]
+            upstream_exists = bool(
+                route.get("upstream_target_exists")
+                or route.get("approved_target")
+                or route.get("target_identity_upstream")
+            )
+            if route.get("resolution_mode") == EXACT_APPROVED_TARGET:
+                approved_target = _path(route.get("approved_target") or route.get("target"))
+                if not approved_target or (explicit_targets and approved_target not in explicit_targets):
+                    errors.append(f"route[{index}] exact approved target does not match authority")
+            if route.get("target") is None and upstream_exists:
+                errors.append(f"route[{index}] dropped an exact approved target")
+            if route.get("target") is None and route.get("resolution_mode") != UNRESOLVED:
+                errors.append(f"route[{index}] target-null route is not explicitly unresolved")
+        semantic = _route_semantic_key(route)
+        authority_semantic = (authority_id,) + semantic
+        if authority_semantic in seen:
+            errors.append(f"route[{index}] duplicate authority expansion")
+        seen.add(authority_semantic)
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors)),
+        "checked_routes": len(routes) if isinstance(routes, list) else 0,
+        "mandatory_routes": mandatory_count,
+        "model_calls": 0,
+    }
+
+
+def _test_target_details(
     test_contract: list[str], test_files: list[str], scope_paths: list[str],
     execution_evidence: Iterable[dict] | None = None,
-) -> tuple[str | None, bool]:
+) -> tuple[str | None, bool, list[str], str]:
     referenced = []
     for text in test_contract:
         referenced.extend(_references_from_text(text, test_files))
@@ -361,14 +733,35 @@ def _test_target(
             continue
         text = " ".join((str(item.get("target", "")), str(item.get("result", ""))))
         executed.extend(path for path in test_files if path.casefold() in text.casefold())
-    choices = _unique_paths(referenced or scoped or executed)
+    if referenced:
+        choices = _unique_paths(referenced)
+        source = "approved_contract_reference"
+    elif scoped:
+        choices = _unique_paths(scoped)
+        source = "contract_scope"
+    elif executed:
+        choices = _unique_paths(executed)
+        source = "execution_evidence"
+    else:
+        choices = []
+        source = "repository_test_files"
     if len(choices) == 1:
-        return choices[0], False
+        return choices[0], False, choices, source
     if len(choices) > 1:
-        return None, True
+        return None, True, choices, "ambiguous_supported_targets"
     if len(test_files) == 1:
-        return test_files[0], False
-    return None, bool(test_files)
+        return test_files[0], False, list(test_files), "unique_repository_test"
+    return None, bool(test_files), list(test_files), "ambiguous_repository_test_files" if test_files else "missing_repository_test_files"
+
+
+def _test_target(
+    test_contract: list[str], test_files: list[str], scope_paths: list[str],
+    execution_evidence: Iterable[dict] | None = None,
+) -> tuple[str | None, bool]:
+    target, ambiguous, _choices, _source = _test_target_details(
+        test_contract, test_files, scope_paths, execution_evidence,
+    )
+    return target, ambiguous
 
 
 def _is_focused_test_evidence(item: dict) -> bool:
@@ -378,6 +771,177 @@ def _is_focused_test_evidence(item: dict) -> bool:
     return not (
         item.get("tool") == "run_command" and _SYNTAX_EVIDENCE_MARKERS.search(text)
     ) and bool(_TEST_MARKERS.search(text))
+
+
+def _approved_authority_artifact(
+    *,
+    child_id: str,
+    authority: dict[str, Any],
+    test_contract_values: list[str],
+    test_files: list[str],
+    scope_paths: list[str],
+    execution_evidence: list[dict[str, Any]],
+    facts: dict[str, Any],
+    observed_file_types: Iterable[str] | None,
+) -> dict[str, Any]:
+    """Build routes for one already-approved verification authority.
+
+    This branch is intentionally narrower than the generic applicability
+    analyzer.  An approved authority answers an execution question; it does
+    not open a second capability-discovery question for the same obligation.
+    """
+    direct = is_direct_oracle_authority(authority)
+    authority_id = _authority_id(authority) or f"VERIFICATION-{child_id}"
+    required = authority.get("mandatory") if isinstance(authority.get("mandatory"), bool) else authority.get("required") is not False
+    explicit_targets, upstream_target = _authority_target_candidates(
+        authority, test_files, direct=direct,
+    )
+    target_records: list[tuple[str | None, bool, list[str], str, bool]] = []
+    if direct:
+        # A direct oracle owns one immutable module/spec target.  Multiple
+        # conflicting direct target fields are an authority defect, not a
+        # reason to invoke focused-test discovery.
+        if len(explicit_targets) == 1:
+            target_records.append((
+                explicit_targets[0], False, explicit_targets,
+                "approved_direct_oracle_target", True,
+            ))
+        else:
+            target_records.append((
+                None, bool(explicit_targets), explicit_targets,
+                "missing_or_conflicting_direct_oracle_target", bool(explicit_targets),
+            ))
+    elif explicit_targets:
+        # Multiple distinct paths are legitimate only when the approved
+        # authority explicitly names them.  That is deliberate authority
+        # fan-out, not generic supported-target discovery.
+        for target in explicit_targets:
+            target_records.append((
+                target, False, explicit_targets,
+                "approved_contract_target", True,
+            ))
+    else:
+        target, ambiguous, candidates, source = _test_target_details(
+            test_contract_values, test_files, scope_paths, execution_evidence,
+        )
+        target_records.append((
+            target, ambiguous, candidates, source, False,
+        ))
+
+    routes: list[VerificationRouteBinding] = []
+    for index, (target, ambiguous, candidates, resolution_source, target_is_upstream) in enumerate(target_records, 1):
+        if direct:
+            route_kind = FOCUSED_TEST
+            route_type = DIRECT_ORACLE
+            route_authority_type = DIRECT_ORACLE
+            channel = DIRECT_ORACLE_EXECUTION
+            reason_codes = ["DIRECT_ORACLE_AUTHORITY"]
+            if target:
+                reason_codes.append(TEST_TARGET_PRESENT)
+            if ambiguous:
+                reason_codes.append(AMBIGUOUS_SUPPORTED_TARGET)
+            mode = EXACT_APPROVED_TARGET if target else UNRESOLVED
+            source = str(authority.get("authority_source") or "HIVO_VERIFIER")
+        else:
+            route_kind = FOCUSED_TEST
+            route_type = APPROVED_FOCUSED_TEST
+            route_authority_type = APPROVED_VERIFICATION_CONTRACT
+            channel = STAGE5A_COMMAND
+            reason_codes = [CONTRACT_REQUIRES_TEST]
+            if target:
+                reason_codes.extend((FOCUSED_TEST_PRESENT, TEST_TARGET_PRESENT))
+            elif ambiguous:
+                reason_codes.append(AMBIGUOUS_SUPPORTED_TARGET)
+            mode = EXACT_APPROVED_TARGET if target_is_upstream and target else (
+                SUPPORTED_TARGET_DISCOVERY if target else UNRESOLVED
+            )
+            source = str(authority.get("authority_source") or APPROVED_VERIFICATION_CONTRACT)
+        refs = [f"child:{child_id}", f"approved:{authority_id}"]
+        refs.extend(f"authority:{item}" for item in _as_list(authority.get("evidence_ids")))
+        if target:
+            refs.append(f"repo:test:{target}" if not direct else f"repo:oracle:{target}")
+        route = _route(
+            route_kind,
+            bool(required),
+            bool(target),
+            target,
+            reason_codes,
+            refs,
+            PENDING if target else BLOCKED_REQUIRED_TARGET_MISSING,
+            resolution_status="RESOLVED" if target else VERIFICATION_TARGET_UNRESOLVED,
+            resolution_source=resolution_source,
+            candidate_targets=candidates,
+            selected_target=target,
+            approved_target=target if target_is_upstream and target else None,
+            authority_target_candidates=explicit_targets,
+            upstream_target_exists=bool(target_is_upstream),
+            target_identity_upstream=bool(target_is_upstream),
+            authority_fanout_index=index if len(target_records) > 1 else None,
+            authority_fanout_count=len(target_records),
+        )
+        # Responsibility identity is semantic, not the approval-card ID.
+        # The target and command are already part of the deduplication key, so
+        # two approved mechanisms for the same semantic route can fan in while
+        # retaining both authority IDs/provenance refs.
+        responsibility_key = f"approved:{route_type}"
+        binding = build_verification_route_binding(
+            route,
+            authority=authority,
+            authority_type=route_authority_type,
+            authority_source=source,
+            route_type=route_type,
+            execution_channel=channel,
+            resolution_mode=mode,
+            candidate_targets=candidates,
+            selected_target=target,
+            approved_target=target if target_is_upstream and target else None,
+            provenance_refs=[f"approved:{authority_id}"],
+            responsibility_key=responsibility_key,
+        )
+        routes.append(binding)
+
+    route_audit = []
+    for route in routes:
+        route_audit.append({
+            "route_id": route.get("route_id"),
+            "verification_id": authority.get("verification_id"),
+            "oracle_id": authority.get("oracle_id"),
+            "authority_source": route.get("authority_source"),
+            "authority_provenance": authority.get("provenance"),
+            "required": route.get("required"),
+            "applicable": route.get("applicable"),
+            "route_type": route.get("route_type"),
+            "candidate_targets": list(route.get("candidate_targets", []) or []),
+            "selected_target": route.get("selected_target"),
+            "target_resolution_reason": route.get("resolution_source"),
+            "resolution_mode": route.get("resolution_mode"),
+            "evidence_ids": list(authority.get("evidence_ids", []) or []),
+            "target_identity_existed_upstream": bool(route.get("target_identity_upstream")),
+        })
+    artifact = {
+        "schema_version": "V20.5A",
+        "child_id": child_id,
+        "model_calls": 0,
+        "approved_authority": {
+            "verification_id": authority.get("verification_id"),
+            "oracle_id": authority.get("oracle_id"),
+            "authority_source": authority.get("authority_source"),
+            "authority_provenance": authority.get("provenance"),
+            "direct_oracle": direct,
+        },
+        "verification_routes": routes,
+        "verification_route_bindings": routes,
+        "route_audit": route_audit,
+        "repository_evidence": {
+            "known_entrypoints": facts.get("entrypoints", [])[:20],
+            "known_test_files": facts.get("tests", [])[:20],
+            "observed_file_types": sorted({str(item).casefold() for item in (observed_file_types or [])}),
+        },
+    }
+    artifact_hash = _json_hash(artifact)
+    artifact["verification_applicability_hash"] = artifact_hash
+    artifact["verification_routes_hash"] = artifact_hash
+    return artifact
 
 
 def analyze_verification_applicability(
@@ -400,6 +964,9 @@ def analyze_verification_applicability(
     observed_file_types: Iterable[str] | None = None,
     browser_target_resolver: Callable[[Any, dict], Any] | None = None,
     execution_evidence: Iterable[dict] | None = None,
+    approved_verification_authority: dict[str, Any] | None = None,
+    approved_verification_contract: dict[str, Any] | None = None,
+    authority_record: dict[str, Any] | None = None,
 ) -> dict:
     """Build one deterministic route artifact using bounded evidence only."""
     task = dict(task) if isinstance(task, dict) else {}
@@ -472,6 +1039,30 @@ def analyze_verification_applicability(
     if not test_files:
         test_files = _unique_paths([path for path in facts.get("files", []) if _is_test_path(path)])
 
+    execution_evidence = [
+        item for item in (_as_list(execution_evidence))
+        if isinstance(item, dict)
+    ]
+    approved_authority = (
+        approved_verification_authority
+        if isinstance(approved_verification_authority, dict) else
+        approved_verification_contract
+        if isinstance(approved_verification_contract, dict) else
+        authority_record
+        if isinstance(authority_record, dict) else None
+    )
+    if approved_authority is not None:
+        return _approved_authority_artifact(
+            child_id=child_id,
+            authority=approved_authority,
+            test_contract_values=test_contract_values,
+            test_files=test_files,
+            scope_paths=scope_paths,
+            execution_evidence=execution_evidence,
+            facts=facts,
+            observed_file_types=observed_file_types,
+        )
+
     positive_browser_text = _positive_browser_text(text_bundle)
     browser_signals = any(pattern.search(positive_browser_text) for pattern in _BROWSER_REQUIREMENT_PATTERNS)
     explicit_browser = any(pattern.search(positive_browser_text) for pattern in _EXPLICIT_BROWSER_PATTERNS)
@@ -528,10 +1119,6 @@ def analyze_verification_applicability(
             resolution_status="NOT_APPLICABLE", resolution_source="applicability_analyzer",
         )
 
-    execution_evidence = [
-        item for item in (_as_list(execution_evidence))
-        if isinstance(item, dict)
-    ]
     focused_test_evidence = any(
         _is_focused_test_evidence(item)
         for item in execution_evidence
@@ -542,7 +1129,7 @@ def analyze_verification_applicability(
         or bool(_TEST_MARKERS.search(" ".join(goal + done_when_values)))
         or focused_test_evidence
     )
-    test_target, test_ambiguous = _test_target(
+    test_target, test_ambiguous, test_candidates, test_resolution_source = _test_target_details(
         test_contract_values, test_files, scope_paths, execution_evidence,
     )
     test_reasons = []
@@ -566,6 +1153,10 @@ def analyze_verification_applicability(
             PENDING if test_target else BLOCKED_REQUIRED_TARGET_MISSING,
             resolution_status="RESOLVED" if test_target else VERIFICATION_TARGET_UNRESOLVED,
             resolution_source="deterministic_test_file" if test_target else "missing_or_ambiguous_test_file",
+            candidate_targets=test_candidates,
+            selected_target=test_target,
+            target_resolution_reason=test_resolution_source,
+            resolution_mode=SUPPORTED_TARGET_DISCOVERY if test_target else UNRESOLVED,
         )
     else:
         test_route = None
@@ -741,11 +1332,16 @@ def aggregate_verification_evidence(
 
 
 __all__ = [
-    "AMBIGUOUS_SUPPORTED_TARGET", "BROWSER", "BLOCKED_REQUIRED_TARGET_MISSING", "CONTRACT_REQUIRES_SYNTAX",
-    "CONTRACT_REQUIRES_TEST", "FAIL", "FOCUSED_TEST", "FOCUSED_TEST_PRESENT", "NO_SUPPORTED_BROWSER_TARGET",
-    "PASS", "PENDING", "REQUIRED_VERIFICATION_TARGET_UNRESOLVED", "SKIPPED_NOT_APPLICABLE",
-    "SUPPORTED_SOURCE_PRESENT", "SUPPORTED_TARGET_PRESENT", "SYNTAX_STATIC_GATE", "TEST_TARGET_PRESENT",
-    "VERIFICATION_EVIDENCE_UNAVAILABLE", "VERIFICATION_TARGET_UNRESOLVED", "VERIFIER_NOT_REQUIRED",
-    "VerificationApplicabilityAnalyzer", "aggregate_verification_evidence", "analyze_verification_applicability",
-    "deterministic_hash",
+    "AMBIGUOUS_SUPPORTED_TARGET", "APPROVED_FOCUSED_TEST", "APPROVED_VERIFICATION_CONTRACT",
+    "BROWSER", "BLOCKED_REQUIRED_TARGET_MISSING", "CONTRACT_REQUIRES_SYNTAX", "CONTRACT_REQUIRES_TEST",
+    "DETERMINISTIC_CONTRACT_TARGET", "DETERMINISTIC_SYSTEM_SAFETY_CHECK", "DETERMINISTIC_SYSTEM_TARGET",
+    "DIRECT_ORACLE", "DIRECT_ORACLE_EXECUTION", "EXACT_APPROVED_TARGET", "FAIL", "FOCUSED_TEST",
+    "FOCUSED_TEST_PRESENT", "NO_SUPPORTED_BROWSER_TARGET", "OPTIONAL_CAPABILITY", "PASS", "PENDING",
+    "REQUIRED_VERIFICATION_TARGET_UNRESOLVED", "SKIPPED_NOT_APPLICABLE", "STAGE5A_COMMAND",
+    "SUPPORTED_SOURCE_PRESENT", "SUPPORTED_TARGET_DISCOVERY", "SUPPORTED_TARGET_PRESENT", "SYNTAX_STATIC_GATE",
+    "TEST_TARGET_PRESENT", "UNRESOLVED", "VERIFICATION_EVIDENCE_UNAVAILABLE", "VERIFICATION_TARGET_UNRESOLVED",
+    "VERIFIER_NOT_REQUIRED", "VerificationApplicabilityAnalyzer", "VerificationRouteBinding",
+    "aggregate_verification_evidence", "analyze_verification_applicability", "build_verification_route_binding",
+    "canonical_route_hash", "deduplicate_verification_routes", "deterministic_hash",
+    "is_direct_oracle_authority", "validate_verification_route_bindings",
 ]
