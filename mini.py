@@ -37,6 +37,7 @@ from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
 from hivo import verification_obligation_coverage as stage6c_coverage
+from hivo import verification_gap_remediation as stage6c_remediation
 from hivo import reentry as stage6a
 from hivo import verified_planning as stage6b
 from hivo import approval_authority as stage6c
@@ -203,6 +204,13 @@ VERIFICATION_OBLIGATION_UNCOVERED = stage6c_coverage.VERIFICATION_OBLIGATION_UNC
 VERIFICATION_OBLIGATION_COVERAGE_INVALID = stage6c_coverage.VERIFICATION_OBLIGATION_COVERAGE_INVALID
 VERIFICATION_OBLIGATION_COVERAGE_REQUIRED = stage6c_coverage.VERIFICATION_OBLIGATION_COVERAGE_REQUIRED
 VERIFICATION_OBLIGATION_COVERAGE_MISMATCH = stage6c_coverage.VERIFICATION_OBLIGATION_COVERAGE_MISMATCH
+VERIFICATION_GAP_REMEDIATION_VALID = stage6c_remediation.VERIFICATION_GAP_REMEDIATION_VALID
+VERIFICATION_GAP_REMEDIATION_INVALID = stage6c_remediation.VERIFICATION_GAP_REMEDIATION_INVALID
+OLD_APPROVAL_NOT_APPLICABLE_TO_REVISED_PLAN = stage6c_remediation.OLD_APPROVAL_NOT_APPLICABLE_TO_REVISED_PLAN
+BehaviorObservableContract = stage6c_remediation.BehaviorObservableContract
+DirectBehaviorOracleSpec = stage6c_remediation.DirectBehaviorOracleSpec
+VerificationGapRemediationProposal = stage6c_remediation.VerificationGapRemediationProposal
+RevisedPlanApprovalSummary = stage6c_remediation.RevisedPlanApprovalSummary
 EXPLICIT_USER_APPROVAL = stage6c.EXPLICIT_USER_APPROVAL
 TEST_EXPLICIT_USER_APPROVAL = stage6c.TEST_EXPLICIT_USER_APPROVAL
 PlanApprovalRequest = stage6c.PlanApprovalRequest
@@ -1831,6 +1839,16 @@ def new_metrics(mode):
         "verification_obligation_coverage_ready": 0,
         "verification_obligation_coverage_blocks": 0,
         "verification_obligation_coverage_model_calls": 0,
+        # V25.4 deterministic remediation and verifier-owned behavior
+        # authority.  These counters intentionally remain zero-model and
+        # zero-Worker observations.
+        "verification_gap_remediation_proposals": 0,
+        "verification_gap_remediation_valid": 0,
+        "verification_gap_plan_revisions": 0,
+        "direct_behavior_oracle_runs": 0,
+        "verification_gap_model_calls": 0,
+        "verification_gap_worker_calls": 0,
+        "verification_gap_brain_writes": 0,
         "integration_readiness_model_calls": 0,
         "integration_executor_model_calls": 0,
         "integration_executor_calls": 0,
@@ -7370,6 +7388,86 @@ def validate_verification_obligation_coverage(coverage, **kwargs):
 
 def verification_obligation_coverage_summary(coverage):
     return stage6c_coverage.coverage_summary(coverage)
+
+
+def build_behavior_observable_contract(**kwargs):
+    """Build immutable V25.4 additive behavior authority without a provider."""
+    return stage6c_remediation.build_behavior_observable_contract(**kwargs)
+
+
+def validate_behavior_observable_contract(contract):
+    return stage6c_remediation.validate_behavior_observable_contract(contract)
+
+
+def build_direct_behavior_oracle_spec(**kwargs):
+    return stage6c_remediation.build_direct_behavior_oracle_spec(**kwargs)
+
+
+def validate_direct_behavior_oracle_spec(spec, observable_contract=None):
+    return stage6c_remediation.validate_direct_behavior_oracle_spec(
+        spec, observable_contract,
+    )
+
+
+def build_verification_gap_remediation_proposal(**kwargs):
+    RUN["verification_gap_remediation_proposals"] = RUN.get(
+        "verification_gap_remediation_proposals", 0,
+    ) + 1
+    result = stage6c_remediation.build_verification_gap_remediation_proposal(**kwargs)
+    return result
+
+
+def validate_verification_gap_remediation_proposal(proposal, **kwargs):
+    result = stage6c_remediation.validate_verification_gap_remediation_proposal(
+        proposal, **kwargs,
+    )
+    if result.get("valid") is True:
+        RUN["verification_gap_remediation_valid"] = RUN.get(
+            "verification_gap_remediation_valid", 0,
+        ) + 1
+    return result
+
+
+def revise_canonical_plan_from_verification_gap(old_plan, current_coverage, proposal, **kwargs):
+    revised = stage6c_remediation.revise_canonical_plan_from_verification_gap(
+        old_plan, current_coverage, proposal, **kwargs,
+    )
+    RUN["verification_gap_plan_revisions"] = RUN.get(
+        "verification_gap_plan_revisions", 0,
+    ) + 1
+    return revised
+
+
+def compile_revised_plan_contractability(revised_plan, **kwargs):
+    return stage6c_remediation.compile_revised_plan_contractability(
+        revised_plan, **kwargs,
+    )
+
+
+def build_revised_plan_approval_summary(revised_plan, proposal, coverage_artifact):
+    return stage6c_remediation.build_revised_plan_approval_summary(
+        revised_plan, proposal, coverage_artifact,
+    )
+
+
+build_approval_summary = build_revised_plan_approval_summary
+validate_revised_plan_authority = stage6c_remediation.validate_revised_plan_authority
+
+
+def execute_direct_behavior_oracle(spec, workspace, **kwargs):
+    RUN["direct_behavior_oracle_runs"] = RUN.get(
+        "direct_behavior_oracle_runs", 0,
+    ) + 1
+    result = stage6c_remediation.execute_direct_behavior_oracle(
+        spec, workspace, **kwargs,
+    )
+    RUN["verification_gap_model_calls"] = RUN.get(
+        "verification_gap_model_calls", 0,
+    ) + int(result.get("model_calls", 0) or 0)
+    RUN["verification_gap_worker_calls"] = RUN.get(
+        "verification_gap_worker_calls", 0,
+    ) + int(result.get("worker_calls", 0) or 0)
+    return result
 
 
 def _record_verification_obligation_coverage_gate(coverage):
@@ -18905,6 +19003,714 @@ run_stage6c_b_verification_obligation_coverage_self_test = run_stage6c_b_v25_3_s
 run_stage6c_b_v25_3_architecture_self_test = run_stage6c_b_v25_3_self_test
 
 
+def run_stage6c_b_v25_4_self_test(artifact_root=None, brain_database_path=None,
+                                  fixture_root=None, approval_artifact_root=None):
+    """Exercise V25.4 plan revision and direct behavior verification in memory.
+
+    This is deliberately a provider-free architecture self-test.  It reads
+    the historical V25.3 planning artifacts, the exact persisted V25.1
+    approval-bound execution artifacts, and the fixture; it creates no
+    approval or revised approval receipt, never dispatches a Worker, and uses
+    temporary subject copies only for the verifier's positive/negative oracle
+    checks.
+    """
+    global WORKSPACE, MEMORY_STORE, RUN, TASKS, ROLE_STATUS, DASHBOARD
+    global RUN_STARTED, RUN_ID, ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, VISION_ENABLED_FOR_RUN
+    global VISION_ERROR, PREFLIGHT_CONFLICT_STATE, ask_ollama
+    saved = {
+        "WORKSPACE": WORKSPACE, "MEMORY_STORE": MEMORY_STORE, "RUN": RUN,
+        "TASKS": TASKS, "ROLE_STATUS": ROLE_STATUS, "DASHBOARD": DASHBOARD,
+        "RUN_STARTED": RUN_STARTED, "RUN_ID": RUN_ID,
+        "ACTIVE_TRANSACTION": ACTIVE_TRANSACTION,
+        "LAST_COMMITTED_TRANSACTION": LAST_COMMITTED_TRANSACTION,
+        "ACTIVE_CONTRACT": ACTIVE_CONTRACT, "ACTIVE_TOOL_CONTRACT": ACTIVE_TOOL_CONTRACT,
+        "VISION_ENABLED_FOR_RUN": VISION_ENABLED_FOR_RUN,
+        "VISION_ERROR": VISION_ERROR,
+        "PREFLIGHT_CONFLICT_STATE": PREFLIGHT_CONFLICT_STATE,
+        "ask_ollama": ask_ollama,
+    }
+    try:
+        root = Path(
+            artifact_root
+            or Path(__file__).resolve().parent
+            / "output" / "hivo-v24-4-6-stage6b-planning-live-1"
+        ).expanduser().resolve()
+        historical_db = Path(
+            brain_database_path
+            or root.parent / "hivo-v22-stage5c-fresh-receipts-live-1"
+            / ".hivo" / "memory.sqlite3"
+        ).expanduser().resolve()
+        fixture = Path(
+            fixture_root
+            or root.parent / "hivo-v25-stage6c-b-approved-execution-live-1"
+        ).expanduser().resolve()
+        live_approval_artifacts = Path(
+            approval_artifact_root
+            or root.parent / "hivo-v25-1-stage6c-b-approved-execution-live-2" / "artifacts"
+        ).expanduser().resolve()
+        with (root / "final_plan.json").open("r", encoding="utf-8") as handle:
+            root_plan = json.load(handle)
+        with (live_approval_artifacts / "stage6b_plan_source.json").open(
+            "r", encoding="utf-8"
+        ) as handle:
+            persisted_plan_source = json.load(handle)
+        old_plan = persisted_plan_source.get("plan")
+        if not isinstance(old_plan, dict):
+            raise ValueError("persisted Stage 6B plan source does not contain a canonical plan")
+        if old_plan != root_plan:
+            raise ValueError("persisted Stage 6B plan source differs from the frozen planning root")
+        with (live_approval_artifacts / "existing_approval_receipt_source.json").open(
+            "r", encoding="utf-8"
+        ) as handle:
+            persisted_approval_source = json.load(handle)
+        historical_receipt = persisted_approval_source.get("receipt")
+        historical_request = persisted_approval_source.get("request")
+        if not isinstance(historical_receipt, dict) or not isinstance(historical_request, dict):
+            raise ValueError("persisted approval source does not contain the approval request and receipt")
+        with (live_approval_artifacts / "preexecution_revalidation.json").open(
+            "r", encoding="utf-8"
+        ) as handle:
+            persisted_revalidation = json.load(handle)
+        with (live_approval_artifacts / "execution_authorization.json").open(
+            "r", encoding="utf-8"
+        ) as handle:
+            persisted_authorization = json.load(handle)
+        with (live_approval_artifacts / "stage4_contracts.json").open(
+            "r", encoding="utf-8"
+        ) as handle:
+            persisted_stage4 = json.load(handle)
+        with (root / "verified_planning_context.json").open("r", encoding="utf-8") as handle:
+            planning_context = json.load(handle)
+        with (root / "planning_context_freshness.json").open("r", encoding="utf-8") as handle:
+            planning_freshness = json.load(handle)
+        with (root / "plan_validation.json").open("r", encoding="utf-8") as handle:
+            plan_validation = json.load(handle)
+        with (root / "stage4_contractability_audit.json").open("r", encoding="utf-8") as handle:
+            stage4_contractability = json.load(handle)
+        with (root / "challenger_reconciliation.json").open("r", encoding="utf-8") as handle:
+            reconciliation = json.load(handle)
+        brain = stage6c.read_only_project_brain_identity(
+            historical_db, planning_context.get("project_id")
+        )
+        if brain.get("logical_hash") != (
+            "8eac670a83eeddb30528ebd3ad5032dabc6f6d1a3fb97b65b4600964b1b434bb"
+        ):
+            raise ValueError("read-only Project Brain logical hash does not match the frozen identity")
+        replay_state = stage6c._live_state(
+            root, old_plan, planning_context, planning_freshness, plan_validation,
+            stage4_contractability, reconciliation, brain,
+        )
+        replay = {
+            "state": replay_state,
+            "approval_request": historical_request,
+            "approval_receipt": historical_receipt,
+            "pre_execution_approval_revalidation": persisted_revalidation,
+            "execution_authorization": persisted_authorization,
+            "stage4": persisted_stage4,
+            "status": persisted_authorization.get("status"),
+            "terminal_state": persisted_authorization.get("terminal_state"),
+            "model_calls": 0,
+            "worker_calls": 0,
+            "subject_mutations": 0,
+            "brain_writes": 0,
+        }
+        with (root / "current_surface_evidence.json").open("r", encoding="utf-8") as handle:
+            evidence_artifact = json.load(handle)
+        repository_evidence = evidence_artifact.get("repository_evidence", [])
+        canonical_registry = evidence_artifact.get("registry")
+        requirements = old_plan.get("requirements", [])
+        old_receipt_integrity = stage6c.validate_plan_approval_receipt(
+            historical_receipt,
+        )
+        old_receipt_binding = stage6c.validate_plan_approval_receipt(
+            historical_receipt, historical_request,
+        )
+        fixture_files = tuple(sorted({
+            str(item.get("path"))
+            for item in repository_evidence
+            if isinstance(item, dict) and item.get("path")
+        }))
+        historical_before = historical_db.read_bytes()
+        fixture_before = {
+            relative: (fixture / relative).read_bytes()
+            for relative in fixture_files
+            if (fixture / relative).is_file()
+        }
+
+        base_compiled = stage6c.compile_approval_bound_execution_contracts(
+            old_plan,
+            historical_receipt,
+            replay.get("pre_execution_approval_revalidation"),
+            replay.get("execution_authorization"),
+            request=historical_request,
+            requirements=requirements,
+            repository_evidence=repository_evidence,
+            canonical_surface_registry=canonical_registry,
+        )
+        base_contract = next(
+            item for item in base_compiled.get("contracts", [])
+            if item.get("responsibility_type") == stage4.MUTATION
+        )
+        invariant_set = stage6c_invariants.build_execution_invariant_set(
+            execution_contract=base_contract,
+            approved_plan=old_plan,
+            source_root=fixture,
+            repository_evidence=repository_evidence,
+        )
+        applicability = stage6cb.build_stage5a_verification_input(
+            task={"id": replay.get("state", {}).get("task_id", "ROOT")},
+            contract=base_contract,
+            authorization=replay.get("execution_authorization", {}),
+            workspace=fixture,
+            post_subject=stage6cb.enumerate_execution_subject(fixture),
+            execution_result={},
+        )["artifact"]
+        old_coverage = stage6c_coverage.build_verification_obligation_coverage(
+            approved_plan=old_plan,
+            approved_verification_contracts=old_plan.get(
+                "canonical_verification_contracts", []
+            ),
+            execution_contract=base_contract,
+            execution_invariant_set=invariant_set,
+            repository_evidence=repository_evidence,
+            source_root=fixture,
+            verification_applicability=applicability,
+            task_id=replay.get("state", {}).get("task_id"),
+        )
+        behavior_id = next(
+            item.get("obligation_id")
+            for item in old_coverage.get("atomic_obligations", [])
+            if item.get("obligation_type") == stage6c_coverage.BEHAVIOR_CHANGE
+        )
+
+        # The exact fixture vocabulary lives in this fixture-specific self
+        # test; the generic remediation module is parameterized and contains
+        # no project symbol/value literals.
+        observable = stage6c_remediation.build_behavior_observable_contract(
+            contract_id="BOC-PAUSE-INDICATOR",
+            target_path="src/status_view.js",
+            symbol="renderPauseIndicator",
+            signature="renderPauseIndicator(pauseController)",
+            export={
+                "kind": "ADDITIVE_EXPORT",
+                "path": "src/status_view.js",
+                "symbol": "renderPauseIndicator",
+            },
+            state_source={
+                "owner": "PauseController",
+                "interface": "PauseController.isPaused",
+            },
+            running={"return_type": "primitive string", "equals": "", "non_empty": False},
+            paused={"return_type": "primitive string", "non_empty": True},
+            legacy_interface={
+                "symbol": "renderStatus",
+                "signature": "renderStatus(pauseController)",
+                "return_type": "primitive string",
+                "outputs": ["Running", "Paused"],
+                "change_authorized": False,
+            },
+        )
+        oracle = stage6c_remediation.build_direct_behavior_oracle_spec(
+            oracle_id="ORACLE-PAUSE-INDICATOR",
+            obligation_id=behavior_id,
+            target_module_path="src/status_view.js",
+            target_symbol="renderPauseIndicator",
+            function_signature="renderPauseIndicator(pauseController)",
+            controller_module_path="src/pause_controller.js",
+            controller_symbol="PauseController",
+            state_query_symbol="isPaused",
+            toggle_symbol="togglePause",
+            running_expectation={
+                "return_type": "primitive string", "equals": "", "non_empty": False,
+            },
+            paused_expectation={
+                "return_type": "primitive string", "non_empty": True,
+            },
+            legacy_compatibility=[{
+                "symbol": "renderStatus",
+                "signature": "renderStatus(pauseController)",
+                "return_type": "primitive string",
+                "outputs": ["Running", "Paused"],
+                "preserve": True,
+            }],
+            source_plan_reference={
+                "plan_id": old_plan.get("plan_id"),
+                "plan_hash": old_plan.get("plan_hash"),
+            },
+            observable_contract_hash=observable.get("contract_hash"),
+        )
+        proposal = stage6c_remediation.build_verification_gap_remediation_proposal(
+            proposal_id="REMEDIATION-PAUSE-INDICATOR",
+            old_plan_id=old_plan.get("plan_id"),
+            old_plan_hash=old_plan.get("plan_hash"),
+            v25_3_coverage_hash=old_coverage.get("coverage_hash"),
+            uncovered_obligation_id=behavior_id,
+            obligation_type=stage6c_coverage.BEHAVIOR_CHANGE,
+            proposed_observable_contract=observable,
+            proposed_direct_oracle=oracle,
+            affected_mutation_surface={
+                "paths": ["src/status_view.js"],
+                "surface_ids": ["SURF-003"],
+            },
+            preservation_references=[
+                "PauseController ownership",
+                "Escape behavior",
+                "movement behavior",
+                "legacy renderStatus primitive-string interface",
+            ],
+        )
+        proposal_check = stage6c_remediation.validate_verification_gap_remediation_proposal(
+            proposal, old_plan=old_plan, current_coverage=old_coverage,
+        )
+        revised_plan = stage6c_remediation.revise_canonical_plan_from_verification_gap(
+            old_plan,
+            old_coverage,
+            proposal,
+            requirements=requirements,
+            repository_evidence=repository_evidence,
+            surface_registry=canonical_registry,
+            authoritative_task_goal=old_plan.get("task_goal"),
+        )
+        revised_plan_check = stage3.validate_change_plan(
+            revised_plan,
+            requirements,
+            repository_evidence,
+            project_mode=stage3.EXISTING_PROJECT,
+            surface_registry=canonical_registry,
+            obligation_ledger=revised_plan.get("requirement_obligation_ledger"),
+            authoritative_task_goal=old_plan.get("task_goal"),
+        )
+        revised_authority_check = stage6c_remediation.validate_revised_plan_authority(
+            revised_plan,
+        )
+        contractability = stage6c_remediation.compile_revised_plan_contractability(
+            revised_plan,
+            requirements=requirements,
+            repository_evidence=repository_evidence,
+            surface_registry=canonical_registry,
+            authoritative_task_goal=old_plan.get("task_goal"),
+        )
+        contractable_contract = next(
+            item for item in contractability.get("contracts", [])
+            if item.get("responsibility_type") == stage4.MUTATION
+        )
+        revised_invariants = stage6c_invariants.build_execution_invariant_set(
+            execution_contract=contractable_contract,
+            approved_plan=revised_plan,
+            source_root=fixture,
+            repository_evidence=repository_evidence,
+        )
+        revised_applicability = stage6cb.build_stage5a_verification_input(
+            task={"id": replay.get("state", {}).get("task_id", "ROOT")},
+            contract=contractable_contract,
+            authorization={},
+            workspace=fixture,
+            post_subject=stage6cb.enumerate_execution_subject(fixture),
+            execution_result={},
+        )["artifact"]
+        revised_coverage = stage6c_coverage.build_verification_obligation_coverage(
+            approved_plan=revised_plan,
+            approved_verification_contracts=revised_plan.get(
+                "canonical_verification_contracts", []
+            ),
+            execution_contract=contractable_contract,
+            execution_invariant_set=revised_invariants,
+            repository_evidence=repository_evidence,
+            source_root=fixture,
+            verification_applicability=revised_applicability,
+            task_id=replay.get("state", {}).get("task_id"),
+        )
+        contractability_bound = stage6c_remediation.compile_revised_plan_contractability(
+            revised_plan,
+            requirements=requirements,
+            repository_evidence=repository_evidence,
+            surface_registry=canonical_registry,
+            authoritative_task_goal=old_plan.get("task_goal"),
+            execution_invariant_set=revised_invariants,
+            verification_obligation_coverage=revised_coverage,
+        )
+        revised_contract = next(
+            item for item in contractability_bound.get("contracts", [])
+            if item.get("responsibility_type") == stage4.MUTATION
+        )
+        worker_mission = stage4.hydrate_worker_mission(
+            revised_contract,
+            {
+                "objective": revised_contract.get("goal"),
+                "implementation_steps": [
+                    "Add the approved observable while preserving existing behavior",
+                ],
+            },
+            [],
+        )
+        worker_projection = stage4.build_worker_context_projection(
+            worker_mission,
+            revised_contract,
+            [],
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        worker_projection_check = stage4.validate_worker_context_projection(
+            worker_projection,
+            worker_mission,
+            revised_contract,
+            [],
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        worker_packet = stage4.render_worker_context_projection(
+            worker_projection,
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        worker_packet_budget = stage4.audit_worker_context_budget(
+            worker_projection,
+            old_v25_2_chars=4151,
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+
+        # A revised approval request is prepared only to prove the fresh
+        # approval boundary.  No event, receipt, authorization, or Worker is
+        # created for the revised plan.
+        revised_state = copy.deepcopy(replay.get("state", {}))
+        revised_state.update({
+            "terminal_state": stage6c.PLAN_APPROVAL_REQUIRED,
+            "stage4_contractability_audit": {
+                "status": "PASS", "contractable": True, "stage4_executed": False,
+            },
+            "coverage": copy.deepcopy(old_plan.get("coverage", [])),
+        })
+        revised_request = stage6c.create_plan_approval_request(
+            revised_plan, revised_state,
+        )
+        revised_request_check = stage6c.validate_plan_approval_request(revised_request)
+        approval_summary = stage6c_remediation.build_revised_plan_approval_summary(
+            revised_plan, proposal, revised_coverage,
+        )
+        old_verification_digest = stage6c.build_approval_authority_binding(
+            old_plan, replay.get("state", {})
+        ).get("verification_contract_digest")
+        revised_verification_digest = stage6c.build_approval_authority_binding(
+            revised_plan, revised_state
+        ).get("verification_contract_digest")
+        old_receipt_against_revised = stage6c.validate_plan_approval_receipt(
+            historical_receipt, revised_request,
+        )
+
+        def _write_oracle_subject(subject_root, status_source):
+            (subject_root / "src").mkdir(parents=True, exist_ok=True)
+            (subject_root / "src" / "pause_controller.js").write_bytes(
+                (fixture / "src" / "pause_controller.js").read_bytes()
+            )
+            (subject_root / "src" / "status_view.js").write_text(
+                status_source, encoding="utf-8",
+            )
+
+        original_status_source = (
+            fixture / "src" / "status_view.js"
+        ).read_text(encoding="utf-8")
+        positive_source = original_status_source.replace(
+            "module.exports = { renderStatus };",
+            """function renderPauseIndicator(pauseController) {
+  if (!(pauseController instanceof PauseController)) {
+    throw new TypeError('a PauseController is required');
+  }
+  return pauseController.isPaused() ? 'PAUSED' : '';
+}
+
+module.exports = { renderStatus, renderPauseIndicator };""",
+        )
+        paused_empty_source = positive_source.replace(
+            "return pauseController.isPaused() ? 'PAUSED' : '';",
+            "return '';",
+        )
+        paused_non_string_source = positive_source.replace(
+            "return pauseController.isPaused() ? 'PAUSED' : '';",
+            "return pauseController.isPaused() ? { status: 'Paused' } : '';",
+        )
+        legacy_break_source = positive_source.replace(
+            "return pauseController.isPaused() ? 'Paused' : 'Running';",
+            "return pauseController.isPaused() ? { status: 'Paused' } : 'Running';",
+        )
+        oracle_runs = {}
+        with tempfile.TemporaryDirectory(prefix="hivo_v25_4_oracle_selftest_") as tmp:
+            oracle_root = Path(tmp)
+            for label, source in (
+                ("positive", positive_source),
+                ("missing_export", original_status_source),
+                ("paused_empty", paused_empty_source),
+                ("paused_non_string", paused_non_string_source),
+                ("legacy_render_break", legacy_break_source),
+            ):
+                subject = oracle_root / label
+                _write_oracle_subject(subject, source)
+                oracle_runs[label] = stage6c_remediation.execute_direct_behavior_oracle(
+                    oracle, subject,
+                    observable_contract=observable,
+                )
+
+        checks = {
+            "old_plan_identity_preserved": (
+                old_plan.get("plan_id") == "PLAN-D8B51EE5EC97"
+                and old_plan.get("plan_hash")
+                == "d8b51ee5ec97a54f1d4e5caff5ccbb9d2f5c9f02935c4ea8a88745f4f9275a73"
+            ),
+            "exact_persisted_live_approval_bound": (
+                historical_receipt.get("approval_id") == "APPROVAL-40A2E163818B30E1"
+                and historical_receipt.get("receipt_hash")
+                == "42c10f682f0a94ba2588aff727399c7a5aa745f570703020cb137ec8ab11e2c3"
+                and historical_request.get("request_hash")
+                == "0e09d38ad835e510b4969fdc1913e8efe4593c51d05f9a8959b54cc0eb0ad507"
+                and historical_request.get("canonical_plan_id") == old_plan.get("plan_id")
+                and historical_request.get("canonical_plan_hash") == old_plan.get("plan_hash")
+            ),
+            "old_coverage_has_one_uncovered_behavior": (
+                old_coverage.get("status")
+                == stage6c_coverage.VERIFICATION_OBLIGATION_UNCOVERED
+                and old_coverage.get("uncovered_obligation_ids") == [behavior_id]
+            ),
+            "proposal_valid": proposal_check.get("valid") is True,
+            "revised_plan_valid": revised_plan_check.get("valid") is True,
+            "revised_authority_valid": revised_authority_check.get("valid") is True,
+            "revised_plan_complete": (
+                revised_plan.get("terminal_state") == stage6c_remediation.PLAN_APPROVAL_REQUIRED
+                and revised_plan.get("approval_required") is True
+                and revised_plan.get("approval_granted") is False
+                and stage3._json_size(revised_plan) <= MAX_IMPACT_PLAN_CHARS
+            ),
+            "four_verification_contracts": len(
+                revised_plan.get("canonical_verification_contracts", [])
+            ) == 4,
+            "old_verification_contracts_unchanged": (
+                revised_plan.get("canonical_verification_contracts", [])[:3]
+                == old_plan.get("canonical_verification_contracts", [])
+            ),
+            "revised_verification_digest_differs": (
+                old_verification_digest not in (None, "")
+                and revised_verification_digest not in (None, "")
+                and old_verification_digest != revised_verification_digest
+            ),
+            "coverage_is_four_of_four": (
+                revised_coverage.get("status") == EXECUTION_VERIFICATION_READY
+                and revised_coverage.get("verification_ready") is True
+                and not revised_coverage.get("uncovered_obligation_ids")
+                and revised_coverage.get("new_behavior_oracle_count") == 1
+            ),
+            "contractability_passes_but_is_ineligible": (
+                contractability.get("status") == stage6c_remediation.STAGE4_CONTRACTABILITY_PASS
+                and contractability.get("execution_eligible") is False
+                and contractability.get("approval_required") is True
+                and contractability.get("authorization") is None
+            ),
+            "coverage_bound_contract_is_ready": all(
+                item.get("verification_obligation_coverage_hash")
+                == revised_coverage.get("coverage_hash")
+                and item.get("verification_obligation_coverage_status")
+                == EXECUTION_VERIFICATION_READY
+                for item in contractability_bound.get("contracts", [])
+            ),
+            "worker_packet_contains_new_authority": (
+                "renderPauseIndicator" in worker_packet
+                and "MUST IMPLEMENT ADDITIVELY" in worker_packet
+                and "primitive string" in worker_packet
+                and len(worker_packet) <= MAX_WORKER_MISSION_CHARS
+            ),
+            "worker_projection_valid": worker_projection_check.get("valid") is True,
+            "legacy_invariants_explicit": all(
+                marker in worker_packet
+                for marker in (
+                    "renderStatus", "primitive string", "Running", "Paused",
+                    "PauseController", "togglePause", "src/pause_controller.js",
+                )
+            ),
+            "oracle_not_worker_mutable": (
+                "direct_behavior_oracles" not in revised_contract
+                and "execution_spec" not in worker_packet
+                and all(
+                    item.get("worker_mutable") is False
+                    for item in revised_contract.get("approved_additive_observables", [])
+                )
+            ),
+            "worker_packet_budget_is_bounded": (
+                worker_packet_budget.get("old_v25_2_chars") == 4151
+                and worker_packet_budget.get("raw_revised_chars", 0) > MAX_WORKER_MISSION_CHARS
+                and worker_packet_budget.get("final_revised_chars", MAX_WORKER_MISSION_CHARS + 1) <= MAX_WORKER_MISSION_CHARS
+                and worker_packet_budget.get("headroom", -1) >= 0
+                and worker_packet_budget.get("mandatory_drops") == 0
+                and worker_packet_budget.get("context_limit") == MAX_WORKER_MISSION_CHARS
+                and worker_packet_budget.get("deduplication")
+            ),
+            "approval_summary_is_compact_and_immutable": (
+                approval_summary.get("plan_id") == revised_plan.get("plan_id")
+                and approval_summary.get("plan_hash") == revised_plan.get("plan_hash")
+                and approval_summary.get("verification_coverage", {}).get("covered") == 4
+                and approval_summary.get("verification_coverage", {}).get("required") == 4
+                and approval_summary.get("fresh_approval_required") is True
+                and approval_summary.get("approval_granted") is False
+                and approval_summary.get("summary_hash") == stage6c_remediation.approval_summary_hash(approval_summary)
+            ),
+            "positive_oracle_passes": oracle_runs["positive"].get("status") == stage6c_remediation.PASS,
+            "negative_oracles_fail": all(
+                oracle_runs[label].get("status") == stage6c_remediation.FAIL
+                for label in (
+                    "missing_export", "paused_empty", "paused_non_string",
+                    "legacy_render_break",
+                )
+            ),
+            "revised_request_is_ready": (
+                revised_request_check.get("valid") is True
+                and revised_request.get("terminal_state") == stage6c.PLAN_APPROVAL_REQUIRED
+            ),
+            "old_receipt_remains_valid_alone": old_receipt_integrity.get("valid") is True,
+            "old_receipt_matches_old_request": old_receipt_binding.get("valid") is True,
+            "old_receipt_rejected_for_revised_request": (
+                old_receipt_against_revised.get("valid") is False
+                and old_receipt_against_revised.get("status") == stage6c.APPROVAL_INVALID
+            ),
+            "no_revised_approval_or_authorization": (
+                contractability.get("authorization") is None
+                and contractability_bound.get("authorization") is None
+            ),
+            "zero_model_and_worker_calls": (
+                all(
+                    item.get("model_calls") == 0 and item.get("worker_calls") == 0
+                    for item in oracle_runs.values()
+                )
+                and contractability.get("model_calls") == 0
+                and contractability.get("worker_calls") == 0
+                and contractability_bound.get("model_calls") == 0
+                and contractability_bound.get("worker_calls") == 0
+            ),
+            "historical_brain_unchanged": historical_db.read_bytes() == historical_before,
+            "historical_subject_unchanged": all(
+                (fixture / relative).read_bytes() == content
+                for relative, content in fixture_before.items()
+            ),
+        }
+        return {
+            "passed": all(checks.values()),
+            "status": "PASS" if all(checks.values()) else "FAIL",
+            "checks": checks,
+            "old_plan": {
+                "plan_id": old_plan.get("plan_id"),
+                "plan_hash": old_plan.get("plan_hash"),
+                "coverage_status": old_coverage.get("status"),
+                "coverage_hash": old_coverage.get("coverage_hash"),
+                "uncovered_obligation_ids": old_coverage.get("uncovered_obligation_ids", []),
+            },
+            "proposal": copy.deepcopy(proposal),
+            "observable_contract": copy.deepcopy(observable),
+            "direct_behavior_oracle": copy.deepcopy(oracle),
+            "revised_plan": {
+                "plan_id": revised_plan.get("plan_id"),
+                "plan_hash": revised_plan.get("plan_hash"),
+                "serialized_chars": stage3._json_size(revised_plan),
+                "terminal_state": revised_plan.get("terminal_state"),
+                "approval_required": revised_plan.get("approval_required"),
+                "approval_granted": revised_plan.get("approval_granted"),
+                "verification_authority_revision": copy.deepcopy(
+                    revised_plan.get("verification_authority_revision", {})
+                ),
+                "canonical_verification_contracts": copy.deepcopy(
+                    revised_plan.get("canonical_verification_contracts", [])
+                ),
+                "behavior_observable_contracts": copy.deepcopy(
+                    revised_plan.get("behavior_observable_contracts", [])
+                ),
+                "direct_behavior_oracles": copy.deepcopy(
+                    revised_plan.get("direct_behavior_oracles", [])
+                ),
+            },
+            "revised_coverage": {
+                "status": revised_coverage.get("status"),
+                "coverage_hash": revised_coverage.get("coverage_hash"),
+                "uncovered_obligation_ids": revised_coverage.get("uncovered_obligation_ids", []),
+                "obligation_coverage": copy.deepcopy(
+                    revised_coverage.get("obligation_coverage", [])
+                ),
+                "new_behavior_oracle_count": revised_coverage.get("new_behavior_oracle_count"),
+            },
+            "contractability": {
+                "status": contractability.get("status"),
+                "execution_eligible": contractability.get("execution_eligible"),
+                "approval_required": contractability.get("approval_required"),
+                "authorization": contractability.get("authorization"),
+                "contracts": [
+                    {
+                        "responsibility_type": item.get("responsibility_type"),
+                        "allowed_mutation_paths": copy.deepcopy(item.get("allowed_mutation_paths", [])),
+                        "global_do_not_touch": copy.deepcopy(item.get("global_do_not_touch", [])),
+                        "approved_additive_observables": copy.deepcopy(item.get("approved_additive_observables", [])),
+                        "verification_obligation_coverage_hash": item.get("verification_obligation_coverage_hash"),
+                        "verification_obligation_coverage_status": item.get("verification_obligation_coverage_status"),
+                    }
+                    for item in contractability_bound.get("contracts", [])
+                ],
+            },
+            "revised_request": {
+                "status": revised_request.get("status"),
+                "request_hash": revised_request.get("request_hash"),
+                "plan_id": revised_request.get("canonical_plan_id"),
+                "plan_hash": revised_request.get("canonical_plan_hash"),
+                "verification_contract_digest": revised_verification_digest,
+            },
+            "historical_approval": {
+                "approval_id": historical_receipt.get("approval_id"),
+                "receipt_hash": historical_receipt.get("receipt_hash"),
+                "request_hash": historical_request.get("request_hash"),
+                "plan_id": historical_receipt.get("canonical_plan_id"),
+                "plan_hash": historical_receipt.get("canonical_plan_hash"),
+                "authorization_id": persisted_authorization.get("authorization_id"),
+                "artifact_root": str(live_approval_artifacts),
+            },
+            "old_verification_digest": old_verification_digest,
+            "approval_summary": copy.deepcopy(approval_summary),
+            "worker_packet_budget": worker_packet_budget,
+            "worker_packet": worker_packet,
+            "worker_projection_validation": copy.deepcopy(worker_projection_check),
+            "oracle_runs": {
+                label: {
+                    "status": result.get("status"),
+                    "exit_code": result.get("exit_code"),
+                    "checks": result.get("checks", []),
+                    "model_calls": result.get("model_calls", 0),
+                    "worker_calls": result.get("worker_calls", 0),
+                }
+                for label, result in oracle_runs.items()
+            },
+            "model_calls": 0,
+            "worker_calls": 0,
+            "historical_brain_writes": 0,
+            "repository_subject_mutations": 0,
+        }
+    except Exception as exc:
+        return {
+            "passed": False, "status": "FAIL",
+            "checks": {"execution_exception_free": False},
+            "error": str(exc), "model_calls": 0, "worker_calls": 0,
+            "historical_brain_writes": 0, "repository_subject_mutations": 0,
+        }
+    finally:
+        WORKSPACE = saved["WORKSPACE"]
+        MEMORY_STORE = saved["MEMORY_STORE"]
+        RUN = saved["RUN"]
+        TASKS = saved["TASKS"]
+        ROLE_STATUS = saved["ROLE_STATUS"]
+        DASHBOARD = saved["DASHBOARD"]
+        RUN_STARTED = saved["RUN_STARTED"]
+        RUN_ID = saved["RUN_ID"]
+        ACTIVE_TRANSACTION = saved["ACTIVE_TRANSACTION"]
+        LAST_COMMITTED_TRANSACTION = saved["LAST_COMMITTED_TRANSACTION"]
+        ACTIVE_CONTRACT = saved["ACTIVE_CONTRACT"]
+        ACTIVE_TOOL_CONTRACT = saved["ACTIVE_TOOL_CONTRACT"]
+        VISION_ENABLED_FOR_RUN = saved["VISION_ENABLED_FOR_RUN"]
+        VISION_ERROR = saved["VISION_ERROR"]
+        PREFLIGHT_CONFLICT_STATE = saved["PREFLIGHT_CONFLICT_STATE"]
+        ask_ollama = saved["ask_ollama"]
+
+
+run_stage6c_b_v25_4_architecture_self_test = run_stage6c_b_v25_4_self_test
+run_stage6c_b_verification_complete_plan_self_test = run_stage6c_b_v25_4_self_test
+
+
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
                          leaf_executor=None, interactive=True):
     if reset:
@@ -20856,6 +21662,9 @@ def run_self_test(install_browser=False):
         v253_verification_coverage_self_test = run_stage6c_b_v25_3_self_test()
         for name, ok in v253_verification_coverage_self_test.get("checks", {}).items():
             print(f"{('v25.3 ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v254_verification_complete_plan_self_test = run_stage6c_b_v25_4_self_test()
+        for name, ok in v254_verification_complete_plan_self_test.get("checks", {}).items():
+            print(f"{('v25.4 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -21461,6 +22270,9 @@ def run_self_test(install_browser=False):
             ),
             "v25.3 verification-coverage self-test": (
                 v253_verification_coverage_self_test.get("passed") is True
+            ),
+            "v25.4 verification-complete-plan self-test": (
+                v254_verification_complete_plan_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():

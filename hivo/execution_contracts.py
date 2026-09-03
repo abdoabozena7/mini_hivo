@@ -34,6 +34,7 @@ MAX_TEST_CHECKS_PER_CONTRACT = 12
 MAX_DONE_WHEN_PER_CONTRACT = 12
 MAX_DEPENDENCIES_PER_CONTRACT = 16
 MAX_REPOSITORY_FACTS_PER_CONTRACT = 16
+MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT = 8
 MAX_SNAPSHOT_REQUIREMENTS = 64
 MAX_SNAPSHOT_EVIDENCE = 128
 MAX_SNAPSHOT_SURFACES = 128
@@ -62,6 +63,7 @@ INTERFACE_REUSE = "INTERFACE_REUSE"
 INTEGRATION_CHECK = "INTEGRATION_CHECK"
 
 PLAN_APPROVAL_REQUIRED = "PLAN_APPROVAL_REQUIRED"
+CONTRACTABILITY_ONLY = "CONTRACTABILITY_ONLY"
 APPROVED_PLAN_STALE = "APPROVED_PLAN_STALE"
 EXECUTION_CONTRACT_BLOCKED = "EXECUTION_CONTRACT_BLOCKED"
 EXECUTION_CONTRACT_TOO_LARGE = "EXECUTION_CONTRACT_TOO_LARGE"
@@ -187,6 +189,16 @@ def _validate_plan_authority_bounds(plan, requirements, evidence, registry):
     _require_authority_list(value.get("prohibition_constraints"), MAX_PROHIBITIONS_PER_CONTRACT, "structured prohibitions")
     _require_authority_list(value.get("integration_verification"), MAX_TEST_CHECKS_PER_CONTRACT, "integration_contract")
     _require_authority_list(value.get("new_surface_proposals"), MAX_SNAPSHOT_PROPOSALS, "new_surface_proposals")
+    _require_authority_list(
+        value.get("behavior_observable_contracts"),
+        MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT,
+        "behavior_observable_contracts",
+    )
+    _require_authority_list(
+        value.get("direct_behavior_oracles"),
+        MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT,
+        "direct_behavior_oracles",
+    )
     canonical_constraints = value.get("canonical_constraints")
     if canonical_constraints is not None:
         if not isinstance(canonical_constraints, dict):
@@ -888,6 +900,25 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
         authority["canonical_verification_contracts"] = _copy(
             plan.get("canonical_verification_contracts")
         )
+    # V25.4 additive behavior authority is plan-owned.  It is copied into the
+    # immutable snapshot only for the Worker responsibility that owns the
+    # approved implementation surface; the direct verifier specification is
+    # kept separately and is never Worker-mutable.
+    if isinstance(plan.get("behavior_observable_contracts"), list):
+        authority["behavior_observable_contracts"] = _copy(
+            plan.get("behavior_observable_contracts")
+        )
+    if isinstance(plan.get("direct_behavior_oracles"), list):
+        authority["direct_behavior_oracles"] = _copy(
+            plan.get("direct_behavior_oracles")
+        )
+    for field in (
+        "verification_authority_revision", "verification_obligation_coverage_summary",
+        "approval_boundary", "terminal_state", "approval_required",
+        "approval_granted", "fresh_approval_required",
+    ):
+        if field in plan:
+            authority[field] = _copy(plan.get(field))
     # Stage 6C-A adds an exact approval proof to the immutable Stage 4
     # snapshot.  The field is optional so the historical V19--V24 APIs keep
     # their original contract shape and compatibility behavior.
@@ -896,7 +927,8 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
     return authority
 
 
-def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goal=None):
+def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goal=None,
+                      allow_contractability=False):
     value = snapshot if isinstance(snapshot, dict) else {}
     errors = []
     if value.get("schema_version") != "4A":
@@ -910,6 +942,10 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         "integration_contract", "canonical_evidence_ids", "canonical_evidence",
         "canonical_surfaces", "new_surface_proposals", "provenance", "bounds",
         "canonical_constraints", "canonical_verification_contracts",
+        "behavior_observable_contracts", "direct_behavior_oracles",
+        "verification_authority_revision", "verification_obligation_coverage_summary",
+        "approval_boundary", "terminal_state", "approval_required",
+        "approval_granted", "fresh_approval_required",
         "approval_binding",
         "snapshot_hash", "immutable",
     }
@@ -921,7 +957,10 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         errors.append("snapshot must be marked immutable")
     if not value.get("plan_id") or not value.get("plan_hash"):
         errors.append("snapshot plan identity is required")
-    if _approval_status(value.get("approval")) != "APPROVED":
+    snapshot_status = _approval_status(value.get("approval"))
+    if snapshot_status != "APPROVED" and not (
+        allow_contractability and snapshot_status == CONTRACTABILITY_ONLY
+    ):
         errors.append("snapshot approval status is not APPROVED")
     snapshot_approval = value.get("approval") if isinstance(value.get("approval"), dict) else {}
     if snapshot_approval.get("plan_id") != value.get("plan_id"):
@@ -937,9 +976,17 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
     if authoritative_task_goal is not None and value.get("task_goal") != authoritative_task_goal:
         errors.append("snapshot task goal does not match authoritative goal")
     if isinstance(plan, dict) and isinstance(approval, dict):
-        approval_result = validate_approved_plan(plan, approval, authoritative_task_goal)
-        if not approval_result["valid"]:
-            errors.extend(approval_result.get("errors", []))
+        if snapshot_status == "APPROVED":
+            approval_result = validate_approved_plan(plan, approval, authoritative_task_goal)
+            if not approval_result["valid"]:
+                errors.extend(approval_result.get("errors", []))
+        elif not (
+            allow_contractability
+            and snapshot_status == CONTRACTABILITY_ONLY
+            and approval.get("plan_id") == plan.get("plan_id")
+            and approval.get("plan_hash") == plan.get("plan_hash")
+        ):
+            errors.append("contractability snapshot approval marker is invalid")
         if value.get("plan_id") != plan.get("plan_id") or value.get("plan_hash") != plan.get("plan_hash"):
             errors.append("snapshot identity does not match approved plan")
     snapshot_limits = {
@@ -956,6 +1003,8 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         "new_surface_proposals": MAX_SNAPSHOT_PROPOSALS,
         "preservation_only_surfaces": MAX_PLAN_NODES,
         "canonical_verification_contracts": MAX_TEST_CHECKS_PER_CONTRACT * 2,
+        "behavior_observable_contracts": MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT,
+        "direct_behavior_oracles": MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT,
     }
     list_fields = set(snapshot_limits) | {
         "canonical_mutation_surfaces", "canonical_test_surfaces", "canonical_reuse_surfaces",
@@ -1064,6 +1113,54 @@ def create_approved_plan_snapshot(plan, approval, authoritative_task_goal=None,
     return result
 
 
+def create_plan_contractability_snapshot(
+    plan, authoritative_task_goal=None, requirements=None,
+    repository_evidence=None, canonical_surface_registry=None,
+):
+    """Build an immutable Stage 4 shape proof without user approval.
+
+    The marker is intentionally not an approval receipt and cannot be passed
+    to the approval-bound authorization constructors.  It exists only so the
+    deterministic contract/compiler can inspect an unapproved revised plan.
+    """
+    value = plan if isinstance(plan, dict) else {}
+    marker = {
+        "approval_status": CONTRACTABILITY_ONLY,
+        "status": CONTRACTABILITY_ONLY,
+        "plan_id": value.get("plan_id"),
+        "plan_hash": value.get("plan_hash"),
+        "approval_source": "DETERMINISTIC_STAGE4_CONTRACTABILITY",
+    }
+    _validate_plan_authority_bounds(
+        value, requirements or [], repository_evidence or [], canonical_surface_registry,
+    )
+    authority = _snapshot_authority(
+        value, marker, authoritative_task_goal, requirements or [],
+        repository_evidence or [], canonical_surface_registry,
+    )
+    authority["bounds"] = {
+        "max_execution_contracts": MAX_EXECUTION_CONTRACTS,
+        "max_plan_nodes": MAX_PLAN_NODES,
+        "max_snapshot_chars": MAX_SNAPSHOT_CHARS,
+    }
+    authority["snapshot_hash"] = deterministic_hash(authority)
+    authority["immutable"] = True
+    result = freeze(authority)
+    checked = validate_snapshot(
+        result, value, marker, authoritative_task_goal,
+        allow_contractability=True,
+    )
+    if not checked["valid"]:
+        raise ApprovedPlanSnapshotError(
+            EXECUTION_CONTRACT_BLOCKED,
+            "; ".join(checked["errors"]), details=checked["errors"],
+        )
+    return result
+
+
+build_plan_contractability_snapshot = create_plan_contractability_snapshot
+
+
 build_approved_plan_snapshot = create_approved_plan_snapshot
 approved_plan_snapshot = create_approved_plan_snapshot
 validate_approved_plan_snapshot = validate_snapshot
@@ -1168,6 +1265,7 @@ def _validate_contract_bounds(contract):
         "execution_invariant_ids": invariant.MAX_INVARIANTS,
         "execution_invariant_relevant_ids": invariant.MAX_PROJECTED_INVARIANTS,
         "execution_invariants": invariant.MAX_PROJECTED_INVARIANTS,
+        "approved_additive_observables": MAX_BEHAVIOR_OBSERVABLES_PER_CONTRACT,
     }
     for field, limit in limits.items():
         values = value.get(field, [])
@@ -1375,6 +1473,21 @@ def _build_contract(snapshot, node, contract_id, responsibility_type, attached_n
         },
         "attached_preservation_surface_ids": _ids([item.get("surface_id") for item in attached_preservation if item.get("surface_id")]),
     }
+    # This is additive implementation authority, not a verification matrix.
+    # Keep it off historical contracts unless the revised plan explicitly
+    # supplies it, so V25.2/V25.3 contract identities remain unchanged.
+    observable_contracts = [
+        _copy(item) for item in (snapshot or {}).get("behavior_observable_contracts", []) or []
+        if isinstance(item, dict)
+        and (
+            not mutation_paths
+            or _path(item.get("target_path")) in {
+                _path(path) for path in mutation_paths
+            }
+        )
+    ]
+    if observable_contracts and responsibility_type in {MUTATION, TEST_MUTATION}:
+        contract["approved_additive_observables"] = observable_contracts
     _validate_contract_bounds(contract)
     contract["contract_hash"] = deterministic_hash(contract)
     if len(_json(contract)) > MAX_CONTRACT_CHARS:
@@ -1554,11 +1667,14 @@ def _attach_verification_obligation_coverage_binding(contract, coverage):
 
 
 def compile_execution_contracts(snapshot, authority_binding=None, execution_invariant_set=None,
-                                verification_obligation_coverage=None):
+                                verification_obligation_coverage=None,
+                                contractability_only=False):
     """Compile one minimal bounded contract for each approved mutation/test responsibility."""
     if not isinstance(snapshot, dict) or not snapshot.get("immutable"):
         raise ExecutionContractError(EXECUTION_CONTRACT_BLOCKED, "an immutable ApprovedPlanSnapshot is required")
-    snapshot_validation = validate_snapshot(snapshot)
+    snapshot_validation = validate_snapshot(
+        snapshot, allow_contractability=contractability_only,
+    )
     if not snapshot_validation.get("valid"):
         raise ExecutionContractError(
             EXECUTION_CONTRACT_BLOCKED,
@@ -1736,7 +1852,15 @@ def compile_execution_contracts(snapshot, authority_binding=None, execution_inva
         "execution_contract_verify_only": sum(item.get("responsibility_type") in {VERIFY_ONLY, INTERFACE_REUSE} for item in contracts),
         "reference_nodes_attached": sum(bool(item.get("attached_plan_node_ids")) for item in contracts),
     }
-    return {"status": "ready", "contracts": contracts, "assignment": assignment, "validation": graph_validation, "metrics": metrics}
+    return {
+        "status": "contractable" if contractability_only else "ready",
+        "contracts": contracts,
+        "assignment": assignment,
+        "validation": graph_validation,
+        "metrics": metrics,
+        "execution_eligible": not contractability_only,
+        "approval_required": bool(contractability_only),
+    }
 
 
 compile_approved_execution_contracts = compile_execution_contracts
@@ -2429,6 +2553,7 @@ def contract_projection(contract, max_chars=MAX_CONTEXT_CHARS):
         "execution_invariant_set_hash", "execution_invariant_ids",
         "execution_invariant_relevant_ids",
         "execution_invariants", "execution_invariant_projection",
+        "approved_additive_observables",
     )
     result = {key: _copy(value.get(key)) for key in fields if key in value}
     encoded = _json(result)
@@ -3184,6 +3309,10 @@ def hydrate_worker_mission(contract, advice, dependency_summaries=None):
         "dependencies": dependencies,
         "implementation_advice": _copy(semantic),
     }
+    if "approved_additive_observables" in authority:
+        mission["approved_additive_observables"] = _copy(
+            authority.get("approved_additive_observables", []) or []
+        )
     return mission
 
 
@@ -3207,6 +3336,7 @@ def validate_hydrated_worker_mission(mission, contract, dependency_summaries=Non
         "targets", "interfaces_to_reuse", "interface_surface_ids", "preservation",
         "prohibitions", "do_not_touch", "test_contract", "integration_responsibility",
         "done_when", "dependency_ids", "dependencies", "implementation_advice",
+        "approved_additive_observables",
     }
     for key in value:
         if key not in expected_fields:
@@ -3241,6 +3371,12 @@ def validate_hydrated_worker_mission(mission, contract, dependency_summaries=Non
     for mission_field, contract_field in exact_fields:
         if value.get(mission_field) != authority.get(contract_field):
             errors.append(f"{mission_field} does not exactly match contract authority")
+    if "approved_additive_observables" in authority and value.get(
+        "approved_additive_observables"
+    ) != authority.get("approved_additive_observables"):
+        errors.append("approved_additive_observables does not exactly match contract authority")
+    elif "approved_additive_observables" in value and "approved_additive_observables" not in authority:
+        errors.append("approved_additive_observables is not authorized by the contract")
     if value.get("targets") != authority.get("allowed_mutation_paths"):
         errors.append("targets do not exactly match contract mutation scope")
     expected_dependencies = _completed_dependency_summaries(
@@ -3368,6 +3504,10 @@ def _worker_context_authority(mission, contract):
         "dependencies": _copy(value.get("dependencies", []) or []),
         "relevant_repository_facts": _compact_worker_repository_facts(authority),
     }
+    if "approved_additive_observables" in authority:
+        result["approved_additive_observables"] = _copy(
+            authority.get("approved_additive_observables", []) or []
+        )
     if authority.get("execution_invariant_set_hash"):
         result.update({
             "execution_invariant_set_hash": authority.get("execution_invariant_set_hash"),
@@ -3441,12 +3581,24 @@ def _make_worker_context_projection(authority, advice, audit):
     return projection
 
 
-def _render_worker_context_projection_lines(projection, *, include_advice=True):
+def _render_worker_context_projection_lines(
+    projection, *, include_advice=True, compact_v254=None,
+):
     """Render the model-facing projection without serializing internal JSON."""
     value = projection if isinstance(projection, dict) else {}
+    if compact_v254 is None:
+        compact_v254 = bool(value.get("approved_additive_observables"))
     lines = [
-        "AUTHORITATIVE CONTRACT (AUTHORITATIVE EXECUTION CONTRACT)",
-        "Execution authority is fixed by the validated contract; this context is informational.",
+        (
+            "AUTHORITATIVE EXECUTION CONTRACT"
+            if compact_v254 else
+            "AUTHORITATIVE CONTRACT (AUTHORITATIVE EXECUTION CONTRACT)"
+        ),
+        (
+            "Contract fixes authority."
+            if compact_v254 else
+            "Execution authority is fixed by the validated contract; this context is informational."
+        ),
         "IDENTITY:",
         f"- plan: {value.get('approved_plan_id')} / {value.get('approved_plan_hash')}",
         f"- contract: {value.get('execution_contract_id')} / {value.get('execution_contract_hash')}",
@@ -3477,10 +3629,49 @@ def _render_worker_context_projection_lines(projection, *, include_advice=True):
             if isinstance(item, dict) else str(item)
         ),
     )
-    add_list("MUST PRESERVE", value.get("preservation"))
+    if value.get("approved_additive_observables"):
+        add_list(
+            "MUST IMPLEMENT ADDITIVELY",
+            value.get("approved_additive_observables"),
+            lambda item: (
+                f"{item.get('signature')}; additive; "
+                f"run={json.dumps((item.get('running') or {}).get('equals'), ensure_ascii=False)}; "
+                f"pause=non-empty primitive string; legacy unchanged."
+                if isinstance(item, dict) else str(item)
+            ),
+        )
+    def preserve_formatter(item):
+        text = str(item)
+        # V25.4 already carries the same preservation facts in the
+        # authoritative invariant projection.  Remove only the repeated
+        # list-label prefix from this model-facing view; no authority item is
+        # dropped and the invariant lines remain mandatory below.
+        if value.get("approved_additive_observables") and text.startswith("Preserve "):
+            return text[len("Preserve "):]
+        return text
+
+    add_list("MUST PRESERVE", value.get("preservation"), preserve_formatter)
     add_list("MUST NOT DO", value.get("prohibitions"))
     add_list("DO NOT MODIFY", value.get("do_not_touch"))
-    add_list("TEST CONTRACT", value.get("test_contract"))
+    def test_contract_formatter(item):
+        text = str(item)
+        # The revised direct oracle is already fully specified above.  Fan
+        # its repeated test-contract prose into one compact verifier-owned
+        # reference while retaining every non-oracle contract verbatim.
+        if compact_v254:
+            symbols = {
+                str(entry.get("symbol"))
+                for entry in value.get("approved_additive_observables", []) or []
+                if isinstance(entry, dict) and entry.get("symbol")
+            }
+            if any(symbol in text for symbol in symbols) and (
+                "oracle" in text.casefold() or "direct" in text.casefold()
+            ):
+                symbol = next(symbol for symbol in symbols if symbol in text)
+                return f"direct oracle: {symbol}; legacy"
+        return text
+
+    add_list("TEST CONTRACT", value.get("test_contract"), test_contract_formatter)
     add_list("DONE WHEN", value.get("done_when"))
     add_list(
         "COMPLETED DEPENDENCIES",
@@ -3547,6 +3738,47 @@ def render_worker_context_projection(projection, max_chars=MAX_CONTEXT_CHARS):
             f"rendered Worker context exceeds its bound ({len(rendered)} > {limit})",
         )
     return rendered
+
+
+def audit_worker_context_budget(projection, *, old_v25_2_chars=None,
+                                max_chars=MAX_CONTEXT_CHARS):
+    """Measure the revised packet before/after deterministic semantic fan-in.
+
+    The uncompacted view is an audit rendering only; it is never sent to a
+    Worker.  It retains the same structured authority and differs solely in
+    repeated model-facing prose.  The caller supplies any historical packet
+    size because that value is evidence, not a production constant.
+    """
+    value = projection if isinstance(projection, dict) else {}
+    limit = MAX_CONTEXT_CHARS if max_chars is None else max(1, int(max_chars))
+    raw = "\n".join(_render_worker_context_projection_lines(
+        value, compact_v254=False,
+    ))
+    final = render_worker_context_projection(value, max_chars=limit)
+    audit = value.get("projection_audit") if isinstance(value.get("projection_audit"), dict) else {}
+    invariant_projection = value.get("execution_invariant_projection")
+    invariant_drops = (
+        int(invariant_projection.get("mandatory_drops", 0) or 0)
+        if isinstance(invariant_projection, dict) else 0
+    )
+    authority_drops = int(audit.get("authority_items_dropped", 0) or 0)
+    return {
+        "old_v25_2_chars": None if old_v25_2_chars is None else int(old_v25_2_chars),
+        "raw_revised_chars": len(raw),
+        "final_revised_chars": len(final),
+        "headroom": limit - len(final),
+        "context_limit": limit,
+        "mandatory_drops": invariant_drops + authority_drops,
+        "authority_items_dropped": authority_drops,
+        "invariant_items_dropped": invariant_drops,
+        "deduplicated_chars": len(raw) - len(final),
+        "deduplication": [
+            "compact repeated authoritative-contract header",
+            "compact repeated additive-observable prose",
+            "fan repeated preservation label into invariant authority",
+            "fan direct-oracle test reference into additive authority",
+        ] if value.get("approved_additive_observables") else [],
+    }
 
 
 def _worker_context_audit(
