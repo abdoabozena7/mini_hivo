@@ -15,6 +15,7 @@ import json
 import re
 
 from hivo import impact_planning as stage3
+from hivo import execution_invariants as invariant
 from hivo.requirements import freeze
 
 
@@ -71,6 +72,12 @@ HYDRATED_MISSION_TOO_LARGE = "HYDRATED_MISSION_TOO_LARGE"
 WORKER_CONTEXT_TOO_LARGE = "WORKER_CONTEXT_TOO_LARGE"
 WORKER_CONTEXT_AUTHORITY_TOO_LARGE = "WORKER_CONTEXT_AUTHORITY_TOO_LARGE"
 WORKER_CONTEXT_ADVICE_UNAVAILABLE = "WORKER_CONTEXT_ADVICE_UNAVAILABLE"
+# V25.2 mandatory execution-invariant authority.  This is deliberately a
+# separate failure from ordinary optional-advice budgeting: preservation
+# facts are never silently dropped to fit a Worker packet.
+WORKER_EXECUTION_INVARIANT_CONTEXT_OVERFLOW = invariant.EXECUTION_INVARIANT_CONTEXT_OVERFLOW
+EXECUTION_INVARIANT_SET_REQUIRED = invariant.EXECUTION_INVARIANT_SET_REQUIRED
+EXECUTION_INVARIANT_INVALID = invariant.EXECUTION_INVARIANT_INVALID
 
 # V19.4 structural granularity outcomes.  These are deterministic routing
 # observations over an already-approved Execution Contract; they are not
@@ -1150,6 +1157,9 @@ def _validate_contract_bounds(contract):
         "done_when": MAX_DONE_WHEN_PER_CONTRACT,
         "dependencies": MAX_DEPENDENCIES_PER_CONTRACT,
         "attached_preservation_surface_ids": MAX_PLAN_NODES,
+        "execution_invariant_ids": invariant.MAX_INVARIANTS,
+        "execution_invariant_relevant_ids": invariant.MAX_PROJECTED_INVARIANTS,
+        "execution_invariants": invariant.MAX_PROJECTED_INVARIANTS,
     }
     for field, limit in limits.items():
         values = value.get(field, [])
@@ -1412,6 +1422,8 @@ def _attach_approval_binding(contract, snapshot, authority_binding=None):
         "approved_challenger_reconciliation_hash": binding.get("approved_challenger_reconciliation_hash") or binding.get("challenger_reconciliation_hash"),
         "stage4_contract_graph_hash": binding.get("stage4_contract_graph_hash"),
         "stage4_dependency_graph_digest": binding.get("stage4_dependency_graph_digest"),
+        "execution_invariant_set_hash": binding.get("execution_invariant_set_hash"),
+        "execution_invariant_ids": _copy(binding.get("execution_invariant_ids", [])),
     }
     for key, value in fields.items():
         if value not in (None, "", [], {}):
@@ -1423,7 +1435,86 @@ def _attach_approval_binding(contract, snapshot, authority_binding=None):
     return contract
 
 
-def compile_execution_contracts(snapshot, authority_binding=None):
+def _attach_execution_invariant_binding(contract, execution_invariant_set):
+    """Attach only bounded invariant authority to one compiled contract."""
+    set_value = execution_invariant_set if isinstance(execution_invariant_set, dict) else {}
+    set_scope = {
+        str(item).casefold().rstrip("/")
+        for item in (set_value.get("authority") or {}).get("mutation_paths", []) or []
+    }
+    contract_scope = {
+        str(item).casefold().rstrip("/")
+        for item in (contract or {}).get("allowed_mutation_paths", []) or []
+    }
+    scope_relevant = bool(set_scope.intersection(contract_scope))
+    checked = invariant.validate_execution_invariant_set(
+        execution_invariant_set,
+        execution_contract=contract if scope_relevant else None,
+    )
+    if not checked.get("valid"):
+        raise ExecutionContractError(
+            str(checked.get("code") or EXECUTION_INVARIANT_INVALID),
+            "; ".join(checked.get("errors", [])) or "execution invariant set is invalid",
+            details=checked.get("errors", []),
+        )
+    selected = (
+        invariant.relevant_invariants(set_value, contract)
+        if scope_relevant else []
+    )
+    if len(selected) > invariant.MAX_PROJECTED_INVARIANTS:
+        raise ExecutionContractError(
+            WORKER_EXECUTION_INVARIANT_CONTEXT_OVERFLOW,
+            "responsibility-relevant execution invariants exceed the projection bound",
+            details=[
+                f"relevant_invariants={len(selected)}",
+                f"projection_limit={invariant.MAX_PROJECTED_INVARIANTS}",
+            ],
+        )
+    compact = [invariant._compact_invariant(item) for item in selected]
+    contract["execution_invariant_set_hash"] = set_value.get("invariant_set_hash")
+    contract["execution_invariant_relevant_ids"] = [item.get("invariant_id") for item in compact]
+    contract["execution_invariant_ids"] = [item.get("invariant_id") for item in compact]
+    projection_core = invariant._projection_core(
+        set_value.get("invariant_set_hash"), selected,
+    )
+    projection_core["projection_hash"] = invariant.canonical_hash(projection_core)
+    contract["execution_invariant_projection"] = projection_core
+    # Current source facts remain compact repository orientation.  The
+    # semantic invariant itself is the authority; this list is not a second
+    # mutation scope or a model-generated recommendation.
+    facts = list(contract.get("relevant_repository_facts", []) or [])
+    existing_fact_keys = {
+        (str(item.get("evidence_id")), str(item.get("symbol")), str(item.get("path")))
+        for item in facts if isinstance(item, dict)
+    }
+    # Existing Stage 4 repository facts are preferred.  Only an otherwise
+    # empty fact section receives one compact evidence-backed orientation fact;
+    # the semantic invariant projection remains the authoritative payload.
+    for item in (selected if not facts else []):
+        if item.get("type") not in {
+            invariant.FUNCTION_SIGNATURE, invariant.RETURN_SHAPE,
+            invariant.EXACT_EXISTING_OUTPUT, invariant.CONSUMER_EXPECTATION,
+            invariant.INTERFACE_COMPATIBILITY,
+        }:
+            continue
+        refs = [ref for ref in item.get("evidence_refs", []) or [] if isinstance(ref, dict)]
+        ref = refs[0] if refs else {}
+        fact = {
+            "evidence_id": ref.get("evidence_id"),
+            "fact": item.get("statement"),
+            "path": item.get("path"),
+            "symbol": item.get("symbol"),
+        }
+        key = (str(fact.get("evidence_id")), str(fact.get("symbol")), str(fact.get("path")))
+        if key not in existing_fact_keys and len(facts) < 1:
+            facts.append(fact)
+            existing_fact_keys.add(key)
+    contract["relevant_repository_facts"] = facts[:MAX_REPOSITORY_FACTS_PER_CONTRACT]
+    contract["contract_hash"] = deterministic_hash(_without(contract, "contract_hash"))
+    return contract
+
+
+def compile_execution_contracts(snapshot, authority_binding=None, execution_invariant_set=None):
     """Compile one minimal bounded contract for each approved mutation/test responsibility."""
     if not isinstance(snapshot, dict) or not snapshot.get("immutable"):
         raise ExecutionContractError(EXECUTION_CONTRACT_BLOCKED, "an immutable ApprovedPlanSnapshot is required")
@@ -1572,6 +1663,21 @@ def compile_execution_contracts(snapshot, authority_binding=None):
         contract["contract_hash"] = deterministic_hash(_without(contract, "contract_hash"))
         _validate_contract_bounds(contract)
     binding = _approval_binding_for(snapshot, authority_binding)
+    bound_invariant_hash = binding.get("execution_invariant_set_hash") if isinstance(binding, dict) else None
+    if bound_invariant_hash and execution_invariant_set is None:
+        raise ExecutionContractError(
+            EXECUTION_INVARIANT_SET_REQUIRED,
+            "the approval-bound contract references an execution invariant set that was not supplied",
+        )
+    if execution_invariant_set is not None:
+        supplied_hash = execution_invariant_set.get("invariant_set_hash") if isinstance(execution_invariant_set, dict) else None
+        if bound_invariant_hash and supplied_hash != bound_invariant_hash:
+            raise ExecutionContractError(
+                EXECUTION_INVARIANT_INVALID,
+                "execution invariant set does not match the authorized invariant-set hash",
+            )
+        for contract in contracts:
+            _attach_execution_invariant_binding(contract, execution_invariant_set)
     if binding:
         for contract in contracts:
             _attach_approval_binding(contract, snapshot, binding)
@@ -1710,6 +1816,8 @@ def validate_contracts(snapshot, contracts, assignment=None):
                 "approved_challenger_reconciliation_hash": approval_binding.get("approved_challenger_reconciliation_hash") or approval_binding.get("challenger_reconciliation_hash"),
                 "stage4_contract_graph_hash": approval_binding.get("stage4_contract_graph_hash"),
                 "stage4_dependency_graph_digest": approval_binding.get("stage4_dependency_graph_digest"),
+                "execution_invariant_set_hash": approval_binding.get("execution_invariant_set_hash"),
+                "execution_invariant_ids": _copy(approval_binding.get("execution_invariant_ids", [])),
             }
             for field, expected in expected_binding_fields.items():
                 if expected not in (None, "", [], {}) and contract.get(field) != expected:
@@ -1733,6 +1841,8 @@ def validate_contracts(snapshot, contracts, assignment=None):
                     "approved_challenger_reconciliation_hash": expected_binding_fields.get("approved_challenger_reconciliation_hash"),
                     "stage4_contract_graph_hash": expected_binding_fields.get("stage4_contract_graph_hash"),
                     "stage4_dependency_graph_digest": expected_binding_fields.get("stage4_dependency_graph_digest"),
+                    "execution_invariant_set_hash": expected_binding_fields.get("execution_invariant_set_hash"),
+                    "execution_invariant_ids": expected_binding_fields.get("execution_invariant_ids"),
                 }.items() if item not in (None, "", [], {})
             })
             if contract.get("approval_binding_hash") != expected_binding_hash:
@@ -1761,6 +1871,11 @@ def validate_contracts(snapshot, contracts, assignment=None):
             errors.append(f"{cid}: mutation scope conflicts with protected surfaces")
         if contract.get("responsibility_type") not in RESPONSIBILITY_TYPES:
             errors.append(f"{cid}: unknown responsibility type")
+        if contract.get("execution_invariant_set_hash"):
+            if not isinstance(contract.get("execution_invariant_projection"), dict):
+                errors.append(f"{cid}: execution invariant projection is missing")
+            if not isinstance(contract.get("execution_invariant_relevant_ids"), list):
+                errors.append(f"{cid}: execution invariant relevance list is missing")
         expected_worker = contract.get("responsibility_type") in {MUTATION, TEST_MUTATION}
         if bool(contract.get("worker_required")) != expected_worker:
             errors.append(f"{cid}: worker_required does not match responsibility type")
@@ -2255,6 +2370,12 @@ def contract_projection(contract, max_chars=MAX_CONTEXT_CHARS):
         "approved_interface_binding_digest", "approved_requirement_coverage_digest",
         "approved_challenger_reconciliation_hash", "stage4_contract_graph_hash",
         "stage4_dependency_graph_digest", "approval_binding_hash",
+        # V25.2 deterministic preservation authority.  The full evidence
+        # catalog stays internal; only the compact responsibility projection
+        # is eligible for Worker context.
+        "execution_invariant_set_hash", "execution_invariant_ids",
+        "execution_invariant_relevant_ids",
+        "execution_invariants", "execution_invariant_projection",
     )
     result = {key: _copy(value.get(key)) for key in fields if key in value}
     encoded = _json(result)
@@ -3133,6 +3254,7 @@ _WORKER_CONTEXT_INCLUDED_SECTIONS = (
     "inspection scope", "interfaces", "requirements", "preservation",
     "prohibitions", "do_not_touch", "test contract", "done_when",
     "dependencies", "repository facts", "implementation advice",
+    "execution invariants",
 )
 
 
@@ -3172,7 +3294,7 @@ def _worker_context_authority(mission, contract):
             })
         else:
             requirements.append({"requirement_id": "", "text": str(item or "")})
-    return {
+    result = {
         "mission_id": value.get("mission_id"),
         "mission_hash": value.get("mission_hash"),
         "execution_contract_id": authority.get("execution_contract_id"),
@@ -3193,6 +3315,26 @@ def _worker_context_authority(mission, contract):
         "dependencies": _copy(value.get("dependencies", []) or []),
         "relevant_repository_facts": _compact_worker_repository_facts(authority),
     }
+    if authority.get("execution_invariant_set_hash"):
+        result.update({
+            "execution_invariant_set_hash": authority.get("execution_invariant_set_hash"),
+            "execution_invariant_ids": _copy(
+                authority.get("execution_invariant_relevant_ids")
+                or authority.get("execution_invariant_ids", []) or [],
+            ),
+            "execution_invariant_relevant_ids": _copy(
+                authority.get("execution_invariant_relevant_ids", []) or [],
+            ),
+            "execution_invariants": _copy(
+                authority.get("execution_invariants")
+                or (authority.get("execution_invariant_projection", {}) or {}).get("invariants", [])
+                or [],
+            ),
+            "execution_invariant_projection": _copy(
+                authority.get("execution_invariant_projection", {}) or {},
+            ),
+        })
+    return result
 
 
 def _worker_context_advice_items(advice):
@@ -3307,6 +3449,17 @@ def _render_worker_context_projection_lines(projection, *, include_advice=True):
             if isinstance(item, dict) else str(item)
         ),
     )
+    if value.get("execution_invariant_set_hash"):
+        try:
+            invariant_lines = invariant.render_worker_execution_invariant_projection(
+                value.get("execution_invariant_projection", {}) or {},
+                max_chars=MAX_CONTEXT_CHARS,
+            )
+        except invariant.ExecutionInvariantError as exc:
+            raise ExecutionContractError(
+                exc.code, str(exc), details=getattr(exc, "details", []),
+            ) from exc
+        lines.extend(invariant_lines.splitlines())
     if include_advice:
         advice = value.get("implementation_advice")
         if isinstance(advice, dict) and advice:
@@ -3419,8 +3572,13 @@ def build_worker_context_projection(
     # structured projection is an internal auditable artifact and may remain
     # richer than the model-facing character budget.
     if required_rendered_chars > limit:
+        overflow_code = (
+            WORKER_EXECUTION_INVARIANT_CONTEXT_OVERFLOW
+            if authority_projection.get("execution_invariant_set_hash")
+            else WORKER_CONTEXT_AUTHORITY_TOO_LARGE
+        )
         raise ExecutionContractError(
-            WORKER_CONTEXT_AUTHORITY_TOO_LARGE,
+            overflow_code,
             "required Worker authority cannot fit without dropping authority",
             details=[
                 f"required_rendered_chars={required_rendered_chars}",
@@ -3608,6 +3766,28 @@ def validate_worker_context_projection(
         audit = {}
     if audit.get("authority_items_dropped", 0) != 0:
         errors.append("projection dropped required authority")
+    if value.get("execution_invariant_set_hash"):
+        invariant_projection = value.get("execution_invariant_projection")
+        if not isinstance(invariant_projection, dict):
+            errors.append("execution invariant projection is missing")
+        else:
+            if invariant_projection.get("execution_invariant_set_hash") != value.get("execution_invariant_set_hash"):
+                errors.append("execution invariant projection set hash is stale")
+            if invariant_projection.get("invariant_ids") != value.get("execution_invariant_ids"):
+                errors.append("execution invariant projection ids do not match contract")
+            if invariant_projection.get("mandatory_drops") != 0:
+                errors.append("mandatory execution invariants were dropped")
+            expected_invariant_projection_hash = invariant.canonical_hash(
+                invariant._without(invariant_projection, "projection_hash"),
+            )
+            if invariant_projection.get("projection_hash") != expected_invariant_projection_hash:
+                errors.append("execution invariant projection hash is invalid")
+            try:
+                invariant.render_worker_execution_invariant_projection(
+                    invariant_projection, max_chars=limit,
+                )
+            except invariant.ExecutionInvariantError as exc:
+                errors.append(str(exc))
     forbidden = _projection_forbidden_keys(value)
     if forbidden:
         errors.extend(f"projection contains forbidden internal field {item}" for item in forbidden[:20])
@@ -3889,6 +4069,21 @@ def validate_child_specs(parent, specs, other_contract_ids=None):
         })
         safe = []
     return {"valid": bool(safe) and not rejected, "children": safe, "rejected": rejected}
+
+
+# Public V25.2 aliases keep the execution-contract module as the stable
+# Stage 4 import seam while the parser/reconciler remains independently
+# testable in ``hivo.execution_invariants``.
+ExecutionInvariantSet = invariant.ExecutionInvariantSet
+WorkerExecutionInvariantProjection = invariant.WorkerExecutionInvariantProjection
+ExecutionInvariantError = invariant.ExecutionInvariantError
+build_execution_invariant_set = invariant.build_execution_invariant_set
+extract_execution_invariant_set = invariant.extract_execution_invariant_set
+validate_execution_invariant_set = invariant.validate_execution_invariant_set
+build_worker_execution_invariant_projection = invariant.build_worker_execution_invariant_projection
+validate_worker_execution_invariant_projection = invariant.validate_worker_execution_invariant_projection
+render_worker_execution_invariant_projection = invariant.render_worker_execution_invariant_projection
+canonical_invariant_set_hash = invariant.canonical_invariant_set_hash
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]

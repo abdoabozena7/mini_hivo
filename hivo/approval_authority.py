@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from hivo import impact_planning as stage3
+from hivo import execution_invariants as invariant
 from hivo.requirements import freeze
 
 
@@ -54,6 +55,8 @@ APPROVAL_REQUEST_INVALID = "APPROVAL_REQUEST_INVALID"
 EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH = "EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH"
 APPROVAL_DNT_VIOLATION = "APPROVAL_DNT_VIOLATION"
 APPROVAL_AUTHORITY_CHANGE = "APPROVAL_AUTHORITY_CHANGE"
+EXECUTION_INVARIANT_SET_REQUIRED = invariant.EXECUTION_INVARIANT_SET_REQUIRED
+EXECUTION_INVARIANT_INVALID = invariant.EXECUTION_INVARIANT_INVALID
 
 _BINDING_FIELDS = (
     "task_id", "requirement_ids", "canonical_plan_id", "canonical_plan_hash",
@@ -1087,6 +1090,8 @@ def _stage4_binding(
         "approved_challenger_reconciliation_hash": authorization.get("challenger_reconciliation_hash"),
         "stage4_contract_graph_hash": authorization.get("stage4_contract_graph_hash"),
         "stage4_dependency_graph_digest": authorization.get("stage4_dependency_graph_digest"),
+        "execution_invariant_set_hash": authorization.get("execution_invariant_set_hash"),
+        "execution_invariant_ids": _copy(authorization.get("execution_invariant_ids", [])),
     }
 
 
@@ -1109,6 +1114,7 @@ def create_approved_execution_authorization(
     request: PlanApprovalRequest | dict[str, Any] | None = None,
     stage4_graph: dict[str, Any] | None = None,
     current_state: dict[str, Any] | None = None,
+    execution_invariant_set: dict[str, Any] | None = None,
 ) -> ApprovedExecutionAuthorization:
     """Grant only the immutable, provider-free authority proof after revalidation."""
     receipt_value = receipt if isinstance(receipt, dict) else {}
@@ -1141,6 +1147,23 @@ def create_approved_execution_authorization(
         {"execution_contract_id": item.get("execution_contract_id"), "dependencies": list(item.get("dependencies", []) or [])}
         for item in dependency_graph if isinstance(item, dict)
     ]) if dependency_graph else binding.get("dependency_digest")
+    invariant_hash = ""
+    invariant_ids: list[str] = []
+    if execution_invariant_set is not None:
+        invariant_check = invariant.validate_execution_invariant_set(execution_invariant_set)
+        if not invariant_check.get("valid"):
+            raise ExecutionAuthorizationError(
+                str(invariant_check.get("code") or EXECUTION_INVARIANT_INVALID),
+                "; ".join(invariant_check.get("errors", [])) or "execution invariant set is invalid",
+                invariant_check.get("errors", []),
+            )
+        invariant_hash = str(execution_invariant_set.get("invariant_set_hash") or "")
+        invariant_ids = [str(item) for item in execution_invariant_set.get("invariant_ids", []) or []]
+    elif binding.get("execution_invariant_set_hash"):
+        raise ExecutionAuthorizationError(
+            EXECUTION_INVARIANT_SET_REQUIRED,
+            "current approval-bound authorization references an invariant set that was not supplied",
+        )
     record = {
         "schema_version": SCHEMA_VERSION,
         "status": EXECUTION_AUTHORIZATION_READY,
@@ -1161,6 +1184,8 @@ def create_approved_execution_authorization(
         "interface_binding_digest": binding.get("interface_binding_digest"),
         "requirement_coverage_digest": binding.get("requirement_coverage_digest"),
         "challenger_reconciliation_hash": binding.get("challenger_reconciliation_hash"),
+        "execution_invariant_set_hash": invariant_hash,
+        "execution_invariant_ids": invariant_ids,
         "source_bindings": _copy(binding.get("source_bindings", {})),
         "authority_constraints_digest": binding.get("authority_constraints_digest"),
         "approved_mutation_scope": _copy(binding.get("mutation_scope", {})),
@@ -1178,6 +1203,7 @@ def create_approved_execution_authorization(
         "approval_receipt_hash": record["approval_receipt_hash"],
         "canonical_plan_hash": record["canonical_plan_hash"],
         "stage4_contract_graph_hash": graph_hash,
+        "execution_invariant_set_hash": invariant_hash,
     })[:16].upper()
     record["binding"] = _stage4_binding(record)
     record["authorization_hash"] = canonical_hash(_authorization_hash_payload(record))
@@ -1195,6 +1221,7 @@ def validate_approved_execution_authorization(
     revalidation: PreExecutionApprovalRevalidation | dict[str, Any] | None = None,
     *,
     request: PlanApprovalRequest | dict[str, Any] | None = None,
+    execution_invariant_set: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate an authorization object and its optional upstream proofs."""
     value = authorization if isinstance(authorization, dict) else {}
@@ -1219,9 +1246,27 @@ def validate_approved_execution_authorization(
         ("verification_digest", "approved_verification_digest"),
         ("interface_binding_digest", "approved_interface_binding_digest"),
         ("stage4_contract_graph_hash", "stage4_contract_graph_hash"),
+        ("execution_invariant_set_hash", "execution_invariant_set_hash"),
     ):
         if binding.get(binding_field) != value.get(field):
             errors.append({"code": APPROVAL_INVALID, "field": field})
+    authorized_invariant_hash = value.get("execution_invariant_set_hash")
+    if execution_invariant_set is not None:
+        invariant_check = invariant.validate_execution_invariant_set(execution_invariant_set)
+        if not invariant_check.get("valid"):
+            errors.append({
+                "code": invariant_check.get("code") or EXECUTION_INVARIANT_INVALID,
+                "field": "execution_invariant_set",
+                "details": invariant_check.get("errors", []),
+            })
+        elif not authorized_invariant_hash or authorized_invariant_hash != execution_invariant_set.get("invariant_set_hash"):
+            errors.append({"code": EXECUTION_INVARIANT_INVALID, "field": "execution_invariant_set_hash"})
+    elif authorized_invariant_hash:
+        # Structural authorization validation remains possible without
+        # re-reading the subject.  Stage 4 compilation still requires the
+        # exact immutable set so it can project semantic facts to the Worker.
+        if value.get("execution_invariant_ids") != binding.get("execution_invariant_ids", []):
+            errors.append({"code": APPROVAL_INVALID, "field": "execution_invariant_ids"})
     if isinstance(receipt, dict):
         receipt_check = validate_plan_approval_receipt(receipt, request)
         if not receipt_check.get("valid"):
@@ -1248,6 +1293,7 @@ def worker_authorization_gate(
     revalidation: PreExecutionApprovalRevalidation | dict[str, Any] | None = None,
     *,
     request: PlanApprovalRequest | dict[str, Any] | None = None,
+    execution_invariant_set: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a gate decision only; this function never invokes a Worker."""
     if not isinstance(authorization, dict):
@@ -1258,6 +1304,7 @@ def worker_authorization_gate(
         }
     checked = validate_approved_execution_authorization(
         authorization, receipt, revalidation, request=request,
+        execution_invariant_set=execution_invariant_set,
     )
     if not checked.get("valid"):
         return {
@@ -1328,8 +1375,12 @@ def validate_approval_bound_contracts(
             ("approved_verification_digest", "approved_verification_digest"),
             ("approved_interface_binding_digest", "approved_interface_binding_digest"),
             ("stage4_contract_graph_hash", "stage4_contract_graph_hash"),
+            ("execution_invariant_set_hash", "execution_invariant_set_hash"),
         ):
-            if contract.get(field) != expected.get(expected_field):
+            expected_value = expected.get(expected_field)
+            if field == "execution_invariant_set_hash" and expected_value in (None, ""):
+                continue
+            if contract.get(field) != expected_value:
                 errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": field, "contract_id": contract.get("execution_contract_id")})
         approved_paths.update(_text(item).casefold() for item in contract.get("allowed_mutation_paths", []) or [])
         approved_surfaces.update(_text(item) for item in contract.get("allowed_mutation_surface_ids", []) or [])
@@ -1349,6 +1400,9 @@ def validate_approval_bound_contracts(
             set(_text(item) for item in contract.get("global_do_not_touch_surface_ids", []) or [])
         ):
             errors.append({"code": APPROVAL_DNT_VIOLATION, "field": "allowed_mutation_surface_ids", "contract_id": contract.get("execution_contract_id")})
+        if auth.get("execution_invariant_set_hash"):
+            if contract.get("execution_invariant_ids") != list(auth.get("execution_invariant_ids", []) or []):
+                errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "execution_invariant_ids", "contract_id": contract.get("execution_contract_id")})
     approved_scope = auth.get("approved_mutation_scope") if isinstance(auth.get("approved_mutation_scope"), dict) else {}
     expected_paths = {_text(item).casefold() for item in approved_scope.get("paths", []) or []}
     expected_surfaces = set(_text(item) for item in approved_scope.get("surface_ids", []) or [])
@@ -1435,11 +1489,16 @@ def compile_approval_bound_execution_contracts(
     repository_evidence: list[dict[str, Any]] | None = None,
     canonical_surface_registry: dict[str, Any] | None = None,
     authoritative_task_goal: str | None = None,
+    execution_invariant_set: dict[str, Any] | None = None,
+    execution_invariant_source_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Construct Stage 4 contracts from the exact approved plan, read-only."""
     value = plan if isinstance(plan, dict) else {}
     auth = authorization if isinstance(authorization, dict) else {}
-    gate = worker_authorization_gate(auth, receipt, revalidation, request=request)
+    gate = worker_authorization_gate(
+        auth, receipt, revalidation, request=request,
+        execution_invariant_set=execution_invariant_set,
+    )
     if not gate.get("allowed"):
         raise ExecutionAuthorizationError(
             str(gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED),
@@ -1453,6 +1512,30 @@ def compile_approval_bound_execution_contracts(
     except ImportError as exc:  # pragma: no cover
         raise ExecutionAuthorizationError(EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, str(exc)) from exc
     binding = _contract_authority_fields(auth)
+    authorized_invariant_hash = _text(auth.get("execution_invariant_set_hash"))
+    if authorized_invariant_hash and execution_invariant_set is None:
+        raise ExecutionAuthorizationError(
+            EXECUTION_INVARIANT_SET_REQUIRED,
+            "Stage 4 requires the exact invariant set bound by authorization",
+        )
+    if execution_invariant_set is not None:
+        supplied_invariant_hash = _text(execution_invariant_set.get("invariant_set_hash"))
+        if authorized_invariant_hash and supplied_invariant_hash != authorized_invariant_hash:
+            raise ExecutionAuthorizationError(
+                EXECUTION_INVARIANT_INVALID,
+                "execution invariant set does not match current authorization",
+            )
+        invariant_check = invariant.validate_execution_invariant_set(
+            execution_invariant_set,
+            source_root=execution_invariant_source_root,
+            require_current_subject=execution_invariant_source_root is not None,
+        )
+        if not invariant_check.get("valid"):
+            raise ExecutionAuthorizationError(
+                str(invariant_check.get("code") or EXECUTION_INVARIANT_INVALID),
+                "; ".join(invariant_check.get("errors", [])) or "execution invariant set is invalid",
+                invariant_check.get("errors", []),
+            )
     approval = {
         "approval_status": "APPROVED",
         "plan_id": value.get("plan_id"),
@@ -1468,7 +1551,10 @@ def compile_approval_bound_execution_contracts(
         canonical_surface_registry=canonical_surface_registry,
         authority_binding=binding,
     )
-    compiled = stage4.compile_execution_contracts(snapshot, authority_binding=binding)
+    compiled = stage4.compile_execution_contracts(
+        snapshot, authority_binding=binding,
+        execution_invariant_set=execution_invariant_set,
+    )
     contracts = compiled.get("contracts", [])
     graph = stage4.build_execution_graph(snapshot, contracts)
     graph_check = stage4.validate_execution_graph(snapshot, graph, contracts)
