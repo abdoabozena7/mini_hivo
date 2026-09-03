@@ -8010,6 +8010,7 @@ def _stage3_execution_gate(task=None):
             RUN.get("approval_receipt"),
             RUN.get("pre_execution_approval_revalidation"),
             request=RUN.get("approval_request"),
+            verification_obligation_coverage=RUN.get("verification_obligation_coverage"),
         )
         if not authority_gate.get("allowed"):
             return {
@@ -10460,6 +10461,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             RUN.get("approval_receipt"),
             RUN.get("pre_execution_approval_revalidation"),
             request=RUN.get("approval_request"),
+            verification_obligation_coverage=RUN.get("verification_obligation_coverage"),
         )
         if not authority_gate.get("allowed"):
             coverage = RUN.get("verification_obligation_coverage")
@@ -17697,6 +17699,7 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
         worker_context=bounded_context,
         worker_dispatch=dispatch,
         verification_runner=RUN.get("_approval_bound_verification_runner"),
+        verification_obligation_coverage=RUN.get("verification_obligation_coverage"),
         store=get_memory_store(),
         project_id=str(RUN.get("project_id") or "default"),
         transaction_commit=commit_transaction,
@@ -19985,6 +19988,412 @@ run_stage6c_b_v25_4_architecture_self_test = run_stage6c_b_v25_4_self_test
 run_stage6c_b_verification_complete_plan_self_test = run_stage6c_b_v25_4_self_test
 
 
+def run_stage6c_b_v25_4_1_self_test(
+    artifact_root=None, brain_database_path=None, planning_root=None,
+):
+    """Replay V25.4 through every coverage-aware execution boundary.
+
+    This is a provider-free propagation self-test.  It reads the exact
+    persisted V25.4 failed-live authority artifacts, copies only the subject
+    files and historical Brain database into temporary locations, and uses an
+    injected callback to prove that the final Worker seam is reachable.  The
+    callback deliberately makes no edit, so this self-test cannot become a
+    live execution or a promotion.
+    """
+    global WORKSPACE, MEMORY_STORE, RUN, TASKS, ROLE_STATUS, DASHBOARD
+    global RUN_STARTED, RUN_ID, ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, VISION_ENABLED_FOR_RUN
+    global VISION_ERROR, PREFLIGHT_CONFLICT_STATE, ask_ollama
+    saved = {
+        "WORKSPACE": WORKSPACE, "MEMORY_STORE": MEMORY_STORE, "RUN": RUN,
+        "TASKS": TASKS, "ROLE_STATUS": ROLE_STATUS, "DASHBOARD": DASHBOARD,
+        "RUN_STARTED": RUN_STARTED, "RUN_ID": RUN_ID,
+        "ACTIVE_TRANSACTION": ACTIVE_TRANSACTION,
+        "LAST_COMMITTED_TRANSACTION": LAST_COMMITTED_TRANSACTION,
+        "ACTIVE_CONTRACT": ACTIVE_CONTRACT, "ACTIVE_TOOL_CONTRACT": ACTIVE_TOOL_CONTRACT,
+        "VISION_ENABLED_FOR_RUN": VISION_ENABLED_FOR_RUN,
+        "VISION_ERROR": VISION_ERROR,
+        "PREFLIGHT_CONFLICT_STATE": PREFLIGHT_CONFLICT_STATE,
+        "ask_ollama": ask_ollama,
+    }
+
+    def _read(root, name, field=None):
+        with (Path(root) / "artifacts" / name).open("r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value.get(field) if field else value
+
+    try:
+        live_root = Path(
+            artifact_root
+            or Path(__file__).resolve().parent
+            / "output" / "hivo-v25-4-stage6c-b-verification-complete-live-2"
+        ).expanduser().resolve()
+        planning = Path(
+            planning_root
+            or live_root.parent / "hivo-v24-4-6-stage6b-planning-live-1"
+        ).expanduser().resolve()
+        historical_db = Path(
+            brain_database_path
+            or live_root.parent / "hivo-v22-stage5c-fresh-receipts-live-1"
+            / ".hivo" / "memory.sqlite3"
+        ).expanduser().resolve()
+        plan = _read(live_root, "revised_plan_source.json", "plan")
+        request = _read(live_root, "approval_request.json")
+        receipt = _read(live_root, "approval_receipt.json")
+        revalidation = _read(live_root, "preexecution_revalidation.json")
+        authorization = _read(live_root, "execution_authorization.json")
+        invariant_set = _read(live_root, "execution_invariant_source.json", "invariant_set")
+        coverage = _read(live_root, "verification_obligation_coverage_source.json", "coverage")
+        persisted_stage4 = _read(live_root, "stage4_contracts.json")
+        worker_packet_audit = _read(live_root, "worker_packet_audit.json")
+        planning_context = json.loads(
+            (planning / "verified_planning_context.json").read_text(encoding="utf-8")
+        )
+        planning_freshness = json.loads(
+            (planning / "planning_context_freshness.json").read_text(encoding="utf-8")
+        )
+        plan_validation = json.loads(
+            (planning / "plan_validation.json").read_text(encoding="utf-8")
+        )
+        contractability = json.loads(
+            (planning / "stage4_contractability_audit.json").read_text(encoding="utf-8")
+        )
+        reconciliation = json.loads(
+            (planning / "challenger_reconciliation.json").read_text(encoding="utf-8")
+        )
+        surface_evidence = json.loads(
+            (planning / "current_surface_evidence.json").read_text(encoding="utf-8")
+        )
+        repository_evidence = surface_evidence.get("repository_evidence", [])
+        canonical_registry = surface_evidence.get("registry")
+        brain = stage6c.read_only_project_brain_identity(
+            historical_db, planning_context.get("project_id")
+        )
+        current_state = stage6c._live_state(
+            planning, plan, planning_context, planning_freshness,
+            plan_validation, contractability, reconciliation, brain,
+        )
+        persisted_current_binding = revalidation.get("current_binding", {})
+        current_state.update({
+            # These observations are part of the exact persisted live
+            # binding.  They are not regenerated from the revised plan.
+            "current_brain_hash": authorization.get("current_brain_hash"),
+            "current_subject_aggregate_hash": authorization.get("current_subject_hash"),
+            "interface_binding": copy.deepcopy(
+                persisted_current_binding.get("interface_binding", {})
+            ),
+        })
+        contract = next(
+            item for item in persisted_stage4.get("contracts", [])
+            if isinstance(item, dict)
+            and item.get("responsibility_type") == stage4.MUTATION
+        )
+        subject_files = (
+            "src/input.js", "src/pause_controller.js", "src/status_view.js",
+            "tests/input.test.js", "tests/pause_flow.integration.test.js",
+            "tests/status_view.test.js",
+        )
+        historical_brain_before = historical_db.read_bytes()
+        live_subject_before = {
+            relative: (live_root / relative).read_bytes()
+            for relative in subject_files
+        }
+        coverage_check = stage6c_coverage.validate_verification_obligation_coverage(
+            coverage, plan=plan,
+        )
+        invariant_check = stage6c_invariants.validate_execution_invariant_set(
+            invariant_set,
+        )
+        receipt_check = stage6c.validate_plan_approval_receipt(receipt, request)
+        authorization_check = stage6c.validate_approved_execution_authorization(
+            authorization, receipt, revalidation, request=request,
+            execution_invariant_set=invariant_set,
+            verification_obligation_coverage=coverage,
+        )
+        old_missing_artifact_audit = stage6cb.last_moment_authorization_audit(
+            authorization=authorization, receipt=receipt,
+            revalidation=revalidation, request=request, plan=plan,
+            current_state=current_state,
+            contracts=persisted_stage4.get("contracts", []),
+            graph=persisted_stage4.get("graph"), contract=contract,
+            workspace=live_root, project_id=authorization.get(
+                "source_bindings", {}
+            ).get("project_id"), subject_paths=(
+                contract.get("allowed_inspection_paths", [])
+                + contract.get("allowed_mutation_paths", [])
+                + contract.get("global_do_not_touch", [])
+            ),
+            verification_obligation_coverage=None,
+        )
+        exact_last_moment_audit = stage6cb.last_moment_authorization_audit(
+            authorization=authorization, receipt=receipt,
+            revalidation=revalidation, request=request, plan=plan,
+            current_state=current_state,
+            contracts=persisted_stage4.get("contracts", []),
+            graph=persisted_stage4.get("graph"), contract=contract,
+            workspace=live_root, project_id=authorization.get(
+                "source_bindings", {}
+            ).get("project_id"), subject_paths=(
+                contract.get("allowed_inspection_paths", [])
+                + contract.get("allowed_mutation_paths", [])
+                + contract.get("global_do_not_touch", [])
+            ),
+            verification_obligation_coverage=coverage,
+        )
+        start_subject = stage6cb.enumerate_execution_subject(live_root)
+        start_receipt = stage6cb.create_execution_start_receipt(
+            authorization, receipt, plan, contract,
+            pre_subject_hash=str(start_subject.get("hash") or ""),
+            pre_brain_hash=str(authorization.get("current_brain_hash") or ""),
+            workspace=live_root,
+            subject_paths=(
+                contract.get("allowed_inspection_paths", [])
+                + contract.get("allowed_mutation_paths", [])
+                + contract.get("global_do_not_touch", [])
+            ),
+            verification_obligation_coverage=coverage,
+        )
+        start_check = stage6cb.validate_execution_start_receipt(
+            start_receipt, authorization=authorization,
+            verification_obligation_coverage=coverage,
+        )
+        worker_mission = stage4.hydrate_worker_mission(
+            contract,
+            {
+                "objective": contract.get("goal"),
+                "implementation_steps": [
+                    "Add the approved observable while preserving existing behavior",
+                ],
+            },
+            [],
+        )
+        worker_projection = stage4.build_worker_context_projection(
+            worker_mission, contract, [], max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        worker_packet = stage4.render_worker_context_projection(
+            worker_projection, max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+        worker_packet_budget = stage4.audit_worker_context_budget(
+            worker_projection, old_v25_2_chars=4151,
+            max_chars=MAX_WORKER_MISSION_CHARS,
+        )
+
+        callback_calls = []
+        provider_calls = []
+
+        def forbidden_provider(*_args, **_kwargs):
+            provider_calls.append(True)
+            raise AssertionError("V25.4.1 self-test must not call a provider")
+
+        def injected_worker(**kwargs):
+            callback_calls.append({
+                "task_id": kwargs.get("task_id"),
+                "authorization": copy.deepcopy(kwargs.get("authorization")),
+                "start_receipt": copy.deepcopy(kwargs.get("start_receipt")),
+            })
+            return {
+                "status": "done",
+                "summary": "provider-free Worker dispatch proof",
+                "tool_evidence": [],
+            }
+
+        self_test_result = None
+        with tempfile.TemporaryDirectory(prefix="hivo_v25_4_1_selftest_") as temporary:
+            temporary_root = Path(temporary)
+            execution_root = temporary_root / "execution"
+            execution_root.mkdir()
+            for relative in subject_files:
+                target = execution_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((live_root / relative).read_bytes())
+            working_root = temporary_root / "working_brain"
+            (working_root / ".hivo").mkdir(parents=True)
+            shutil.copy2(historical_db, working_root / ".hivo" / "memory.sqlite3")
+            working_store = MemoryStore(working_root)
+            root_contract = {
+                "goal": plan.get("task_goal"),
+                "requirements": copy.deepcopy(plan.get("requirements", [])),
+                "success_criteria": copy.deepcopy(plan.get("requirements", [])),
+                "original_goal": plan.get("task_goal"),
+                "project_id": authorization.get("source_bindings", {}).get("project_id"),
+            }
+            execution_before = stage6cb.enumerate_execution_subject(execution_root)
+            ask_ollama = forbidden_provider
+            self_test_result, _ = run_approval_bound_execution_lifecycle(
+                plan=plan, request=request, receipt=receipt,
+                revalidation=revalidation, authorization=authorization,
+                contract=root_contract, memory={},
+                repo_snapshot=inspect_repository(execution_root),
+                workspace=execution_root, working_brain_store=working_store,
+                current_state=current_state, worker_callback=injected_worker,
+                verification_runner=None, execution_invariant_set=invariant_set,
+                repository_evidence=repository_evidence,
+                canonical_surface_registry=canonical_registry,
+                verification_obligation_coverage=coverage,
+            )
+            execution_after = stage6cb.enumerate_execution_subject(execution_root)
+            result_start_receipts = self_test_result.get(
+                "execution_start_receipts", []
+            ) if isinstance(self_test_result, dict) else []
+            result_start = result_start_receipts[0] if result_start_receipts else {}
+            result_start_check = stage6cb.validate_execution_start_receipt(
+                result_start, authorization=authorization,
+                verification_obligation_coverage=coverage,
+            ) if result_start else {"valid": False}
+            execution_contract_hash = None
+            child_results = self_test_result.get(
+                "approval_bound_execution_results", []
+            ) if isinstance(self_test_result, dict) else []
+            if child_results and isinstance(child_results[0], dict):
+                execution = child_results[0].get("worker_execution") or {}
+                execution_contract_hash = execution.get("execution_contract_hash")
+            subject_unchanged = (
+                execution_after.get("hash") == execution_before.get("hash")
+                and all(
+                    (execution_root / relative).read_bytes() == content
+                    for relative, content in {
+                        item: (live_root / item).read_bytes()
+                        for item in subject_files
+                    }.items()
+                )
+            )
+
+        checks = {
+            "persisted_plan_identity": (
+                plan.get("plan_id") == "PLAN-5E9D01B255C2"
+                and plan.get("plan_hash") == "5e9d01b255c23753eafa3fa76160b91b8b92486506580ffaf11f582b9522115a"
+            ),
+            "receipt_valid": receipt_check.get("valid") is True,
+            "authorization_valid_with_exact_coverage": authorization_check.get("valid") is True,
+            "invariant_set_valid": invariant_check.get("valid") is True,
+            "coverage_valid_and_ready": (
+                coverage_check.get("valid") is True
+                and coverage_check.get("coverage_hash") == authorization.get(
+                    "verification_obligation_coverage_hash"
+                )
+                and coverage_check.get("verification_ready") is True
+                and coverage_check.get("uncovered_obligation_ids") == []
+            ),
+            "old_missing_artifact_blocker_reproduced": (
+                old_missing_artifact_audit.get("allowed") is False
+                and any(
+                    isinstance(item, dict)
+                    and item.get("code") == stage6c.EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH
+                    for item in old_missing_artifact_audit.get("errors", [])
+                )
+            ),
+            "exact_artifact_closes_last_moment_blocker": (
+                exact_last_moment_audit.get("allowed") is True
+            ),
+            "start_receipt_coverage_bound": (
+                start_check.get("valid") is True
+                and start_receipt.get("verification_obligation_coverage_hash")
+                == coverage.get("coverage_hash")
+                and start_receipt.get("verification_obligation_coverage_ready") is True
+            ),
+            "provider_free_callback_reached_once": (
+                len(callback_calls) == 1 and not provider_calls
+            ),
+            "final_gate_passed_before_callback": (
+                len(callback_calls) == 1
+                and callback_calls[0].get("start_receipt", {}).get(
+                    "verification_obligation_coverage_hash"
+                ) == coverage.get("coverage_hash")
+            ),
+            "execution_start_receipt_reached": result_start_check.get("valid") is True,
+            "execution_start_receipt_has_exact_coverage": (
+                result_start.get("verification_obligation_coverage_hash")
+                == coverage.get("coverage_hash")
+            ),
+            "compiled_contract_identity_preserved": (
+                execution_contract_hash == contract.get("contract_hash")
+            ),
+            "no_subject_mutation_in_self_test": subject_unchanged,
+            "worker_packet_bounded": (
+                worker_packet_budget.get("final_revised_chars") == 4192
+                and worker_packet_budget.get("mandatory_drops") == 0
+                and len(worker_packet) <= MAX_WORKER_MISSION_CHARS
+                and "atomic_obligations" not in worker_packet
+                and coverage.get("coverage_hash") not in worker_packet
+            ),
+            "worker_packet_audit_non_regression": (
+                worker_packet_audit.get("provider_facing_packet_chars") == 4192
+                and worker_packet_audit.get("worker_context_budget", {}).get("context_limit") == 4200
+                and worker_packet_audit.get("worker_context_budget", {}).get("mandatory_drops") == 0
+            ),
+            "historical_brain_unchanged": historical_db.read_bytes() == historical_brain_before,
+            "failed_live_subject_unchanged": all(
+                (live_root / relative).read_bytes() == content
+                for relative, content in live_subject_before.items()
+            ),
+            "model_and_worker_provider_calls_zero": not provider_calls,
+        }
+        return {
+            "passed": all(checks.values()),
+            "status": "PASS" if all(checks.values()) else "FAIL",
+            "checks": checks,
+            "plan_id": plan.get("plan_id"),
+            "plan_hash": plan.get("plan_hash"),
+            "coverage_hash": coverage.get("coverage_hash"),
+            "verification_digest": authorization.get("verification_digest"),
+            "oracle_id": "ORACLE-PAUSE-INDICATOR",
+            "oracle_hash": "f1ccdc309c31709f3bc589b184a7f3d252de408f0b8da2e2ad908109f079b140",
+            "authorization_hash": authorization.get("authorization_hash"),
+            "contract_hash": contract.get("contract_hash"),
+            "execution_contract_hash": execution_contract_hash,
+            "worker_packet_chars": worker_packet_audit.get("provider_facing_packet_chars"),
+            "worker_packet_limit": MAX_WORKER_MISSION_CHARS,
+            "callback_calls": len(callback_calls),
+            "provider_calls": len(provider_calls),
+            "terminal_state": self_test_result.get("terminal_state") if isinstance(self_test_result, dict) else None,
+            "execution_start_receipt": copy.deepcopy(result_start),
+            "old_missing_artifact_audit": {
+                "allowed": old_missing_artifact_audit.get("allowed"),
+                "code": old_missing_artifact_audit.get("code"),
+                "error_codes": [
+                    item.get("code") for item in old_missing_artifact_audit.get("errors", [])
+                    if isinstance(item, dict)
+                ],
+            },
+            "exact_last_moment_audit": {
+                "allowed": exact_last_moment_audit.get("allowed"),
+                "code": exact_last_moment_audit.get("code"),
+            },
+            "model_calls": 0,
+            "worker_calls": 0,
+            "historical_brain_writes": 0,
+            "repository_subject_mutations": 0,
+        }
+    except Exception as exc:
+        return {
+            "passed": False, "status": "FAIL",
+            "checks": {"execution_exception_free": False},
+            "error": str(exc), "model_calls": 0, "worker_calls": 0,
+            "historical_brain_writes": 0, "repository_subject_mutations": 0,
+        }
+    finally:
+        WORKSPACE = saved["WORKSPACE"]
+        MEMORY_STORE = saved["MEMORY_STORE"]
+        RUN = saved["RUN"]
+        TASKS = saved["TASKS"]
+        ROLE_STATUS = saved["ROLE_STATUS"]
+        DASHBOARD = saved["DASHBOARD"]
+        RUN_STARTED = saved["RUN_STARTED"]
+        RUN_ID = saved["RUN_ID"]
+        ACTIVE_TRANSACTION = saved["ACTIVE_TRANSACTION"]
+        LAST_COMMITTED_TRANSACTION = saved["LAST_COMMITTED_TRANSACTION"]
+        ACTIVE_CONTRACT = saved["ACTIVE_CONTRACT"]
+        ACTIVE_TOOL_CONTRACT = saved["ACTIVE_TOOL_CONTRACT"]
+        VISION_ENABLED_FOR_RUN = saved["VISION_ENABLED_FOR_RUN"]
+        VISION_ERROR = saved["VISION_ERROR"]
+        PREFLIGHT_CONFLICT_STATE = saved["PREFLIGHT_CONFLICT_STATE"]
+        ask_ollama = saved["ask_ollama"]
+
+
+run_stage6c_b_v25_4_1_architecture_self_test = run_stage6c_b_v25_4_1_self_test
+run_stage6c_b_verification_coverage_propagation_self_test = run_stage6c_b_v25_4_1_self_test
+
+
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
                          leaf_executor=None, interactive=True):
     if reset:
@@ -21939,6 +22348,9 @@ def run_self_test(install_browser=False):
         v254_verification_complete_plan_self_test = run_stage6c_b_v25_4_self_test()
         for name, ok in v254_verification_complete_plan_self_test.get("checks", {}).items():
             print(f"{('v25.4 ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v2541_coverage_propagation_self_test = run_stage6c_b_v25_4_1_self_test()
+        for name, ok in v2541_coverage_propagation_self_test.get("checks", {}).items():
+            print(f"{('v25.4.1 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -22547,6 +22959,9 @@ def run_self_test(install_browser=False):
             ),
             "v25.4 verification-complete-plan self-test": (
                 v254_verification_complete_plan_self_test.get("passed") is True
+            ),
+            "v25.4.1 coverage-propagation self-test": (
+                v2541_coverage_propagation_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
