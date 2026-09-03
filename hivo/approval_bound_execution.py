@@ -21,6 +21,7 @@ from hivo import approval_authority as stage6c
 from hivo import execution_contracts as stage4
 from hivo import impact_planning as stage3
 from hivo import integration_gate
+from hivo import verification_obligation_coverage as verification_coverage
 from hivo import verification_routing
 
 
@@ -272,6 +273,7 @@ def create_execution_start_receipt(
     pre_brain_hash: str,
     workspace: str | os.PathLike,
     subject_paths: Iterable[Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create the one immutable-in-content proof for a Worker start."""
     auth = authorization if isinstance(authorization, dict) else {}
@@ -311,6 +313,22 @@ def create_execution_start_receipt(
         "subject_paths": paths,
         "receipt_hash": "",
     }
+    if isinstance(verification_obligation_coverage, dict):
+        value.update({
+            "verification_obligation_coverage_hash": verification_obligation_coverage.get("coverage_hash"),
+            "verification_obligation_coverage_status": (
+                verification_obligation_coverage.get("coverage_status")
+                or verification_obligation_coverage.get("status")
+            ),
+            "verification_obligation_coverage_ready": (
+                verification_obligation_coverage.get("verification_ready") is True
+            ),
+            "verification_obligation_uncovered_ids": [
+                str(item) for item in verification_obligation_coverage.get(
+                    "uncovered_obligation_ids", []
+                ) or []
+            ],
+        })
     identity_hash = stage6c.canonical_hash(_without(value, "execution_start_id", "receipt_hash"))
     value["execution_start_id"] = "START-" + identity_hash[:24].upper()
     value["receipt_hash"] = stage6c.canonical_hash(_without(value, "receipt_hash"))
@@ -321,7 +339,12 @@ create_approved_execution_start = create_execution_start_receipt
 create_approval_bound_execution_receipt = create_execution_start_receipt
 
 
-def validate_execution_start_receipt(receipt: dict[str, Any] | None) -> dict[str, Any]:
+def validate_execution_start_receipt(
+    receipt: dict[str, Any] | None,
+    *,
+    authorization: dict[str, Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     value = receipt if isinstance(receipt, dict) else {}
     errors: list[str] = []
     if value.get("schema_version") != SCHEMA_VERSION:
@@ -332,6 +355,48 @@ def validate_execution_start_receipt(receipt: dict[str, Any] | None) -> dict[str
         errors.append("execution-start receipt status is invalid")
     if not value.get("receipt_hash") or value.get("receipt_hash") != stage6c.canonical_hash(_without(value, "receipt_hash")):
         errors.append("execution-start receipt hash is invalid")
+    auth = authorization if isinstance(authorization, dict) else {}
+    coverage_bound = bool(auth.get("verification_obligation_coverage_hash"))
+    if coverage_bound and verification_obligation_coverage is None:
+        errors.append("execution-start receipt requires the exact verification-obligation coverage artifact")
+    if verification_obligation_coverage is not None:
+        coverage_check = verification_coverage.validate_verification_obligation_coverage(
+            verification_obligation_coverage,
+        )
+        if not coverage_check.get("valid"):
+            errors.extend(str(item) for item in coverage_check.get("errors", [])[:10])
+        expected = {
+            "verification_obligation_coverage_hash": verification_obligation_coverage.get("coverage_hash"),
+            "verification_obligation_coverage_status": (
+                verification_obligation_coverage.get("coverage_status")
+                or verification_obligation_coverage.get("status")
+            ),
+            "verification_obligation_coverage_ready": (
+                verification_obligation_coverage.get("verification_ready") is True
+            ),
+            "verification_obligation_uncovered_ids": [
+                str(item) for item in verification_obligation_coverage.get(
+                    "uncovered_obligation_ids", []
+                ) or []
+            ],
+        }
+        for field, expected_value in expected.items():
+            if value.get(field) != expected_value:
+                errors.append(f"execution-start receipt coverage binding is invalid: {field}")
+        if coverage_bound and value.get("verification_obligation_coverage_hash") != auth.get(
+            "verification_obligation_coverage_hash"
+        ):
+            errors.append("execution-start receipt coverage hash does not match authorization")
+    elif any(
+        value.get(field) not in (None, "", [], {})
+        for field in (
+            "verification_obligation_coverage_hash",
+            "verification_obligation_coverage_status",
+            "verification_obligation_coverage_ready",
+            "verification_obligation_uncovered_ids",
+        )
+    ):
+        errors.append("execution-start receipt contains coverage binding without the exact artifact")
     return {"valid": not errors, "errors": errors[:20], "receipt_hash": value.get("receipt_hash")}
 
 
@@ -488,6 +553,7 @@ def last_moment_authorization_audit(
     project_id: str | None = None,
     expected_start_receipt: dict[str, Any] | None = None,
     subject_paths: Iterable[Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Repeat the full V25 proof immediately before Worker dispatch."""
     auth = authorization if isinstance(authorization, dict) else {}
@@ -506,6 +572,7 @@ def last_moment_authorization_audit(
     errors: list[dict[str, Any]] = []
     auth_check = stage6c.validate_approved_execution_authorization(
         auth, approval, revalidation, request=request,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not auth_check.get("valid"):
         errors.extend(auth_check.get("errors", []))
@@ -574,6 +641,7 @@ def last_moment_authorization_audit(
         auth,
         plan=plan_value,
         graph=graph,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not contract_check.get("valid"):
         errors.extend(contract_check.get("errors", []))
@@ -611,7 +679,11 @@ def last_moment_authorization_audit(
     errors.extend(_authorization_binding_errors(auth, approval, current_binding))
 
     if expected_start_receipt is not None:
-        start_check = validate_execution_start_receipt(expected_start_receipt)
+        start_check = validate_execution_start_receipt(
+            expected_start_receipt,
+            authorization=auth,
+            verification_obligation_coverage=verification_obligation_coverage,
+        )
         if not start_check.get("valid"):
             errors.extend({"code": "EXECUTION_START_RECEIPT_INVALID", "field": item} for item in start_check.get("errors", []))
         else:
@@ -1052,6 +1124,7 @@ def execute_approval_bound_worker(
     worker_context: str,
     worker_dispatch: Callable[..., Any],
     verification_runner: Callable[..., Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
     execute_command: Callable[[str], Any] | None = None,
     store: Any = None,
     project_id: str | None = None,
@@ -1088,6 +1161,7 @@ def execute_approval_bound_worker(
         contracts=contracts, graph=graph, contract=contract,
         workspace=workspace, store=store, project_id=project_id,
         subject_paths=paths,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not audit.get("allowed"):
         if callable(on_authorization_block):
@@ -1108,8 +1182,13 @@ def execute_approval_bound_worker(
         pre_subject_hash=str(pre_subject.get("hash") or ""),
         pre_brain_hash=str(pre_brain or ""), workspace=workspace,
         subject_paths=paths,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
-    start_check = validate_execution_start_receipt(start_receipt)
+    start_check = validate_execution_start_receipt(
+        start_receipt,
+        authorization=authorization,
+        verification_obligation_coverage=verification_obligation_coverage,
+    )
     if not start_check.get("valid"):
         return {
             "status": "blocked", "terminal_state": WORKER_AUTHORIZATION_INVALID,
@@ -1128,6 +1207,7 @@ def execute_approval_bound_worker(
             contracts=contracts, graph=graph, contract=contract,
             workspace=workspace, store=store, project_id=project_id,
             expected_start_receipt=start_receipt, subject_paths=paths,
+            verification_obligation_coverage=verification_obligation_coverage,
         )
 
     try:
