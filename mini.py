@@ -17,6 +17,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from hivo.browser_checks import run_profile_interactions
 from hivo.context import compact_messages
@@ -20120,6 +20121,529 @@ run_stage6c_b_v25_4_1_architecture_self_test = run_stage6c_b_v25_4_1_self_test
 run_stage6c_b_verification_coverage_propagation_self_test = run_stage6c_b_v25_4_1_self_test
 
 
+def run_stage6c_b_v25_4_2_self_test(
+    artifact_root=None, brain_database_path=None,
+):
+    """Replay exact approved routing and verification without providers.
+
+    The persisted V25.4.1 live directory is read-only evidence.  Commands,
+    the direct oracle, Stage 5B readiness, and the optional Stage 5C boundary
+    all run against temporary subject/Brain copies.  No Worker callback or
+    model entrypoint is reachable from this function.
+    """
+    def _read(root, name, field=None):
+        with (Path(root) / "artifacts" / name).open("r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value.get(field) if field else value
+
+    def _subject_copy(source_root, destination_root, relatives):
+        copied = {}
+        for relative in relatives:
+            source = Path(source_root) / relative
+            target = Path(destination_root) / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = source.read_bytes()
+            target.write_bytes(data)
+            copied[relative] = data
+        return copied
+
+    live_root = Path(
+        artifact_root
+        or Path(__file__).resolve().parent
+        / "output" / "hivo-v25-4-1-stage6c-b-verification-complete-live-1"
+    ).expanduser().resolve()
+    if live_root.name.casefold() == "artifacts" and live_root.is_dir():
+        live_root = live_root.parent
+    historical_db = Path(
+        brain_database_path
+        or live_root.parent / "hivo-v22-stage5c-fresh-receipts-live-1"
+        / ".hivo" / "memory.sqlite3"
+    ).expanduser().resolve()
+    subject_files = (
+        "src/input.js", "src/pause_controller.js", "src/status_view.js",
+        "tests/input.test.js", "tests/pause_flow.integration.test.js",
+        "tests/status_view.test.js",
+    )
+    checks: dict[str, bool] = {}
+    command_results: list[dict[str, Any]] = []
+    corrected_artifact: dict[str, Any] = {}
+    aggregation: dict[str, Any] = {}
+    direct_result: dict[str, Any] = {}
+    readiness: dict[str, Any] = {}
+    integration: dict[str, Any] = {}
+    promotion: dict[str, Any] = {}
+    reentry: dict[str, Any] = {}
+    try:
+        routing = stage6cb.verification_routing
+        plan = _read(live_root, "revised_plan_source.json", "plan")
+        authorization = _read(live_root, "execution_authorization.json")
+        stage4_artifact = _read(live_root, "stage4_contracts.json")
+        contract = next(
+            item for item in stage4_artifact.get("contracts", [])
+            if isinstance(item, dict) and item.get("responsibility_type") == stage4.MUTATION
+        )
+        persisted_applicability = _read(live_root, "verification_applicability.json")
+        oracle_source = _read(live_root, "direct_behavior_oracle_source.json")
+        oracle = oracle_source.get("oracle") if isinstance(oracle_source, dict) else {}
+        final_summary = _read(live_root, "final_validation_summary.json")
+        packet_audit = _read(live_root, "worker_packet_audit.json")
+        approval_validation = _read(live_root, "approval_receipt_validation.json")
+        receipt = _read(live_root, "approval_receipt.json")
+        plan_hash = plan.get("plan_hash")
+        coverage_hash = authorization.get("verification_obligation_coverage_hash")
+        verification_digest = authorization.get("verification_digest")
+        oracle_hash = oracle.get("oracle_hash")
+
+        live_subject_before = stage6cb.enumerate_execution_subject(live_root)
+        live_subject_bytes = {
+            relative: (live_root / relative).read_bytes()
+            for relative in subject_files
+        }
+        brain_before = historical_db.read_bytes()
+        approval_files = (
+            "revised_plan_source.json", "approval_receipt.json",
+            "execution_authorization.json", "verification_obligation_coverage_source.json",
+            "direct_behavior_oracle_source.json",
+        )
+        approval_bytes = {
+            relative: (live_root / "artifacts" / relative).read_bytes()
+            for relative in approval_files
+        }
+
+        # Reproduce the historical bug using the exact old lossy projection:
+        # only id+contract reach the generic analyzer, so the direct oracle's
+        # target/spec authority is absent before discovery starts.
+        raw_records = authorization.get("approved_verification_contracts", [])
+        direct_record = next(
+            item for item in raw_records
+            if isinstance(item, dict) and item.get("verification_id") == "VERIFICATION-004"
+        )
+        lossy_direct_record = {
+            "verification_id": direct_record.get("verification_id"),
+            "contract": copy.deepcopy(direct_record.get("contract", [])),
+        }
+        known_files = [
+            item.get("path") for item in live_subject_before.get("paths", [])
+            if isinstance(item, dict) and item.get("path")
+        ]
+        known_tests = stage6cb._known_test_files(live_root, known_files)
+        pre_fix_artifact = routing.analyze_verification_applicability(
+            {"id": "EXEC-001"}, contract,
+            {"files": known_files, "tests": known_tests, "entrypoints": []},
+            test_contract=lossy_direct_record.get("contract", []),
+            mutation_paths=contract.get("allowed_mutation_paths", []) or [],
+            inspection_paths=contract.get("allowed_inspection_paths", []) or [],
+            workspace=live_root, known_test_files=known_tests,
+        )
+        pre_fix_null = next(
+            (item for item in pre_fix_artifact.get("verification_routes", []) or []
+             if item.get("kind") == FOCUSED_TEST and item.get("required") is True),
+            {},
+        )
+        checks["pre_fix_null_route_reproduced"] = (
+            pre_fix_null.get("target") is None
+            and pre_fix_null.get("result") == BLOCKED_REQUIRED_TARGET_MISSING
+            and AMBIGUOUS_SUPPORTED_TARGET in pre_fix_null.get("reason_codes", [])
+            and pre_fix_null.get("resolution_status") == VERIFICATION_TARGET_UNRESOLVED
+        )
+        checks["pre_fix_origin_is_lossy_authority_projection"] = (
+            "target" not in lossy_direct_record
+            and "oracle_id" not in lossy_direct_record
+            and direct_record.get("target") == "src/status_view.js"
+            and direct_record.get("oracle_id") == "ORACLE-PAUSE-INDICATOR"
+        )
+        checks["historical_live_route_contains_phantom"] = any(
+            isinstance(item, dict)
+            and item.get("required") is True
+            and item.get("target") is None
+            and item.get("result") == BLOCKED_REQUIRED_TARGET_MISSING
+            for item in (persisted_applicability.get("verification_routes", []) or [])
+        )
+
+        with tempfile.TemporaryDirectory(
+            prefix="hivo_v25_4_2_exact_routing_selftest_", ignore_cleanup_errors=True,
+        ) as temporary:
+            temporary_root = Path(temporary)
+            execution_root = temporary_root / "execution"
+            execution_root.mkdir()
+            temporary_subject_bytes = _subject_copy(live_root, execution_root, subject_files)
+            working_root = temporary_root / "working_brain"
+            (working_root / ".hivo").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(historical_db, working_root / ".hivo" / "memory.sqlite3")
+            working_store = MemoryStore(working_root)
+
+            post_subject = stage6cb.enumerate_execution_subject(execution_root)
+            corrected_input = stage6cb.build_stage5a_verification_input(
+                task={"id": "EXEC-001"},
+                contract=contract,
+                authorization=authorization,
+                workspace=execution_root,
+                post_subject=post_subject,
+                execution_result={},
+            )
+            corrected_artifact = corrected_input.get("artifact", {})
+            corrected_routes = [
+                item for item in corrected_artifact.get("verification_routes", []) or []
+                if isinstance(item, dict)
+            ]
+            all_bindings = [
+                item for item in corrected_artifact.get("verification_route_bindings", []) or []
+                if isinstance(item, dict)
+            ]
+            direct_routes = [
+                item for item in corrected_artifact.get("direct_oracle_routes", []) or []
+                if isinstance(item, dict)
+            ]
+            required_targets = {
+                item.get("target") for item in corrected_routes
+                if item.get("required") is True and item.get("applicable") is True
+            }
+            expected_executable_targets = {
+                "tests/input.test.js", "src/input.js",
+                "tests/pause_flow.integration.test.js", "tests/status_view.test.js",
+            }
+            checks["corrected_route_validation"] = (
+                corrected_artifact.get("route_validation", {}).get("valid") is True
+            )
+            checks["corrected_required_targets_exact"] = (
+                required_targets == expected_executable_targets
+                and not any(
+                    item.get("required") is True and item.get("target") is None
+                    for item in corrected_routes
+                )
+            )
+            checks["no_required_phantom_route"] = not any(
+                item.get("required") is True
+                and item.get("target") is None
+                and item.get("result") == BLOCKED_REQUIRED_TARGET_MISSING
+                for item in corrected_routes
+            )
+            checks["exact_authorities_have_no_unsupported_ambiguity"] = not any(
+                item.get("required") is True
+                and item.get("resolution_mode") == routing.UNRESOLVED
+                for item in all_bindings
+                if item.get("authority_id") in {
+                    "VERIFICATION-001", "VERIFICATION-002",
+                    "VERIFICATION-003", "VERIFICATION-004",
+                }
+            )
+            checks["all_mandatory_routes_have_authority"] = all(
+                item.get("authority_id") and item.get("authority_source")
+                for item in all_bindings if item.get("required") is True
+            )
+            checks["direct_oracle_is_exact_and_separate"] = (
+                len(direct_routes) == 1
+                and direct_routes[0].get("verification_id") == "VERIFICATION-004"
+                and direct_routes[0].get("oracle_id") == "ORACLE-PAUSE-INDICATOR"
+                and direct_routes[0].get("target") == "src/status_view.js"
+                and direct_routes[0].get("route_type") == routing.DIRECT_ORACLE
+                and direct_routes[0].get("resolution_mode") == routing.EXACT_APPROVED_TARGET
+                and direct_routes[0].get("execution_channel") == routing.DIRECT_ORACLE_EXECUTION
+            )
+            syntax_routes = [
+                item for item in corrected_routes
+                if item.get("kind") == SYNTAX_STATIC_GATE
+            ]
+            checks["system_syntax_route_exact_and_resolved"] = (
+                len(syntax_routes) == 1
+                and syntax_routes[0].get("target") == "src/input.js"
+                and syntax_routes[0].get("required") is True
+                and syntax_routes[0].get("applicable") is True
+                and syntax_routes[0].get("route_type") == routing.DETERMINISTIC_SYSTEM_SAFETY_CHECK
+                and syntax_routes[0].get("resolution_mode") == routing.DETERMINISTIC_SYSTEM_TARGET
+            )
+
+            for route in corrected_routes:
+                if route.get("required") is not True or route.get("applicable") is not True:
+                    continue
+                command = stage6cb._command_for_route(route)
+                if not command:
+                    command_results.append({
+                        "target": route.get("target"), "command": None,
+                        "exit_code": None, "passed": False,
+                    })
+                    continue
+                try:
+                    completed = subprocess.run(
+                        command, cwd=str(execution_root), shell=True,
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=30, check=False,
+                    )
+                    output = " ".join(((completed.stdout or "") + (completed.stderr or "")).split())
+                    result_text = f"[exit_code={completed.returncode}] {output}".strip()
+                    command_results.append({
+                        "target": route.get("target"), "command": command,
+                        "exit_code": completed.returncode,
+                        "passed": completed.returncode == 0,
+                        "result": result_text[:1200],
+                    })
+                except (OSError, subprocess.SubprocessError) as exc:
+                    command_results.append({
+                        "target": route.get("target"), "command": command,
+                        "exit_code": None, "passed": False, "result": str(exc),
+                    })
+            command_evidence = [
+                {
+                    "tool": "run_command", "target": item.get("target"),
+                    "command": item.get("command"), "result": item.get("result", ""),
+                }
+                for item in command_results
+            ]
+            aggregation = routing.aggregate_verification_evidence(
+                corrected_artifact, command_evidence,
+            )
+            direct_result = stage6c_remediation.execute_direct_behavior_oracle(
+                oracle, execution_root,
+            )
+            legacy_passes = {
+                item.get("target") for item in command_results
+                if item.get("passed") is True
+            }
+            checks["legacy_verification_commands_pass"] = (
+                all(item.get("passed") is True for item in command_results)
+                and legacy_passes == expected_executable_targets
+                and aggregation.get("passed") is True
+            )
+            checks["direct_oracle_passes"] = (
+                direct_result.get("status") == stage6c_remediation.PASS
+                and direct_result.get("valid") is True
+                and direct_result.get("model_calls") == 0
+                and direct_result.get("worker_calls") == 0
+            )
+
+            parent_contract = {
+                "contract_hash": "V2542-PARENT-CONTRACT",
+                "plan_hash": plan_hash,
+                "execution_contract_id": "V2542-PARENT",
+                "project_id": "v25-4-2-routing-self-test",
+                "state_ownership": ["PauseController owns pause state"],
+                "interfaces_to_reuse": ["PauseController.togglePause()"],
+                "preservation_constraints": ["legacy renderStatus remains primitive string"],
+                "structured_prohibitions": ["do not create a second pause-state owner"],
+            }
+            parent = {
+                "id": "V2542-PARENT",
+                "goal": "integrate exact approved verification routes",
+                "integration_routes": [{
+                    "kind": "INTEGRATION_TEST", "required": True, "applicable": True,
+                    "target": "tests/pause_flow.integration.test.js", "result": routing.PENDING,
+                }, {
+                    "kind": "BROWSER", "required": False, "applicable": False,
+                    "target": None, "result": routing.SKIPPED_NOT_APPLICABLE,
+                }],
+            }
+            child_plan = []
+            child_pairs = []
+            child_receipts = {}
+            for child_id, source in (("A", "src/input.js"), ("B", "src/status_view.js")):
+                child_contract = {
+                    "execution_contract_id": f"V2542-EXEC-{child_id}",
+                    "contract_hash": f"V2542-CONTRACT-{child_id}",
+                    "plan_hash": plan_hash,
+                    "allowed_mutation_paths": [source],
+                    "plan_node_ids": [f"V2542-NODE-{child_id}"],
+                    "owned_plan_node_ids": [f"V2542-NODE-{child_id}"],
+                }
+                child_task = {
+                    "id": child_id, "parent": parent["id"], "status": "done",
+                    "execution_contract_id": child_contract["execution_contract_id"],
+                    "execution_contract_hash": child_contract["contract_hash"],
+                    "approved_plan_hash": plan_hash,
+                    "execution_contract": child_contract,
+                    "plan_node_ids": child_contract["plan_node_ids"],
+                    "owned_plan_node_ids": child_contract["owned_plan_node_ids"],
+                    "done_when": [f"{child_id} is verified"],
+                }
+                child_result = {
+                    "status": "done",
+                    "summary": f"{child_id} exact routing replay passed",
+                    "gate": {"verification_aggregation": copy.deepcopy(aggregation)},
+                    "builder": {"status": "done", "tool_evidence": copy.deepcopy(command_evidence)},
+                }
+                child_receipt = _create_verified_child_receipt_v21(
+                    child_task, child_result, parent_id=parent["id"],
+                    parent_contract=parent_contract,
+                    verification_applicability=corrected_artifact,
+                    verification_aggregation=aggregation,
+                    verification_evidence=command_evidence,
+                    workspace=execution_root,
+                    mutation_paths=[source],
+                )
+                child_plan.append({
+                    "child_id": child_id, "required": True,
+                    "execution_contract_id": child_contract["execution_contract_id"],
+                    "contract_hash": child_contract["contract_hash"],
+                    "plan_node_ids": child_contract["plan_node_ids"],
+                    "owned_plan_node_ids": child_contract["owned_plan_node_ids"],
+                })
+                child_pairs.append((child_task, child_result))
+                child_receipts[child_id] = child_receipt
+            parent["validated_child_plan"] = child_plan
+            readiness = _assess_integration_readiness_v21(
+                parent, child_pairs, child_receipts,
+                parent_contract=parent_contract,
+                validated_child_plan=child_plan,
+                workspace=execution_root,
+                parent_verification_applicability=corrected_artifact,
+            )
+            integration = _aggregate_parent_integration_v21(
+                parent, parent_contract, readiness,
+                [{
+                    "tool": "run_command",
+                    "target": "tests/pause_flow.integration.test.js",
+                    "result": "[exit_code=0] integration passed",
+                }],
+                workspace=execution_root,
+            )
+            checks["verified_child_readiness_ready"] = (
+                readiness.get("readiness") == "READY"
+                and readiness.get("reason") is None
+                and readiness.get("coverage", {}).get("complete") is True
+            )
+            checks["stage5b_not_blocked_by_old_route"] = (
+                readiness.get("readiness") == "READY"
+                and not any(
+                    item.get("target") is None and item.get("required") is True
+                    for item in corrected_routes
+                )
+            )
+            checks["integration_boundary_passes"] = (
+                integration.get("status") == PARENT_VERIFIED
+                and integration.get("parent_verified") is True
+            )
+
+            promotion = _promote_verified_parent_v22(
+                parent=parent,
+                parent_receipt=integration.get("parent_verification_receipt"),
+                parent_contract=parent_contract,
+                parent_result=integration,
+                child_receipts=child_receipts,
+                workspace=execution_root,
+                project_id=parent_contract["project_id"],
+                store=working_store,
+                task_id=parent["id"],
+                artifact_refs=["v25.4.2:provider-free-routing-replay"],
+            )
+            checks["temporary_promotion_preconditions_ready"] = (
+                promotion.get("promotion_status") in {PROMOTED, ALREADY_PROMOTED}
+            )
+            checks["historical_promotion_not_attempted"] = (
+                historical_db.read_bytes() == brain_before
+            )
+
+            # The existing V23 re-entry self-test is itself temporary/read-only
+            # and provider-free; preserve that architecture boundary here.
+            reentry = run_verified_state_reentry_self_test()
+            checks["temporary_reentry_boundary_passes"] = reentry.get("passed") is True
+            checks["temporary_subject_unchanged"] = (
+                all(
+                    (execution_root / relative).read_bytes() == content
+                    for relative, content in temporary_subject_bytes.items()
+                )
+            )
+
+        checks["plan_identity_unchanged"] = (
+            plan.get("plan_id") == "PLAN-5E9D01B255C2"
+            and plan_hash == "5e9d01b255c23753eafa3fa76160b91b8b92486506580ffaf11f582b9522115a"
+        )
+        checks["verification_digest_unchanged"] = (
+            verification_digest == "98a8ed7513a7f3da21a3e5062712890ad2f499c390070e7cbaa3f57b2b655b51"
+        )
+        checks["coverage_hash_unchanged"] = (
+            coverage_hash == "6bab7c0383a56446d00c6681675366b020a17f524d5bb46b9349ff9c03a85402"
+        )
+        checks["oracle_hash_unchanged"] = (
+            oracle_hash == "f1ccdc309c31709f3bc589b184a7f3d252de408f0b8da2e2ad908109f079b140"
+        )
+        checks["approval_receipt_integrity_preserved"] = (
+            approval_validation.get("valid") is True
+            and receipt.get("receipt_hash") == "b94af87ad1847cd277a5f671dedcd276827c137219504cd9f3b0361360f194a3"
+        )
+        checks["worker_packet_unchanged"] = (
+            packet_audit.get("historical_provider_facing_packet_chars") == 4192
+            and packet_audit.get("context_limit") == 4200
+            and packet_audit.get("mandatory_drops") == 0
+        )
+        checks["historical_brain_unchanged"] = historical_db.read_bytes() == brain_before
+        checks["historical_subject_unchanged"] = (
+            stage6cb.enumerate_execution_subject(live_root).get("hash") == live_subject_before.get("hash")
+            and all((live_root / relative).read_bytes() == data for relative, data in live_subject_bytes.items())
+        )
+        checks["historical_approval_files_unchanged"] = all(
+            (live_root / "artifacts" / relative).read_bytes() == data
+            for relative, data in approval_bytes.items()
+        )
+        checks["no_provider_or_worker_calls"] = (
+            sum(int(direct_result.get(key, 0) or 0) for key in ("model_calls", "worker_calls")) == 0
+            and not any(item.get("model_calls", 0) or item.get("worker_calls", 0) for item in (reentry, promotion) if isinstance(item, dict))
+        )
+        checks["historical_live_remains_unpromoted"] = (
+            final_summary.get("terminal_state") == "VERIFICATION_FAILED"
+            and final_summary.get("execution_time_coverage", {}).get("direct_behavior_oracle_passed") is True
+        )
+        passed = all(checks.values())
+        return {
+            "passed": passed,
+            "status": "PASS" if passed else "FAIL",
+            "checks": checks,
+            "pre_fix": {
+                "verification_id": lossy_direct_record.get("verification_id"),
+                "target": pre_fix_null.get("target"),
+                "result": pre_fix_null.get("result"),
+                "reason_codes": pre_fix_null.get("reason_codes", []),
+                "candidate_targets": pre_fix_null.get("candidate_targets", []),
+                "source": "lossy approved-record projection -> generic _test_target",
+            },
+            "route_audit": corrected_artifact.get("route_audit", []),
+            "route_validation": corrected_artifact.get("route_validation", {}),
+            "corrected_routes": copy.deepcopy(corrected_artifact.get("verification_routes", [])),
+            "direct_oracle_route": copy.deepcopy((corrected_artifact.get("direct_oracle_routes") or [None])[0]),
+            "command_results": command_results,
+            "verification_aggregation": copy.deepcopy(aggregation),
+            "direct_oracle": copy.deepcopy(direct_result),
+            "stage5b_readiness": copy.deepcopy(readiness),
+            "stage5b_integration": copy.deepcopy(integration),
+            "temporary_promotion": {
+                "status": promotion.get("promotion_status"),
+                "model_calls": promotion.get("model_calls", 0),
+                "worker_calls": promotion.get("worker_calls", 0),
+            },
+            "temporary_reentry": {
+                "passed": reentry.get("passed"),
+                "model_calls": reentry.get("model_calls", 0),
+            },
+            "plan_id": plan.get("plan_id"),
+            "plan_hash": plan_hash,
+            "verification_digest": verification_digest,
+            "coverage_hash": coverage_hash,
+            "oracle_hash": oracle_hash,
+            "approval_receipt_hash": receipt.get("receipt_hash"),
+            "model_calls": 0,
+            "worker_calls": 0,
+            "provider_calls": 0,
+            "historical_brain_writes": 0,
+            "repository_subject_mutations": 0,
+        }
+    except Exception as exc:
+        return {
+            "passed": False,
+            "status": "FAIL",
+            "checks": {"execution_exception_free": False},
+            "error": str(exc),
+            "command_results": command_results,
+            "route_audit": corrected_artifact.get("route_audit", []),
+            "model_calls": 0,
+            "worker_calls": 0,
+            "provider_calls": 0,
+            "historical_brain_writes": 0,
+            "repository_subject_mutations": 0,
+        }
+
+
+run_stage6c_b_v25_4_2_architecture_self_test = run_stage6c_b_v25_4_2_self_test
+run_stage6c_b_approved_verification_exact_routing_self_test = run_stage6c_b_v25_4_2_self_test
+
+
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
                          leaf_executor=None, interactive=True):
     if reset:
@@ -22077,6 +22601,9 @@ def run_self_test(install_browser=False):
         v2541_coverage_propagation_self_test = run_stage6c_b_v25_4_1_self_test()
         for name, ok in v2541_coverage_propagation_self_test.get("checks", {}).items():
             print(f"{('v25.4.1 ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v2542_exact_routing_self_test = run_stage6c_b_v25_4_2_self_test()
+        for name, ok in v2542_exact_routing_self_test.get("checks", {}).items():
+            print(f"{('v25.4.2 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -22688,6 +23215,9 @@ def run_self_test(install_browser=False):
             ),
             "v25.4.1 coverage-propagation self-test": (
                 v2541_coverage_propagation_self_test.get("passed") is True
+            ),
+            "v25.4.2 exact-routing self-test": (
+                v2542_exact_routing_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
