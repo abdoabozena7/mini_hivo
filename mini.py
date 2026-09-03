@@ -36,6 +36,7 @@ from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
+from hivo import execution_invariants as stage6c_invariants
 from hivo import reentry as stage6a
 from hivo import verified_planning as stage6b
 from hivo import approval_authority as stage6c
@@ -7338,7 +7339,7 @@ def _authority_fail_closed_result(code, message="", base=None, task_id=None):
 
 
 def compile_approved_plan_execution_contracts(contract=None, plan=None, approval=None,
-                                              force=False):
+                                              force=False, execution_invariant_set=None):
     """Snapshot the approved Stage 3 plan and compile its deterministic DAG.
 
     This is the only entry point that creates Stage 4A authority.  It never
@@ -7368,7 +7369,16 @@ def compile_approved_plan_execution_contracts(contract=None, plan=None, approval
                 RUN.get("pre_execution_approval_revalidation"),
                 RUN.get("execution_authorization"),
                 request=RUN.get("approval_request"),
+                requirements=(bound_plan or {}).get("requirements", []) if isinstance(bound_plan, dict) else None,
+                repository_evidence=RUN.get("repository_evidence", []) or [],
+                canonical_surface_registry=RUN.get("canonical_surface_registry"),
                 authoritative_task_goal=_stage4_authoritative_goal(contract, bound_plan),
+                execution_invariant_set=(
+                    execution_invariant_set
+                    if execution_invariant_set is not None
+                    else RUN.get("execution_invariant_set")
+                ),
+                execution_invariant_source_root=RUN.get("execution_workspace"),
             )
         except stage6c.ApprovalAuthorityError as exc:
             return _stage4_failure_result(
@@ -7572,6 +7582,21 @@ def compile_approval_bound_execution_contracts(plan, receipt, revalidation, auth
     RUN["approval_bound_execution_contracts"] = result.get("contracts", [])
     RUN["approval_bound_execution_graph"] = result.get("graph")
     return result
+
+
+def build_execution_invariant_set(**kwargs):
+    """Provider-free V25.2 invariant construction seam."""
+    return stage6c_invariants.build_execution_invariant_set(**kwargs)
+
+
+def validate_execution_invariant_set(invariant_set, **kwargs):
+    return stage6c_invariants.validate_execution_invariant_set(invariant_set, **kwargs)
+
+
+def build_worker_execution_invariant_projection(invariant_set, contract=None, **kwargs):
+    return stage6c_invariants.build_worker_execution_invariant_projection(
+        invariant_set, contract, **kwargs,
+    )
 
 
 def worker_authorization_gate(authorization=None, receipt=None, revalidation=None, **kwargs):
@@ -8255,7 +8280,10 @@ def _worker_context_projection_artifact(mission, contract, dependency_summaries=
         RUN["worker_context_projection_failures"] = RUN.get(
             "worker_context_projection_failures", 0,
         ) + 1
-        if exc.code == stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE:
+        if exc.code in {
+            stage4.WORKER_CONTEXT_AUTHORITY_TOO_LARGE,
+            stage4.WORKER_EXECUTION_INVARIANT_CONTEXT_OVERFLOW,
+        }:
             RUN["worker_context_authority_overflows"] = RUN.get(
                 "worker_context_authority_overflows", 0,
             ) + 1
@@ -8299,10 +8327,34 @@ def _worker_context_projection_artifact(mission, contract, dependency_summaries=
                 "interfaces_to_reuse", "requirements", "preservation", "prohibitions",
                 "do_not_touch", "test_contract", "done_when", "dependencies",
                 "relevant_repository_facts",
+                "execution_invariant_set_hash", "execution_invariant_ids",
+                "execution_invariant_relevant_ids", "execution_invariants",
+                "execution_invariant_projection",
             )
         },
         "advice_field_source": "MODEL",
     }
+    if projection.get("execution_invariant_set_hash"):
+        invariant_projection = projection.get("execution_invariant_projection", {})
+        artifact.update({
+            "execution_invariant_set_hash": projection.get("execution_invariant_set_hash"),
+            "execution_invariant_ids": list(projection.get("execution_invariant_ids", []) or []),
+            "execution_invariant_mandatory_drops": int(
+                (invariant_projection or {}).get("mandatory_drops", 0) or 0
+            ) if isinstance(invariant_projection, dict) else 0,
+            "execution_invariant_projection_chars": len(
+                stage6c_invariants.render_worker_execution_invariant_projection(
+                    invariant_projection, max_chars=MAX_WORKER_MISSION_CHARS,
+                )
+            ) if isinstance(invariant_projection, dict) else 0,
+            "execution_invariant_provider_facing_hash": (
+                stage6c_invariants.canonical_hash(
+                    stage6c_invariants.render_worker_execution_invariant_projection(
+                        invariant_projection, max_chars=MAX_WORKER_MISSION_CHARS,
+                    )
+                ) if isinstance(invariant_projection, dict) else ""
+            ),
+        })
     if isinstance(cache, dict):
         cache[key] = copy.deepcopy(artifact)
     RUN["worker_context_projections_created"] = RUN.get(
@@ -17576,7 +17628,10 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         RUN["stage5b_enabled"] = True
     state = compile_approved_plan_execution_contracts(contract=contract)
     if state.get("status") not in ({"ready", EXECUTION_AUTHORIZATION_READY} if approval_bound else {"ready"}):
-        return dict(state), memory
+        blocked_state = dict(state)
+        blocked_state.setdefault("worker_calls", 0)
+        blocked_state.setdefault("model_calls", 0)
+        return blocked_state, memory
     snapshot = state.get("snapshot")
     graph = state.get("graph") or {}
     if approval_bound:
@@ -17998,7 +18053,9 @@ def run_approval_bound_execution_lifecycle(
     plan=None, request=None, receipt=None, revalidation=None,
     authorization=None, contract=None, memory=None, repo_snapshot=None,
     workspace=None, working_brain_store=None, current_state=None,
-    worker_callback=None, verification_runner=None, reset=True,
+    worker_callback=None, verification_runner=None, execution_invariant_set=None,
+    repository_evidence=None, canonical_surface_registry=None,
+    reset=True,
 ):
     """Run V25.1 from immutable approval through Stage 5 and V23.1 re-entry.
 
@@ -18061,6 +18118,12 @@ def run_approval_bound_execution_lifecycle(
         RUN["approval_receipt"] = copy.deepcopy(active_receipt)
         RUN["pre_execution_approval_revalidation"] = copy.deepcopy(active_revalidation)
         RUN["execution_authorization"] = copy.deepcopy(active_authorization)
+        RUN["execution_invariant_set"] = (
+            copy.deepcopy(execution_invariant_set)
+            if execution_invariant_set is not None else RUN.get("execution_invariant_set")
+        )
+        RUN["repository_evidence"] = copy.deepcopy(repository_evidence or [])
+        RUN["canonical_surface_registry"] = copy.deepcopy(canonical_surface_registry)
         RUN["approval_bound_current_state"] = copy.deepcopy(current_state)
         RUN["execution_workspace"] = str(execution_root)
         RUN["_working_brain_store"] = working_brain_store
@@ -18110,6 +18173,9 @@ def run_approval_bound_execution_lifecycle(
         RUN.pop("_working_brain_store", None)
         RUN.pop("_approval_bound_worker_callback", None)
         RUN.pop("_approval_bound_verification_runner", None)
+        RUN.pop("execution_invariant_set", None)
+        RUN.pop("repository_evidence", None)
+        RUN.pop("canonical_surface_registry", None)
 
 
 run_stage6c_b_execution = run_approval_bound_execution_lifecycle
@@ -18261,6 +18327,285 @@ module.exports = { renderStatus, renderPauseIndicator };"""
 
 
 run_stage6c_b_architecture_self_test = run_stage6c_b_self_test
+
+
+def run_stage6c_b_v25_2_self_test(artifact_root=None, brain_database_path=None,
+                                  fixture_root=None):
+    """Exercise V25.2 invariant projection through an isolated fixture.
+
+    This deliberately sits beside, rather than inside, the V25.1 self-test:
+    the latter already proves promotion and post-promotion re-entry and must
+    retain that coverage.  This test adds the deterministic invariant seam
+    before the injected Worker while never reaching a real provider.
+    """
+    global WORKSPACE, MEMORY_STORE, RUN, TASKS, ROLE_STATUS, DASHBOARD
+    global RUN_STARTED, RUN_ID, ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, VISION_ENABLED_FOR_RUN
+    global VISION_ERROR, PREFLIGHT_CONFLICT_STATE, ask_ollama
+    saved = {
+        "WORKSPACE": WORKSPACE, "MEMORY_STORE": MEMORY_STORE, "RUN": RUN,
+        "TASKS": TASKS, "ROLE_STATUS": ROLE_STATUS, "DASHBOARD": DASHBOARD,
+        "RUN_STARTED": RUN_STARTED, "RUN_ID": RUN_ID,
+        "ACTIVE_TRANSACTION": ACTIVE_TRANSACTION,
+        "LAST_COMMITTED_TRANSACTION": LAST_COMMITTED_TRANSACTION,
+        "ACTIVE_CONTRACT": ACTIVE_CONTRACT, "ACTIVE_TOOL_CONTRACT": ACTIVE_TOOL_CONTRACT,
+        "VISION_ENABLED_FOR_RUN": VISION_ENABLED_FOR_RUN,
+        "VISION_ERROR": VISION_ERROR,
+        "PREFLIGHT_CONFLICT_STATE": PREFLIGHT_CONFLICT_STATE,
+        "ask_ollama": ask_ollama,
+    }
+    try:
+        root = Path(artifact_root or Path(__file__).resolve().parent / "output" / "hivo-v24-4-6-stage6b-planning-live-1").expanduser().resolve()
+        historical_db = Path(brain_database_path or root.parent / "hivo-v22-stage5c-fresh-receipts-live-1" / ".hivo" / "memory.sqlite3").expanduser().resolve()
+        fixture = Path(fixture_root or root.parent / "hivo-v25-stage6c-b-approved-execution-live-1").expanduser().resolve()
+        replay = stage6c.run_stage6c_a_live_replay(
+            root, brain_database_path=historical_db,
+            expected_brain_hash="8eac670a83eeddb30528ebd3ad5032dabc6f6d1a3fb97b65b4600964b1b434bb",
+        )
+        with (root / "final_plan.json").open("r", encoding="utf-8") as handle:
+            plan_value = json.load(handle)
+        with (root / "current_surface_evidence.json").open("r", encoding="utf-8") as handle:
+            evidence_artifact = json.load(handle)
+        repository_evidence = evidence_artifact.get("repository_evidence", [])
+        canonical_registry = evidence_artifact.get("registry")
+        fixture_files = tuple(sorted({
+            str(item.get("path"))
+            for item in repository_evidence
+            if isinstance(item, dict) and item.get("path")
+        }))
+        source_before = {
+            relative: (fixture / relative).read_bytes() for relative in fixture_files
+        }
+        historical_before = historical_db.read_bytes()
+        with tempfile.TemporaryDirectory(prefix="hivo_v25_2_selftest_") as tmp:
+            temp_root = Path(tmp)
+            execution_root = temp_root / "execution"
+            execution_root.mkdir()
+            for relative in fixture_files:
+                target = execution_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source_before[relative])
+            working_root = temp_root / "working_brain"
+            (working_root / ".hivo").mkdir(parents=True)
+            shutil.copy2(historical_db, working_root / ".hivo" / "memory.sqlite3")
+            working_store = MemoryStore(working_root)
+
+            # First compile the unchanged approved plan only to identify the
+            # already-authorized responsibility and its evidence boundary.
+            old_compiled = stage6c.compile_approval_bound_execution_contracts(
+                plan_value, replay.get("approval_receipt"),
+                replay.get("pre_execution_approval_revalidation"),
+                replay.get("execution_authorization"),
+                request=replay.get("approval_request"),
+                requirements=plan_value.get("requirements", []),
+                repository_evidence=repository_evidence,
+                canonical_surface_registry=canonical_registry,
+            )
+            old_contract = next(
+                item for item in old_compiled.get("contracts", [])
+                if item.get("responsibility_type") == stage4.MUTATION
+            )
+            invariant_set = stage6c_invariants.build_execution_invariant_set(
+                execution_contract=old_contract, approved_plan=plan_value,
+                source_root=execution_root, repository_evidence=repository_evidence,
+            )
+            invariant_check = stage6c_invariants.validate_execution_invariant_set(
+                invariant_set, execution_contract=old_contract,
+                source_root=execution_root, require_current_subject=True,
+            )
+            authorization = stage6c.create_approved_execution_authorization(
+                replay.get("approval_receipt"),
+                replay.get("pre_execution_approval_revalidation"),
+                request=replay.get("approval_request"),
+                stage4_graph=old_compiled.get("graph"),
+                execution_invariant_set=invariant_set,
+            )
+            compiled = stage6c.compile_approval_bound_execution_contracts(
+                plan_value, replay.get("approval_receipt"),
+                replay.get("pre_execution_approval_revalidation"), authorization,
+                request=replay.get("approval_request"),
+                requirements=plan_value.get("requirements", []),
+                repository_evidence=repository_evidence,
+                canonical_surface_registry=canonical_registry,
+                execution_invariant_set=invariant_set,
+                execution_invariant_source_root=execution_root,
+            )
+            mutation_contract = next(
+                item for item in compiled.get("contracts", [])
+                if item.get("responsibility_type") == stage4.MUTATION
+            )
+            mission = stage4.hydrate_worker_mission(
+                mutation_contract,
+                {"objective": mutation_contract.get("goal"),
+                 "implementation_steps": ["Apply approved responsibility only"]},
+                [],
+            )
+            packet_projection = stage4.build_worker_context_projection(
+                mission, mutation_contract, [], max_chars=MAX_WORKER_MISSION_CHARS,
+            )
+            packet = stage4.render_worker_context_projection(
+                packet_projection, max_chars=MAX_WORKER_MISSION_CHARS,
+            )
+            callback_calls = []
+            captured_context = {}
+
+            target_path = next(
+                path for path in mutation_contract.get("allowed_mutation_paths", [])
+                if path in source_before
+            )
+            target_symbol = next(
+                item.get("symbol") for item in invariant_set.get("invariants", [])
+                if item.get("type") == stage6c_invariants.FUNCTION_SIGNATURE
+                and item.get("path") == target_path
+            )
+            target_source = (execution_root / target_path).read_text(encoding="utf-8")
+            export_match = re.search(
+                r"module\.exports\s*=\s*\{[^}]*\}\s*;", target_source,
+            )
+            if export_match is None:
+                raise AssertionError("self-test fixture has no supported export statement")
+            export_statement = export_match.group(0)
+            export_names = re.search(r"\{([^}]*)\}", export_statement)
+            if export_names is None:
+                raise AssertionError("self-test fixture export statement is unsupported")
+            indicator_symbol = f"{target_symbol}Indicator"
+            indicator_function = (
+                f"function {indicator_symbol}(controller) {{\n"
+                "  return controller.isPaused() ? 'INDICATOR_ACTIVE' : 'INDICATOR_INACTIVE';\n"
+                "}\n\n"
+            )
+            extended_export = (
+                "module.exports = { "
+                + export_names.group(1).strip()
+                + f", {indicator_symbol} }};"
+            )
+            old_export = export_statement
+            replacement = indicator_function + extended_export
+
+            def worker(execute_tool=None, worker_context=None, **kwargs):
+                callback_calls.append(str(kwargs.get("task_id", "")))
+                captured_context["rendered"] = worker_context
+                tool_result = execute_tool(
+                    "edit_file",
+                    {"path": target_path, "old": old_export, "new": replacement,
+                     "expected_replacements": 1},
+                )
+                return {
+                    "status": "done", "summary": "V25.2 self-test approved mutation",
+                    "tool_evidence": [{
+                        "tool": "edit_file", "target": target_path,
+                        "result": str(tool_result),
+                    }],
+                }
+
+            def forbidden_provider(*_args, **_kwargs):
+                raise AssertionError("V25.2 self-test must not call a provider")
+
+            ask_ollama = forbidden_provider
+            result, _memory = run_approval_bound_execution_lifecycle(
+                plan=plan_value,
+                request=replay.get("approval_request"),
+                receipt=replay.get("approval_receipt"),
+                revalidation=replay.get("pre_execution_approval_revalidation"),
+                authorization=authorization,
+                memory={}, workspace=execution_root,
+                working_brain_store=working_store,
+                current_state=replay.get("state"), worker_callback=worker,
+                execution_invariant_set=invariant_set,
+                repository_evidence=repository_evidence,
+                canonical_surface_registry=canonical_registry,
+            )
+            working_hash = working_store.project_brain_hash(
+                replay.get("state", {}).get("project_id") or "default",
+            )
+            mutated = (execution_root / target_path).read_text(encoding="utf-8")
+            parsed_mutated = stage6c_invariants.extract_source_contract(
+                mutated, target_symbol, path=target_path,
+            )
+            invariant_projection = stage6c_invariants.build_worker_execution_invariant_projection(
+                invariant_set, mutation_contract, max_chars=MAX_WORKER_MISSION_CHARS,
+            )
+            invariant_rendered = stage6c_invariants.render_worker_execution_invariant_projection(
+                invariant_projection,
+                max_chars=MAX_WORKER_MISSION_CHARS,
+            )
+            actual_worker_packet = str(captured_context.get("rendered") or "")
+            checks = {
+                "invariant_valid": invariant_set.get("status") == stage6c_invariants.VALID and invariant_check.get("valid") is True,
+                "invariant_hash_bound_authorization": authorization.get("execution_invariant_set_hash") == invariant_set.get("invariant_set_hash"),
+                "invariant_hash_bound_contract": mutation_contract.get("execution_invariant_set_hash") == invariant_set.get("invariant_set_hash"),
+                "worker_packet_contains_invariants": "CURRENT EXECUTION INVARIANTS" in packet and "primitive string" in packet,
+                "worker_packet_identity_matches": (
+                    invariant_rendered in actual_worker_packet
+                    and invariant_projection.get("provider_facing_hash") == stage6c_invariants.canonical_hash(invariant_rendered)
+                ),
+                "worker_packet_within_budget": len(actual_worker_packet) <= MAX_WORKER_MISSION_CHARS,
+                "mandatory_invariants_retained": packet_projection.get("projection_audit", {}).get("authority_items_dropped") == 0,
+                "authorized_worker_once": len(callback_calls) == 1 and result.get("worker_calls") == 1,
+                "positive_legacy_verification": (result.get("contract_results") or [{}])[0].get("status") == "done",
+                "additive_fixture_mutation": (
+                    indicator_symbol in mutated
+                    and parsed_mutated.get("status") == stage6c_invariants.VALID
+                    and parsed_mutated.get("return_shape") == next(
+                        item.get("return_shape") for item in invariant_set.get("invariants", [])
+                        if item.get("type") == stage6c_invariants.RETURN_SHAPE
+                        and item.get("path") == target_path
+                    )
+                ),
+                "dnt_subject_unchanged": all(
+                    (execution_root / path).read_bytes() == source_before[path]
+                    for path in mutation_contract.get("global_do_not_touch", [])
+                    if path in source_before
+                ),
+                "historical_brain_unchanged": historical_db.read_bytes() == historical_before,
+                "historical_subject_unchanged": all(
+                    (fixture / relative).read_bytes() == content
+                    for relative, content in source_before.items()
+                ),
+                "working_brain_promoted": working_hash != replay.get("brain_identity", {}).get("logical_hash"),
+                "provider_calls_zero": result.get("model_calls", 0) == 0 and RUN.get("model_calls", 0) == 0,
+            }
+            return {
+                "passed": all(checks.values()),
+                "status": "PASS" if all(checks.values()) else "FAIL",
+                "checks": checks,
+                "invariant_set_hash": invariant_set.get("invariant_set_hash"),
+                "invariant_projection_chars": len(invariant_rendered),
+                "worker_context_chars": len(actual_worker_packet),
+                "worker_calls": len(callback_calls),
+                "model_calls": 0,
+                "historical_brain_writes": 0,
+                "repository_subject_mutations": 0,
+                "terminal_state": result.get("terminal_state"),
+            }
+    except Exception as exc:
+        return {
+            "passed": False, "status": "FAIL",
+            "checks": {"execution_exception_free": False},
+            "error": str(exc), "worker_calls": 0, "model_calls": 0,
+            "historical_brain_writes": 0, "repository_subject_mutations": 0,
+        }
+    finally:
+        WORKSPACE = saved["WORKSPACE"]
+        MEMORY_STORE = saved["MEMORY_STORE"]
+        RUN = saved["RUN"]
+        TASKS = saved["TASKS"]
+        ROLE_STATUS = saved["ROLE_STATUS"]
+        DASHBOARD = saved["DASHBOARD"]
+        RUN_STARTED = saved["RUN_STARTED"]
+        RUN_ID = saved["RUN_ID"]
+        ACTIVE_TRANSACTION = saved["ACTIVE_TRANSACTION"]
+        LAST_COMMITTED_TRANSACTION = saved["LAST_COMMITTED_TRANSACTION"]
+        ACTIVE_CONTRACT = saved["ACTIVE_CONTRACT"]
+        ACTIVE_TOOL_CONTRACT = saved["ACTIVE_TOOL_CONTRACT"]
+        VISION_ENABLED_FOR_RUN = saved["VISION_ENABLED_FOR_RUN"]
+        VISION_ERROR = saved["VISION_ERROR"]
+        PREFLIGHT_CONFLICT_STATE = saved["PREFLIGHT_CONFLICT_STATE"]
+        ask_ollama = saved["ask_ollama"]
+
+
+run_stage6c_b_invariant_projection_self_test = run_stage6c_b_v25_2_self_test
+run_stage6c_b_v25_2_architecture_self_test = run_stage6c_b_v25_2_self_test
 
 
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
@@ -20208,6 +20553,9 @@ def run_self_test(install_browser=False):
         v251_approval_bound_self_test = run_stage6c_b_self_test()
         for name, ok in v251_approval_bound_self_test.get("checks", {}).items():
             print(f"{('v25.1 ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v252_execution_invariant_self_test = run_stage6c_b_v25_2_self_test()
+        for name, ok in v252_execution_invariant_self_test.get("checks", {}).items():
+            print(f"{('v25.2 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -20807,6 +21155,9 @@ def run_self_test(install_browser=False):
             ),
             "v25.1 approval-bound execution self-test": (
                 v251_approval_bound_self_test.get("passed") is True
+            ),
+            "v25.2 execution-invariant self-test": (
+                v252_execution_invariant_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():
