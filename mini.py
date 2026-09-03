@@ -38,6 +38,7 @@ from hivo import execution_contracts as stage4
 from hivo import reentry as stage6a
 from hivo import verified_planning as stage6b
 from hivo import approval_authority as stage6c
+from hivo import approval_bound_execution as stage6cb
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -202,6 +203,27 @@ ExplicitUserApprovalEvent = stage6c.ExplicitUserApprovalEvent
 PlanApprovalReceipt = stage6c.PlanApprovalReceipt
 PreExecutionApprovalRevalidation = stage6c.PreExecutionApprovalRevalidation
 ApprovedExecutionAuthorization = stage6c.ApprovedExecutionAuthorization
+# V25.1 / Stage 6C-B approval-bound Worker lifecycle.  Stage 4 and Stage 5
+# remain the implementation owners; these aliases expose only the lifecycle
+# glue and its fail-closed state machine.
+APPROVAL_BOUND_EXECUTION_STARTED = stage6cb.APPROVAL_BOUND_EXECUTION_STARTED
+WORKER_EXECUTION_COMPLETED = stage6cb.WORKER_EXECUTION_COMPLETED
+MUTATION_SCOPE_VALIDATED = stage6cb.MUTATION_SCOPE_VALIDATED
+VERIFICATION_PASSED = stage6cb.VERIFICATION_PASSED
+INTEGRATION_VERIFIED = stage6cb.INTEGRATION_VERIFIED
+VERIFIED_STATE_PROMOTED = stage6cb.VERIFIED_STATE_PROMOTED
+APPROVED_EXECUTION_VERIFIED_AND_PROMOTED = stage6cb.APPROVED_EXECUTION_VERIFIED_AND_PROMOTED
+POST_PROMOTION_REENTRY_READY = stage6cb.POST_PROMOTION_REENTRY_READY
+WORKER_AUTHORIZATION_INVALID = stage6cb.WORKER_AUTHORIZATION_INVALID
+WORKER_OUTPUT_INVALID = stage6cb.WORKER_OUTPUT_INVALID
+WORKER_NO_APPROVED_MUTATION = stage6cb.WORKER_NO_APPROVED_MUTATION
+UNAUTHORIZED_MUTATION = stage6cb.UNAUTHORIZED_MUTATION
+DNT_VIOLATION = stage6cb.DNT_VIOLATION
+VERIFICATION_FAILED = stage6cb.VERIFICATION_FAILED
+INTEGRATION_FAILED = stage6cb.INTEGRATION_FAILED
+PROMOTION_PRECONDITION_FAILED = stage6cb.PROMOTION_PRECONDITION_FAILED
+PROMOTION_FAILED = stage6cb.PROMOTION_FAILED
+POST_PROMOTION_REENTRY_FAILED = stage6cb.POST_PROMOTION_REENTRY_FAILED
 # V24 Stage 6B verified-state-aware planning. These names are aliases only;
 # the deterministic implementation remains in hivo.verified_planning.
 VERIFIED_STATE_REENTRY = stage6b.VERIFIED_STATE_REENTRY
@@ -1245,6 +1267,12 @@ def run_tool(name, args, role="System"):
 
 def get_memory_store():
     global MEMORY_STORE
+    # Stage 6C-B explicitly supplies a working Brain store.  It may live
+    # outside the isolated execution workspace, so do not replace it with the
+    # workspace-local default while promotion/re-entry are in progress.
+    supplied = RUN.get("_working_brain_store") if isinstance(RUN, dict) else None
+    if supplied is not None:
+        return supplied
     if WORKSPACE is None:
         return None
     expected = (WORKSPACE / ".hivo" / "memory.sqlite3").resolve()
@@ -1609,6 +1637,16 @@ def new_metrics(mode):
         "impact_planner_calls": 0,
         "impact_challenger_calls": 0,
         "impact_plan_revision_calls": 0,
+        # Stage 6C-B compact lifecycle accounting.  These are intentionally
+        # aggregate counters; authorization/receipt details remain in the
+        # bounded run artifacts rather than high-cardinality metrics.
+        "approval_bound_executions_started": 0,
+        "worker_authorization_blocks": 0,
+        "approved_worker_calls": 0,
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "verified_executions": 0,
+        "verified_execution_promotions": 0,
         # V24.4.4 weak-Challenger review projection accounting.  These are
         # deterministic packet-shaping counters, not model roles or retries.
         "challenger_review_projection_builds": 0,
@@ -7293,11 +7331,13 @@ def run_stage6c_a_live_replay(artifact_root=None, **kwargs):
     except (OSError, ValueError):
         pass
     RUN["stage6c_enabled"] = True
+    RUN["approval_bound_lifecycle"] = False
     RUN.update({
         "approval_request": result.get("approval_request"),
         "approval_receipt": result.get("approval_receipt"),
         "pre_execution_approval_revalidation": result.get("pre_execution_approval_revalidation"),
         "execution_authorization": result.get("execution_authorization"),
+        "approval_bound_current_state": result.get("state"),
         "approval_bound_execution_contracts": (result.get("stage4") or {}).get("contracts", []),
         "approval_bound_execution_graph": (result.get("stage4") or {}).get("graph"),
         "status": result.get("status"),
@@ -9942,7 +9982,9 @@ def verification_failure_digest(result, limit=1800):
 
 
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="",
-                       tool_policy=None, max_steps=None):
+                       tool_policy=None, max_steps=None, worker_callback=None,
+                       worker_context=None, execution_contract=None,
+                       execution_authorization_check=None):
     if RUN.get("stage6c_enabled") and role in {"Builder", "Worker"}:
         authority_gate = stage6c.worker_authorization_gate(
             RUN.get("execution_authorization"),
@@ -9952,18 +9994,135 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         )
         if not authority_gate.get("allowed"):
             RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
-        return {
-            "status": "blocked",
-            "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
-            "orchestration_failure": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
-            "summary": (
-                "; ".join(str(item) for item in authority_gate.get("errors", []))
-                or "Stage 6C-A stops before Worker execution"
-            ),
-            "worker_calls": 0,
-            "builder_calls": 0,
-            "memory": memory,
-        }
+            return {
+                "status": "blocked",
+                "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
+                "orchestration_failure": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
+                "failure_type": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
+                "summary": (
+                    "; ".join(str(item) for item in authority_gate.get("errors", []))
+                    or "current execution authorization is invalid"
+                ),
+                "worker_calls": 0,
+                "builder_calls": 0,
+                "memory": memory,
+            }
+        # Stage 6C-A remains a readiness-only boundary.  Only the explicit
+        # Stage 6C-B lifecycle is allowed to enter the existing execution loop.
+        if not RUN.get("approval_bound_lifecycle"):
+            return {
+                "status": "blocked",
+                "terminal_state": EXECUTION_AUTHORIZATION_READY,
+                "orchestration_failure": None,
+                "summary": "Stage 6C-A execution authorization is ready; execution is deferred",
+                "execution_authorization": RUN.get("execution_authorization"),
+                "worker_calls": 0,
+                "builder_calls": 0,
+                "memory": memory,
+            }
+        # Repeat the complete lifecycle gate immediately before the Worker
+        # seam/provider.  A valid Stage 6C-A proof is an eligibility input,
+        # not a substitute for this last-moment check.
+        if not callable(execution_authorization_check):
+            RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+            return {
+                "status": "blocked",
+                "terminal_state": WORKER_AUTHORIZATION_INVALID,
+                "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+                "failure_type": WORKER_AUTHORIZATION_INVALID,
+                "summary": "approval-bound Worker dispatch requires a last-moment authorization check",
+                "worker_calls": 0,
+                "builder_calls": 0,
+                "memory": memory,
+            }
+        if callable(execution_authorization_check):
+            try:
+                current_gate = execution_authorization_check()
+            except Exception as exc:
+                current_gate = {
+                    "allowed": False,
+                    "status": WORKER_AUTHORIZATION_INVALID,
+                    "terminal_state": WORKER_AUTHORIZATION_INVALID,
+                    "code": WORKER_AUTHORIZATION_INVALID,
+                    "errors": [str(exc)],
+                }
+            if not isinstance(current_gate, dict) or not current_gate.get("allowed"):
+                RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+                if isinstance(current_gate, dict) and current_gate.get("status") == REAPPROVAL_REQUIRED:
+                    RUN["reapproval_required"] = RUN.get("reapproval_required", 0) + 1
+                return {
+                    "status": "blocked",
+                    "terminal_state": (current_gate or {}).get("terminal_state", WORKER_AUTHORIZATION_INVALID),
+                    "orchestration_failure": (current_gate or {}).get("code") or WORKER_AUTHORIZATION_INVALID,
+                    "failure_type": (current_gate or {}).get("status") or WORKER_AUTHORIZATION_INVALID,
+                    "summary": "; ".join(str(item) for item in (current_gate or {}).get("errors", [])[:8])
+                    or "last-moment Worker authorization failed",
+                    "worker_calls": 0,
+                    "builder_calls": 0,
+                    "memory": memory,
+                    "authorization_audit": current_gate,
+                }
+        approval_bound_worker = bool(RUN.get("approval_bound_lifecycle")) and role in {"Builder", "Worker"}
+        if approval_bound_worker:
+            RUN["approved_worker_calls"] = RUN.get("approved_worker_calls", 0) + 1
+        if callable(worker_callback):
+            if not isinstance(execution_contract, dict):
+                return {
+                    "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
+                    "terminal_state": WORKER_OUTPUT_INVALID,
+                    "orchestration_failure": WORKER_OUTPUT_INVALID,
+                    "summary": "approval-bound Worker callback has no execution contract",
+                    "worker_calls": 1 if approval_bound_worker else 0,
+                    "builder_calls": 0, "memory": memory, "model_calls": 0,
+                }
+            bounded_context = worker_context if isinstance(worker_context, str) else str(extra_context or "")
+            try:
+                callback_result = stage6cb.invoke_callback(
+                    worker_callback,
+                    worker_context=bounded_context,
+                    context=bounded_context,
+                    execution_contract=execution_contract,
+                    contract=execution_contract,
+                    task_id=str(task_id),
+                    workspace=str(WORKSPACE) if WORKSPACE is not None else None,
+                    authorization=RUN.get("execution_authorization"),
+                    receipt=RUN.get("approval_receipt"),
+                    start_receipt=RUN.get("execution_start_receipt"),
+                    worker_start_receipt=RUN.get("execution_start_receipt"),
+                    execute_tool=lambda name, args: run_tool(name, args, role="Builder"),
+                    run_tool=lambda name, args: run_tool(name, args, role="Builder"),
+                )
+            except Exception as exc:
+                return {
+                    "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
+                    "terminal_state": WORKER_OUTPUT_INVALID,
+                    "orchestration_failure": WORKER_OUTPUT_INVALID,
+                    "summary": f"approval-bound Worker callback failed: {exc}",
+                    "worker_calls": 1 if approval_bound_worker else 0,
+                    "builder_calls": 0, "memory": memory, "model_calls": 0,
+                }
+            if not isinstance(callback_result, dict):
+                return {
+                    "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
+                    "terminal_state": WORKER_OUTPUT_INVALID,
+                    "orchestration_failure": WORKER_OUTPUT_INVALID,
+                    "summary": "approval-bound Worker callback returned a non-object result",
+                    "worker_calls": 1 if approval_bound_worker else 0,
+                    "builder_calls": 0, "memory": memory, "model_calls": 0,
+                }
+            result = copy.deepcopy(callback_result)
+            result.setdefault("status", "done")
+            result.setdefault("summary", "approval-bound Worker callback completed")
+            result.setdefault("tool_evidence", [])
+            result["worker_calls"] = 1 if approval_bound_worker else 0
+            result["builder_calls"] = 0
+            result["memory"] = memory
+            result["model_calls"] = 0
+            result["callback_invoked"] = True
+            result["raw_worker_result_ref"] = "worker-result:" + stage6c.canonical_hash(
+                {key: value for key, value in result.items() if key != "raw_worker_result_ref"}
+            )[:24]
+            return result
     if messages is None:
         messages = [{"role": "system", "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)}]
     durable = relevant_memory_context(f"{role} {task_text}", role=role, memory=memory, max_chars=1200)
@@ -11678,11 +11837,29 @@ def _stage5c_promote_parent(task, contract, result, memory, repo_snapshot=None):
     ]
     audit = _stage5b_scope_audit(result.get("children", []))
     authority_failure = _authority_terminal_failure(task)
+    promotion_parent_result = result
+    # The Stage 5B adapter exposes ordinary orchestration status as ``done``
+    # after receiving PARENT_VERIFIED.  Stage 5C's existing validator also
+    # accepts the explicit integration result, but its parent-state guard is
+    # intentionally strict; preserve that boundary with a local projection
+    # rather than changing the durable promotion semantics.
+    if (
+        isinstance(result, dict)
+        and result.get("status") == "done"
+        and result.get("integration_result") == PARENT_VERIFIED
+    ):
+        promotion_parent_result = copy.deepcopy(result)
+        promotion_parent_result["status"] = PARENT_VERIFIED
+        promotion_parent = copy.deepcopy(task) if isinstance(task, dict) else {}
+        promotion_parent["status"] = PARENT_VERIFIED
+        promotion_parent["integration_result"] = PARENT_VERIFIED
+    else:
+        promotion_parent = task
     promotion = _promote_verified_parent_v22(
-        parent=task,
+        parent=promotion_parent,
         parent_receipt=receipt,
         parent_contract=contract if isinstance(contract, dict) else {},
-        parent_result=result,
+        parent_result=promotion_parent_result,
         child_receipts=RUN.get("child_receipts", {}),
         workspace=WORKSPACE,
         project_id=_stage5c_project_id(contract),
@@ -16586,6 +16763,27 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     structural_fit = _record_structural_fit(task, execution_contract)
     if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("TASK_FIT")
+    if (
+        RUN.get("approval_bound_lifecycle")
+        and isinstance(structural_fit, dict)
+        and structural_fit.get("classification") == stage4.DECOMPOSITION_REQUIRED
+    ):
+        # The approved graph is frozen at the execution boundary.  A broad
+        # contract cannot trigger Planner/Challenger/Reviser work, a new
+        # decomposition, or an unauthorized direct Worker fallback here.
+        result = {
+            "status": "failed",
+            "terminal_state": WORKER_AUTHORIZATION_INVALID,
+            "failure_type": WORKER_AUTHORIZATION_INVALID,
+            "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+            "summary": "approval-bound execution contract requires decomposition outside the frozen execution phase",
+            "memory": memory,
+            "worker_calls": 0,
+            "model_calls": 0,
+        }
+        _mark_task_result(task, result)
+        event(f"[FAILED {label}] frozen approval-bound contract is not directly executable", task=label)
+        return result
     if can_split:
         structural_classification = structural_fit.get("classification") if structural_fit else None
         if structural_classification == stage4.DIRECT_ALLOWED:
@@ -16773,10 +16971,217 @@ def begin_durable_run(contract):
             pass
 
 
+def _close_approval_bound_transaction():
+    """Close an approval-bound transaction without attempting recovery."""
+    global ACTIVE_TRANSACTION
+    transaction = ACTIVE_TRANSACTION
+    ACTIVE_TRANSACTION = None
+    if transaction is not None:
+        record_run_event(
+            "approval_bound_transaction_closed",
+            task_id=transaction.get("task_id"),
+            changed=sorted(transaction.get("files", {})),
+        )
+    return []
+
+
+def _approval_bound_worker_context(task, execution_contract, dependency_summaries=None):
+    """Hydrate and project the existing Stage 4 mission for one Worker."""
+    advice = {
+        "objective": execution_contract.get("goal") or task.get("goal") or "Execute approved responsibility",
+        "implementation_steps": [
+            "Apply the approved responsibility only within the execution contract.",
+            "Reuse approved interfaces and preserve protected state.",
+        ],
+    }
+    mission = stage4.hydrate_worker_mission(
+        execution_contract, advice, dependency_summaries or [],
+    )
+    validation = stage4.validate_hydrated_worker_mission(
+        mission, execution_contract, dependency_summaries or [],
+    )
+    if not validation.get("valid"):
+        raise stage4.ExecutionContractError(
+            MISSION_CONTRACT_VIOLATION,
+            "; ".join(validation.get("errors", [])) or "hydrated Worker mission is invalid",
+        )
+    artifact = _worker_context_projection_artifact(
+        mission, execution_contract, dependency_summaries or [],
+        task_id=task.get("id"),
+    )
+    RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
+    return mission, artifact
+
+
+def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
+                                  parent_summary="", dependency_summaries=None,
+                                  strategy_context=None):
+    """Run one graph responsibility through the existing Worker entrypoint."""
+    global ACTIVE_TOOL_CONTRACT
+    dependency_summaries = dependency_summaries or []
+    RUN["leaf_tasks"] = RUN.get("leaf_tasks", 0) + 1
+    effective = _current_execution_contract(task)
+    if not isinstance(effective, dict):
+        return {
+            "status": "failed", "terminal_state": WORKER_AUTHORIZATION_INVALID,
+            "failure_type": WORKER_AUTHORIZATION_INVALID,
+            "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+            "summary": "approval-bound graph task has no current Stage 4 execution contract",
+            "memory": memory, "worker_calls": 0, "model_calls": 0,
+        }
+    contract_id = str(effective.get("execution_contract_id") or "")
+    approved_contracts = RUN.get("approval_bound_execution_contracts") or RUN.get("execution_contracts") or []
+    approved_by_id = {
+        str(item.get("execution_contract_id")): item
+        for item in approved_contracts if isinstance(item, dict)
+    }
+    approved_effective = approved_by_id.get(contract_id)
+    if not isinstance(approved_effective, dict) or approved_effective.get("contract_hash") != effective.get("contract_hash"):
+        return {
+            "status": "failed", "terminal_state": WORKER_AUTHORIZATION_INVALID,
+            "failure_type": WORKER_AUTHORIZATION_INVALID,
+            "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+            "summary": "approval-bound graph task is not the exact compiled Stage 4 contract",
+            "memory": memory, "worker_calls": 0, "model_calls": 0,
+        }
+    effective = copy.deepcopy(approved_effective)
+    task["execution_contract"] = copy.deepcopy(effective)
+    task["execution_contract_id"] = effective.get("execution_contract_id")
+    task["execution_contract_hash"] = effective.get("contract_hash")
+    try:
+        _mission, projection = _approval_bound_worker_context(
+            task, effective, dependency_summaries,
+        )
+    except stage4.ExecutionContractError as exc:
+        return {
+            "status": "failed", "terminal_state": WORKER_OUTPUT_INVALID,
+            "failure_type": WORKER_OUTPUT_INVALID,
+            "orchestration_failure": WORKER_OUTPUT_INVALID,
+            "summary": str(exc), "memory": memory,
+            "failure_evidence": [{
+                "kind": "worker_context_projection", "status": "FAIL",
+                "source": "stage4", "evidence": compact_text(str(exc), 700),
+            }],
+            "worker_calls": 0, "model_calls": 0,
+        }
+    bounded_context = projection.get("rendered_worker_context", "")
+    ACTIVE_TOOL_CONTRACT = {
+        "goal": task.get("goal", effective.get("goal", "")),
+        "requirements": task.get("done_when", []),
+        "constraints": effective.get("constraints", []),
+        "success_criteria": task.get("done_when", []),
+        "task_id": task.get("id"),
+        "project_invariants": RUN.get("project_invariants", []),
+        "execution_contract_child": task.get("execution_contract_child"),
+        "execution_contract": copy.deepcopy(effective),
+    }
+    ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
+    # The nested authoritative contract must survive the flat compatibility
+    # fields above; Stage 4's mutation guard resolves this exact object.
+    ACTIVE_TOOL_CONTRACT["execution_contract"] = copy.deepcopy(effective)
+    if ACTIVE_TRANSACTION is not None:
+        _close_approval_bound_transaction()
+    try:
+        begin_transaction(task.get("id", "ROOT"))
+    except Exception as exc:
+        return {
+            "status": "failed", "terminal_state": WORKER_OUTPUT_INVALID,
+            "failure_type": WORKER_OUTPUT_INVALID,
+            "orchestration_failure": WORKER_OUTPUT_INVALID,
+            "summary": f"approval-bound transaction could not start: {exc}",
+            "memory": memory, "worker_calls": 0, "model_calls": 0,
+        }
+
+    def dispatch(worker_context=None, execution_contract=None,
+                 authorization_check=None, **_ignored):
+        selected_contract = execution_contract if isinstance(execution_contract, dict) else effective
+        return execute_agent_task(
+            selected_contract.get("goal") or task.get("goal", "approved responsibility"),
+            memory,
+            messages=None,
+            # The existing Stage 4 Worker loop is implemented by the
+            # repository's Builder role. Keep that provider role unchanged;
+            # "Worker" is the lifecycle/audit concept, not a new model role.
+            role="Builder",
+            task_id=task.get("id", "ROOT"),
+            extra_context=worker_context or bounded_context,
+            worker_callback=RUN.get("_approval_bound_worker_callback"),
+            worker_context=worker_context or bounded_context,
+            execution_contract=selected_contract,
+            execution_authorization_check=authorization_check,
+        )
+
+    def on_start(start_receipt):
+        RUN["execution_start_receipt"] = copy.deepcopy(start_receipt)
+        if APPROVAL_BOUND_EXECUTION_STARTED not in RUN.setdefault("control_flow", []):
+            RUN["control_flow"].append(APPROVAL_BOUND_EXECUTION_STARTED)
+        RUN["approval_bound_executions_started"] = RUN.get(
+            "approval_bound_executions_started", 0,
+        ) + 1
+        record_run_event(
+            "approval_bound_execution_started",
+            task_id=task.get("id"),
+            execution_start_id=start_receipt.get("execution_start_id"),
+            execution_contract_hash=effective.get("contract_hash"),
+            model_calls=0,
+        )
+
+    def on_authorization_block(audit):
+        RUN["worker_authorization_blocks"] = RUN.get(
+            "worker_authorization_blocks", 0,
+        ) + 1
+        RUN["approval_bound_last_authorization_audit"] = copy.deepcopy(audit)
+
+    result = stage6cb.execute_approval_bound_worker(
+        task=task,
+        contract=effective,
+        plan=RUN.get("approved_change_plan", {}),
+        authorization=RUN.get("execution_authorization", {}),
+        receipt=RUN.get("approval_receipt", {}),
+        revalidation=RUN.get("pre_execution_approval_revalidation", {}),
+        request=RUN.get("approval_request", {}),
+        current_state=RUN.get("approval_bound_current_state"),
+        contracts=approved_contracts,
+        graph=RUN.get("approval_bound_execution_graph") or RUN.get("plan_execution_graph"),
+        workspace=RUN.get("execution_workspace") or WORKSPACE,
+        worker_context=bounded_context,
+        worker_dispatch=dispatch,
+        verification_runner=RUN.get("_approval_bound_verification_runner"),
+        store=get_memory_store(),
+        project_id=str(RUN.get("project_id") or "default"),
+        transaction_commit=commit_transaction,
+        transaction_close=_close_approval_bound_transaction,
+        on_start_receipt=on_start,
+        on_authorization_block=on_authorization_block,
+    )
+    mutation_audit = result.get("mutation_audit") if isinstance(result, dict) else {}
+    if isinstance(mutation_audit, dict):
+        RUN["mutation_scope_violations"] = RUN.get("mutation_scope_violations", 0) + int(
+            mutation_audit.get("scope_violations", 0) or 0
+        ) + int(mutation_audit.get("unauthorized_mutations", 0) or 0)
+        RUN["dnt_execution_violations"] = RUN.get("dnt_execution_violations", 0) + int(
+            mutation_audit.get("dnt_violations", 0) or 0
+        )
+    if isinstance(result, dict) and result.get("status") == "done" and result.get("verification_status") == VERIFICATION_PASSED:
+        RUN["verified_executions"] = RUN.get("verified_executions", 0) + 1
+    return result
+
+
 def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decider=None,
-                                leaf_executor=None, aggregator=None):
+                                leaf_executor=None, aggregator=None,
+                                worker_callback=None, verification_runner=None,
+                                execution_workspace=None, working_brain_store=None,
+                                current_state=None):
     """Execute the immutable Stage 4A graph one approved contract at a time."""
-    if RUN.get("stage6c_enabled"):
+    global WORKSPACE
+    stage6c_ready = bool(RUN.get("stage6c_enabled"))
+    approval_bound = bool(stage6c_ready and (
+        RUN.get("approval_bound_lifecycle")
+        or execution_workspace is not None
+        or working_brain_store is not None
+        or worker_callback is not None
+    ))
+    if stage6c_ready and not approval_bound:
         authority_gate = stage6c.worker_authorization_gate(
             RUN.get("execution_authorization"),
             RUN.get("approval_receipt"),
@@ -16792,10 +17197,6 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
                 "summary": "Stage 6C-A requires an exact current execution authorization before graph execution",
                 "worker_calls": 0,
             }, memory
-        # Stage 6C-A is deliberately a readiness boundary.  The graph may be
-        # compiled by compile_approval_bound_execution_contracts(), but this
-        # legacy execution loop is not entered until the later execution
-        # stage is implemented.
         return {
             "status": "ready",
             "terminal_state": EXECUTION_AUTHORIZATION_READY,
@@ -16806,6 +17207,68 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             "builder_calls": 0,
             "contract_results": [],
         }, memory
+    if approval_bound:
+        authority_gate = stage6c.worker_authorization_gate(
+            RUN.get("execution_authorization"),
+            RUN.get("approval_receipt"),
+            RUN.get("pre_execution_approval_revalidation"),
+            request=RUN.get("approval_request"),
+        )
+        if not authority_gate.get("allowed"):
+            RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+            return {
+                "status": "blocked",
+                "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
+                "orchestration_failure": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
+                "summary": "Stage 6C-A requires an exact current execution authorization before graph execution",
+                "worker_calls": 0,
+            }, memory
+        execution_workspace = execution_workspace or RUN.get("execution_workspace")
+        working_brain_store = working_brain_store or RUN.get("_working_brain_store")
+        try:
+            execution_root = Path(execution_workspace).expanduser().resolve()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            execution_root = None
+        if execution_root is None or not execution_root.is_dir() or working_brain_store is None:
+            return {
+                "status": "blocked",
+                "terminal_state": WORKER_AUTHORIZATION_INVALID,
+                "failure_type": WORKER_AUTHORIZATION_INVALID,
+                "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+                "summary": "approval-bound execution requires an isolated workspace and explicit working Brain store",
+                "worker_calls": 0, "model_calls": 0,
+            }, memory
+        WORKSPACE = execution_root
+        RUN["execution_workspace"] = str(execution_root)
+        RUN["_working_brain_store"] = working_brain_store
+        RUN["approval_bound_lifecycle"] = True
+        if current_state is not None:
+            RUN["approval_bound_current_state"] = copy.deepcopy(current_state)
+        if worker_callback is not None or "_approval_bound_worker_callback" not in RUN:
+            RUN["_approval_bound_worker_callback"] = worker_callback
+        if verification_runner is not None or "_approval_bound_verification_runner" not in RUN:
+            RUN["_approval_bound_verification_runner"] = verification_runner
+        state_value = RUN.get("approval_bound_current_state")
+        source_bindings = RUN.get("execution_authorization", {}).get("source_bindings", {})
+        if not isinstance(source_bindings, dict):
+            source_bindings = {}
+        RUN["project_id"] = str(
+            (state_value or {}).get("project_id")
+            or source_bindings.get("project_id")
+            or (contract or {}).get("project_id")
+            or RUN.get("project_id")
+            or "default"
+        )
+        RUN["stage5b_enabled"] = True
+        RUN["stage5c_enabled"] = True
+        bound_leaf_executor = _approval_bound_leaf_executor
+        bound_fit_decider = lambda *args, **kwargs: {
+            "decision": "execute",
+            "reason": "approval-bound execution uses the frozen Stage 4 graph",
+        }
+    else:
+        bound_leaf_executor = leaf_executor
+        bound_fit_decider = fit_decider
     # V21 Stage 5B is enabled only after Stage 4A has produced the immutable
     # execution graph.  The graph, not the set of results that happens to
     # exist later, is the source of the mandatory child plan.  A caller that
@@ -16838,21 +17301,67 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
     if leaf_executor is None or stage5b_requested:
         RUN["stage5b_enabled"] = True
     state = compile_approved_plan_execution_contracts(contract=contract)
-    if state.get("status") != "ready":
+    if state.get("status") not in ({"ready", EXECUTION_AUTHORIZATION_READY} if approval_bound else {"ready"}):
         return dict(state), memory
     snapshot = state.get("snapshot")
     graph = state.get("graph") or {}
+    if approval_bound:
+        RUN["approval_bound_execution_contracts"] = copy.deepcopy(state.get("contracts", []) or [])
+        RUN["approval_bound_execution_graph"] = copy.deepcopy(graph)
+        if not RUN["approval_bound_execution_contracts"]:
+            return {
+                "status": "blocked", "terminal_state": WORKER_AUTHORIZATION_INVALID,
+                "failure_type": WORKER_AUTHORIZATION_INVALID,
+                "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+                "summary": "approval-bound Stage 4 graph contains no executable contract",
+                "worker_calls": 0, "model_calls": 0,
+            }, memory
+        # A direct caller may supply a Stage 4 contract as the graph input.
+        # Treat that as an assertion to validate, never as authority that can
+        # replace the freshly compiled approved contract.
+        supplied_contract_id = contract.get("execution_contract_id") if isinstance(contract, dict) else None
+        if supplied_contract_id:
+            supplied_check = contract.get("contract_hash") == stage4.deterministic_hash(
+                stage4._without(contract, "contract_hash")
+            )
+            compiled_match = next(
+                (
+                    item for item in state.get("contracts", []) or []
+                    if isinstance(item, dict)
+                    and str(item.get("execution_contract_id")) == str(supplied_contract_id)
+                ),
+                None,
+            )
+            if (
+                not supplied_check
+                or not isinstance(compiled_match, dict)
+                or compiled_match.get("contract_hash") != contract.get("contract_hash")
+            ):
+                return {
+                    "status": "blocked", "terminal_state": WORKER_AUTHORIZATION_INVALID,
+                    "failure_type": WORKER_AUTHORIZATION_INVALID,
+                    "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+                    "summary": "supplied Stage 4 contract is not the exact approved contract",
+                    "worker_calls": 0, "model_calls": 0,
+                }, memory
     contracts = {
         item.get("execution_contract_id"): item
         for item in state.get("contracts", []) or []
     }
+    parent_stage_contract = (
+        copy.deepcopy((state.get("contracts") or [])[0])
+        if approval_bound and state.get("contracts")
+        else contract
+    )
+    if approval_bound:
+        RUN["approval_bound_parent_contract"] = copy.deepcopy(parent_stage_contract)
     root = root_task_from_contract(contract)
     root["execution_graph_hash"] = graph.get("graph_hash")
     root["approved_plan_snapshot_hash"] = (snapshot or {}).get("snapshot_hash")
     if RUN.get("stage5b_enabled"):
         root["stage5b_enabled"] = True
-        root["stage5b_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
-        RUN["stage5b_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
+        root["stage5b_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
+        RUN["stage5b_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
         root["validated_child_plan"] = [
             {
                 "child_id": item.get("execution_contract_id"),
@@ -16873,8 +17382,8 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         ]
     if RUN.get("stage5c_enabled"):
         root["stage5c_enabled"] = True
-        root["stage5c_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
-        RUN["stage5c_parent_contract"] = copy.deepcopy(contract if isinstance(contract, dict) else {})
+        root["stage5c_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
+        RUN["stage5c_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
     TASKS["ROOT"] = root
     RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0))
     update_task_ledger(root)
@@ -16961,7 +17470,7 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             result = solve_task(
                 task, 1, worker_contract, memory, repo_snapshot or inspect_repository(),
                 dependency_summaries=dependency_summaries,
-                fit_decider=fit_decider, leaf_executor=leaf_executor,
+                fit_decider=bound_fit_decider, leaf_executor=bound_leaf_executor,
                 aggregator=aggregator or aggregate_execution_contract_children,
             )
             memory = result.get("memory", memory)
@@ -16984,11 +17493,75 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         for item in state.get("contracts", []) or []
         if isinstance(item, dict)
     ]
+    if approval_bound:
+        root["approval_bound_execution_results"] = [
+            {
+                "execution_contract_id": item.get("task", {}).get("execution_contract_id"),
+                "status": item.get("result", {}).get("status"),
+                "terminal_state": item.get("result", {}).get("terminal_state"),
+                "execution_start_receipt": copy.deepcopy(
+                    item.get("result", {}).get("execution_start_receipt")
+                ),
+                "worker_execution": copy.deepcopy(
+                    item.get("result", {}).get("worker_execution")
+                ),
+                "mutation_audit": copy.deepcopy(
+                    item.get("result", {}).get("mutation_audit")
+                ),
+                "approved_verification_contracts": copy.deepcopy(
+                    item.get("result", {}).get("approved_verification_contracts", [])
+                ),
+                "verification_input": copy.deepcopy(
+                    item.get("result", {}).get("verification_input")
+                ),
+                "verification_applicability": copy.deepcopy(
+                    item.get("result", {}).get("verification_applicability")
+                ),
+                "verification_aggregation": copy.deepcopy(
+                    item.get("result", {}).get("verification_aggregation")
+                ),
+                "verification_evidence": copy.deepcopy(
+                    item.get("result", {}).get("verification_evidence", [])
+                ),
+                "raw_worker_result_ref": item.get("result", {}).get("worker_execution", {}).get(
+                    "raw_worker_result_ref"
+                ) if isinstance(item.get("result", {}).get("worker_execution"), dict) else None,
+            }
+            for item in child_records
+            if isinstance(item, dict) and isinstance(item.get("result"), dict)
+        ]
+        integration_routes = []
+        integration_evidence = []
+        route_keys = set()
+        for item in child_records:
+            child_result = item.get("result", {}) if isinstance(item, dict) else {}
+            if not isinstance(child_result, dict):
+                continue
+            if not isinstance(root.get("verification_applicability"), dict) and isinstance(
+                child_result.get("verification_applicability"), dict
+            ):
+                root["verification_applicability"] = copy.deepcopy(
+                    child_result.get("verification_applicability")
+                )
+            for route in child_result.get("integration_routes", []) or []:
+                if not isinstance(route, dict):
+                    continue
+                key = (route.get("kind"), route.get("target"), route.get("required"), route.get("applicable"))
+                if key not in route_keys:
+                    route_keys.add(key)
+                    integration_routes.append(copy.deepcopy(route))
+            integration_evidence.extend(
+                item for item in child_result.get("integration_evidence", []) or []
+                if isinstance(item, dict)
+            )
+        root["integration_routes"] = integration_routes
+        root["integration_evidence"] = integration_evidence
     if RUN.get("stage5b_enabled"):
-        readiness = _stage5b_parent_readiness(root, contract, child_records, repo_snapshot)
+        stage5_parent_contract = parent_stage_contract if approval_bound else contract
+        readiness = _stage5b_parent_readiness(root, stage5_parent_contract, child_records, repo_snapshot)
         if readiness and readiness.get("readiness") == "READY":
             root_result = _aggregate_stage5b_parent(
-                root, contract, child_records, memory, repo_snapshot,
+                root, stage5_parent_contract, child_records, memory, repo_snapshot,
                 root=True, readiness=readiness,
             )
         else:
@@ -17024,13 +17597,115 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             "execution_graph_hash": graph.get("graph_hash"),
             "contract_results": compact_results,
         }
+    if approval_bound:
+        if root_result.get("status") != "done" or root_result.get("integration_result") != PARENT_VERIFIED:
+            lifecycle_failures = {
+                REAPPROVAL_REQUIRED, WORKER_AUTHORIZATION_INVALID,
+                WORKER_OUTPUT_INVALID, WORKER_NO_APPROVED_MUTATION,
+                UNAUTHORIZED_MUTATION, DNT_VIOLATION, VERIFICATION_FAILED,
+            }
+            child_terminal = next(
+                (
+                    item.get("result", {}).get("terminal_state")
+                    or item.get("result", {}).get("failure_type")
+                    for item in child_records
+                    if isinstance(item.get("result"), dict)
+                    and (
+                        item["result"].get("terminal_state") in lifecycle_failures
+                        or item["result"].get("failure_type") in lifecycle_failures
+                    )
+                ),
+                None,
+            )
+            root_result["terminal_state"] = child_terminal or INTEGRATION_FAILED
+            root_result["failure_type"] = root_result["terminal_state"]
+            root_result["orchestration_failure"] = root_result["terminal_state"]
+        else:
+            promotion_status = root_result.get("promotion_status")
+            if promotion_status not in {PROMOTED, ALREADY_PROMOTED}:
+                root_result["terminal_state"] = (
+                    PROMOTION_PRECONDITION_FAILED
+                    if not root_result.get("promotion")
+                    else PROMOTION_FAILED
+                )
+                root_result["failure_type"] = root_result["terminal_state"]
+                root_result["orchestration_failure"] = root_result["terminal_state"]
+            else:
+                promotion_receipt = root_result.get("promotion_receipt")
+                if not isinstance(promotion_receipt, dict):
+                    promotion = root_result.get("promotion") if isinstance(root_result.get("promotion"), dict) else {}
+                    promotion_receipt = promotion.get("promotion_receipt")
+                changed_paths = [
+                    path for item in child_records
+                    for path in (item.get("result", {}).get("changed_files", []) or [])
+                    if isinstance(path, str)
+                ]
+                try:
+                    reentry = run_verified_state_reentry(
+                        RUN.get("project_id") or "default",
+                        f"{RUN_ID or 'approval-bound'}-REENTRY",
+                        root.get("goal", contract.get("goal", "approved execution")),
+                        store=get_memory_store(),
+                        workspace=RUN.get("execution_workspace") or WORKSPACE,
+                        current_repository_evidence=inspect_repository(
+                            RUN.get("execution_workspace") or WORKSPACE,
+                        ),
+                        current_authority=copy.deepcopy(parent_stage_contract),
+                        relevant_paths=list(dict.fromkeys(
+                            changed_paths + list(parent_stage_contract.get("allowed_inspection_paths", []) or [])
+                        )),
+                        previous_task_completion=root_result.get("task_brain_completion"),
+                        promotion_provenance=promotion_receipt,
+                    )
+                except Exception as exc:
+                    reentry = {
+                        "status": POST_PROMOTION_REENTRY_FAILED,
+                        "ready": False,
+                        "errors": [str(exc)],
+                        "model_calls": 0,
+                    }
+                root_result["post_promotion_reentry"] = copy.deepcopy(reentry)
+                if reentry.get("ready") is True and reentry.get("status") == stage6a.REENTRY_READY:
+                    root_result["terminal_state"] = APPROVED_EXECUTION_VERIFIED_AND_PROMOTED
+                    root_result["post_promotion_terminal_state"] = POST_PROMOTION_REENTRY_READY
+                    root_result["lifecycle_states"] = list(dict.fromkeys(
+                        list(root_result.get("lifecycle_states", []) or [])
+                        + [INTEGRATION_VERIFIED, VERIFIED_STATE_PROMOTED,
+                           APPROVED_EXECUTION_VERIFIED_AND_PROMOTED,
+                           POST_PROMOTION_REENTRY_READY]
+                    ))
+                    RUN["verified_execution_promotions"] = RUN.get(
+                        "verified_execution_promotions", 0,
+                    ) + 1
+                else:
+                    root_result["terminal_state"] = POST_PROMOTION_REENTRY_FAILED
+                    root_result["failure_type"] = POST_PROMOTION_REENTRY_FAILED
+                    root_result["orchestration_failure"] = POST_PROMOTION_REENTRY_FAILED
     root_result.update({
         "plan_id": (snapshot or {}).get("plan_id"),
         "plan_hash": (snapshot or {}).get("plan_hash"),
         "approved_plan_snapshot_hash": (snapshot or {}).get("snapshot_hash"),
         "execution_graph_hash": graph.get("graph_hash"),
         "contract_results": compact_results,
+        "lifecycle_terminal_state": root_result.get("terminal_state"),
     })
+    if approval_bound:
+        root_result["approval_bound_execution_results"] = copy.deepcopy(
+            root.get("approval_bound_execution_results", [])
+        )
+        root_result["execution_start_receipts"] = [
+            item.get("execution_start_receipt")
+            for item in root_result["approval_bound_execution_results"]
+            if isinstance(item, dict) and isinstance(item.get("execution_start_receipt"), dict)
+        ]
+        root_result["worker_calls"] = sum(
+            int(item.get("result", {}).get("worker_calls", 0) or 0)
+            for item in child_records if isinstance(item.get("result"), dict)
+        )
+        root_result["model_calls"] = sum(
+            int(item.get("result", {}).get("model_calls", 0) or 0)
+            for item in child_records if isinstance(item.get("result"), dict)
+        )
     _mark_task_result(root, root_result)
     RUN["execution_graph_execution"] = {
         "plan_id": (snapshot or {}).get("plan_id"),
@@ -17038,9 +17713,280 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         "snapshot_hash": (snapshot or {}).get("snapshot_hash"),
         "graph_hash": graph.get("graph_hash"),
         "contract_results": compact_results,
+        "lifecycle_terminal_state": root_result.get("terminal_state"),
+        "approval_bound": approval_bound,
     }
     RUN["execution_graph_status"] = root_result["status"]
     return root_result, memory
+
+
+def run_approval_bound_execution_lifecycle(
+    plan=None, request=None, receipt=None, revalidation=None,
+    authorization=None, contract=None, memory=None, repo_snapshot=None,
+    workspace=None, working_brain_store=None, current_state=None,
+    worker_callback=None, verification_runner=None, reset=True,
+):
+    """Run V25.1 from immutable approval through Stage 5 and V23.1 re-entry.
+
+    The caller must provide an isolated execution workspace and an explicit
+    working Project Brain store.  The historical source and Brain are never
+    selected implicitly by this entrypoint.
+    """
+    global WORKSPACE, MEMORY_STORE
+    old_workspace = WORKSPACE
+    old_memory_store = MEMORY_STORE
+    if reset:
+        reset_run("approval-bound-execution")
+    elif RUN.get("mode") != "approval-bound-execution":
+        RUN["mode"] = "approval-bound-execution"
+    active_plan = plan if isinstance(plan, dict) else RUN.get("approved_change_plan")
+    active_request = request if isinstance(request, dict) else RUN.get("approval_request")
+    active_receipt = receipt if isinstance(receipt, dict) else RUN.get("approval_receipt")
+    active_revalidation = (
+        revalidation if isinstance(revalidation, dict)
+        else RUN.get("pre_execution_approval_revalidation")
+    )
+    active_authorization = (
+        authorization if isinstance(authorization, dict)
+        else RUN.get("execution_authorization")
+    )
+    try:
+        execution_root = Path(workspace).expanduser().resolve() if workspace is not None else None
+    except (OSError, RuntimeError, TypeError, ValueError):
+        execution_root = None
+    missing = []
+    for name, value in (
+        ("plan", active_plan), ("request", active_request),
+        ("receipt", active_receipt), ("revalidation", active_revalidation),
+        ("authorization", active_authorization), ("current_state", current_state),
+    ):
+        if not isinstance(value, dict):
+            missing.append(name)
+    if execution_root is None or not execution_root.is_dir():
+        missing.append("isolated_execution_workspace")
+    if working_brain_store is None:
+        missing.append("working_brain_store")
+    if missing:
+        result = {
+            "status": "blocked",
+            "terminal_state": WORKER_AUTHORIZATION_INVALID,
+            "failure_type": WORKER_AUTHORIZATION_INVALID,
+            "orchestration_failure": WORKER_AUTHORIZATION_INVALID,
+            "summary": "approval-bound execution inputs are incomplete: " + ", ".join(missing),
+            "worker_calls": 0, "model_calls": 0,
+        }
+        return result, memory if isinstance(memory, dict) else {}
+
+    try:
+        WORKSPACE = execution_root
+        MEMORY_STORE = working_brain_store
+        RUN["stage6c_enabled"] = True
+        RUN["approval_bound_lifecycle"] = True
+        RUN["approved_change_plan"] = copy.deepcopy(active_plan)
+        RUN["approval_request"] = copy.deepcopy(active_request)
+        RUN["approval_receipt"] = copy.deepcopy(active_receipt)
+        RUN["pre_execution_approval_revalidation"] = copy.deepcopy(active_revalidation)
+        RUN["execution_authorization"] = copy.deepcopy(active_authorization)
+        RUN["approval_bound_current_state"] = copy.deepcopy(current_state)
+        RUN["execution_workspace"] = str(execution_root)
+        RUN["_working_brain_store"] = working_brain_store
+        RUN["_approval_bound_worker_callback"] = worker_callback
+        RUN["_approval_bound_verification_runner"] = verification_runner
+        source_bindings = active_authorization.get("source_bindings", {})
+        if not isinstance(source_bindings, dict):
+            source_bindings = {}
+        RUN["project_id"] = str(
+            current_state.get("project_id")
+            or source_bindings.get("project_id")
+            or active_plan.get("project_id")
+            or "default"
+        )
+        root_contract = copy.deepcopy(contract) if isinstance(contract, dict) else {
+            "goal": active_plan.get("task_goal") or active_plan.get("goal") or "approved execution",
+            "requirements": copy.deepcopy(active_plan.get("requirements", []) or []),
+            "success_criteria": copy.deepcopy(active_plan.get("success_criteria", []) or []),
+            "original_goal": active_plan.get("task_goal") or active_plan.get("goal") or "approved execution",
+            "project_id": RUN["project_id"],
+        }
+        begin_durable_run(root_contract)
+        result, active_memory = execute_approved_plan_graph(
+            root_contract,
+            memory if isinstance(memory, dict) else {},
+            repo_snapshot=repo_snapshot or inspect_repository(execution_root),
+            worker_callback=worker_callback,
+            verification_runner=verification_runner,
+            execution_workspace=execution_root,
+            working_brain_store=working_brain_store,
+            current_state=current_state,
+        )
+        result = copy.deepcopy(result) if isinstance(result, dict) else {
+            "status": "failed", "terminal_state": WORKER_OUTPUT_INVALID,
+            "failure_type": WORKER_OUTPUT_INVALID, "summary": "lifecycle returned no result",
+        }
+        result.setdefault("memory", active_memory)
+        return result, result.get("memory", active_memory)
+    finally:
+        WORKSPACE = old_workspace
+        MEMORY_STORE = old_memory_store
+        # The run metrics/results remain inspectable, but the explicit
+        # execution authority and working-store handles must not stay armed
+        # for a later unrelated task in this process.
+        RUN["approval_bound_lifecycle"] = False
+        RUN["stage6c_enabled"] = False
+        RUN.pop("_working_brain_store", None)
+        RUN.pop("_approval_bound_worker_callback", None)
+        RUN.pop("_approval_bound_verification_runner", None)
+
+
+run_stage6c_b_execution = run_approval_bound_execution_lifecycle
+run_stage6c_b_approval_bound_execution = run_approval_bound_execution_lifecycle
+execute_approval_bound_execution_lifecycle = run_approval_bound_execution_lifecycle
+
+
+def run_stage6c_b_self_test(artifact_root=None, brain_database_path=None,
+                            fixture_root=None):
+    """Exercise the complete V25.1 loop with a temporary fixture and no model."""
+    global WORKSPACE, MEMORY_STORE, RUN, TASKS, ROLE_STATUS, DASHBOARD
+    global RUN_STARTED, RUN_ID, ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, VISION_ENABLED_FOR_RUN
+    global VISION_ERROR, PREFLIGHT_CONFLICT_STATE, ask_ollama
+    saved = {
+        "WORKSPACE": WORKSPACE, "MEMORY_STORE": MEMORY_STORE, "RUN": RUN,
+        "TASKS": TASKS, "ROLE_STATUS": ROLE_STATUS, "DASHBOARD": DASHBOARD,
+        "RUN_STARTED": RUN_STARTED, "RUN_ID": RUN_ID,
+        "ACTIVE_TRANSACTION": ACTIVE_TRANSACTION,
+        "LAST_COMMITTED_TRANSACTION": LAST_COMMITTED_TRANSACTION,
+        "ACTIVE_CONTRACT": ACTIVE_CONTRACT, "ACTIVE_TOOL_CONTRACT": ACTIVE_TOOL_CONTRACT,
+        "VISION_ENABLED_FOR_RUN": VISION_ENABLED_FOR_RUN,
+        "VISION_ERROR": VISION_ERROR,
+        "PREFLIGHT_CONFLICT_STATE": PREFLIGHT_CONFLICT_STATE,
+        "ask_ollama": ask_ollama,
+    }
+    try:
+        root = Path(artifact_root or Path(__file__).resolve().parent / "output" / "hivo-v24-4-6-stage6b-planning-live-1").expanduser().resolve()
+        historical_db = Path(brain_database_path or root.parent / "hivo-v22-stage5c-fresh-receipts-live-1" / ".hivo" / "memory.sqlite3").expanduser().resolve()
+        fixture = Path(fixture_root or root.parent / "hivo-v25-stage6c-b-approved-execution-live-1").expanduser().resolve()
+        replay = stage6c.run_stage6c_a_live_replay(
+            root, brain_database_path=historical_db,
+            expected_brain_hash="8eac670a83eeddb30528ebd3ad5032dabc6f6d1a3fb97b65b4600964b1b434bb",
+        )
+        with tempfile.TemporaryDirectory(prefix="hivo_v25_1_selftest_") as tmp:
+            temp_root = Path(tmp)
+            execution_root = temp_root / "execution"
+            execution_root.mkdir()
+            fixture_files = (
+                "src/input.js", "src/pause_controller.js", "src/status_view.js",
+                "tests/input.test.js", "tests/pause_flow.integration.test.js",
+                "tests/status_view.test.js",
+            )
+            source_before = {}
+            for relative in fixture_files:
+                source = fixture / relative
+                target = execution_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read_bytes())
+                source_before[relative] = source.read_bytes()
+            working_root = temp_root / "working_brain"
+            (working_root / ".hivo").mkdir(parents=True)
+            shutil.copy2(historical_db, working_root / ".hivo" / "memory.sqlite3")
+            working_store = MemoryStore(working_root)
+            historical_before = historical_db.read_bytes()
+            callback_calls = []
+
+            def worker(execute_tool=None, **kwargs):
+                callback_calls.append(str(kwargs.get("task_id", "")))
+                old = "module.exports = { renderStatus };"
+                new = """function renderPauseIndicator(pauseController) {
+  if (!(pauseController instanceof PauseController)) {
+    throw new TypeError('a PauseController is required');
+  }
+  return pauseController.isPaused() ? '⏸ Paused' : '▶ Running';
+}
+
+module.exports = { renderStatus, renderPauseIndicator };"""
+                tool_result = execute_tool(
+                    "edit_file",
+                    {"path": "src/status_view.js", "old": old, "new": new,
+                     "expected_replacements": 1},
+                )
+                return {
+                    "status": "done", "summary": "self-test approved mutation",
+                    "tool_evidence": [{
+                        "tool": "edit_file", "target": "src/status_view.js",
+                        "result": str(tool_result),
+                    }],
+                }
+
+            def forbidden_provider(*_args, **_kwargs):
+                raise AssertionError("V25.1 self-test must not call a provider")
+
+            ask_ollama = forbidden_provider
+            with (root / "final_plan.json").open("r", encoding="utf-8") as handle:
+                plan_value = json.load(handle)
+            result, _memory = run_approval_bound_execution_lifecycle(
+                plan=plan_value,
+                request=replay.get("approval_request"),
+                receipt=replay.get("approval_receipt"),
+                revalidation=replay.get("pre_execution_approval_revalidation"),
+                authorization=replay.get("execution_authorization"),
+                memory={}, workspace=execution_root,
+                working_brain_store=working_store,
+                current_state=replay.get("state"), worker_callback=worker,
+            )
+            working_hash = working_store.project_brain_hash(
+                replay.get("state", {}).get("project_id") or "default",
+            )
+            checks = {
+                "authorization_ready_reached_worker": RUN.get("approved_worker_calls") == 1,
+                "worker_callback_once": len(callback_calls) == 1,
+                "stage5a_verified": (result.get("contract_results") or [{}])[0].get("status") == "done",
+                "promotion_reached": result.get("promotion_status") in {PROMOTED, ALREADY_PROMOTED},
+                "post_promotion_reentry_ready": result.get("post_promotion_terminal_state") == POST_PROMOTION_REENTRY_READY,
+                "provider_calls_zero": result.get("model_calls", 0) == 0 and RUN.get("model_calls", 0) == 0,
+                "historical_brain_unchanged": historical_db.read_bytes() == historical_before,
+                "historical_subject_unchanged": all(
+                    (fixture / relative).read_bytes() == content
+                    for relative, content in source_before.items()
+                ),
+                "working_brain_promoted": working_hash != replay.get("brain_identity", {}).get("logical_hash"),
+            }
+            return {
+                "passed": all(checks.values()),
+                "status": "PASS" if all(checks.values()) else "FAIL",
+                "checks": checks,
+                "worker_calls": len(callback_calls),
+                "model_calls": 0,
+                "historical_brain_writes": 0,
+                "repository_subject_mutations": 0,
+                "terminal_state": result.get("terminal_state"),
+            }
+    except Exception as exc:
+        return {
+            "passed": False, "status": "FAIL",
+            "checks": {"execution_exception_free": False},
+            "error": str(exc), "worker_calls": 0, "model_calls": 0,
+            "historical_brain_writes": 0, "repository_subject_mutations": 0,
+        }
+    finally:
+        WORKSPACE = saved["WORKSPACE"]
+        MEMORY_STORE = saved["MEMORY_STORE"]
+        RUN = saved["RUN"]
+        TASKS = saved["TASKS"]
+        ROLE_STATUS = saved["ROLE_STATUS"]
+        DASHBOARD = saved["DASHBOARD"]
+        RUN_STARTED = saved["RUN_STARTED"]
+        RUN_ID = saved["RUN_ID"]
+        ACTIVE_TRANSACTION = saved["ACTIVE_TRANSACTION"]
+        LAST_COMMITTED_TRANSACTION = saved["LAST_COMMITTED_TRANSACTION"]
+        ACTIVE_CONTRACT = saved["ACTIVE_CONTRACT"]
+        ACTIVE_TOOL_CONTRACT = saved["ACTIVE_TOOL_CONTRACT"]
+        VISION_ENABLED_FOR_RUN = saved["VISION_ENABLED_FOR_RUN"]
+        VISION_ERROR = saved["VISION_ERROR"]
+        PREFLIGHT_CONFLICT_STATE = saved["PREFLIGHT_CONFLICT_STATE"]
+        ask_ollama = saved["ask_ollama"]
+
+
+run_stage6c_b_architecture_self_test = run_stage6c_b_self_test
 
 
 def run_baseline_request(user_text, memory, contract_override=None, repo_snapshot=None, reset=True, finish=True,
@@ -18985,6 +19931,9 @@ def run_self_test(install_browser=False):
         v246b_verified_planning_self_test = run_verified_planning_self_test()
         for name, ok in v246b_verified_planning_self_test.get("checks", {}).items():
             print(f"{('v24.6B ' + name):<24} {'PASS' if ok else 'FAIL'}")
+        v251_approval_bound_self_test = run_stage6c_b_self_test()
+        for name, ok in v251_approval_bound_self_test.get("checks", {}).items():
+            print(f"{('v25.1 ' + name):<24} {'PASS' if ok else 'FAIL'}")
         checks = {
             "deep recursion": result["status"] == "done" and RUN["max_depth"] >= 3,
             "more than old eight": RUN["tasks_created"] > 8,
@@ -19581,6 +20530,9 @@ def run_self_test(install_browser=False):
             ),
             "v24.6B verified-state-aware planning self-test": (
                 v246b_verified_planning_self_test.get("passed") is True
+            ),
+            "v25.1 approval-bound execution self-test": (
+                v251_approval_bound_self_test.get("passed") is True
             ),
         }
         for name, ok in checks.items():

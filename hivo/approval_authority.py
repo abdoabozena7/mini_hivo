@@ -1637,6 +1637,10 @@ def run_stage6c_a_live_replay(
     return {
         "status": EXECUTION_AUTHORIZATION_READY,
         "terminal_state": EXECUTION_AUTHORIZATION_READY,
+        # The state is a read-only replay projection used by the subsequent
+        # Stage 6C-B last-moment gate.  Returning it does not grant authority,
+        # mutate the historical Brain, or change the approval semantics.
+        "state": state,
         "approval_request": request,
         "approval_event": event,
         "approval_receipt": receipt,
