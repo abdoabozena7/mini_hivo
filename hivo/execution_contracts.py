@@ -16,6 +16,7 @@ import re
 
 from hivo import impact_planning as stage3
 from hivo import execution_invariants as invariant
+from hivo import verification_obligation_coverage as verification_coverage
 from hivo.requirements import freeze
 
 
@@ -78,6 +79,13 @@ WORKER_CONTEXT_ADVICE_UNAVAILABLE = "WORKER_CONTEXT_ADVICE_UNAVAILABLE"
 WORKER_EXECUTION_INVARIANT_CONTEXT_OVERFLOW = invariant.EXECUTION_INVARIANT_CONTEXT_OVERFLOW
 EXECUTION_INVARIANT_SET_REQUIRED = invariant.EXECUTION_INVARIANT_SET_REQUIRED
 EXECUTION_INVARIANT_INVALID = invariant.EXECUTION_INVARIANT_INVALID
+
+# V25.3 verification-obligation coverage is an execution-readiness proof,
+# not a Worker responsibility.  Keep the names local so Stage 4 can expose
+# the compact identity without importing the orchestration layer.
+EXECUTION_VERIFICATION_READY = verification_coverage.EXECUTION_VERIFICATION_READY
+VERIFICATION_OBLIGATION_UNCOVERED = verification_coverage.VERIFICATION_OBLIGATION_UNCOVERED
+VERIFICATION_OBLIGATION_COVERAGE_INVALID = verification_coverage.VERIFICATION_OBLIGATION_COVERAGE_INVALID
 
 # V19.4 structural granularity outcomes.  These are deterministic routing
 # observations over an already-approved Execution Contract; they are not
@@ -1424,6 +1432,10 @@ def _attach_approval_binding(contract, snapshot, authority_binding=None):
         "stage4_dependency_graph_digest": binding.get("stage4_dependency_graph_digest"),
         "execution_invariant_set_hash": binding.get("execution_invariant_set_hash"),
         "execution_invariant_ids": _copy(binding.get("execution_invariant_ids", [])),
+        "verification_obligation_coverage_hash": binding.get("verification_obligation_coverage_hash"),
+        "verification_obligation_coverage_status": binding.get("verification_obligation_coverage_status"),
+        "verification_obligation_coverage_ready": binding.get("verification_obligation_coverage_ready"),
+        "verification_obligation_uncovered_ids": _copy(binding.get("verification_obligation_uncovered_ids", [])),
     }
     for key, value in fields.items():
         if value not in (None, "", [], {}):
@@ -1514,7 +1526,35 @@ def _attach_execution_invariant_binding(contract, execution_invariant_set):
     return contract
 
 
-def compile_execution_contracts(snapshot, authority_binding=None, execution_invariant_set=None):
+def _attach_verification_obligation_coverage_binding(contract, coverage):
+    """Bind only coverage identity/readiness to a Stage 4 contract.
+
+    The complete ledger remains an internal audit artifact.  A contract gets
+    the hash, readiness, and compact missing-obligation IDs so changing the
+    verification authority changes the contract identity without expanding
+    the Worker-facing packet.
+    """
+    if not isinstance(coverage, dict):
+        return contract
+    checked = verification_coverage.validate_verification_obligation_coverage(coverage)
+    if not checked.get("valid"):
+        raise ExecutionContractError(
+            str(checked.get("code") or VERIFICATION_OBLIGATION_COVERAGE_INVALID),
+            "; ".join(checked.get("errors", [])) or "verification-obligation coverage is invalid",
+            details=checked.get("errors", []),
+        )
+    contract["verification_obligation_coverage_hash"] = coverage.get("coverage_hash")
+    contract["verification_obligation_coverage_status"] = coverage.get("coverage_status") or coverage.get("status")
+    contract["verification_obligation_coverage_ready"] = coverage.get("verification_ready") is True
+    contract["verification_obligation_uncovered_ids"] = _ids(
+        coverage.get("uncovered_obligation_ids", []) or [], MAX_SURFACES_PER_CONTRACT,
+    )
+    contract["contract_hash"] = deterministic_hash(_without(contract, "contract_hash"))
+    return contract
+
+
+def compile_execution_contracts(snapshot, authority_binding=None, execution_invariant_set=None,
+                                verification_obligation_coverage=None):
     """Compile one minimal bounded contract for each approved mutation/test responsibility."""
     if not isinstance(snapshot, dict) or not snapshot.get("immutable"):
         raise ExecutionContractError(EXECUTION_CONTRACT_BLOCKED, "an immutable ApprovedPlanSnapshot is required")
@@ -1678,6 +1718,11 @@ def compile_execution_contracts(snapshot, authority_binding=None, execution_inva
             )
         for contract in contracts:
             _attach_execution_invariant_binding(contract, execution_invariant_set)
+    if verification_obligation_coverage is not None:
+        for contract in contracts:
+            _attach_verification_obligation_coverage_binding(
+                contract, verification_obligation_coverage,
+            )
     if binding:
         for contract in contracts:
             _attach_approval_binding(contract, snapshot, binding)
@@ -1818,6 +1863,10 @@ def validate_contracts(snapshot, contracts, assignment=None):
                 "stage4_dependency_graph_digest": approval_binding.get("stage4_dependency_graph_digest"),
                 "execution_invariant_set_hash": approval_binding.get("execution_invariant_set_hash"),
                 "execution_invariant_ids": _copy(approval_binding.get("execution_invariant_ids", [])),
+                "verification_obligation_coverage_hash": approval_binding.get("verification_obligation_coverage_hash"),
+                "verification_obligation_coverage_status": approval_binding.get("verification_obligation_coverage_status"),
+                "verification_obligation_coverage_ready": approval_binding.get("verification_obligation_coverage_ready"),
+                "verification_obligation_uncovered_ids": _copy(approval_binding.get("verification_obligation_uncovered_ids", [])),
             }
             for field, expected in expected_binding_fields.items():
                 if expected not in (None, "", [], {}) and contract.get(field) != expected:
@@ -1843,6 +1892,10 @@ def validate_contracts(snapshot, contracts, assignment=None):
                     "stage4_dependency_graph_digest": expected_binding_fields.get("stage4_dependency_graph_digest"),
                     "execution_invariant_set_hash": expected_binding_fields.get("execution_invariant_set_hash"),
                     "execution_invariant_ids": expected_binding_fields.get("execution_invariant_ids"),
+                    "verification_obligation_coverage_hash": expected_binding_fields.get("verification_obligation_coverage_hash"),
+                    "verification_obligation_coverage_status": expected_binding_fields.get("verification_obligation_coverage_status"),
+                    "verification_obligation_coverage_ready": expected_binding_fields.get("verification_obligation_coverage_ready"),
+                    "verification_obligation_uncovered_ids": expected_binding_fields.get("verification_obligation_uncovered_ids"),
                 }.items() if item not in (None, "", [], {})
             })
             if contract.get("approval_binding_hash") != expected_binding_hash:

@@ -17,6 +17,7 @@ from typing import Any, Iterable
 
 from hivo import impact_planning as stage3
 from hivo import execution_invariants as invariant
+from hivo import verification_obligation_coverage as verification_coverage
 from hivo.requirements import freeze
 
 
@@ -57,6 +58,11 @@ APPROVAL_DNT_VIOLATION = "APPROVAL_DNT_VIOLATION"
 APPROVAL_AUTHORITY_CHANGE = "APPROVAL_AUTHORITY_CHANGE"
 EXECUTION_INVARIANT_SET_REQUIRED = invariant.EXECUTION_INVARIANT_SET_REQUIRED
 EXECUTION_INVARIANT_INVALID = invariant.EXECUTION_INVARIANT_INVALID
+EXECUTION_VERIFICATION_READY = verification_coverage.EXECUTION_VERIFICATION_READY
+VERIFICATION_OBLIGATION_UNCOVERED = verification_coverage.VERIFICATION_OBLIGATION_UNCOVERED
+VERIFICATION_OBLIGATION_COVERAGE_INVALID = verification_coverage.VERIFICATION_OBLIGATION_COVERAGE_INVALID
+VERIFICATION_OBLIGATION_COVERAGE_REQUIRED = verification_coverage.VERIFICATION_OBLIGATION_COVERAGE_REQUIRED
+VERIFICATION_OBLIGATION_COVERAGE_MISMATCH = verification_coverage.VERIFICATION_OBLIGATION_COVERAGE_MISMATCH
 
 _BINDING_FIELDS = (
     "task_id", "requirement_ids", "canonical_plan_id", "canonical_plan_hash",
@@ -1092,6 +1098,10 @@ def _stage4_binding(
         "stage4_dependency_graph_digest": authorization.get("stage4_dependency_graph_digest"),
         "execution_invariant_set_hash": authorization.get("execution_invariant_set_hash"),
         "execution_invariant_ids": _copy(authorization.get("execution_invariant_ids", [])),
+        "verification_obligation_coverage_hash": authorization.get("verification_obligation_coverage_hash"),
+        "verification_obligation_coverage_status": authorization.get("verification_obligation_coverage_status"),
+        "verification_obligation_coverage_ready": authorization.get("verification_obligation_coverage_ready"),
+        "verification_obligation_uncovered_ids": _copy(authorization.get("verification_obligation_uncovered_ids", [])),
     }
 
 
@@ -1115,6 +1125,7 @@ def create_approved_execution_authorization(
     stage4_graph: dict[str, Any] | None = None,
     current_state: dict[str, Any] | None = None,
     execution_invariant_set: dict[str, Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> ApprovedExecutionAuthorization:
     """Grant only the immutable, provider-free authority proof after revalidation."""
     receipt_value = receipt if isinstance(receipt, dict) else {}
@@ -1164,6 +1175,30 @@ def create_approved_execution_authorization(
             EXECUTION_INVARIANT_SET_REQUIRED,
             "current approval-bound authorization references an invariant set that was not supplied",
         )
+    coverage_hash = ""
+    coverage_status = ""
+    coverage_ready = None
+    coverage_uncovered_ids: list[str] = []
+    if verification_obligation_coverage is not None:
+        coverage_check = verification_coverage.validate_verification_obligation_coverage(
+            verification_obligation_coverage,
+        )
+        if not coverage_check.get("valid"):
+            raise ExecutionAuthorizationError(
+                str(coverage_check.get("code") or VERIFICATION_OBLIGATION_COVERAGE_INVALID),
+                "; ".join(coverage_check.get("errors", [])) or "verification-obligation coverage is invalid",
+                coverage_check.get("errors", []),
+            )
+        coverage_hash = str(verification_obligation_coverage.get("coverage_hash") or "")
+        coverage_status = str(
+            verification_obligation_coverage.get("coverage_status")
+            or verification_obligation_coverage.get("status")
+            or ""
+        )
+        coverage_ready = verification_obligation_coverage.get("verification_ready") is True
+        coverage_uncovered_ids = [
+            str(item) for item in verification_obligation_coverage.get("uncovered_obligation_ids", []) or []
+        ]
     record = {
         "schema_version": SCHEMA_VERSION,
         "status": EXECUTION_AUTHORIZATION_READY,
@@ -1186,6 +1221,10 @@ def create_approved_execution_authorization(
         "challenger_reconciliation_hash": binding.get("challenger_reconciliation_hash"),
         "execution_invariant_set_hash": invariant_hash,
         "execution_invariant_ids": invariant_ids,
+        "verification_obligation_coverage_hash": coverage_hash,
+        "verification_obligation_coverage_status": coverage_status,
+        "verification_obligation_coverage_ready": coverage_ready,
+        "verification_obligation_uncovered_ids": coverage_uncovered_ids,
         "source_bindings": _copy(binding.get("source_bindings", {})),
         "authority_constraints_digest": binding.get("authority_constraints_digest"),
         "approved_mutation_scope": _copy(binding.get("mutation_scope", {})),
@@ -1204,6 +1243,10 @@ def create_approved_execution_authorization(
         "canonical_plan_hash": record["canonical_plan_hash"],
         "stage4_contract_graph_hash": graph_hash,
         "execution_invariant_set_hash": invariant_hash,
+        "verification_obligation_coverage_hash": coverage_hash,
+        "verification_obligation_coverage_status": coverage_status,
+        "verification_obligation_coverage_ready": coverage_ready,
+        "verification_obligation_uncovered_ids": coverage_uncovered_ids,
     })[:16].upper()
     record["binding"] = _stage4_binding(record)
     record["authorization_hash"] = canonical_hash(_authorization_hash_payload(record))
@@ -1222,6 +1265,7 @@ def validate_approved_execution_authorization(
     *,
     request: PlanApprovalRequest | dict[str, Any] | None = None,
     execution_invariant_set: dict[str, Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate an authorization object and its optional upstream proofs."""
     value = authorization if isinstance(authorization, dict) else {}
@@ -1247,8 +1291,17 @@ def validate_approved_execution_authorization(
         ("interface_binding_digest", "approved_interface_binding_digest"),
         ("stage4_contract_graph_hash", "stage4_contract_graph_hash"),
         ("execution_invariant_set_hash", "execution_invariant_set_hash"),
+        ("verification_obligation_coverage_hash", "verification_obligation_coverage_hash"),
+        ("verification_obligation_coverage_status", "verification_obligation_coverage_status"),
+        ("verification_obligation_coverage_ready", "verification_obligation_coverage_ready"),
+        ("verification_obligation_uncovered_ids", "verification_obligation_uncovered_ids"),
     ):
-        if binding.get(binding_field) != value.get(field):
+        # Legacy V25.1/V25.2 authorizations have no V25.3 coverage binding.
+        # Once present, every bound field is part of the authorization proof.
+        if (
+            binding.get(binding_field) != value.get(field)
+            and (binding.get(binding_field) not in (None, "", [], {}) or value.get(field) not in (None, "", [], {}))
+        ):
             errors.append({"code": APPROVAL_INVALID, "field": field})
     authorized_invariant_hash = value.get("execution_invariant_set_hash")
     if execution_invariant_set is not None:
@@ -1267,6 +1320,49 @@ def validate_approved_execution_authorization(
         # exact immutable set so it can project semantic facts to the Worker.
         if value.get("execution_invariant_ids") != binding.get("execution_invariant_ids", []):
             errors.append({"code": APPROVAL_INVALID, "field": "execution_invariant_ids"})
+    coverage_bound = bool(value.get("verification_obligation_coverage_hash"))
+    coverage_check = None
+    if verification_obligation_coverage is not None:
+        coverage_check = verification_coverage.validate_verification_obligation_coverage(
+            verification_obligation_coverage,
+        )
+        if not coverage_check.get("valid"):
+            errors.append({
+                "code": coverage_check.get("code") or VERIFICATION_OBLIGATION_COVERAGE_INVALID,
+                "field": "verification_obligation_coverage",
+                "details": coverage_check.get("errors", []),
+            })
+        elif not coverage_bound:
+            errors.append({"code": VERIFICATION_OBLIGATION_COVERAGE_MISMATCH, "field": "verification_obligation_coverage_hash"})
+        else:
+            for field in (
+                "coverage_hash", "coverage_status", "verification_ready", "uncovered_obligation_ids",
+            ):
+                auth_field = {
+                    "coverage_hash": "verification_obligation_coverage_hash",
+                    "coverage_status": "verification_obligation_coverage_status",
+                    "verification_ready": "verification_obligation_coverage_ready",
+                    "uncovered_obligation_ids": "verification_obligation_uncovered_ids",
+                }[field]
+                current = verification_obligation_coverage.get(field)
+                if field == "coverage_status":
+                    current = verification_obligation_coverage.get("coverage_status") or verification_obligation_coverage.get("status")
+                if field == "verification_ready":
+                    current = verification_obligation_coverage.get("verification_ready") is True
+                if field == "uncovered_obligation_ids":
+                    current = [str(item) for item in verification_obligation_coverage.get(field, []) or []]
+                if value.get(auth_field) != current:
+                    errors.append({"code": VERIFICATION_OBLIGATION_COVERAGE_MISMATCH, "field": auth_field})
+    elif coverage_bound:
+        # An authorization may be inspected without rehydrating the full
+        # artifact, but it is not execution-eligible until that exact artifact
+        # is supplied to the Worker gate.
+        coverage_check = {
+            "valid": True,
+            "status": value.get("verification_obligation_coverage_status"),
+            "verification_ready": value.get("verification_obligation_coverage_ready") is True,
+            "uncovered_obligation_ids": list(value.get("verification_obligation_uncovered_ids", []) or []),
+        }
     if isinstance(receipt, dict):
         receipt_check = validate_plan_approval_receipt(receipt, request)
         if not receipt_check.get("valid"):
@@ -1284,6 +1380,15 @@ def validate_approved_execution_authorization(
         "code": None if not errors else errors[0].get("code"),
         "errors": errors[:30],
         "authorization_hash": value.get("authorization_hash"),
+        "verification_coverage_bound": coverage_bound,
+        "verification_coverage_status": (
+            value.get("verification_obligation_coverage_status") if coverage_bound else None
+        ),
+        "verification_ready": (
+            value.get("verification_obligation_coverage_ready") is True
+            if coverage_bound else None
+        ),
+        "verification_coverage": coverage_check,
     }
 
 
@@ -1294,6 +1399,7 @@ def worker_authorization_gate(
     *,
     request: PlanApprovalRequest | dict[str, Any] | None = None,
     execution_invariant_set: dict[str, Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a gate decision only; this function never invokes a Worker."""
     if not isinstance(authorization, dict):
@@ -1305,6 +1411,7 @@ def worker_authorization_gate(
     checked = validate_approved_execution_authorization(
         authorization, receipt, revalidation, request=request,
         execution_invariant_set=execution_invariant_set,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not checked.get("valid"):
         return {
@@ -1315,6 +1422,57 @@ def worker_authorization_gate(
             "errors": checked.get("errors", []),
             "authorization_hash": authorization.get("authorization_hash"),
         }
+    coverage_bound = bool(authorization.get("verification_obligation_coverage_hash"))
+    if coverage_bound and verification_obligation_coverage is None:
+        return {
+            "allowed": False,
+            "status": EXECUTION_AUTHORIZATION_BLOCKED,
+            "terminal_state": VERIFICATION_OBLIGATION_COVERAGE_REQUIRED,
+            "code": VERIFICATION_OBLIGATION_COVERAGE_REQUIRED,
+            "errors": [
+                "the authorization is bound to verification-obligation coverage but the exact artifact was not supplied",
+            ],
+            "authorization_hash": authorization.get("authorization_hash"),
+            "verification_coverage": checked.get("verification_coverage"),
+        }
+    if verification_obligation_coverage is not None:
+        coverage_check = verification_coverage.validate_verification_obligation_coverage(
+            verification_obligation_coverage,
+        )
+        if not coverage_check.get("valid"):
+            return {
+                "allowed": False,
+                "status": EXECUTION_AUTHORIZATION_BLOCKED,
+                "terminal_state": VERIFICATION_OBLIGATION_COVERAGE_INVALID,
+                "code": VERIFICATION_OBLIGATION_COVERAGE_INVALID,
+                "errors": coverage_check.get("errors", []),
+                "authorization_hash": authorization.get("authorization_hash"),
+                "verification_coverage": coverage_check,
+            }
+        if not coverage_bound or coverage_check.get("coverage_hash") != authorization.get("verification_obligation_coverage_hash"):
+            return {
+                "allowed": False,
+                "status": EXECUTION_AUTHORIZATION_BLOCKED,
+                "terminal_state": VERIFICATION_OBLIGATION_COVERAGE_MISMATCH,
+                "code": VERIFICATION_OBLIGATION_COVERAGE_MISMATCH,
+                "errors": ["verification-obligation coverage does not match authorization"],
+                "authorization_hash": authorization.get("authorization_hash"),
+                "verification_coverage": coverage_check,
+            }
+        if coverage_check.get("status") != EXECUTION_VERIFICATION_READY:
+            return {
+                "allowed": False,
+                "status": EXECUTION_AUTHORIZATION_BLOCKED,
+                "terminal_state": VERIFICATION_OBLIGATION_UNCOVERED,
+                "code": VERIFICATION_OBLIGATION_UNCOVERED,
+                "errors": [
+                    "mandatory verification obligation coverage is incomplete",
+                ] + [
+                    str(item) for item in coverage_check.get("uncovered_obligation_ids", [])
+                ],
+                "authorization_hash": authorization.get("authorization_hash"),
+                "verification_coverage": coverage_check,
+            }
     return {
         "allowed": True,
         "status": EXECUTION_AUTHORIZATION_READY,
@@ -1322,6 +1480,7 @@ def worker_authorization_gate(
         "code": None,
         "errors": [],
         "authorization_hash": authorization.get("authorization_hash"),
+        "verification_coverage": checked.get("verification_coverage"),
     }
 
 
@@ -1342,10 +1501,13 @@ def validate_approval_bound_contracts(
     *,
     plan: dict[str, Any] | None = None,
     graph: dict[str, Any] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Audit Stage 4 contracts for exact approval-bound authority equality."""
     auth = authorization if isinstance(authorization, dict) else {}
-    gate = worker_authorization_gate(auth)
+    gate = worker_authorization_gate(
+        auth, verification_obligation_coverage=verification_obligation_coverage,
+    )
     errors: list[dict[str, Any]] = []
     if not gate.get("allowed"):
         errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "authorization", "details": gate.get("errors", [])})
@@ -1376,9 +1538,12 @@ def validate_approval_bound_contracts(
             ("approved_interface_binding_digest", "approved_interface_binding_digest"),
             ("stage4_contract_graph_hash", "stage4_contract_graph_hash"),
             ("execution_invariant_set_hash", "execution_invariant_set_hash"),
+            ("verification_obligation_coverage_hash", "verification_obligation_coverage_hash"),
+            ("verification_obligation_coverage_status", "verification_obligation_coverage_status"),
+            ("verification_obligation_coverage_ready", "verification_obligation_coverage_ready"),
         ):
             expected_value = expected.get(expected_field)
-            if field == "execution_invariant_set_hash" and expected_value in (None, ""):
+            if expected_value in (None, "", [], {}):
                 continue
             if contract.get(field) != expected_value:
                 errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": field, "contract_id": contract.get("execution_contract_id")})
@@ -1403,6 +1568,15 @@ def validate_approval_bound_contracts(
         if auth.get("execution_invariant_set_hash"):
             if contract.get("execution_invariant_ids") != list(auth.get("execution_invariant_ids", []) or []):
                 errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "execution_invariant_ids", "contract_id": contract.get("execution_contract_id")})
+        if auth.get("verification_obligation_coverage_hash"):
+            if contract.get("verification_obligation_coverage_hash") != auth.get("verification_obligation_coverage_hash"):
+                errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "verification_obligation_coverage_hash", "contract_id": contract.get("execution_contract_id")})
+            if contract.get("verification_obligation_coverage_status") != auth.get("verification_obligation_coverage_status"):
+                errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "verification_obligation_coverage_status", "contract_id": contract.get("execution_contract_id")})
+            if contract.get("verification_obligation_coverage_ready") != auth.get("verification_obligation_coverage_ready"):
+                errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "verification_obligation_coverage_ready", "contract_id": contract.get("execution_contract_id")})
+            if contract.get("verification_obligation_uncovered_ids") != list(auth.get("verification_obligation_uncovered_ids", []) or []):
+                errors.append({"code": EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "field": "verification_obligation_uncovered_ids", "contract_id": contract.get("execution_contract_id")})
     approved_scope = auth.get("approved_mutation_scope") if isinstance(auth.get("approved_mutation_scope"), dict) else {}
     expected_paths = {_text(item).casefold() for item in approved_scope.get("paths", []) or []}
     expected_surfaces = set(_text(item) for item in approved_scope.get("surface_ids", []) or [])
@@ -1491,6 +1665,7 @@ def compile_approval_bound_execution_contracts(
     authoritative_task_goal: str | None = None,
     execution_invariant_set: dict[str, Any] | None = None,
     execution_invariant_source_root: str | Path | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct Stage 4 contracts from the exact approved plan, read-only."""
     value = plan if isinstance(plan, dict) else {}
@@ -1498,6 +1673,7 @@ def compile_approval_bound_execution_contracts(
     gate = worker_authorization_gate(
         auth, receipt, revalidation, request=request,
         execution_invariant_set=execution_invariant_set,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not gate.get("allowed"):
         raise ExecutionAuthorizationError(
@@ -1554,13 +1730,17 @@ def compile_approval_bound_execution_contracts(
     compiled = stage4.compile_execution_contracts(
         snapshot, authority_binding=binding,
         execution_invariant_set=execution_invariant_set,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     contracts = compiled.get("contracts", [])
     graph = stage4.build_execution_graph(snapshot, contracts)
     graph_check = stage4.validate_execution_graph(snapshot, graph, contracts)
     if not graph_check.get("valid"):
         raise ExecutionAuthorizationError(EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "; ".join(graph_check.get("errors", [])), graph_check.get("errors", []))
-    contract_check = validate_approval_bound_contracts(contracts, auth, plan=value, graph=graph)
+    contract_check = validate_approval_bound_contracts(
+        contracts, auth, plan=value, graph=graph,
+        verification_obligation_coverage=verification_obligation_coverage,
+    )
     if not contract_check.get("valid"):
         raise ExecutionAuthorizationError(EXECUTION_CONTRACT_APPROVAL_BINDING_MISMATCH, "; ".join(str(item) for item in contract_check.get("errors", [])), contract_check.get("errors", []))
     return {
