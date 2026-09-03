@@ -746,7 +746,8 @@ def _preservation_records(plan):
     return records
 
 
-def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, evidence, registry):
+def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, evidence, registry,
+                        authority_binding=None):
     nodes = [_compact_node(item) for item in list((plan or {}).get("approved_change_nodes", []) or [])]
     surfaces = _surface_records(plan, registry)
     referenced_surface_ids = {
@@ -872,6 +873,11 @@ def _snapshot_authority(plan, approval, authoritative_task_goal, requirements, e
         authority["canonical_verification_contracts"] = _copy(
             plan.get("canonical_verification_contracts")
         )
+    # Stage 6C-A adds an exact approval proof to the immutable Stage 4
+    # snapshot.  The field is optional so the historical V19--V24 APIs keep
+    # their original contract shape and compatibility behavior.
+    if isinstance(authority_binding, dict):
+        authority["approval_binding"] = _copy(authority_binding)
     return authority
 
 
@@ -889,6 +895,7 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
         "integration_contract", "canonical_evidence_ids", "canonical_evidence",
         "canonical_surfaces", "new_surface_proposals", "provenance", "bounds",
         "canonical_constraints", "canonical_verification_contracts",
+        "approval_binding",
         "snapshot_hash", "immutable",
     }
     errors.extend(
@@ -985,6 +992,14 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
     expected_hash = deterministic_hash(_without(value, "snapshot_hash", "immutable"))
     if value.get("snapshot_hash") != expected_hash:
         errors.append("snapshot hash does not match snapshot content")
+    approval_binding = value.get("approval_binding") if isinstance(value.get("approval_binding"), dict) else {}
+    if approval_binding:
+        bound_plan_hash = approval_binding.get("approved_plan_hash") or approval_binding.get("canonical_plan_hash")
+        bound_plan_id = approval_binding.get("approved_plan_id") or approval_binding.get("canonical_plan_id")
+        if bound_plan_hash and bound_plan_hash != value.get("plan_hash"):
+            errors.append("snapshot approval binding plan hash does not match snapshot")
+        if bound_plan_id and bound_plan_id != value.get("plan_id"):
+            errors.append("snapshot approval binding plan id does not match snapshot")
     def scan(item):
         if isinstance(item, dict):
             for key, child in item.items():
@@ -1006,7 +1021,8 @@ def validate_snapshot(snapshot, plan=None, approval=None, authoritative_task_goa
 
 def create_approved_plan_snapshot(plan, approval, authoritative_task_goal=None,
                                   requirements=None, repository_evidence=None,
-                                  canonical_surface_registry=None):
+                                  canonical_surface_registry=None,
+                                  authority_binding=None):
     """Create a frozen, whitelisted snapshot only after approval validation."""
     validation = validate_approved_plan(plan, approval, authoritative_task_goal)
     if not validation["valid"]:
@@ -1017,6 +1033,7 @@ def create_approved_plan_snapshot(plan, approval, authoritative_task_goal=None,
     authority = _snapshot_authority(
         plan, approval, authoritative_task_goal, requirements or [],
         repository_evidence or [], canonical_surface_registry,
+        authority_binding=authority_binding,
     )
     authority["bounds"] = {
         "max_execution_contracts": MAX_EXECUTION_CONTRACTS,
@@ -1365,7 +1382,48 @@ def _compatible_reuse(node, contracts):
     return scores[0][2] if scores and scores[0][0] < 0 else None
 
 
-def compile_execution_contracts(snapshot):
+def _approval_binding_for(snapshot, authority_binding=None):
+    value = authority_binding if isinstance(authority_binding, dict) else {}
+    if not value and isinstance(snapshot, dict) and isinstance(snapshot.get("approval_binding"), dict):
+        value = snapshot.get("approval_binding")
+    return value if isinstance(value, dict) else {}
+
+
+def _attach_approval_binding(contract, snapshot, authority_binding=None):
+    """Copy only compact V25 authority references into one Stage 4 contract."""
+    binding = _approval_binding_for(snapshot, authority_binding)
+    if not binding:
+        return contract
+    fields = {
+        "approved_plan_hash": binding.get("approved_plan_hash") or binding.get("canonical_plan_hash") or snapshot.get("plan_hash"),
+        "approval_receipt_hash": binding.get("approval_receipt_hash"),
+        "execution_authorization_hash": binding.get("execution_authorization_hash"),
+        "approved_task_id": binding.get("approved_task_id") or binding.get("task_id"),
+        "approved_requirement_ids": _copy(binding.get("approved_requirement_ids") or binding.get("requirement_ids", [])),
+        "approved_subject_hash": binding.get("approved_subject_hash") or binding.get("subject_aggregate_hash"),
+        "approved_brain_hash": binding.get("approved_brain_hash") or binding.get("brain_hash"),
+        "approved_planning_context_hash": binding.get("approved_planning_context_hash") or binding.get("planning_context_hash"),
+        "approved_mutation_scope_digest": binding.get("approved_mutation_scope_digest") or binding.get("mutation_scope_digest"),
+        "approved_dnt_digest": binding.get("approved_dnt_digest") or binding.get("dnt_digest"),
+        "approved_dependency_digest": binding.get("approved_dependency_digest") or binding.get("dependency_digest"),
+        "approved_verification_digest": binding.get("approved_verification_digest") or binding.get("verification_contract_digest"),
+        "approved_interface_binding_digest": binding.get("approved_interface_binding_digest") or binding.get("interface_binding_digest"),
+        "approved_requirement_coverage_digest": binding.get("approved_requirement_coverage_digest") or binding.get("requirement_coverage_digest"),
+        "approved_challenger_reconciliation_hash": binding.get("approved_challenger_reconciliation_hash") or binding.get("challenger_reconciliation_hash"),
+        "stage4_contract_graph_hash": binding.get("stage4_contract_graph_hash"),
+        "stage4_dependency_graph_digest": binding.get("stage4_dependency_graph_digest"),
+    }
+    for key, value in fields.items():
+        if value not in (None, "", [], {}):
+            contract[key] = value
+    contract["approval_binding_hash"] = deterministic_hash({
+        key: value for key, value in fields.items() if value not in (None, "", [], {})
+    })
+    contract["contract_hash"] = deterministic_hash(_without(contract, "contract_hash"))
+    return contract
+
+
+def compile_execution_contracts(snapshot, authority_binding=None):
     """Compile one minimal bounded contract for each approved mutation/test responsibility."""
     if not isinstance(snapshot, dict) or not snapshot.get("immutable"):
         raise ExecutionContractError(EXECUTION_CONTRACT_BLOCKED, "an immutable ApprovedPlanSnapshot is required")
@@ -1513,6 +1571,10 @@ def compile_execution_contracts(snapshot):
         contract["dependencies"] = dependencies
         contract["contract_hash"] = deterministic_hash(_without(contract, "contract_hash"))
         _validate_contract_bounds(contract)
+    binding = _approval_binding_for(snapshot, authority_binding)
+    if binding:
+        for contract in contracts:
+            _attach_approval_binding(contract, snapshot, binding)
     graph_validation = validate_contracts(snapshot, contracts, assignment=assignment)
     if not graph_validation["valid"]:
         raise ExecutionGraphError(EXECUTION_GRAPH_INVALID, "; ".join(graph_validation["errors"]))
@@ -1628,6 +1690,53 @@ def validate_contracts(snapshot, contracts, assignment=None):
             errors.append(f"{cid}: contract plan identity mismatch")
         if contract.get("contract_hash") != deterministic_hash(_without(contract, "contract_hash")):
             errors.append(f"{cid}: contract hash does not match content")
+        approval_binding = _approval_binding_for(value)
+        if approval_binding:
+            expected_binding_fields = {
+                "approved_plan_hash": approval_binding.get("approved_plan_hash") or approval_binding.get("canonical_plan_hash") or value.get("plan_hash"),
+                "approval_receipt_hash": approval_binding.get("approval_receipt_hash"),
+                "execution_authorization_hash": approval_binding.get("execution_authorization_hash"),
+                "approved_task_id": approval_binding.get("approved_task_id") or approval_binding.get("task_id"),
+                "approved_requirement_ids": _copy(approval_binding.get("approved_requirement_ids") or approval_binding.get("requirement_ids", [])),
+                "approved_subject_hash": approval_binding.get("approved_subject_hash") or approval_binding.get("subject_aggregate_hash"),
+                "approved_brain_hash": approval_binding.get("approved_brain_hash") or approval_binding.get("brain_hash"),
+                "approved_planning_context_hash": approval_binding.get("approved_planning_context_hash") or approval_binding.get("planning_context_hash"),
+                "approved_mutation_scope_digest": approval_binding.get("approved_mutation_scope_digest") or approval_binding.get("mutation_scope_digest"),
+                "approved_dnt_digest": approval_binding.get("approved_dnt_digest") or approval_binding.get("dnt_digest"),
+                "approved_dependency_digest": approval_binding.get("approved_dependency_digest") or approval_binding.get("dependency_digest"),
+                "approved_verification_digest": approval_binding.get("approved_verification_digest") or approval_binding.get("verification_contract_digest"),
+                "approved_interface_binding_digest": approval_binding.get("approved_interface_binding_digest") or approval_binding.get("interface_binding_digest"),
+                "approved_requirement_coverage_digest": approval_binding.get("approved_requirement_coverage_digest") or approval_binding.get("requirement_coverage_digest"),
+                "approved_challenger_reconciliation_hash": approval_binding.get("approved_challenger_reconciliation_hash") or approval_binding.get("challenger_reconciliation_hash"),
+                "stage4_contract_graph_hash": approval_binding.get("stage4_contract_graph_hash"),
+                "stage4_dependency_graph_digest": approval_binding.get("stage4_dependency_graph_digest"),
+            }
+            for field, expected in expected_binding_fields.items():
+                if expected not in (None, "", [], {}) and contract.get(field) != expected:
+                    errors.append(f"{cid}: approval binding {field} mismatch")
+            expected_binding_hash = deterministic_hash({
+                key: item for key, item in {
+                    "approved_plan_hash": expected_binding_fields.get("approved_plan_hash"),
+                    "approval_receipt_hash": expected_binding_fields.get("approval_receipt_hash"),
+                    "execution_authorization_hash": expected_binding_fields.get("execution_authorization_hash"),
+                    "approved_task_id": expected_binding_fields.get("approved_task_id"),
+                    "approved_requirement_ids": expected_binding_fields.get("approved_requirement_ids"),
+                    "approved_subject_hash": expected_binding_fields.get("approved_subject_hash"),
+                    "approved_brain_hash": expected_binding_fields.get("approved_brain_hash"),
+                    "approved_planning_context_hash": expected_binding_fields.get("approved_planning_context_hash"),
+                    "approved_mutation_scope_digest": expected_binding_fields.get("approved_mutation_scope_digest"),
+                    "approved_dnt_digest": expected_binding_fields.get("approved_dnt_digest"),
+                    "approved_dependency_digest": expected_binding_fields.get("approved_dependency_digest"),
+                    "approved_verification_digest": expected_binding_fields.get("approved_verification_digest"),
+                    "approved_interface_binding_digest": expected_binding_fields.get("approved_interface_binding_digest"),
+                    "approved_requirement_coverage_digest": expected_binding_fields.get("approved_requirement_coverage_digest"),
+                    "approved_challenger_reconciliation_hash": expected_binding_fields.get("approved_challenger_reconciliation_hash"),
+                    "stage4_contract_graph_hash": expected_binding_fields.get("stage4_contract_graph_hash"),
+                    "stage4_dependency_graph_digest": expected_binding_fields.get("stage4_dependency_graph_digest"),
+                }.items() if item not in (None, "", [], {})
+            })
+            if contract.get("approval_binding_hash") != expected_binding_hash:
+                errors.append(f"{cid}: approval binding hash mismatch")
         node_ids = [str(item) for item in contract.get("plan_node_ids", []) or []]
         owned_ids = [str(item) for item in contract.get("owned_plan_node_ids", []) or []]
         if not set(node_ids).issubset(known_node_ids) or not set(owned_ids).issubset(known_node_ids):
@@ -1775,6 +1884,10 @@ def build_execution_graph(snapshot, contracts=None):
         "integration_responsibility": list(snapshot.get("integration_contract", []) or []),
         "provenance": APPROVED_PLAN,
     }
+    approval_binding = _approval_binding_for(snapshot)
+    if approval_binding:
+        graph["approval_binding"] = _copy(approval_binding)
+        graph["approval_binding_hash"] = deterministic_hash(approval_binding)
     graph["graph_hash"] = deterministic_hash(graph)
     return graph
 
@@ -1787,6 +1900,12 @@ def validate_execution_graph(snapshot, graph, contracts=None):
     errors = []
     if value.get("plan_id") != (snapshot or {}).get("plan_id") or value.get("plan_hash") != (snapshot or {}).get("plan_hash"):
         errors.append("graph plan identity mismatch")
+    snapshot_binding = _approval_binding_for(snapshot)
+    if snapshot_binding:
+        if value.get("approval_binding") != snapshot_binding:
+            errors.append("graph approval binding does not match the approved snapshot")
+        if value.get("approval_binding_hash") != deterministic_hash(snapshot_binding):
+            errors.append("graph approval binding hash does not match content")
     expected_hash = deterministic_hash(_without(value, "graph_hash"))
     if value.get("graph_hash") != expected_hash:
         errors.append("graph hash does not match content")
@@ -2125,6 +2244,17 @@ def contract_projection(contract, max_chars=MAX_CONTEXT_CHARS):
         "local_preservation_constraints", "structured_prohibitions", "global_do_not_touch_surface_ids",
         "global_do_not_touch", "test_contract", "integration_responsibility", "done_when",
         "dependencies", "provenance", "derivation", "source_provenance", "worker_required",
+        # Stage 6C-A additive authority references.  They are intentionally
+        # projected with the contract so a downstream Worker can never lose
+        # the approval proof while receiving its bounded context.
+        "approved_plan_hash", "approval_receipt_hash", "execution_authorization_hash",
+        "approved_task_id", "approved_requirement_ids", "approved_subject_hash",
+        "approved_brain_hash", "approved_planning_context_hash",
+        "approved_mutation_scope_digest", "approved_dnt_digest",
+        "approved_dependency_digest", "approved_verification_digest",
+        "approved_interface_binding_digest", "approved_requirement_coverage_digest",
+        "approved_challenger_reconciliation_hash", "stage4_contract_graph_hash",
+        "stage4_dependency_graph_digest", "approval_binding_hash",
     )
     result = {key: _copy(value.get(key)) for key in fields if key in value}
     encoded = _json(result)

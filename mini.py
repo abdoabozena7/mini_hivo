@@ -38,6 +38,7 @@ from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import reentry as stage6a
 from hivo import verified_planning as stage6b
+from hivo import approval_authority as stage6c
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -185,6 +186,23 @@ PLAN_APPROVAL_REQUIRED = "PLAN_APPROVAL_REQUIRED"
 PLAN_REJECTED = "PLAN_REJECTED"
 PLAN_INCOMPLETE = "PLAN_INCOMPLETE"
 UNAPPROVED_SCOPE_EXPANSION = "UNAPPROVED_SCOPE_EXPANSION"
+# V25 Stage 6C-A approval-bound execution authorization.  The deterministic
+# implementation lives in hivo.approval_authority; these aliases keep the
+# orchestrator's public surface easy to discover without changing V24 flow.
+APPROVAL_REQUEST_READY = stage6c.APPROVAL_REQUEST_READY
+APPROVAL_RECORDED = stage6c.APPROVAL_RECORDED
+APPROVAL_INVALID = stage6c.APPROVAL_INVALID
+APPROVAL_STALE = stage6c.APPROVAL_STALE
+REAPPROVAL_REQUIRED = stage6c.REAPPROVAL_REQUIRED
+EXECUTION_AUTHORIZATION_READY = stage6c.EXECUTION_AUTHORIZATION_READY
+EXECUTION_AUTHORIZATION_BLOCKED = stage6c.EXECUTION_AUTHORIZATION_BLOCKED
+EXPLICIT_USER_APPROVAL = stage6c.EXPLICIT_USER_APPROVAL
+TEST_EXPLICIT_USER_APPROVAL = stage6c.TEST_EXPLICIT_USER_APPROVAL
+PlanApprovalRequest = stage6c.PlanApprovalRequest
+ExplicitUserApprovalEvent = stage6c.ExplicitUserApprovalEvent
+PlanApprovalReceipt = stage6c.PlanApprovalReceipt
+PreExecutionApprovalRevalidation = stage6c.PreExecutionApprovalRevalidation
+ApprovedExecutionAuthorization = stage6c.ApprovedExecutionAuthorization
 # V24 Stage 6B verified-state-aware planning. These names are aliases only;
 # the deterministic implementation remains in hivo.verified_planning.
 VERIFIED_STATE_REENTRY = stage6b.VERIFIED_STATE_REENTRY
@@ -1275,6 +1293,34 @@ def _normalized_workspace_relative_path(raw_path):
 def _stage3_mutation_guard(name, args):
     if name not in {"write_file", "edit_file", "edit_file_range"}:
         return None
+    if RUN.get("stage6c_enabled"):
+        authority_gate = stage6c.worker_authorization_gate(
+            RUN.get("execution_authorization"),
+            RUN.get("approval_receipt"),
+            RUN.get("pre_execution_approval_revalidation"),
+            request=RUN.get("approval_request"),
+        )
+        if not authority_gate.get("allowed"):
+            return (
+                f"error: {authority_gate.get('code') or EXECUTION_AUTHORIZATION_BLOCKED}; "
+                "Stage 6C-A has no exact current execution authorization"
+            )
+        active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+        effective = _current_execution_contract(active) if active.get("execution_contract_id") else None
+        if not isinstance(effective, dict):
+            return (
+                f"error: {EXECUTION_AUTHORIZATION_BLOCKED}; "
+                "Stage 6C-A stops before a mutable Worker contract is activated"
+            )
+        target = _normalized_workspace_relative_path((args or {}).get("path"))
+        check = stage4.tool_scope(effective, target, mutation=True)
+        if not check.get("allowed"):
+            RUN["approval_contract_binding_failures"] = RUN.get("approval_contract_binding_failures", 0) + 1
+            return (
+                f"error: {stage6c.APPROVAL_MUTATION_SCOPE_MISMATCH}; "
+                f"'{(args or {}).get('path')}' is outside the approval-bound contract"
+            )
+        return None
     if not RUN.get("impact_planning_required") or RUN.get("project_mode") != EXISTING_PROJECT:
         return None
     plan = RUN.get("approved_change_plan")
@@ -1813,6 +1859,14 @@ def new_metrics(mode):
         "plan_approval_granted": 0,
         "plan_approval_rejected": 0,
         "unapproved_scope_expansions": 0,
+        # Stage 6C-A compact deterministic approval-boundary accounting.
+        "approval_requests_created": 0,
+        "approval_receipts_recorded": 0,
+        "approval_validation_failures": 0,
+        "preexecution_revalidations": 0,
+        "reapproval_required": 0,
+        "execution_authorizations_ready": 0,
+        "approval_contract_binding_failures": 0,
         "impact_planner_calls": 0,
         "impact_challenger_calls": 0,
         "impact_plan_revision_calls": 0,
@@ -7258,8 +7312,37 @@ def compile_approved_plan_execution_contracts(contract=None, plan=None, approval
         plan is None and approval is None
         and RUN.get("project_mode") != EXISTING_PROJECT
         and not RUN.get("impact_planning_required")
+        and not RUN.get("stage6c_enabled")
     ):
         return {"status": "not_applicable", "contracts": [], "graph": None}
+    if (
+        RUN.get("stage6c_enabled")
+        and isinstance(RUN.get("approval_request"), dict)
+        and isinstance(RUN.get("approval_receipt"), dict)
+        and isinstance(RUN.get("pre_execution_approval_revalidation"), dict)
+        and isinstance(RUN.get("execution_authorization"), dict)
+    ):
+        bound_plan = plan if isinstance(plan, dict) else RUN.get("approved_change_plan")
+        try:
+            bound = compile_approval_bound_execution_contracts(
+                bound_plan,
+                RUN.get("approval_receipt"),
+                RUN.get("pre_execution_approval_revalidation"),
+                RUN.get("execution_authorization"),
+                request=RUN.get("approval_request"),
+                authoritative_task_goal=_stage4_authoritative_goal(contract, bound_plan),
+            )
+        except stage6c.ApprovalAuthorityError as exc:
+            return _stage4_failure_result(
+                getattr(exc, "code", EXECUTION_AUTHORIZATION_BLOCKED),
+                str(exc), phase="approval_binding",
+            )
+        RUN["approved_plan_snapshot"] = bound.get("snapshot")
+        RUN["approved_plan_snapshot_hash"] = (bound.get("snapshot") or {}).get("snapshot_hash")
+        RUN["execution_contracts"] = bound.get("contracts", [])
+        RUN["plan_execution_graph"] = bound.get("graph")
+        RUN["execution_contract_status"] = "ready"
+        return bound
     contract = contract if isinstance(contract, dict) else RUN.get("source_contract")
     plan = plan if isinstance(plan, dict) else RUN.get("approved_change_plan")
     approval = approval if isinstance(approval, dict) else RUN.get("plan_approval")
@@ -7378,6 +7461,118 @@ def compile_approved_plan_execution_contracts(contract=None, plan=None, approval
         "assignment": compiled.get("assignment", {}), "graph": graph,
         "validation": graph_validation,
     }
+
+
+# ---------------------------------------------------------------------------
+# STAGE 6C-A APPROVAL-BOUND AUTHORITY
+# ---------------------------------------------------------------------------
+
+def create_stage6c_approval_request(plan, state=None, **metadata):
+    """Create the V25 request without changing the historical approval UI."""
+    RUN["stage6c_enabled"] = True
+    try:
+        request = stage6c.create_plan_approval_request(plan, state, **metadata)
+    except stage6c.ApprovalAuthorityError:
+        RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+        raise
+    RUN["approval_requests_created"] = RUN.get("approval_requests_created", 0) + 1
+    RUN["approval_request"] = request
+    RUN.setdefault("control_flow", []).append("APPROVAL_REQUEST_READY")
+    return request
+
+
+def record_stage6c_approval(request, approval_event=None, **kwargs):
+    """Record only a caller-supplied explicit event; never synthesize approval."""
+    RUN["stage6c_enabled"] = True
+    try:
+        receipt = stage6c.record_plan_approval(request, approval_event, **kwargs)
+    except stage6c.ApprovalAuthorityError:
+        RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+        raise
+    RUN["approval_receipts_recorded"] = RUN.get("approval_receipts_recorded", 0) + 1
+    RUN["approval_receipt"] = receipt
+    RUN.setdefault("control_flow", []).append("APPROVAL_RECORDED")
+    return receipt
+
+
+def pre_execution_approval_revalidation(receipt, current_plan=None, current_state=None, **kwargs):
+    RUN["stage6c_enabled"] = True
+    result = stage6c.pre_execution_approval_revalidation(
+        receipt, current_plan, current_state, **kwargs,
+    )
+    RUN["preexecution_revalidations"] = RUN.get("preexecution_revalidations", 0) + 1
+    RUN["pre_execution_approval_revalidation"] = result
+    if not result.get("valid"):
+        RUN["reapproval_required"] = RUN.get("reapproval_required", 0) + 1
+    return result
+
+
+def create_approved_execution_authorization(receipt, revalidation, **kwargs):
+    RUN["stage6c_enabled"] = True
+    try:
+        authorization = stage6c.create_approved_execution_authorization(
+            receipt, revalidation, **kwargs,
+        )
+    except stage6c.ApprovalAuthorityError:
+        RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+        raise
+    RUN["execution_authorizations_ready"] = RUN.get("execution_authorizations_ready", 0) + 1
+    RUN["execution_authorization"] = authorization
+    RUN.setdefault("control_flow", []).append("EXECUTION_AUTHORIZATION_READY")
+    return authorization
+
+
+def compile_approval_bound_execution_contracts(plan, receipt, revalidation, authorization, **kwargs):
+    RUN["stage6c_enabled"] = True
+    try:
+        result = stage6c.compile_approval_bound_execution_contracts(
+            plan, receipt, revalidation, authorization, **kwargs,
+        )
+    except stage6c.ApprovalAuthorityError:
+        RUN["approval_contract_binding_failures"] = RUN.get("approval_contract_binding_failures", 0) + 1
+        raise
+    RUN["approval_bound_execution_contracts"] = result.get("contracts", [])
+    RUN["approval_bound_execution_graph"] = result.get("graph")
+    return result
+
+
+def worker_authorization_gate(authorization=None, receipt=None, revalidation=None, **kwargs):
+    """Final pre-Worker guard for V25; a true result still performs no work."""
+    return stage6c.worker_authorization_gate(
+        authorization, receipt, revalidation, **kwargs,
+    )
+
+
+def run_stage6c_a_live_replay(artifact_root=None, **kwargs):
+    """Run the exact persisted Stage 6B replay and stop before execution."""
+    if artifact_root is None:
+        artifact_root = Path(__file__).resolve().parent / "output" / "hivo-v24-4-6-stage6b-planning-live-1"
+    result = stage6c.run_stage6c_a_live_replay(artifact_root, **kwargs)
+    try:
+        with (Path(artifact_root) / "final_plan.json").open("r", encoding="utf-8") as handle:
+            RUN["approved_change_plan"] = json.load(handle)
+    except (OSError, ValueError):
+        pass
+    RUN["stage6c_enabled"] = True
+    RUN.update({
+        "approval_request": result.get("approval_request"),
+        "approval_receipt": result.get("approval_receipt"),
+        "pre_execution_approval_revalidation": result.get("pre_execution_approval_revalidation"),
+        "execution_authorization": result.get("execution_authorization"),
+        "approval_bound_execution_contracts": (result.get("stage4") or {}).get("contracts", []),
+        "approval_bound_execution_graph": (result.get("stage4") or {}).get("graph"),
+        "status": result.get("status"),
+        "terminal_state": result.get("terminal_state"),
+        "worker_calls": 0,
+        "subject_mutations": 0,
+        "brain_writes": 0,
+    })
+    return result
+
+
+run_stage6c_a_authorization = run_stage6c_a_live_replay
+run_stage6c_a_replay = run_stage6c_a_live_replay
+run_stage6c_a_self_test = stage6c.run_stage6c_a_self_test
 
 
 # Public aliases make the Stage 4A handoff directly testable without exposing
@@ -7588,6 +7783,20 @@ def attach_approved_plan_to_task(task, plan, node_ids=None):
 
 
 def _stage3_execution_gate(task=None):
+    if RUN.get("stage6c_enabled"):
+        authority_gate = stage6c.worker_authorization_gate(
+            RUN.get("execution_authorization"),
+            RUN.get("approval_receipt"),
+            RUN.get("pre_execution_approval_revalidation"),
+            request=RUN.get("approval_request"),
+        )
+        if not authority_gate.get("allowed"):
+            return {
+                "allowed": False,
+                "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
+                "code": authority_gate.get("code") or REAPPROVAL_REQUIRED,
+                "errors": authority_gate.get("errors", []),
+            }
     if not RUN.get("impact_planning_required") or RUN.get("project_mode") != EXISTING_PROJECT:
         return {"allowed": True, "plan": None, "contract": None}
     plan = current_approved_change_plan()
@@ -9995,6 +10204,27 @@ def verification_failure_digest(result, limit=1800):
 
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="",
                        tool_policy=None, max_steps=None):
+    if RUN.get("stage6c_enabled") and role in {"Builder", "Worker"}:
+        authority_gate = stage6c.worker_authorization_gate(
+            RUN.get("execution_authorization"),
+            RUN.get("approval_receipt"),
+            RUN.get("pre_execution_approval_revalidation"),
+            request=RUN.get("approval_request"),
+        )
+        if not authority_gate.get("allowed"):
+            RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+        return {
+            "status": "blocked",
+            "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
+            "orchestration_failure": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
+            "summary": (
+                "; ".join(str(item) for item in authority_gate.get("errors", []))
+                or "Stage 6C-A stops before Worker execution"
+            ),
+            "worker_calls": 0,
+            "builder_calls": 0,
+            "memory": memory,
+        }
     if messages is None:
         messages = [{"role": "system", "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)}]
     durable = relevant_memory_context(f"{role} {task_text}", role=role, memory=memory, max_chars=1200)
@@ -16820,6 +17050,36 @@ def begin_durable_run(contract):
 def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decider=None,
                                 leaf_executor=None, aggregator=None):
     """Execute the immutable Stage 4A graph one approved contract at a time."""
+    if RUN.get("stage6c_enabled"):
+        authority_gate = stage6c.worker_authorization_gate(
+            RUN.get("execution_authorization"),
+            RUN.get("approval_receipt"),
+            RUN.get("pre_execution_approval_revalidation"),
+            request=RUN.get("approval_request"),
+        )
+        if not authority_gate.get("allowed"):
+            RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+            return {
+                "status": "blocked",
+                "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
+                "orchestration_failure": authority_gate.get("code") or EXECUTION_AUTHORIZATION_BLOCKED,
+                "summary": "Stage 6C-A requires an exact current execution authorization before graph execution",
+                "worker_calls": 0,
+            }, memory
+        # Stage 6C-A is deliberately a readiness boundary.  The graph may be
+        # compiled by compile_approval_bound_execution_contracts(), but this
+        # legacy execution loop is not entered until the later execution
+        # stage is implemented.
+        return {
+            "status": "ready",
+            "terminal_state": EXECUTION_AUTHORIZATION_READY,
+            "orchestration_failure": None,
+            "summary": "Stage 6C-A execution authorization is ready; execution is deferred",
+            "execution_authorization": RUN.get("execution_authorization"),
+            "worker_calls": 0,
+            "builder_calls": 0,
+            "contract_results": [],
+        }, memory
     # V21 Stage 5B is enabled only after Stage 4A has produced the immutable
     # execution graph.  The graph, not the set of results that happens to
     # exist later, is the source of the mandatory child plan.  A caller that
