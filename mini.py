@@ -37,6 +37,7 @@ from hivo import project_understanding as stage2
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
+from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
 from hivo import verification_gap_remediation as stage6c_remediation
 from hivo import reentry as stage6a
@@ -772,6 +773,80 @@ def source_validation_error(target, content):
     return None
 
 
+def _precommit_invariant_feedback(target, candidate, *, tool_name, original=None,
+                                  pre_state_bytes=None):
+    """Run the bound semantic gate at the last pre-write mutation boundary."""
+    if not RUN.get("stage6c_enabled"):
+        return None
+    invariant_set = RUN.get("execution_invariant_set")
+    authorization = RUN.get("execution_authorization")
+    # V25.1/V25.3 compatibility executions may predate the optional V25.2
+    # invariant binding.  They have no semantic authority to enforce here;
+    # importantly, this path never derives a replacement set at mutation time.
+    if (
+        not isinstance(invariant_set, dict)
+        or not invariant_set.get("invariant_set_hash")
+    ):
+        return None
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    effective = active.get("execution_contract") if isinstance(active.get("execution_contract"), dict) else None
+    if not isinstance(effective, dict):
+        effective = _current_execution_contract(active) if active else None
+    try:
+        relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        relative = str(target)
+    mutation_id = "{}-{}".format(
+        str(tool_name).upper(),
+        stage6c.canonical_hash({
+            "path": relative,
+            "pre_state_hash": hashlib.sha256(
+                pre_state_bytes if isinstance(pre_state_bytes, bytes)
+                else str(original or "").encode("utf-8")
+            ).hexdigest(),
+            "candidate_hash": hashlib.sha256(str(candidate).encode("utf-8")).hexdigest(),
+        })[:24].upper(),
+    )
+    gate = stage6c_precommit.PreCommitExecutionInvariantGate(
+        invariant_set,
+        contract=effective,
+        # A supplied set without a current binding is a fail-closed gate
+        # input.  Legacy executions skip only when no set is present at all.
+        authorization=authorization if isinstance(authorization, dict) else {},
+        workspace=WORKSPACE,
+    )
+    audit = gate.evaluate(
+        relative,
+        candidate,
+        original_content=original,
+        pre_state_bytes=pre_state_bytes,
+        mutation_id=mutation_id,
+    )
+    audit_value = copy.deepcopy(audit)
+    RUN["precommit_invariant_gate_calls"] = RUN.get("precommit_invariant_gate_calls", 0) + 1
+    RUN.setdefault("precommit_invariant_audits", []).append(audit_value)
+    RUN["precommit_invariant_audits"] = RUN["precommit_invariant_audits"][-32:]
+    if not audit.get("allowed"):
+        RUN["precommit_invariant_gate_rejections"] = RUN.get(
+            "precommit_invariant_gate_rejections", 0,
+        ) + 1
+    record_run_event(
+        "precommit_invariant_audit",
+        tool=tool_name,
+        target=relative,
+        status=audit.get("status"),
+        allowed=audit.get("allowed"),
+        audit_hash=audit.get("canonical_hash"),
+        invariant_ids=list(audit.get("applicable_invariant_ids", []) or []),
+        violations=list(audit.get("violations", []) or []),
+        model_calls=0,
+        worker_calls=0,
+    )
+    if audit.get("allowed"):
+        return None
+    return stage6c_precommit.format_precommit_invariant_feedback(audit)
+
+
 def write_file(path, content, role="System"):
     target = safe_path(path)
     if target is None:
@@ -786,12 +861,23 @@ def write_file(path, content, role="System"):
         resumable = bool(ACTIVE_TRANSACTION is not None and store and store.is_unverified_model_artifact(target))
         if not resumable:
             return "error: write_file cannot replace an existing user-owned or verified file; use focused edit_file"
-    note = backup(target) if target.exists() and not created_here else ""
-    if note.startswith("error"):
-        return note
     validation = source_validation_error(target, content)
     if validation:
         return f"error: {validation}; file was not changed"
+    pre_state_bytes = None
+    if target.exists() and target.is_file():
+        try:
+            pre_state_bytes = target.read_bytes()
+        except OSError:
+            pre_state_bytes = None
+    gate_issue = _precommit_invariant_feedback(
+        target, content, tool_name="write_file", pre_state_bytes=pre_state_bytes,
+    )
+    if gate_issue:
+        return gate_issue
+    note = backup(target) if target.exists() and not created_here else ""
+    if note.startswith("error"):
+        return note
     try:
         _transaction_capture(target)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -823,6 +909,16 @@ def edit_file(path, old, new, expected_replacements=1):
     validation = source_validation_error(target, candidate)
     if validation:
         return f"error: {validation}; edit rejected and file was not changed"
+    try:
+        pre_state_bytes = target.read_bytes()
+    except OSError:
+        pre_state_bytes = None
+    gate_issue = _precommit_invariant_feedback(
+        target, candidate, tool_name="edit_file", original=original,
+        pre_state_bytes=pre_state_bytes,
+    )
+    if gate_issue:
+        return gate_issue
     snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
     transaction_owned = bool(snapshot and not snapshot.get("existed"))
     note = "" if transaction_owned else backup(target)
@@ -881,6 +977,16 @@ def edit_file_range(path, start_line, end_line, new, role="System"):
     validation = source_validation_error(target, candidate)
     if validation:
         return f"error: {validation}; edit rejected and file was not changed"
+    try:
+        pre_state_bytes = target.read_bytes()
+    except OSError:
+        pre_state_bytes = None
+    gate_issue = _precommit_invariant_feedback(
+        target, candidate, tool_name="edit_file_range", original=original,
+        pre_state_bytes=pre_state_bytes,
+    )
+    if gate_issue:
+        return gate_issue
     note = "" if transaction_owned else backup(target)
     if note.startswith("error"):
         return note
@@ -1651,6 +1757,9 @@ def new_metrics(mode):
         "reapproval_required": 0,
         "execution_authorizations_ready": 0,
         "approval_contract_binding_failures": 0,
+        "precommit_invariant_gate_calls": 0,
+        "precommit_invariant_gate_rejections": 0,
+        "precommit_invariant_audits": [],
         "impact_planner_calls": 0,
         "impact_challenger_calls": 0,
         "impact_plan_revision_calls": 0,
@@ -7368,6 +7477,13 @@ def build_execution_invariant_set(**kwargs):
 
 def validate_execution_invariant_set(invariant_set, **kwargs):
     return stage6c_invariants.validate_execution_invariant_set(invariant_set, **kwargs)
+
+
+PreCommitExecutionInvariantGate = stage6c_precommit.PreCommitExecutionInvariantGate
+PreCommitInvariantAudit = stage6c_precommit.PreCommitInvariantAudit
+EXECUTION_INVARIANT_MUTATION_VIOLATION = stage6c_precommit.EXECUTION_INVARIANT_MUTATION_VIOLATION
+validate_precommit_invariant_audit = stage6c_precommit.validate_precommit_invariant_audit
+format_precommit_invariant_feedback = stage6c_precommit.format_precommit_invariant_feedback
 
 
 def build_worker_execution_invariant_projection(invariant_set, contract=None, **kwargs):
