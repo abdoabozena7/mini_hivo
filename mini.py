@@ -45,6 +45,7 @@ from hivo import reentry as stage6a
 from hivo import verified_planning as stage6b
 from hivo import approval_authority as stage6c
 from hivo import approval_bound_execution as stage6cb
+from hivo import recovery as stage6d
 from hivo.requirements import DERIVED
 from hivo.requirements import USER_CONFIRMED
 from hivo.requirements import USER_STATED
@@ -242,6 +243,35 @@ INTEGRATION_FAILED = stage6cb.INTEGRATION_FAILED
 PROMOTION_PRECONDITION_FAILED = stage6cb.PROMOTION_PRECONDITION_FAILED
 PROMOTION_FAILED = stage6cb.PROMOTION_FAILED
 POST_PROMOTION_REENTRY_FAILED = stage6cb.POST_PROMOTION_REENTRY_FAILED
+# V26 provider-free authority-bounded autonomous recovery foundation.  The
+# recovery module owns only deterministic evidence, authorization, fresh
+# mission construction, and an injected seam; it does not invoke Gemma or a
+# real Worker.
+HARNESS_RECOVERABLE = stage6d.HARNESS_RECOVERABLE
+WORKER_RECOVERABLE = stage6d.WORKER_RECOVERABLE
+AUTHORITY_CHANGE_REQUIRED = stage6d.AUTHORITY_CHANGE_REQUIRED
+CAPABILITY_FLOOR = stage6d.CAPABILITY_FLOOR
+NON_RECOVERABLE_ARCHITECTURE_FAILURE = stage6d.NON_RECOVERABLE_ARCHITECTURE_FAILURE
+RECOVERY_CLASSIFICATION_UNCERTAIN = stage6d.RECOVERY_CLASSIFICATION_UNCERTAIN
+RECOVERY_AUTHORIZATION_READY = stage6d.RECOVERY_AUTHORIZATION_READY
+RECOVERY_AUTHORIZATION_BLOCKED = stage6d.RECOVERY_AUTHORIZATION_BLOCKED
+RECOVERY_MISSION_READY = stage6d.RECOVERY_MISSION_READY
+RECOVERY_MISSION_BLOCKED = stage6d.RECOVERY_MISSION_BLOCKED
+RECOVERY_ELIGIBLE = stage6d.RECOVERY_ELIGIBLE
+RECOVERY_BLOCKED = stage6d.RECOVERY_BLOCKED
+RECOVERY_BUDGET_EXHAUSTED = stage6d.RECOVERY_BUDGET_EXHAUSTED
+AUTHORIZED_EXECUTION_DESCENDANT = stage6d.AUTHORIZED_EXECUTION_DESCENDANT
+INVALID_AUTHORIZED_EXECUTION_DESCENDANT = stage6d.INVALID_AUTHORIZED_EXECUTION_DESCENDANT
+EXTERNAL_UNAUTHORIZED_DRIFT = stage6d.EXTERNAL_UNAUTHORIZED_DRIFT
+USER_REAPPROVAL_REQUIRED = stage6d.USER_REAPPROVAL_REQUIRED
+MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS = stage6d.MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS
+RECOVERY_WORKER_PACKET_MAX_CHARS = stage6d.RECOVERY_WORKER_PACKET_MAX_CHARS
+RecoveryFailureEnvelope = stage6d.RecoveryFailureEnvelope
+RecoveryAuthorityDelta = stage6d.RecoveryAuthorityDelta
+AuthorizedExecutionLineage = stage6d.AuthorizedExecutionLineage
+ApprovedRecoveryAuthorization = stage6d.ApprovedRecoveryAuthorization
+RecoveryMission = stage6d.RecoveryMission
+RecoveryWorkerPacket = stage6d.RecoveryWorkerPacket
 # V24 Stage 6B verified-state-aware planning. These names are aliases only;
 # the deterministic implementation remains in hivo.verified_planning.
 VERIFIED_STATE_REENTRY = stage6b.VERIFIED_STATE_REENTRY
@@ -1726,6 +1756,41 @@ run_stage6a_reentry = run_verified_state_reentry
 def run_verified_state_reentry_self_test():
     """Expose the deterministic V23 architecture self-test without Gemma."""
     return stage6a.run_verified_state_reentry_self_test()
+
+
+def build_recovery_failure_envelope(*args, **kwargs):
+    return stage6d.build_recovery_failure_envelope(*args, **kwargs)
+
+
+create_recovery_failure_envelope = build_recovery_failure_envelope
+load_live3_recovery_evidence = stage6d.load_live3_recovery_evidence
+validate_recovery_failure_envelope = stage6d.validate_recovery_failure_envelope
+classify_recovery_failure = stage6d.classify_recovery_failure
+classify_recovery = classify_recovery_failure
+build_recovery_authority_delta = stage6d.build_recovery_authority_delta
+analyze_recovery_authority_delta = build_recovery_authority_delta
+validate_recovery_authority_delta = stage6d.validate_recovery_authority_delta
+build_authorized_execution_lineage = stage6d.build_authorized_execution_lineage
+validate_authorized_execution_lineage = stage6d.validate_authorized_execution_lineage
+decide_recovery_eligibility = stage6d.decide_recovery_eligibility
+assess_recovery_eligibility = decide_recovery_eligibility
+build_approved_recovery_authorization = stage6d.build_approved_recovery_authorization
+authorize_recovery = build_approved_recovery_authorization
+validate_approved_recovery_authorization = stage6d.validate_approved_recovery_authorization
+build_recovery_mission = stage6d.build_recovery_mission
+create_recovery_mission = build_recovery_mission
+build_recovery_worker_packet = stage6d.build_recovery_worker_packet
+validate_recovery_worker_packet = stage6d.validate_recovery_worker_packet
+dispatch_recovery_worker = stage6d.dispatch_recovery_worker
+dispatch_injected_recovery_worker = dispatch_recovery_worker
+create_recovery_attempt_accounting = stage6d.create_recovery_attempt_accounting
+can_start_recovery_attempt = stage6d.can_start_recovery_attempt
+consume_recovery_attempt = stage6d.consume_recovery_attempt
+run_provider_free_recovery_replay = stage6d.run_provider_free_recovery_replay
+run_injected_recovery_replay = run_provider_free_recovery_replay
+run_recovery_architecture_self_test = stage6d.run_recovery_architecture_self_test
+run_stage6c_b_recovery_self_test = run_recovery_architecture_self_test
+run_v26_recovery_self_test = run_recovery_architecture_self_test
 
 
 def compile_verified_planning_context(*args, **kwargs):
