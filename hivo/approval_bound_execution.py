@@ -1067,6 +1067,26 @@ def build_stage5a_verification_input(
         "schema_version": "V20.5A",
         "child_id": str(task.get("id") or contract.get("execution_contract_id") or "UNKNOWN"),
         "model_calls": 0,
+        "plan_id": (
+            authorization.get("canonical_plan_id")
+            or contract.get("plan_id")
+            or task.get("approved_plan_id")
+        ),
+        "plan_hash": (
+            authorization.get("canonical_plan_hash")
+            or contract.get("plan_hash")
+            or task.get("approved_plan_hash")
+        ),
+        "verification_digest": authorization.get("verification_digest"),
+        "verification_obligation_coverage_hash": authorization.get(
+            "verification_obligation_coverage_hash"
+        ),
+        "approved_verification_authority_ids": [
+            str(item.get("verification_id") or item.get("oracle_id"))
+            for item in records
+            if isinstance(item, dict)
+            and (item.get("verification_id") or item.get("oracle_id"))
+        ],
         "verification_routes": [_copy(item) for item in merged_routes if isinstance(item, dict) and not (
             item.get("route_type") == verification_routing.DIRECT_ORACLE
             or item.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
@@ -1119,6 +1139,8 @@ def run_stage5a_verification(
     execution_result: dict[str, Any],
     verification_runner: Callable[..., Any] | None = None,
     execute_command: Callable[[str], Any] | None = None,
+    execution_obligation_evidence: Iterable[dict[str, Any]] | None = None,
+    verification_obligation_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Route and execute approved verification contracts through Stage 5A."""
     input_state = build_stage5a_verification_input(
@@ -1169,6 +1191,8 @@ def run_stage5a_verification(
             })
     aggregation = verification_routing.aggregate_verification_evidence(
         artifact, evidence,
+        execution_obligation_evidence=execution_obligation_evidence,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     return {
         "status": VERIFICATION_PASSED if aggregation.get("passed") else VERIFICATION_FAILED,
@@ -1177,6 +1201,9 @@ def run_stage5a_verification(
         "verification_input": input_state["verification_input"],
         "approved_verification_contracts": input_state["approved_verification_contracts"],
         "verification_aggregation": aggregation,
+        "execution_verification_closure": aggregation.get("execution_verification_closure"),
+        "execution_time_coverage": aggregation.get("execution_time_coverage"),
+        "execution_obligation_evidence": aggregation.get("execution_obligation_evidence", []),
         "verification_evidence": evidence,
         "tool_evidence": evidence,
         "model_calls": 0,
@@ -1293,6 +1320,7 @@ def execute_approval_bound_worker(
     worker_context: str,
     worker_dispatch: Callable[..., Any],
     verification_runner: Callable[..., Any] | None = None,
+    execution_obligation_evidence: Iterable[dict[str, Any]] | Callable[[], Iterable[dict[str, Any]]] | None = None,
     verification_obligation_coverage: dict[str, Any] | None = None,
     execute_command: Callable[[str], Any] | None = None,
     store: Any = None,
@@ -1516,10 +1544,17 @@ def execute_approval_bound_worker(
             "precommit_invariant_rejection": precommit_rejection,
         }
 
+    obligation_evidence = (
+        execution_obligation_evidence()
+        if callable(execution_obligation_evidence)
+        else execution_obligation_evidence
+    )
     verification = run_stage5a_verification(
         task=task, contract=contract, authorization=authorization,
         workspace=workspace, post_subject=after, execution_result=execution_result,
         verification_runner=verification_runner, execute_command=execute_command,
+        execution_obligation_evidence=obligation_evidence,
+        verification_obligation_coverage=verification_obligation_coverage,
     )
     if not verification.get("passed"):
         if callable(transaction_close):
@@ -1539,6 +1574,9 @@ def execute_approval_bound_worker(
             "verification_input": verification.get("verification_input"),
             "approved_verification_contracts": verification.get("approved_verification_contracts", []),
             "verification_aggregation": verification.get("verification_aggregation"),
+            "execution_verification_closure": verification.get("execution_verification_closure"),
+            "execution_time_coverage": verification.get("execution_time_coverage"),
+            "execution_obligation_evidence": verification.get("execution_obligation_evidence", []),
             "verification_evidence": verification.get("verification_evidence", []),
             "tool_evidence": verification.get("tool_evidence", []),
             "changed_files": list(mutation_audit.get("changed_paths", []) or []),
@@ -1595,6 +1633,9 @@ def execute_approval_bound_worker(
         "verification_input": verification.get("verification_input"),
         "approved_verification_contracts": verification.get("approved_verification_contracts", []),
         "verification_aggregation": verification.get("verification_aggregation"),
+        "execution_verification_closure": verification.get("execution_verification_closure"),
+        "execution_time_coverage": verification.get("execution_time_coverage"),
+        "execution_obligation_evidence": verification.get("execution_obligation_evidence", []),
         "verification_evidence": verification.get("verification_evidence", []),
         "tool_evidence": verification.get("tool_evidence", []),
         # The mutation audit is the stable public path representation.  The

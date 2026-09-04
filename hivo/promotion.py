@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from hivo import verification_routing
 from hivo.integration_gate import (
     PARENT_RECEIPT_TYPE,
     PARENT_VERIFIED,
@@ -509,6 +510,51 @@ def validate_parent_verification_receipt(
         if not isinstance(receipt, dict) or ref.get("receipt_hash") != receipt.get("receipt_hash"):
             errors.append(f"invalid listed child receipt: {child_id}")
             stale_receipt = True
+    verification_closure_failures: list[str] = []
+    for child_id in validated_child_ids:
+        receipt = receipt_by_id.get(child_id, {})
+        closure = receipt.get("execution_verification_closure")
+        if not isinstance(closure, dict):
+            continue
+        checked_closure = verification_routing.validate_execution_verification_closure(
+            closure,
+            required_set=receipt.get("required_execution_verification_set")
+            if isinstance(receipt.get("required_execution_verification_set"), dict)
+            else None,
+        )
+        if not checked_closure.get("valid") or closure.get("all_required_passed") is not True:
+            errors.append(f"required child execution verification closure failed: {child_id}")
+            verification_closure_failures.append(child_id)
+    for summary in value.get("execution_verification_closures", []) or []:
+        if not isinstance(summary, dict):
+            continue
+        child_id = str(summary.get("child_id") or "")
+        receipt = receipt_by_id.get(child_id, {})
+        closure = receipt.get("execution_verification_closure")
+        if not isinstance(closure, dict) or summary.get("closure_hash") != closure.get("closure_hash"):
+            errors.append(f"parent execution verification closure identity mismatch: {child_id}")
+            verification_closure_failures.append(child_id)
+        if summary.get("all_required_passed") is not True or summary.get("valid") is not True:
+            errors.append(f"parent execution verification closure is incomplete: {child_id}")
+            verification_closure_failures.append(child_id)
+    for source in (parent_value, parent_result_value):
+        aggregation = source.get("verification_aggregation")
+        if not isinstance(aggregation, dict):
+            aggregation = source.get("verification")
+        if not isinstance(aggregation, dict):
+            continue
+        closure = aggregation.get("execution_verification_closure")
+        if not isinstance(closure, dict):
+            continue
+        checked_closure = verification_routing.validate_execution_verification_closure(
+            closure,
+            required_set=aggregation.get("required_execution_verification_set")
+            if isinstance(aggregation.get("required_execution_verification_set"), dict)
+            else None,
+        )
+        if not checked_closure.get("valid") or closure.get("all_required_passed") is not True:
+            errors.append("parent result execution verification closure is not complete")
+            verification_closure_failures.append(str(value.get("parent_id") or "PARENT"))
     routes = [item for item in value.get("integration_route_results", []) or [] if isinstance(item, dict)]
     if not routes:
         routes = [item for item in value.get("integration_routes", []) or [] if isinstance(item, dict)]
@@ -539,6 +585,7 @@ def validate_parent_verification_receipt(
         "stale_subject_state": bool(stale_subject),
         "required_integration_routes": copy.deepcopy(required_routes),
         "integration_evidence": copy.deepcopy(evidence[:MAX_ARTIFACT_REFS]),
+        "verification_closure_failures": sorted(set(verification_closure_failures)),
         "violations": counts,
         "model_calls": 0,
     }
