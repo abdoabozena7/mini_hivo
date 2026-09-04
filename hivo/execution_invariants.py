@@ -106,6 +106,16 @@ class WorkerExecutionInvariantProjection(_FrozenRecord):
     """Immutable compact model-facing projection of execution invariants."""
 
 
+PRECOMMIT_SCHEMA_VERSION = "25.5-PRECOMMIT-EXECUTION-INVARIANT-1"
+EXECUTION_INVARIANT_MUTATION_VIOLATION = "EXECUTION_INVARIANT_MUTATION_VIOLATION"
+PRECOMMIT_ALLOWED = "PASS"
+PRECOMMIT_DNT_VIOLATION = "DNT_VIOLATION"
+
+
+class PreCommitInvariantAudit(_FrozenRecord):
+    """Immutable evidence for one candidate mutation before filesystem commit."""
+
+
 def canonical_hash(value: Any) -> str:
     encoded = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
@@ -1458,6 +1468,656 @@ def relevant_invariants(invariant_set: Any, contract: dict[str, Any] | None = No
         if relevant:
             selected.append(item)
     return selected
+
+
+def _precommit_path(value: Any) -> str:
+    return _path(value).casefold()
+
+
+def _precommit_source(value: Any) -> tuple[str | None, bytes | None, str | None]:
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8"), value, None
+        except UnicodeError as exc:
+            return None, None, str(exc)
+    if value is None:
+        return None, None, "source content is required"
+    text = str(value)
+    return text, text.encode("utf-8"), None
+
+
+def _precommit_lookup(
+    path: str,
+    *,
+    target_path: str,
+    target_content: str,
+    workspace: str | Path | None,
+    source_files: dict[str, Any] | None,
+) -> tuple[str | None, bytes | None, str | None]:
+    normalized = _precommit_path(path)
+    if normalized == _precommit_path(target_path):
+        return _precommit_source(target_content)
+    if isinstance(source_files, dict):
+        for key, value in source_files.items():
+            if _precommit_path(key) == normalized:
+                return _precommit_source(value)
+    return _read_subject_file(workspace, _path(path), source_files=None)
+
+
+def _precommit_compact(value: Any, limit: int = 700) -> Any:
+    """Keep audit observations bounded without hiding their semantic kind."""
+    if isinstance(value, dict):
+        return {
+            str(key): _precommit_compact(item, limit=limit)
+            for key, item in list(sorted(value.items(), key=lambda pair: str(pair[0])))[:16]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_precommit_compact(item, limit=limit) for item in list(value)[:16]]
+    if isinstance(value, str):
+        return _text(value, limit)
+    return value
+
+
+def _precommit_value(item: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if item.get(key) not in (None, "", []):
+            return item.get(key)
+    nested = item.get("value") if isinstance(item.get("value"), dict) else {}
+    for key in keys:
+        if nested.get(key) not in (None, "", []):
+            return nested.get(key)
+    subject = item.get("subject") if isinstance(item.get("subject"), dict) else {}
+    for key in keys:
+        if subject.get(key) not in (None, "", []):
+            return subject.get(key)
+    return default
+
+
+def _precommit_expected_outputs(item: dict[str, Any]) -> list[str]:
+    values = _precommit_value(item, "output_literals", "existing_outputs", default=None)
+    if values is None:
+        nested = item.get("value") if isinstance(item.get("value"), dict) else {}
+        values = nested.get("outputs", [])
+    if isinstance(values, (str, bytes)):
+        values = [values]
+    return _norm_values(values if isinstance(values, (list, tuple, set)) else [])
+
+
+def _precommit_violation(
+    item: dict[str, Any],
+    reason: str,
+    *,
+    expected: Any = None,
+    observed: Any = None,
+) -> dict[str, Any]:
+    return {
+        "invariant_id": _text(item.get("invariant_id"), 160),
+        "type": _text(item.get("type"), 80),
+        "symbol": _symbol(item.get("symbol")),
+        "path": _path(item.get("path")),
+        "classification": _text(item.get("classification"), 80),
+        "reason": _text(reason, 500),
+        "expected": _precommit_compact(expected),
+        "observed": _precommit_compact(observed),
+    }
+
+
+def _precommit_has_declaration(source: str, symbol: str) -> bool:
+    target = _symbol(symbol)
+    if not target or "." in target:
+        return False
+    masked = _mask_non_code(source)
+    return re.search(
+        rf"\b(?:class|function|const|let|var)\s+{re.escape(target)}\b", masked,
+    ) is not None
+
+
+def _precommit_interface_token(interface: str) -> str:
+    value = _symbol(interface)
+    if "." in value:
+        value = value.rsplit(".", 1)[-1]
+    value = re.sub(r"\(.*\)$", "", value).strip()
+    return value
+
+
+def _precommit_has_interface(source: str, interface: str) -> bool:
+    token = _precommit_interface_token(interface)
+    if not token or not re.fullmatch(r"[A-Za-z_$][\w$]*", token):
+        return False
+    masked = _mask_non_code(source)
+    return re.search(rf"\b{re.escape(token)}\s*(?:\(|[:=])", masked) is not None
+
+
+def _precommit_expected_consumer_values(item: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    for consumer in item.get("consumers", []) or []:
+        if not isinstance(consumer, dict):
+            continue
+        expected = consumer.get("expected")
+        values.extend(expected if isinstance(expected, list) else [expected])
+    return _norm_values(values)
+
+
+def _precommit_consumer_paths(item: dict[str, Any]) -> set[str]:
+    return {
+        _precommit_path(consumer.get("path"))
+        for consumer in item.get("consumers", []) or []
+        if isinstance(consumer, dict) and _path(consumer.get("path"))
+    }
+
+
+def _precommit_applicable(
+    invariant_set: dict[str, Any],
+    contract: dict[str, Any] | None,
+    target_path: str,
+) -> list[dict[str, Any]]:
+    selected = relevant_invariants(invariant_set, contract if isinstance(contract, dict) else None)
+    target = _precommit_path(target_path)
+    result = []
+    for item in selected:
+        item_path = _precommit_path(item.get("path"))
+        if item_path == target or target in _precommit_consumer_paths(item):
+            result.append(item)
+    result.sort(key=lambda item: (
+        _text(item.get("invariant_id"), 160),
+        _text(item.get("type"), 80),
+        _path(item.get("path")),
+    ))
+    return result
+
+
+def _precommit_authority_errors(
+    invariant_set: Any,
+    *,
+    contract: dict[str, Any] | None,
+    authorization: dict[str, Any] | None,
+) -> list[str]:
+    value = invariant_set if isinstance(invariant_set, dict) else {}
+    errors: list[str] = []
+    if not value:
+        return ["execution invariant set is required"]
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("execution invariant set schema version is invalid")
+    if value.get("status") != VALID:
+        errors.append(str(value.get("code") or EXECUTION_INVARIANT_INVALID))
+    if value.get("invariant_set_hash") != canonical_invariant_set_hash(value):
+        errors.append("execution invariant set hash does not match content")
+    if not _metric_is_zero(value.get("model_calls", 0)):
+        errors.append("execution invariant set contains model calls")
+    if not _metric_is_zero(value.get("worker_calls", 0)):
+        errors.append("execution invariant set contains Worker calls")
+    checked = validate_execution_invariant_set(
+        value, execution_contract=contract if isinstance(contract, dict) else None,
+    )
+    if not checked.get("valid"):
+        errors.extend(str(item) for item in checked.get("errors", [])[:20])
+    if isinstance(contract, dict):
+        contract_hash = _text(contract.get("execution_invariant_set_hash"), 128)
+        if contract_hash and contract_hash != value.get("invariant_set_hash"):
+            errors.append("execution contract is not bound to the supplied invariant set")
+        contract_ids = contract.get("execution_invariant_ids")
+        if contract_ids and list(contract_ids) != list(value.get("invariant_ids", []) or []):
+            errors.append("execution contract invariant IDs do not match the supplied set")
+    if isinstance(authorization, dict):
+        auth_hash = _text(authorization.get("execution_invariant_set_hash"), 128)
+        if not auth_hash:
+            errors.append("current execution authorization has no invariant-set binding")
+        elif auth_hash != value.get("invariant_set_hash"):
+            errors.append("current execution authorization is not bound to the supplied invariant set")
+        auth_ids = authorization.get("execution_invariant_ids")
+        if auth_ids is not None and list(auth_ids) != list(value.get("invariant_ids", []) or []):
+            errors.append("current execution authorization invariant IDs do not match the supplied set")
+    return list(dict.fromkeys(errors))[:40]
+
+
+def _precommit_semantic_violations(
+    item: dict[str, Any],
+    *,
+    target_path: str,
+    target_content: str,
+    pre_content: str | None = None,
+    workspace: str | Path | None,
+    source_files: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    item_type = _text(item.get("type"), 80)
+    item_path = _path(item.get("path"))
+    target = _precommit_path(target_path)
+    item_target = _precommit_path(item_path)
+    if item_type == DNT_PRESERVATION:
+        return [_precommit_violation(
+            item, "candidate target is inside a do-not-touch surface",
+            expected="target remains unmodified", observed=target_path,
+        )]
+    if item_target != target and item_type not in {CONSUMER_EXPECTATION}:
+        return []
+
+    if item_type == CONSUMER_EXPECTATION and target in _precommit_consumer_paths(item):
+        consumer_source, _raw, error = _precommit_lookup(
+            target_path, target_path=target_path, target_content=target_content,
+            workspace=workspace, source_files=source_files,
+        )
+        if error or consumer_source is None:
+            return [_precommit_violation(
+                item, "candidate consumer semantics could not be extracted",
+                expected=_precommit_expected_consumer_values(item), observed=error or "missing consumer source",
+            )]
+        parsed = extract_consumer_expectations(
+            consumer_source, _symbol(item.get("symbol")), path=target_path,
+        )
+        actual = _norm_values(
+            expectation.get("expected")
+            for expectation in parsed.get("expectations", []) or []
+            if isinstance(expectation, dict)
+        )
+        expected = _precommit_expected_consumer_values(item)
+        if parsed.get("status") != VALID or not set(expected).issubset(set(actual)):
+            return [_precommit_violation(
+                item, "preserved consumer expectation is absent from the candidate",
+                expected=expected, observed={"status": parsed.get("status"), "expected": actual},
+            )]
+        return []
+
+    if item_type in {FUNCTION_SIGNATURE, RETURN_SHAPE, EXACT_EXISTING_OUTPUT,
+                     INTERFACE_COMPATIBILITY, CONSUMER_EXPECTATION}:
+        candidate_source, _raw, error = _precommit_lookup(
+            item_path, target_path=target_path, target_content=target_content,
+            workspace=workspace, source_files=source_files,
+        )
+        if error or candidate_source is None:
+            return [_precommit_violation(
+                item, "candidate source semantics could not be extracted",
+                expected=_precommit_value(item, "signature", "return_shape", "output_literals", "existing_outputs"),
+                observed=error or "missing candidate source",
+            )]
+        parsed = extract_source_contract(
+            candidate_source, _symbol(item.get("symbol")), path=item_path,
+        )
+        if parsed.get("status") != VALID:
+            return [_precommit_violation(
+                item, "candidate source semantic extraction is unsupported",
+                expected={
+                    "signature": _precommit_value(item, "signature"),
+                    "return_shape": _precommit_value(item, "return_shape"),
+                    "outputs": _precommit_expected_outputs(item),
+                },
+                observed={"status": parsed.get("status"), "errors": parsed.get("errors", [])},
+            )]
+        violations: list[dict[str, Any]] = []
+        if item_type == FUNCTION_SIGNATURE:
+            expected = _precommit_value(item, "signature")
+            if expected and parsed.get("signature") != expected:
+                violations.append(_precommit_violation(
+                    item, "preserved callable signature changed",
+                    expected=expected, observed=parsed.get("signature"),
+                ))
+        elif item_type == RETURN_SHAPE:
+            expected = _precommit_value(item, "return_shape")
+            if expected and parsed.get("return_shape") != expected:
+                violations.append(_precommit_violation(
+                    item, "preserved return shape changed",
+                    expected=expected, observed=parsed.get("return_shape"),
+                ))
+        elif item_type == EXACT_EXISTING_OUTPUT:
+            expected = _precommit_expected_outputs(item)
+            observed = _norm_values(parsed.get("output_literals", []))
+            if expected != observed:
+                violations.append(_precommit_violation(
+                    item, "preserved exact outputs changed",
+                    expected=expected, observed=observed,
+                ))
+        elif item_type == INTERFACE_COMPATIBILITY:
+            expected_shape = _precommit_value(item, "return_shape")
+            expected_outputs = _precommit_expected_outputs(item)
+            observed = {
+                "return_shape": parsed.get("return_shape"),
+                "outputs": _norm_values(parsed.get("output_literals", [])),
+            }
+            if expected_shape and parsed.get("return_shape") != expected_shape:
+                violations.append(_precommit_violation(
+                    item, "preserved interface return shape changed",
+                    expected={"return_shape": expected_shape}, observed=observed,
+                ))
+            if expected_outputs and observed["outputs"] != expected_outputs:
+                violations.append(_precommit_violation(
+                    item, "preserved interface outputs changed",
+                    expected={"outputs": expected_outputs}, observed=observed,
+                ))
+        elif item_type == CONSUMER_EXPECTATION:
+            expected = _precommit_expected_consumer_values(item)
+            observed = _norm_values(parsed.get("output_literals", []))
+            if not set(expected).issubset(set(observed)):
+                violations.append(_precommit_violation(
+                    item, "preserved consumer expectation is not produced",
+                    expected=expected, observed=observed,
+                ))
+        return violations
+
+    if item_type == STATE_OWNER:
+        owner = _symbol(_precommit_value(item, "owner") or item.get("symbol"))
+        if not _precommit_has_declaration(target_content, owner):
+            violations = [_precommit_violation(
+                item, "preserved state owner declaration is absent",
+                expected=owner, observed="owner declaration not found",
+            )]
+        else:
+            violations = []
+        # This is intentionally limited to newly introduced class names in
+        # the already-bound owner file.  It catches a second state-holder
+        # declaration without attempting a new whole-repository ownership
+        # analysis.
+        if pre_content is not None:
+            previous_classes = set(re.findall(
+                r"\bclass\s+([A-Za-z_$][\w$]*)\b", _mask_non_code(pre_content),
+            ))
+            candidate_classes = set(re.findall(
+                r"\bclass\s+([A-Za-z_$][\w$]*)\b", _mask_non_code(target_content),
+            ))
+            new_classes = sorted(candidate_classes - previous_classes)
+            if new_classes:
+                violations.append(_precommit_violation(
+                    item, "candidate introduces a new class beside the preserved state owner",
+                    expected=sorted(previous_classes), observed=sorted(candidate_classes),
+                ))
+        return violations
+
+    if item_type == REQUIRED_INTERFACE_REUSE:
+        interface = _symbol(_precommit_value(item, "interface") or item.get("symbol"))
+        if not _precommit_has_interface(target_content, interface):
+            return [_precommit_violation(
+                item, "required existing interface is not reused",
+                expected=interface, observed="required interface token not found",
+            )]
+        return []
+    return []
+
+
+def canonical_precommit_invariant_audit_hash(value: Any) -> str:
+    """Return the canonical hash of a pre-commit audit without its self-hash."""
+    return canonical_hash(_without(value, "canonical_hash"))
+
+
+def _build_precommit_audit(
+    *,
+    candidate_mutation_id: str,
+    path: str,
+    pre_state_hash: str,
+    candidate_hash: str,
+    applicable: list[dict[str, Any]],
+    violations: list[dict[str, Any]],
+    status: str,
+    authority_set_hash: str,
+    authority_errors: list[str] | None = None,
+) -> PreCommitInvariantAudit:
+    classifications = {
+        _text(item.get("invariant_id"), 160): _text(item.get("classification"), 80)
+        for item in applicable
+    }
+    preserve_ids = sorted(
+        invariant_id for invariant_id, classification in classifications.items()
+        if classification == PRESERVE
+    )
+    authorized_ids = sorted(
+        invariant_id for invariant_id, classification in classifications.items()
+        if classification == CHANGE_AUTHORIZED
+    )
+    payload = {
+        "schema_version": PRECOMMIT_SCHEMA_VERSION,
+        "artifact_type": "PRECOMMIT_EXECUTION_INVARIANT_AUDIT",
+        "candidate_mutation_id": _text(candidate_mutation_id, 160),
+        "path": _path(path),
+        "pre_state_hash": _text(pre_state_hash, 128),
+        "candidate_hash": _text(candidate_hash, 128),
+        "applicable_invariant_ids": [
+            _text(item.get("invariant_id"), 160) for item in applicable
+        ],
+        "classifications": classifications,
+        "preserve_invariant_ids": preserve_ids,
+        "change_authorized_invariant_ids": authorized_ids,
+        "violations": sorted(
+            [_copy(item) for item in violations],
+            key=lambda item: (
+                _text(item.get("invariant_id"), 160),
+                _text(item.get("type"), 80),
+                _text(item.get("reason"), 500),
+            ),
+        ),
+        "status": status,
+        "allowed": status == PRECOMMIT_ALLOWED,
+        "authority_set_hash": _text(authority_set_hash, 128),
+        "authority_errors": list(authority_errors or [])[:20],
+        "model_calls": 0,
+        "worker_calls": 0,
+        "canonical_hash": "",
+    }
+    payload["canonical_hash"] = canonical_precommit_invariant_audit_hash(payload)
+    return _freeze_record(PreCommitInvariantAudit, payload)
+
+
+class PreCommitExecutionInvariantGate:
+    """Compare a candidate mutation with already-bound preserved semantics."""
+
+    def __init__(self, invariant_set: Any, *, contract: dict[str, Any] | None = None,
+                 authorization: dict[str, Any] | None = None,
+                 workspace: str | Path | None = None,
+                 source_files: dict[str, Any] | None = None):
+        self.invariant_set = invariant_set
+        self.contract = contract if isinstance(contract, dict) else None
+        self.authorization = authorization if isinstance(authorization, dict) else None
+        self.workspace = workspace
+        self.source_files = source_files
+
+    def evaluate(
+        self,
+        path: str,
+        candidate_content: Any,
+        original_content: Any = None,
+        *,
+        pre_state_bytes: bytes | None = None,
+        mutation_id: str | None = None,
+        candidate_files: dict[str, Any] | None = None,
+    ) -> PreCommitInvariantAudit:
+        target_path = _path(path)
+        candidate_text, candidate_raw, candidate_error = _precommit_source(candidate_content)
+        if candidate_text is None or candidate_raw is None:
+            candidate_text = ""
+            candidate_raw = b""
+        pre_state_available = False
+        if pre_state_bytes is not None:
+            pre_raw = bytes(pre_state_bytes)
+            pre_state_available = True
+        else:
+            _pre_text, pre_raw, _pre_error = _precommit_source(original_content)
+            pre_state_available = _pre_text is not None and pre_raw is not None
+            if _pre_text is None or pre_raw is None:
+                _looked_up_text, looked_up_raw, _looked_up_error = _read_subject_file(
+                    self.workspace, target_path, self.source_files,
+                )
+                if looked_up_raw is not None:
+                    pre_state_available = True
+                    pre_raw = looked_up_raw
+        pre_raw = pre_raw or b""
+        pre_hash = hashlib.sha256(pre_raw).hexdigest()
+        candidate_hash = hashlib.sha256(candidate_raw).hexdigest()
+        authority_errors = _precommit_authority_errors(
+            self.invariant_set, contract=self.contract, authorization=self.authorization,
+        )
+        value = self.invariant_set if isinstance(self.invariant_set, dict) else {}
+        set_hash = _text(value.get("invariant_set_hash"), 128)
+        applicable = _precommit_applicable(value, self.contract, target_path) if not authority_errors else []
+        merged_files: dict[str, Any] = {}
+        if isinstance(self.source_files, dict):
+            merged_files.update(self.source_files)
+        if isinstance(candidate_files, dict):
+            merged_files.update(candidate_files)
+        violations: list[dict[str, Any]] = []
+        if candidate_error:
+            violations.append({
+                "invariant_id": "PRECOMMIT-CANDIDATE",
+                "type": "CANDIDATE_CONTENT",
+                "symbol": "",
+                "path": target_path,
+                "classification": PRESERVE,
+                "reason": _text(candidate_error, 500),
+                "expected": "UTF-8 candidate content",
+                "observed": "candidate content could not be decoded",
+            })
+        if not pre_state_available and any(
+            _text(item.get("classification"), 80) == PRESERVE for item in applicable
+        ):
+            violations.append({
+                "invariant_id": "PRECOMMIT-PRESTATE",
+                "type": "PRE_STATE",
+                "symbol": "",
+                "path": target_path,
+                "classification": PRESERVE,
+                "reason": "pre-state content is required for semantic comparison",
+                "expected": "existing target content",
+                "observed": "missing pre-state content",
+            })
+        if authority_errors:
+            violations.append({
+                "invariant_id": "PRECOMMIT-AUTHORITY",
+                "type": "AUTHORIZATION_BOUND_INVARIANT_SET",
+                "symbol": "",
+                "path": target_path,
+                "classification": PRESERVE,
+                "reason": "; ".join(authority_errors),
+                "expected": "current authorization-bound valid invariant set",
+                "observed": {"invariant_set_hash": set_hash},
+            })
+        dnt_target = any(
+            item.get("type") == DNT_PRESERVATION
+            and _precommit_path(item.get("path")) == _precommit_path(target_path)
+            for item in applicable
+        )
+        if dnt_target and not authority_errors:
+            violations.append({
+                "invariant_id": next(
+                    _text(item.get("invariant_id"), 160)
+                    for item in applicable if item.get("type") == DNT_PRESERVATION
+                ),
+                "type": DNT_PRESERVATION,
+                "symbol": "",
+                "path": target_path,
+                "classification": PRESERVE,
+                "reason": "candidate target is inside a do-not-touch surface",
+                "expected": "target remains unmodified",
+                "observed": target_path,
+            })
+        if not authority_errors and not dnt_target and pre_state_available and candidate_text is not None:
+            for item in applicable:
+                if _text(item.get("classification"), 80) != PRESERVE:
+                    continue
+                pre_content, _pre_item_raw, _pre_item_error = _read_subject_file(
+                    self.workspace, _path(item.get("path")), self.source_files,
+                )
+                violations.extend(_precommit_semantic_violations(
+                    item, target_path=target_path, target_content=candidate_text,
+                    pre_content=pre_content,
+                    workspace=self.workspace, source_files=merged_files,
+                ))
+        status = (
+            EXECUTION_INVARIANT_MUTATION_VIOLATION
+            if violations else PRECOMMIT_ALLOWED
+        )
+        if dnt_target and not authority_errors:
+            status = PRECOMMIT_DNT_VIOLATION
+        default_id = "MUTATION-" + canonical_hash({
+            "path": target_path, "pre_state_hash": pre_hash,
+            "candidate_hash": candidate_hash,
+        })[:24].upper()
+        return _build_precommit_audit(
+            candidate_mutation_id=mutation_id or default_id,
+            path=target_path,
+            pre_state_hash=pre_hash,
+            candidate_hash=candidate_hash,
+            applicable=applicable,
+            violations=violations,
+            status=status,
+            authority_set_hash=set_hash,
+            authority_errors=authority_errors,
+        )
+
+    check = evaluate
+    validate = evaluate
+
+    def __call__(self, path: str, candidate_content: Any, original_content: Any = None, **kwargs: Any) -> PreCommitInvariantAudit:
+        return self.evaluate(path, candidate_content, original_content, **kwargs)
+
+
+def format_precommit_invariant_feedback(audit: Any) -> str:
+    value = audit if isinstance(audit, dict) else {}
+    violations = value.get("violations", []) if isinstance(value.get("violations"), list) else []
+    details = []
+    for item in violations[:3]:
+        if not isinstance(item, dict):
+            continue
+        expected = _text(json.dumps(
+            _precommit_compact(item.get("expected")),
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+        ), 170)
+        observed = _text(json.dumps(
+            _precommit_compact(item.get("observed")),
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+        ), 170)
+        details.append(
+            f"{item.get('invariant_id')}:{item.get('type')}"
+            f"[{item.get('classification')}] {_text(item.get('reason'), 120)}"
+            f" expected={expected} observed={observed}"
+        )
+    if not details:
+        details.append("none")
+    return (
+        "error: mutation rejected before commit; "
+        f"candidate_mutation_id={value.get('candidate_mutation_id')}; "
+        f"path={value.get('path')}; pre_hash={value.get('pre_state_hash')}; "
+        f"candidate_hash={value.get('candidate_hash')}; "
+        f"applicable_invariants={','.join(str(item) for item in value.get('applicable_invariant_ids', []) or []) or 'none'}; "
+        f"classifications={json.dumps(value.get('classifications', {}), sort_keys=True, separators=(',', ':'))}; "
+        f"violations={'; '.join(details)}; status={value.get('status')}; "
+        f"canonical_hash={value.get('canonical_hash')}"
+    )
+
+
+def validate_precommit_invariant_audit(audit: Any) -> dict[str, Any]:
+    value = audit if isinstance(audit, dict) else {}
+    expected = canonical_precommit_invariant_audit_hash(value) if value else ""
+    actual = _text(value.get("canonical_hash"), 128)
+    return {
+        "valid": bool(value) and bool(actual) and actual == expected,
+        "status": PRECOMMIT_ALLOWED if bool(value) and actual == expected else EXECUTION_INVARIANT_INVALID,
+        "errors": [] if bool(value) and actual == expected else ["pre-commit audit hash does not match content"],
+        "canonical_hash": actual,
+    }
+
+
+def precommit_execution_invariant_gate(
+    invariant_set: Any,
+    path: str,
+    candidate_content: Any,
+    *,
+    original_content: Any = None,
+    contract: dict[str, Any] | None = None,
+    authorization: dict[str, Any] | None = None,
+    workspace: str | Path | None = None,
+    source_files: dict[str, Any] | None = None,
+    pre_state_bytes: bytes | None = None,
+    mutation_id: str | None = None,
+) -> PreCommitInvariantAudit:
+    return PreCommitExecutionInvariantGate(
+        invariant_set, contract=contract, authorization=authorization,
+        workspace=workspace, source_files=source_files,
+    ).evaluate(
+        path, candidate_content, original_content,
+        pre_state_bytes=pre_state_bytes, mutation_id=mutation_id,
+    )
+
+
+evaluate_candidate_mutation = precommit_execution_invariant_gate
+validate_candidate_preservation = precommit_execution_invariant_gate
+candidate_semantic_preservation_check = precommit_execution_invariant_gate
+run_precommit_execution_invariant_gate = precommit_execution_invariant_gate
+precommit_gate = precommit_execution_invariant_gate
 
 
 def _projection_core(set_hash: str, items: list[dict[str, Any]]) -> dict[str, Any]:

@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterable
 
 from hivo import approval_authority as stage6c
 from hivo import execution_contracts as stage4
+from hivo import execution_invariants as stage6c_invariants
 from hivo import impact_planning as stage3
 from hivo import integration_gate
 from hivo import verification_obligation_coverage as verification_coverage
@@ -1260,6 +1261,22 @@ def _worker_output_valid(value: Any) -> bool:
     return status in {"done", "completed", "complete", "success", "worker_execution_completed"}
 
 
+def _contains_precommit_rejection(value: Any, depth: int = 0) -> bool:
+    """Find the deterministic tool rejection without treating it as verification."""
+    if depth > 5:
+        return False
+    if isinstance(value, str):
+        return stage6c_invariants.EXECUTION_INVARIANT_MUTATION_VIOLATION in value
+    if isinstance(value, dict):
+        return any(
+            _contains_precommit_rejection(item, depth + 1)
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_precommit_rejection(item, depth + 1) for item in value)
+    return False
+
+
 def execute_approval_bound_worker(
     *,
     task: dict[str, Any],
@@ -1469,12 +1486,23 @@ def execute_approval_bound_worker(
     if mutation_audit.get("status") != MUTATION_SCOPE_VALIDATED:
         if callable(transaction_close):
             transaction_close()
+        precommit_rejection = _contains_precommit_rejection(worker_result)
+        # V25.2 callers historically observed VERIFICATION_FAILED for a
+        # completed callback whose proposed edit could not produce a verified
+        # subject.  Preserve that terminal alias for compatibility while
+        # exposing the exact V25.5 failure type and never invoking Stage 5 for
+        # a candidate that was rejected before commit.
+        terminal_state = VERIFICATION_FAILED if precommit_rejection else mutation_audit.get("status")
+        failure_type = (
+            stage6c_invariants.EXECUTION_INVARIANT_MUTATION_VIOLATION
+            if precommit_rejection else mutation_audit.get("status")
+        )
         return {
             "status": "failed",
-            "terminal_state": mutation_audit.get("status"),
-            "failure_type": mutation_audit.get("status"),
-            "orchestration_failure": mutation_audit.get("status"),
-            "summary": mutation_audit.get("status"),
+            "terminal_state": terminal_state,
+            "failure_type": failure_type,
+            "orchestration_failure": failure_type,
+            "summary": failure_type,
             "execution_start_receipt": start_receipt,
             "worker_result": worker_result,
             "execution_result": execution_result,
@@ -1485,6 +1513,7 @@ def execute_approval_bound_worker(
             "unauthorized_mutations": mutation_audit.get("unauthorized_mutations", 0),
             "scope_violations": mutation_audit.get("scope_violations", 0),
             "dnt_violations": mutation_audit.get("dnt_violations", 0),
+            "precommit_invariant_rejection": precommit_rejection,
         }
 
     verification = run_stage5a_verification(
