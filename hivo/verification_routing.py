@@ -96,6 +96,19 @@ _SYNTAX_EVIDENCE_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
+# V25.6 closes verification at the authority boundary.  These values are
+# deliberately independent of the execution channel: a command, direct
+# oracle, or deterministic system validator can all be required authorities.
+EXECUTION_VERIFICATION_CLOSURE_SCHEMA = "V25.6"
+EXECUTION_VERIFICATION_CLOSURE = "ExecutionVerificationClosure"
+REQUIRED_EXECUTION_VERIFICATION_SET = "RequiredExecutionVerificationSet"
+MISSING_RECEIPT = "MISSING_RECEIPT"
+NOT_RUN = "NOT_RUN"
+INVALID_RECEIPT = "INVALID_RECEIPT"
+UNRESOLVED_RECEIPT = "UNRESOLVED"
+REQUIRED_VERIFICATION_CLOSURE_FAILED = "REQUIRED_VERIFICATION_CLOSURE_FAILED"
+REQUIRED_VERIFICATION_NOT_RUN = "REQUIRED_VERIFICATION_NOT_RUN"
+
 
 class VerificationRouteBinding(dict):
     """Mutable, JSON-safe canonical binding for one Stage 5A route.
@@ -114,7 +127,7 @@ def _route_identity(value: dict[str, Any]) -> dict[str, Any]:
         command_identity = value.get("command_spec_identity") or value.get("command")
     if not command_identity:
         command_identity = value.get("oracle_spec_identity")
-    return {
+    identity = {
         "authority_id": str(value.get("authority_id") or value.get("verification_id") or ""),
         "authority_type": str(value.get("authority_type") or ""),
         "authority_source": str(value.get("authority_source") or ""),
@@ -128,6 +141,12 @@ def _route_identity(value: dict[str, Any]) -> dict[str, Any]:
         "applicable": bool(value.get("applicable")),
         "resolution_mode": str(value.get("resolution_mode") or ""),
     }
+    # V25.6 direct-oracle bindings may carry the hash as a first-class field.
+    # Keep the field conditional so older persisted route artifacts retain
+    # their historical route identity.
+    if "oracle_hash" in value:
+        identity["oracle_hash"] = str(value.get("oracle_hash") or "")
+    return identity
 
 
 def canonical_route_hash(route: dict[str, Any] | None) -> str:
@@ -582,6 +601,8 @@ def build_verification_route_binding(
             f"{resolved_authority_id}:{route_type}" if resolved_authority_id else f"{route_type}"
         ),
     })
+    if direct and record.get("oracle_hash"):
+        value["oracle_hash"] = str(record.get("oracle_hash"))
     # A binding is allowed to have no target only when it explicitly carries
     # the fail-closed unresolved mode.  Validation enforces the authority
     # rules; hashing remains useful for both resolved and unresolved cards.
@@ -1206,12 +1227,24 @@ class VerificationApplicabilityAnalyzer:
 
 def _parse_result(value: Any) -> tuple[str | None, bool]:
     if isinstance(value, dict):
-        if value.get("verification_status") == SKIPPED_NOT_APPLICABLE or value.get("result") == SKIPPED_NOT_APPLICABLE:
+        explicit_status = str(
+            value.get("verification_status") or value.get("status")
+            or value.get("result") or ""
+        ).upper()
+        if explicit_status == SKIPPED_NOT_APPLICABLE:
+            return None, False
+        if explicit_status in {PASS, "PASSED", "SUCCESS", "SUCCEEDED"}:
+            return PASS, True
+        if explicit_status in {FAIL, "FAILED", "FAILURE"}:
+            return FAIL, True
+        if explicit_status in {PENDING, NOT_RUN, MISSING_RECEIPT}:
             return None, False
         if value.get("passed") is True:
             return PASS, True
         if value.get("passed") is False:
             return FAIL, True
+        if "passed" in value:
+            return None, False
     text = str(value or "").strip()
     if text.casefold().startswith("[not_applicable]"):
         return None, False
@@ -1223,17 +1256,365 @@ def _parse_result(value: Any) -> tuple[str | None, bool]:
     except (TypeError, ValueError):
         pass
     if isinstance(payload, dict):
-        if payload.get("verification_status") == SKIPPED_NOT_APPLICABLE or payload.get("result") == SKIPPED_NOT_APPLICABLE:
+        explicit_status = str(
+            payload.get("verification_status") or payload.get("status")
+            or payload.get("result") or ""
+        ).upper()
+        if explicit_status == SKIPPED_NOT_APPLICABLE:
+            return None, False
+        if explicit_status in {PASS, "PASSED", "SUCCESS", "SUCCEEDED"}:
+            return PASS, True
+        if explicit_status in {FAIL, "FAILED", "FAILURE"}:
+            return FAIL, True
+        if explicit_status in {PENDING, NOT_RUN, MISSING_RECEIPT}:
             return None, False
         if payload.get("passed") is True:
             return PASS, True
         if payload.get("passed") is False:
             return FAIL, True
+        if "passed" in payload:
+            return None, False
     if re.search(r"\[exit_code=0\]", text, re.I) or re.search(r"\b(?:pass|passed|success|succeeded)\b", text, re.I):
         return PASS, True
     if re.search(r"\[exit_code=[1-9]\d*\]", text, re.I) or re.search(r"\b(?:fail|failed|failure|syntaxerror|assertionerror)\b", text, re.I):
         return FAIL, True
     return None, False
+
+
+def _route_authority_key(route: dict[str, Any] | None) -> str:
+    value = route if isinstance(route, dict) else {}
+    for key in ("authority_id", "verification_id", "oracle_id"):
+        candidate = str(value.get(key) or "").strip()
+        if candidate and candidate.casefold() not in {"none", "null"}:
+            return candidate
+    return ""
+
+
+def _is_direct_route(route: dict[str, Any] | None) -> bool:
+    value = route if isinstance(route, dict) else {}
+    route_type = str(value.get("route_type") or "").casefold()
+    channel = str(value.get("execution_channel") or "").casefold()
+    return bool(
+        route_type == DIRECT_ORACLE.casefold()
+        or channel == DIRECT_ORACLE_EXECUTION.casefold()
+    )
+
+
+def _route_merge_key(route: dict[str, Any]) -> tuple[str, ...]:
+    authority = _route_authority_key(route)
+    if authority:
+        return ("authority", authority.casefold())
+    return ("semantic",) + tuple(str(item) for item in _route_semantic_key(route))
+
+
+def _authority_routes(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return one route per authority without collapsing command/oracle channels."""
+    primary: list[dict[str, Any]] = []
+    for key in ("verification_routes", "direct_oracle_routes"):
+        primary.extend(
+            dict(item) for item in artifact.get(key, []) or []
+            if isinstance(item, dict)
+        )
+    bindings = [
+        dict(item) for item in artifact.get("verification_route_bindings", []) or []
+        if isinstance(item, dict)
+    ]
+    # The two public route lists are intentionally split by execution channel.
+    # Bindings are a fallback for older artifacts or for an authority omitted
+    # from one list; they must not cause a direct oracle to be counted twice.
+    candidates = primary or bindings
+    if primary:
+        present = {_route_merge_key(route) for route in primary}
+        for route in bindings:
+            key = _route_merge_key(route)
+            if key not in present:
+                candidates.append(route)
+                present.add(key)
+    result: list[dict[str, Any]] = []
+    positions: dict[tuple[str, ...], int] = {}
+    for route in candidates:
+        key = _route_merge_key(route)
+        if key not in positions:
+            positions[key] = len(result)
+            result.append(route)
+            continue
+        index = positions[key]
+        current = result[index]
+        if _is_direct_route(route) and not _is_direct_route(current):
+            replacement = dict(route)
+            replacement["result"] = current.get("result", route.get("result", PENDING))
+            current = replacement
+        for field in ("evidence_refs", "provenance_refs", "authority_ids", "candidate_targets"):
+            merged: list[Any] = []
+            for source in (current, route):
+                for item in source.get(field, []) or []:
+                    if item not in merged:
+                        merged.append(item)
+            if merged:
+                current[field] = merged
+        result[index] = current
+    return result
+
+
+def _artifact_plan_id(artifact: dict[str, Any]) -> str | None:
+    value = artifact.get("plan_id") or artifact.get("approved_plan_id")
+    return str(value) if value not in (None, "") else None
+
+
+def _artifact_plan_hash(artifact: dict[str, Any]) -> str | None:
+    value = artifact.get("plan_hash") or artifact.get("approved_plan_hash")
+    return str(value) if value not in (None, "") else None
+
+
+def _artifact_coverage_hash(artifact: dict[str, Any]) -> str | None:
+    for key in (
+        "verification_obligation_coverage_hash", "coverage_hash",
+        "verification_coverage_hash",
+    ):
+        value = artifact.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def requires_execution_verification_closure(artifact: dict | None) -> bool:
+    """Whether an artifact carries authority-bound V25.6 verification routes."""
+    value = artifact if isinstance(artifact, dict) else {}
+    routes = _authority_routes(value)
+    return any(
+        route.get("required") is True
+        and route.get("applicable") is True
+        and bool(
+            _route_authority_key(route)
+            or route.get("authority_type")
+            or route.get("execution_channel") == DIRECT_ORACLE_EXECUTION
+        )
+        for route in routes
+    )
+
+
+def build_required_execution_verification_set(
+    applicability: dict | None,
+) -> dict[str, Any]:
+    """Build the canonical, channel-independent mandatory authority set."""
+    artifact = applicability if isinstance(applicability, dict) else {}
+    all_routes = _authority_routes(artifact)
+    required_routes = [
+        route for route in all_routes
+        if route.get("required") is True and route.get("applicable") is True
+    ]
+    route_records: list[dict[str, Any]] = []
+    required_ids: list[str] = []
+    applicable_ids: list[str] = []
+    optional_ids: list[str] = []
+    for route in all_routes:
+        authority_id = _route_authority_key(route)
+        if not authority_id:
+            continue
+        if route.get("required") is True and route.get("applicable") is True:
+            if authority_id not in required_ids:
+                required_ids.append(authority_id)
+        if route.get("applicable") is True and authority_id not in applicable_ids:
+            applicable_ids.append(authority_id)
+        if not (
+            route.get("required") is True
+            and route.get("applicable") is True
+        ) and authority_id not in optional_ids:
+            optional_ids.append(authority_id)
+    for route in required_routes:
+        authority_id = _route_authority_key(route)
+        if not authority_id:
+            # A required route without an identity is itself an unresolved
+            # authority.  Keep a deterministic key so it cannot disappear.
+            authority_id = "UNRESOLVED-ROUTE-" + canonical_route_hash(route)[:16].upper()
+            required_ids.append(authority_id)
+        route_records.append({
+            "authority_id": authority_id,
+            "verification_id": route.get("verification_id"),
+            "oracle_id": route.get("oracle_id"),
+            "oracle_hash": (
+                str(route.get("oracle_hash"))
+                if route.get("oracle_hash") not in (None, "") else
+                _oracle_hash_from_route(route)
+            ),
+            "authority_type": route.get("authority_type"),
+            "authority_source": route.get("authority_source"),
+            "route_type": route.get("route_type") or route.get("kind"),
+            "execution_channel": route.get("execution_channel"),
+            "target": route.get("target"),
+            "required": True,
+            "applicable": True,
+            "route_hash": canonical_route_hash(route),
+        })
+    approved_ids = [
+        item["authority_id"] for item in route_records
+        if str(item.get("authority_type") or "") != DETERMINISTIC_SYSTEM_SAFETY_CHECK
+    ]
+    system_ids = [
+        item["authority_id"] for item in route_records
+        if str(item.get("authority_type") or "") == DETERMINISTIC_SYSTEM_SAFETY_CHECK
+    ]
+    record: dict[str, Any] = {
+        "schema_version": EXECUTION_VERIFICATION_CLOSURE_SCHEMA,
+        "artifact_type": REQUIRED_EXECUTION_VERIFICATION_SET,
+        "child_id": artifact.get("child_id"),
+        "plan_id": _artifact_plan_id(artifact),
+        "plan_hash": _artifact_plan_hash(artifact),
+        "verification_digest": artifact.get("verification_digest"),
+        "coverage_hash": _artifact_coverage_hash(artifact),
+        "applicable_authority_ids": list(applicable_ids),
+        "required_authority_ids": list(required_ids),
+        "required_verification_authority_ids": list(required_ids),
+        "approved_verification_authority_ids": approved_ids,
+        "system_authority_ids": system_ids,
+        "optional_authority_ids": optional_ids,
+        "routes": route_records,
+    }
+    set_hash = _json_hash(record)
+    record["set_hash"] = set_hash
+    record["canonical_hash"] = set_hash
+    return record
+
+
+def _oracle_hash_from_route(route: dict[str, Any] | None) -> str | None:
+    value = route if isinstance(route, dict) else {}
+    for key in ("oracle_hash", "direct_oracle_hash"):
+        candidate = value.get(key)
+        if candidate not in (None, ""):
+            return str(candidate)
+    identity = str(
+        value.get("command_identity")
+        or value.get("command_spec_identity")
+        or value.get("oracle_spec_identity")
+        or ""
+    )
+    match = re.search(r"oracle:[^:]+:([0-9a-f]{64})$", identity, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _evidence_sources(item: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = [item]
+    for key in ("result", "receipt", "verification_receipt", "oracle_result"):
+        value = item.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    return sources
+
+
+def _evidence_value(item: dict[str, Any], *keys: str) -> Any:
+    for source in _evidence_sources(item):
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _evidence_target(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "target", "path", "selected_target")
+    return _path(value) if value else ""
+
+
+def _evidence_authority_id(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "authority_id", "verification_id", "oracle_id")
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _evidence_oracle_id(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "oracle_id")
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _evidence_oracle_hash(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "oracle_hash", "direct_oracle_hash")
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _evidence_receipt_identity(item: dict[str, Any]) -> str:
+    value = _evidence_value(
+        item, "receipt_identity", "receipt_id", "receipt_hash",
+        "verification_receipt_hash", "oracle_receipt_hash",
+    )
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _evidence_route_type(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "route_type", "authority_type")
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _evidence_channel(item: dict[str, Any]) -> str:
+    value = _evidence_value(item, "execution_channel", "channel")
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _normalise_execution_obligation_evidence(
+    evidence: Iterable[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Project deterministic obligation receipts without trusting Worker prose."""
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in evidence or []:
+        if not isinstance(item, dict):
+            continue
+        authority_id = str(
+            _evidence_value(item, "authority_id", "verification_id", "oracle_id")
+            or ""
+        ).strip()
+        oracle_id = str(_evidence_value(item, "oracle_id") or "").strip()
+        state_value = item.get("result") if "result" in item else item
+        state, observed = _parse_result(state_value)
+        if not observed:
+            state = NOT_RUN
+        receipt_identity = _evidence_receipt_identity(item)
+        receipt_channel = _evidence_channel(item)
+        receipt_valid = item.get("receipt_valid") is True
+        if state == PASS and (
+            not authority_id and not oracle_id
+            or not receipt_identity
+            or not receipt_channel
+            or not receipt_valid
+        ):
+            state = INVALID_RECEIPT
+            receipt_valid = False
+        record = {
+            "authority_id": authority_id or oracle_id,
+            "oracle_id": oracle_id or authority_id,
+            "receipt_identity": receipt_identity or None,
+            "receipt_channel": receipt_channel or None,
+            "execution_channel": receipt_channel or None,
+            "status": state,
+            "receipt_status": state,
+            "receipt_valid": bool(receipt_valid and state == PASS),
+            "source": item.get("source"),
+            "authority_set_hash": item.get("authority_set_hash"),
+            "evidence_hash": item.get("evidence_hash") or item.get("canonical_hash"),
+        }
+        dedupe_key = (
+            str(record.get("authority_id") or "").casefold(),
+            str(record.get("receipt_identity") or "").casefold(),
+            str(record.get("receipt_channel") or "").casefold(),
+            str(record.get("status") or "").casefold(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        records.append(record)
+    return records
+
+
+def _evidence_is_related(route: dict[str, Any], item: dict[str, Any]) -> bool:
+    tool = str(item.get("tool", ""))
+    if tool not in {"run_file", "run_command", "verify_web_app"}:
+        return False
+    target = _path(route.get("target")) if route.get("target") else ""
+    observed_target = _evidence_target(item)
+    if target and observed_target:
+        return target.casefold() == observed_target.casefold()
+    text = " ".join(
+        str(item.get(key, "")) for key in ("target", "path", "command", "result")
+    ).replace("\\", "/").casefold()
+    return bool(target and target.casefold() in text)
 
 
 def _evidence_matches(route: dict, item: dict) -> bool:
@@ -1242,32 +1623,492 @@ def _evidence_matches(route: dict, item: dict) -> bool:
         return False
     if route.get("kind") == BROWSER:
         return tool == "verify_web_app"
-    text = " ".join((str(item.get("target", "")), str(item.get("result", "")))).casefold()
-    target = str(route.get("target") or "").casefold()
-    if route.get("kind") == FOCUSED_TEST and not _is_focused_test_evidence(item):
+    if _is_direct_route(route):
+        expected_target = _path(route.get("target"))
+        observed_target = _evidence_target(item)
+        if not expected_target or not observed_target or expected_target.casefold() != observed_target.casefold():
+            return False
+        expected_authority = _route_authority_key(route)
+        observed_authority = _evidence_authority_id(item)
+        if expected_authority and observed_authority.casefold() != expected_authority.casefold():
+            return False
+        expected_verification = str(route.get("verification_id") or "").strip()
+        observed_verification = str(_evidence_value(item, "verification_id") or "").strip()
+        if expected_verification and observed_verification.casefold() != expected_verification.casefold():
+            return False
+        expected_oracle = str(route.get("oracle_id") or "").strip()
+        observed_oracle = _evidence_oracle_id(item)
+        if expected_oracle and observed_oracle.casefold() != expected_oracle.casefold():
+            return False
+        expected_hash = _oracle_hash_from_route(route)
+        observed_hash = _evidence_oracle_hash(item)
+        if expected_hash and observed_hash.casefold() != expected_hash.casefold():
+            return False
+        expected_type = str(route.get("route_type") or "").strip()
+        observed_type = _evidence_route_type(item)
+        if observed_type and expected_type and observed_type.casefold() != expected_type.casefold():
+            return False
+        expected_channel = str(route.get("execution_channel") or "").strip()
+        observed_channel = _evidence_channel(item)
+        if observed_channel and expected_channel and observed_channel.casefold() != expected_channel.casefold():
+            return False
+        # A direct oracle receipt must carry its oracle identity and hash.
+        return bool(expected_oracle and observed_oracle and expected_hash and observed_hash)
+    explicit_authority = _evidence_authority_id(item)
+    expected_authority = _route_authority_key(route)
+    if explicit_authority and expected_authority and explicit_authority.casefold() != expected_authority.casefold():
         return False
+    text = " ".join(
+        (str(item.get("target", "")), str(item.get("path", "")),
+         str(item.get("command", "")), str(item.get("result", "")))
+    ).casefold()
+    target = str(route.get("target") or "").replace("\\", "/").casefold()
+    if route.get("kind") == FOCUSED_TEST and not _is_focused_test_evidence(item):
+        # The target/authority identity is sufficient for a Stage 5A
+        # approved route.  The marker heuristic remains for legacy generic
+        # focused-test routes only.
+        if not (target and target in text and explicit_authority):
+            return False
     if target and target in text:
         return True
     if route.get("kind") == FOCUSED_TEST:
-        return True
+        return not expected_authority and _is_focused_test_evidence(item)
     if route.get("kind") == SYNTAX_STATIC_GATE:
         return bool(_SYNTAX_EVIDENCE_MARKERS.search(text))
     return False
 
 
-def aggregate_verification_evidence(
-    applicability: dict | None,
+def _execution_time_coverage(
+    coverage: dict[str, Any] | None,
+    closure_records: Iterable[dict[str, Any]],
+    execution_obligation_evidence: Iterable[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    value = coverage if isinstance(coverage, dict) else {}
+    bindings = value.get("obligation_coverage")
+    if not isinstance(bindings, list):
+        return None
+    records = list(closure_records)
+    by_id: dict[str, dict[str, Any]] = {}
+    for record in records:
+        for key in (
+            record.get("authority_id"), record.get("verification_id"),
+            record.get("oracle_id"),
+        ):
+            if key:
+                by_id[str(key).casefold()] = record
+    obligation_records = _normalise_execution_obligation_evidence(
+        execution_obligation_evidence,
+    )
+    for record in obligation_records:
+        for key in (record.get("authority_id"), record.get("oracle_id")):
+            if key and str(key).casefold() not in by_id:
+                by_id[str(key).casefold()] = record
+    obligations: list[dict[str, Any]] = []
+    for binding in bindings:
+        if not isinstance(binding, dict) or binding.get("mandatory") is False:
+            continue
+        authority_ids = [
+            str(item) for item in (
+                binding.get("satisfying_oracle_ids")
+                or binding.get("oracle_ids")
+                or []
+            ) if str(item)
+        ]
+        matched = [
+            by_id[item.casefold()] for item in authority_ids
+            if item.casefold() in by_id
+        ]
+        missing_authority_ids = [
+            item for item in authority_ids
+            if item.casefold() not in by_id
+        ]
+        statuses = [str(item.get("status") or "") for item in matched]
+        if any(status in {FAIL, INVALID_RECEIPT, UNRESOLVED_RECEIPT} for status in statuses):
+            status = FAIL
+        elif missing_authority_ids:
+            status = NOT_RUN
+        elif matched and all(status == PASS for status in statuses):
+            status = PASS
+        else:
+            status = NOT_RUN
+        obligations.append({
+            "obligation_id": binding.get("obligation_id"),
+            "requirement_id": binding.get("requirement_id"),
+            "obligation_type": binding.get("obligation_type"),
+            "mandatory": True,
+            "coverage_state": binding.get("coverage_state"),
+            "authority_ids": authority_ids,
+            "missing_authority_ids": missing_authority_ids,
+            "observed_authority_statuses": statuses,
+            "status": status,
+            "reason": (
+                "required authority receipt failed"
+                if status == FAIL else
+                "required authority receipt was not observed"
+                if status == NOT_RUN else None
+            ),
+        })
+    required = [item for item in obligations if item.get("mandatory") is True]
+    failed = [item.get("obligation_id") for item in required if item.get("status") == FAIL]
+    not_run = [item.get("obligation_id") for item in required if item.get("status") == NOT_RUN]
+    return {
+        "coverage_hash": value.get("coverage_hash"),
+        "coverage_status": value.get("coverage_status") or value.get("status"),
+        "execution_obligation_evidence": obligation_records,
+        "obligations": obligations,
+        "required_obligation_ids": [item.get("obligation_id") for item in required],
+        "failed_obligation_ids": failed,
+        "not_run_obligation_ids": not_run,
+        "verified_obligation_ids": [
+            item.get("obligation_id") for item in required if item.get("status") == PASS
+        ],
+        "all_required_passed": bool(required) and not failed and not not_run,
+        "model_calls": 0,
+    }
+
+
+def build_execution_verification_closure(
+    applicability: dict | None = None,
+    *,
+    verification_aggregation: dict | None = None,
     execution_evidence: Iterable[dict] | None = None,
-    browser_result: dict | None = None,
-) -> dict:
-    """Aggregate actual evidence without turning a skip into a pass."""
+    execution_obligation_evidence: Iterable[dict[str, Any]] | None = None,
+    verification_obligation_coverage: dict | None = None,
+    required_set: dict | None = None,
+) -> dict[str, Any]:
+    """Construct the canonical receipt set and closure for Stage 5A."""
     artifact = applicability if isinstance(applicability, dict) else {}
-    routes = [dict(item) for item in artifact.get("verification_routes", []) if isinstance(item, dict)]
+    required = (
+        required_set if isinstance(required_set, dict)
+        else build_required_execution_verification_set(artifact)
+    )
+    aggregation = verification_aggregation if isinstance(verification_aggregation, dict) else {}
+    routes = {
+        _route_authority_key(route): route
+        for route in aggregation.get("verification_routes", []) or []
+        if isinstance(route, dict) and _route_authority_key(route)
+    }
     evidence = [item for item in (execution_evidence or []) if isinstance(item, dict)]
-    actual_passes = []
-    actual_failures = []
-    skipped = []
-    required_missing = []
+    obligation_evidence = _normalise_execution_obligation_evidence(
+        execution_obligation_evidence,
+    )
+    records: list[dict[str, Any]] = []
+    for expected in required.get("routes", []) or []:
+        authority_id = str(expected.get("authority_id") or "")
+        route = routes.get(authority_id) or expected
+        exact = [item for item in evidence if _evidence_matches(route, item)]
+        related = [item for item in evidence if _evidence_is_related(route, item)]
+        status = str(route.get("result") or PENDING)
+        if status not in {PASS, FAIL, INVALID_RECEIPT, BLOCKED_REQUIRED_TARGET_MISSING}:
+            status = NOT_RUN if not exact else status
+        if status == BLOCKED_REQUIRED_TARGET_MISSING:
+            status = UNRESOLVED_RECEIPT
+        if related and not exact:
+            status = INVALID_RECEIPT
+        if not exact and status in {PENDING, ""}:
+            status = MISSING_RECEIPT
+        receipt = exact[0] if exact else {}
+        receipt_identity = _evidence_receipt_identity(receipt)
+        if exact and not receipt_identity:
+            receipt_identity = "RECEIPT-" + _json_hash({
+                "authority_id": authority_id,
+                "route_hash": expected.get("route_hash"),
+                "status": status,
+                "channel": (
+                    _evidence_channel(receipt)
+                    or expected.get("execution_channel")
+                ),
+            })[:32].upper()
+        receipt_channel = (
+            _evidence_channel(receipt)
+            or expected.get("execution_channel")
+        )
+        records.append({
+            "authority_id": authority_id,
+            "verification_id": expected.get("verification_id"),
+            "oracle_id": expected.get("oracle_id"),
+            "oracle_hash": expected.get("oracle_hash"),
+            "authority_type": expected.get("authority_type"),
+            "route_type": expected.get("route_type"),
+            "required": True,
+            "applicable": True,
+            "route_hash": expected.get("route_hash"),
+            "receipt_identity": receipt_identity or None,
+            "receipt_status": status,
+            "status": status,
+            "receipt_channel": receipt_channel,
+            "execution_channel": receipt_channel,
+            "receipt_target": _evidence_target(receipt) or route.get("target"),
+            "receipt_valid": bool(exact and status == PASS),
+            "evidence_count": len(exact),
+            "related_evidence_count": len(related),
+            "evidence_ids": [
+                _evidence_receipt_identity(item) or (
+                    "EVIDENCE-" + _json_hash({
+                        "authority_id": authority_id,
+                        "target": _evidence_target(item),
+                        "status": _parse_result(item.get("result"))[0],
+                    })[:24].upper()
+                )
+                for item in exact[:4]
+            ],
+            "failure_reason": (
+                "receipt identity/hash/channel does not match approved authority"
+                if status == INVALID_RECEIPT else
+                "required authority receipt missing"
+                if status in {MISSING_RECEIPT, NOT_RUN} else None
+            ),
+        })
+    missing = [
+        item["authority_id"] for item in records
+        if item.get("status") in {MISSING_RECEIPT, NOT_RUN, PENDING, UNRESOLVED_RECEIPT}
+    ]
+    failed = [
+        item["authority_id"] for item in records
+        if item.get("status") in {FAIL, INVALID_RECEIPT, UNRESOLVED_RECEIPT}
+    ]
+    not_run = [
+        item["authority_id"] for item in records
+        if item.get("status") in {MISSING_RECEIPT, NOT_RUN, PENDING}
+    ]
+    invalid = [
+        item["authority_id"] for item in records
+        if item.get("status") == INVALID_RECEIPT
+    ]
+    all_required_passed = bool(records) and len(records) == len(required.get("required_authority_ids", [])) and all(
+        item.get("status") == PASS
+        and item.get("receipt_valid") is True
+        and bool(item.get("receipt_identity"))
+        and bool(item.get("receipt_channel"))
+        for item in records
+    )
+    execution_coverage = _execution_time_coverage(
+        verification_obligation_coverage,
+        records,
+        obligation_evidence,
+    )
+    if execution_coverage is None and required.get("coverage_hash") not in (None, ""):
+        execution_coverage = {
+            "coverage_hash": required.get("coverage_hash"),
+            "coverage_status": None,
+            "execution_obligation_evidence": obligation_evidence,
+            "obligations": [],
+            "required_obligation_ids": [],
+            "failed_obligation_ids": [],
+            "not_run_obligation_ids": [],
+            "verified_obligation_ids": [],
+            "all_required_passed": False,
+            "reason": "exact execution-time coverage artifact was not supplied",
+            "model_calls": 0,
+        }
+    closure: dict[str, Any] = {
+        "schema_version": EXECUTION_VERIFICATION_CLOSURE_SCHEMA,
+        "artifact_type": EXECUTION_VERIFICATION_CLOSURE,
+        "child_id": artifact.get("child_id"),
+        "plan_id": required.get("plan_id"),
+        "plan_hash": required.get("plan_hash"),
+        "verification_digest": required.get("verification_digest"),
+        "coverage_hash": required.get("coverage_hash"),
+        "required_execution_verification_set_hash": required.get("set_hash"),
+        "applicable_authority_ids": list(required.get("applicable_authority_ids", []) or []),
+        "required_authority_ids": list(required.get("required_authority_ids", []) or []),
+        "required_verification_authority_ids": list(
+            required.get("required_verification_authority_ids", []) or []
+        ),
+        "authority_receipts": records,
+        "authority_records": records,
+        "missing_authorities": missing,
+        "failed_authorities": failed,
+        "not_run_authorities": not_run,
+        "invalid_authorities": invalid,
+        "required_receipt_set_complete": bool(records) and not missing,
+        "execution_obligation_evidence": obligation_evidence,
+        "execution_time_obligation_closure": execution_coverage,
+        "all_required_passed": bool(
+            all_required_passed
+            and (
+                required.get("coverage_hash") in (None, "")
+                or (
+                    isinstance(execution_coverage, dict)
+                    and execution_coverage.get("all_required_passed") is True
+                )
+            )
+        ),
+        "model_calls": 0,
+    }
+    closure_hash = _json_hash(closure)
+    closure["closure_hash"] = closure_hash
+    closure["canonical_hash"] = closure_hash
+    return closure
+
+
+def validate_execution_verification_closure(
+    closure: dict | None,
+    *,
+    applicability: dict | None = None,
+    required_set: dict | None = None,
+    verification_obligation_coverage: dict | None = None,
+) -> dict[str, Any]:
+    """Validate identity, receipt status, hashes, and mandatory closure."""
+    value = closure if isinstance(closure, dict) else {}
+    artifact = applicability if isinstance(applicability, dict) else {}
+    required = (
+        required_set if isinstance(required_set, dict)
+        else build_required_execution_verification_set(artifact)
+    )
+    errors: list[str] = []
+    expected_hash = _json_hash({
+        key: item for key, item in value.items()
+        if key not in {"closure_hash", "canonical_hash"}
+    }) if value else None
+    if value.get("schema_version") != EXECUTION_VERIFICATION_CLOSURE_SCHEMA:
+        errors.append("execution verification closure schema is invalid")
+    if value.get("artifact_type") != EXECUTION_VERIFICATION_CLOSURE:
+        errors.append("execution verification closure artifact type is invalid")
+    if value.get("closure_hash") != expected_hash or value.get("canonical_hash") != expected_hash:
+        errors.append("execution verification closure hash is invalid")
+    expected_set_hash = _json_hash({
+        key: item for key, item in required.items()
+        if key not in {"set_hash", "canonical_hash"}
+    }) if required else None
+    if required.get("set_hash") != expected_set_hash:
+        errors.append("required execution verification set hash is invalid")
+    if value.get("required_execution_verification_set_hash") != required.get("set_hash"):
+        errors.append("required execution verification set hash is invalid")
+    for field in ("plan_id", "plan_hash", "verification_digest", "coverage_hash"):
+        expected_value = required.get(field)
+        if expected_value not in (None, "") and value.get(field) != expected_value:
+            errors.append(f"execution verification closure binding is invalid: {field}")
+    expected_ids = list(required.get("required_authority_ids", []) or [])
+    actual_ids = list(value.get("required_authority_ids", []) or [])
+    if actual_ids != expected_ids:
+        errors.append("required authority identity set is invalid")
+    expected_applicable_ids = list(required.get("applicable_authority_ids", []) or [])
+    actual_applicable_ids = list(value.get("applicable_authority_ids", []) or [])
+    if actual_applicable_ids != expected_applicable_ids:
+        errors.append("applicable authority identity set is invalid")
+    expected_verification_ids = list(
+        required.get("required_verification_authority_ids", []) or []
+    )
+    actual_verification_ids = list(
+        value.get("required_verification_authority_ids", []) or []
+    )
+    if actual_verification_ids != expected_verification_ids:
+        errors.append("required verification authority identity set is invalid")
+    records = [
+        item for item in (
+            value.get("authority_receipts")
+            or value.get("authority_records")
+            or []
+        ) if isinstance(item, dict)
+    ]
+    record_ids = [str(item.get("authority_id") or "") for item in records]
+    if len(record_ids) != len(set(record_ids)) or set(record_ids) != set(expected_ids):
+        errors.append("required authority receipt set is incomplete or duplicated")
+    expected_by_id = {
+        str(item.get("authority_id")): item
+        for item in required.get("routes", []) or []
+    }
+    missing: list[str] = []
+    failed: list[str] = []
+    not_run: list[str] = []
+    invalid: list[str] = []
+    for record in records:
+        authority_id = str(record.get("authority_id") or "")
+        expected = expected_by_id.get(authority_id, {})
+        status = str(record.get("status") or record.get("receipt_status") or "")
+        if expected.get("route_hash") and record.get("route_hash") != expected.get("route_hash"):
+            errors.append(f"authority receipt route hash is invalid: {authority_id}")
+        if expected.get("oracle_id") and record.get("oracle_id") != expected.get("oracle_id"):
+            errors.append(f"authority receipt oracle identity is invalid: {authority_id}")
+        if expected.get("oracle_hash") and record.get("oracle_hash") != expected.get("oracle_hash"):
+            errors.append(f"authority receipt oracle hash is invalid: {authority_id}")
+        if status in {MISSING_RECEIPT, NOT_RUN, PENDING}:
+            missing.append(authority_id)
+            not_run.append(authority_id)
+        elif status in {FAIL, INVALID_RECEIPT, UNRESOLVED_RECEIPT}:
+            failed.append(authority_id)
+            if status == INVALID_RECEIPT:
+                invalid.append(authority_id)
+        if status == PASS and (
+            record.get("receipt_valid") is not True
+            or not record.get("receipt_identity")
+            or not record.get("receipt_channel")
+        ):
+            errors.append(f"passing authority receipt is not valid: {authority_id}")
+    expected_all_passed = bool(expected_ids) and len(records) == len(expected_ids) and all(
+        str(item.get("status") or item.get("receipt_status") or "") == PASS
+        and item.get("receipt_valid") is True
+        and bool(item.get("receipt_identity"))
+        and bool(item.get("receipt_channel"))
+        for item in records
+    )
+    if value.get("missing_authorities", []) != missing:
+        errors.append("missing authority projection is invalid")
+    if set(value.get("failed_authorities", []) or []) != set(failed):
+        errors.append("failed authority projection is invalid")
+    if set(value.get("not_run_authorities", []) or []) != set(not_run):
+        errors.append("not-run authority projection is invalid")
+    if set(value.get("invalid_authorities", []) or []) != set(invalid):
+        errors.append("invalid authority projection is invalid")
+    if value.get("required_receipt_set_complete") is not (bool(records) and not missing):
+        errors.append("required receipt completeness projection is invalid")
+    if value.get("all_required_passed") is not expected_all_passed:
+        errors.append("all-required-passed projection is invalid")
+    execution_coverage = value.get("execution_time_obligation_closure")
+    if required.get("coverage_hash") not in (None, "") and not isinstance(execution_coverage, dict):
+        errors.append("execution-time obligation closure is missing")
+    if isinstance(execution_coverage, dict):
+        if required.get("coverage_hash") not in (None, "") and execution_coverage.get(
+            "coverage_hash"
+        ) != required.get("coverage_hash"):
+            errors.append("execution-time coverage hash binding is invalid")
+        if required.get("coverage_hash") not in (None, "") and execution_coverage.get(
+            "all_required_passed"
+        ) is not True:
+            errors.append("execution-time obligation closure is incomplete")
+    if isinstance(execution_coverage, dict) and verification_obligation_coverage is not None:
+        expected_coverage = _execution_time_coverage(
+            verification_obligation_coverage,
+            records,
+            value.get("execution_obligation_evidence", []),
+        )
+        if execution_coverage.get("coverage_hash") != expected_coverage.get("coverage_hash"):
+            errors.append("execution-time coverage hash binding is invalid")
+        if execution_coverage.get("failed_obligation_ids") != expected_coverage.get("failed_obligation_ids"):
+            errors.append("execution-time failed obligation projection is invalid")
+        if execution_coverage.get("not_run_obligation_ids") != expected_coverage.get("not_run_obligation_ids"):
+            errors.append("execution-time not-run obligation projection is invalid")
+        if execution_coverage.get("all_required_passed") is not expected_coverage.get("all_required_passed"):
+            errors.append("execution-time closure result is invalid")
+    return {
+        "valid": not errors,
+        "all_required_passed": bool(value.get("all_required_passed") is True and not errors),
+        "required_receipt_set_complete": bool(value.get("required_receipt_set_complete") is True and not errors),
+        "errors": list(dict.fromkeys(errors))[:40],
+        "applicable_authority_ids": expected_applicable_ids,
+        "required_authority_ids": expected_ids,
+        "required_verification_authority_ids": expected_verification_ids,
+        "missing_authorities": missing,
+        "failed_authorities": failed,
+        "not_run_authorities": not_run,
+        "invalid_authorities": invalid,
+        "execution_time_coverage": execution_coverage,
+        "model_calls": 0,
+    }
+
+
+def _aggregate_verification_routes(
+    artifact: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    browser_result: dict | None,
+) -> dict[str, Any]:
+    routes = _authority_routes(artifact)
+    actual_passes: list[dict[str, Any]] = []
+    actual_failures: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    required_missing: list[dict[str, Any]] = []
+    invalid_receipts: list[dict[str, Any]] = []
     for route in routes:
         kind = route.get("kind")
         if kind == BROWSER and isinstance(browser_result, dict):
@@ -1278,14 +2119,9 @@ def aggregate_verification_evidence(
                 route["result"] = PASS
             elif browser_result.get("passed") is False:
                 route["result"] = FAIL
-        matched = []
-        for item in evidence:
-            if not _evidence_matches(route, item):
-                continue
-            state, actual = _parse_result(item.get("result"))
-            if actual:
-                matched.append(state)
-        if route.get("result") == SKIPPED_NOT_APPLICABLE or (not route.get("applicable") and not route.get("required")):
+        if route.get("result") == SKIPPED_NOT_APPLICABLE or (
+            not route.get("applicable") and not route.get("required")
+        ):
             route["result"] = SKIPPED_NOT_APPLICABLE
             skipped.append(route)
             continue
@@ -1294,29 +2130,54 @@ def aggregate_verification_evidence(
             required_missing.append(route)
             actual_failures.append(route)
             continue
-        if FAIL in matched:
+        matched = [
+            item for item in evidence
+            if _evidence_matches(route, item)
+        ]
+        related = [
+            item for item in evidence
+            if _evidence_is_related(route, item)
+        ]
+        states = [
+            _parse_result(item.get("result"))[0]
+            for item in matched
+            if _parse_result(item.get("result"))[1]
+        ]
+        if related and not matched:
+            route["result"] = INVALID_RECEIPT
+            invalid_receipts.append(route)
+            actual_failures.append(route)
+        elif FAIL in states:
             route["result"] = FAIL
             actual_failures.append(route)
-        elif PASS in matched or (kind == BROWSER and route.get("result") == PASS):
+        elif PASS in states or (kind == BROWSER and route.get("result") == PASS):
             route["result"] = PASS
             actual_passes.append(route)
         elif route.get("result") == FAIL:
             actual_failures.append(route)
         else:
             route["result"] = PENDING
-
-    required_routes = [route for route in routes if route.get("required") and route.get("applicable")]
-    required_failures = [route for route in actual_failures if route.get("required")]
-    usable_required_evidence = [route for route in actual_passes if route.get("required") and route.get("applicable")]
-    failures = list(required_failures)
-    failure_codes = []
+    required_routes = [
+        route for route in routes
+        if route.get("required") is True and route.get("applicable") is True
+    ]
+    required_failures = [
+        route for route in actual_failures
+        if route.get("required") is True
+    ]
+    usable_required_evidence = [
+        route for route in actual_passes
+        if route.get("required") is True and route.get("applicable") is True
+    ]
+    failure_codes: list[str] = []
     if required_missing:
         failure_codes.append(REQUIRED_VERIFICATION_TARGET_UNRESOLVED)
-    if any(route.get("result") == FAIL for route in required_failures):
+    if any(route.get("result") in {FAIL, INVALID_RECEIPT} for route in required_failures):
         failure_codes.append("REQUIRED_VERIFICATION_FAILED")
     if not usable_required_evidence:
         failure_codes.append(VERIFICATION_EVIDENCE_UNAVAILABLE)
-    passed = bool(usable_required_evidence) and not required_failures and not required_missing
+    if any(route.get("result") in {PENDING, MISSING_RECEIPT} for route in required_routes):
+        failure_codes.append(REQUIRED_VERIFICATION_NOT_RUN)
     return {
         "child_id": artifact.get("child_id"),
         "verification_routes": routes,
@@ -1325,10 +2186,66 @@ def aggregate_verification_evidence(
         "skipped_not_applicable": skipped,
         "required_target_failures": required_missing,
         "required_routes": required_routes,
+        "invalid_receipts": invalid_receipts,
         "failure_codes": list(dict.fromkeys(failure_codes)),
         "evidence_available": bool(usable_required_evidence),
-        "passed": passed,
+        "passed": bool(required_routes)
+        and len(usable_required_evidence) == len(required_routes)
+        and not required_failures
+        and not required_missing,
+        "model_calls": 0,
     }
+
+
+def aggregate_verification_evidence(
+    applicability: dict | None,
+    execution_evidence: Iterable[dict] | None = None,
+    browser_result: dict | None = None,
+    *,
+    execution_obligation_evidence: Iterable[dict] | None = None,
+    verification_obligation_coverage: dict | None = None,
+) -> dict:
+    """Aggregate every required authority, including a direct oracle."""
+    artifact = applicability if isinstance(applicability, dict) else {}
+    evidence = [item for item in (execution_evidence or []) if isinstance(item, dict)]
+    aggregation = _aggregate_verification_routes(artifact, evidence, browser_result)
+    required_set = build_required_execution_verification_set(artifact)
+    closure = None
+    if requires_execution_verification_closure(artifact):
+        closure = build_execution_verification_closure(
+            artifact,
+            verification_aggregation=aggregation,
+            execution_evidence=evidence,
+            execution_obligation_evidence=execution_obligation_evidence,
+            verification_obligation_coverage=verification_obligation_coverage,
+            required_set=required_set,
+        )
+        if closure.get("all_required_passed") is not True:
+            aggregation["failure_codes"].append(REQUIRED_VERIFICATION_CLOSURE_FAILED)
+            if closure.get("not_run_authorities"):
+                aggregation["failure_codes"].append(REQUIRED_VERIFICATION_NOT_RUN)
+        aggregation["execution_verification_closure"] = closure
+    execution_coverage = _execution_time_coverage(
+        verification_obligation_coverage,
+        (closure or {}).get("authority_receipts", []) if closure else [],
+        execution_obligation_evidence,
+    )
+    if execution_coverage is not None:
+        aggregation["execution_time_coverage"] = execution_coverage
+    aggregation["required_execution_verification_set"] = required_set
+    aggregation["execution_obligation_evidence"] = _normalise_execution_obligation_evidence(
+        execution_obligation_evidence,
+    )
+    aggregation["all_required_passed"] = bool(
+        closure.get("all_required_passed") if closure else aggregation.get("passed")
+    )
+    aggregation["failure_codes"] = list(dict.fromkeys(aggregation["failure_codes"]))
+    if closure is not None:
+        aggregation["passed"] = bool(
+            aggregation.get("passed") is True
+            and closure.get("all_required_passed") is True
+        )
+    return aggregation
 
 
 __all__ = [
@@ -1337,11 +2254,19 @@ __all__ = [
     "DETERMINISTIC_CONTRACT_TARGET", "DETERMINISTIC_SYSTEM_SAFETY_CHECK", "DETERMINISTIC_SYSTEM_TARGET",
     "DIRECT_ORACLE", "DIRECT_ORACLE_EXECUTION", "EXACT_APPROVED_TARGET", "FAIL", "FOCUSED_TEST",
     "FOCUSED_TEST_PRESENT", "NO_SUPPORTED_BROWSER_TARGET", "OPTIONAL_CAPABILITY", "PASS", "PENDING",
-    "REQUIRED_VERIFICATION_TARGET_UNRESOLVED", "SKIPPED_NOT_APPLICABLE", "STAGE5A_COMMAND",
+    "REQUIRED_EXECUTION_VERIFICATION_SET", "REQUIRED_VERIFICATION_CLOSURE_FAILED",
+    "REQUIRED_VERIFICATION_NOT_RUN", "REQUIRED_VERIFICATION_TARGET_UNRESOLVED",
+    "SKIPPED_NOT_APPLICABLE", "STAGE5A_COMMAND",
     "SUPPORTED_SOURCE_PRESENT", "SUPPORTED_TARGET_DISCOVERY", "SUPPORTED_TARGET_PRESENT", "SYNTAX_STATIC_GATE",
-    "TEST_TARGET_PRESENT", "UNRESOLVED", "VERIFICATION_EVIDENCE_UNAVAILABLE", "VERIFICATION_TARGET_UNRESOLVED",
+    "TEST_TARGET_PRESENT", "UNRESOLVED", "UNRESOLVED_RECEIPT",
+    "VERIFICATION_EVIDENCE_UNAVAILABLE", "VERIFICATION_TARGET_UNRESOLVED",
+    "EXECUTION_VERIFICATION_CLOSURE", "EXECUTION_VERIFICATION_CLOSURE_SCHEMA",
+    "INVALID_RECEIPT", "MISSING_RECEIPT", "NOT_RUN",
     "VERIFIER_NOT_REQUIRED", "VerificationApplicabilityAnalyzer", "VerificationRouteBinding",
-    "aggregate_verification_evidence", "analyze_verification_applicability", "build_verification_route_binding",
+    "aggregate_verification_evidence", "analyze_verification_applicability",
+    "build_execution_verification_closure", "build_required_execution_verification_set",
+    "build_verification_route_binding",
     "canonical_route_hash", "deduplicate_verification_routes", "deterministic_hash",
-    "is_direct_oracle_authority", "validate_verification_route_bindings",
+    "is_direct_oracle_authority", "requires_execution_verification_closure",
+    "validate_execution_verification_closure", "validate_verification_route_bindings",
 ]

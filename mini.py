@@ -11980,7 +11980,16 @@ def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_con
 
 
 def merged_verification_evidence(builder_result, falsifier_result=None):
-    return list(builder_result.get("tool_evidence", [])) + list((falsifier_result or {}).get("tool_evidence", []))
+    values = []
+    for source in (builder_result or {}, falsifier_result or {}):
+        if not isinstance(source, dict):
+            continue
+        for key in ("tool_evidence", "verification_evidence"):
+            values.extend(
+                item for item in source.get(key, []) or []
+                if isinstance(item, dict)
+            )
+    return values
 
 
 def _legacy_quality_projection(value):
@@ -12067,7 +12076,34 @@ def _verification_aggregation(builder_result, falsifier_result=None, browser_res
     if artifact is None:
         return None
     evidence = merged_verification_evidence(builder_result, falsifier_result)
-    aggregation = aggregate_verification_evidence(artifact, evidence, browser_result)
+    obligation_evidence = []
+    for source in (builder_result or {}, falsifier_result or {}):
+        if not isinstance(source, dict):
+            continue
+        for key in ("execution_obligation_evidence",):
+            obligation_evidence.extend(
+                item for item in source.get(key, []) or []
+                if isinstance(item, dict)
+            )
+        verification = source.get("verification")
+        if isinstance(verification, dict):
+            obligation_evidence.extend(
+                item for item in verification.get("execution_obligation_evidence", []) or []
+                if isinstance(item, dict)
+            )
+    coverage = (
+        (builder_result or {}).get("verification_obligation_coverage")
+        if isinstance(builder_result, dict) else None
+    )
+    if not isinstance(coverage, dict) and isinstance(builder_result, dict):
+        verification = builder_result.get("verification")
+        if isinstance(verification, dict):
+            coverage = verification.get("verification_obligation_coverage")
+    aggregation = aggregate_verification_evidence(
+        artifact, evidence, browser_result,
+        execution_obligation_evidence=obligation_evidence,
+        verification_obligation_coverage=coverage,
+    )
     if VERIFICATION_EVIDENCE_UNAVAILABLE in aggregation.get("failure_codes", []):
         RUN["verification_evidence_unavailable"] = RUN.get(
             "verification_evidence_unavailable", 0,
@@ -12171,9 +12207,16 @@ def _stage5b_child_receipt(task, result, parent_contract=None):
     if not isinstance(aggregation, dict):
         aggregation = result.get("verification_aggregation")
     evidence = []
-    for source in (result, result.get("builder", {}), result.get("falsifier", {})):
+    for source in (
+        result, result.get("verification", {}),
+        result.get("builder", {}), result.get("falsifier", {}),
+    ):
         if isinstance(source, dict):
-            evidence.extend(item for item in source.get("tool_evidence", []) or [] if isinstance(item, dict))
+            evidence.extend(
+                item for key in ("tool_evidence", "verification_evidence")
+                for item in source.get(key, []) or []
+                if isinstance(item, dict)
+            )
     authority_failure = _authority_terminal_failure(task)
     receipt = _create_verified_child_receipt_v21(
         task, result,
@@ -17680,6 +17723,62 @@ def _approval_bound_worker_context(task, execution_contract, dependency_summarie
     return mission, artifact
 
 
+def _execution_obligation_evidence_from_gate():
+    """Project accepted V25.5 gate audits as deterministic obligation receipts."""
+    invariant_set = RUN.get("execution_invariant_set")
+    audits = RUN.get("precommit_invariant_audits", [])
+    if not isinstance(invariant_set, dict) or not isinstance(audits, list):
+        return []
+    type_to_oracle = {
+        stage6c_invariants.STATE_OWNER: "INVARIANT-STATE-OWNER",
+        stage6c_invariants.REQUIRED_INTERFACE_REUSE: "INVARIANT-INTERFACE-REUSE",
+        stage6c_invariants.DNT_PRESERVATION: "INVARIANT-DNT-PRESERVATION",
+    }
+    authority_set_hash = invariant_set.get("invariant_set_hash")
+    evidence = []
+    for invariant in invariant_set.get("invariants", []) or []:
+        if not isinstance(invariant, dict):
+            continue
+        oracle_id = type_to_oracle.get(invariant.get("type"))
+        invariant_id = invariant.get("invariant_id")
+        if not oracle_id or not invariant_id:
+            continue
+        related = [
+            item for item in audits
+            if isinstance(item, dict)
+            and item.get("authority_set_hash") == authority_set_hash
+            and invariant_id in (item.get("applicable_invariant_ids", []) or [])
+        ]
+        if not related:
+            continue
+        audit = next(
+            (item for item in reversed(related) if item.get("allowed") is True),
+            related[-1],
+        )
+        passed = audit.get("allowed") is True and not audit.get("violations")
+        audit_hash = audit.get("canonical_hash")
+        evidence.append({
+            "authority_id": oracle_id,
+            "oracle_id": oracle_id,
+            "result": {
+                "passed": passed,
+                "verification_status": VERIFICATION_PASS if passed else VERIFICATION_FAIL,
+            },
+            "receipt_identity": (
+                "PRECOMMIT-AUDIT-" + str(audit_hash).upper()
+                if audit_hash else None
+            ),
+            "receipt_hash": audit_hash,
+            "receipt_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+            "execution_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+            "receipt_valid": bool(audit_hash),
+            "source": "V25.5_PreCommitExecutionInvariantGate",
+            "authority_set_hash": authority_set_hash,
+            "evidence_hash": audit_hash,
+        })
+    return evidence
+
+
 def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
                                   parent_summary="", dependency_summaries=None,
                                   strategy_context=None):
@@ -17814,6 +17913,7 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
         worker_context=bounded_context,
         worker_dispatch=dispatch,
         verification_runner=RUN.get("_approval_bound_verification_runner"),
+        execution_obligation_evidence=_execution_obligation_evidence_from_gate,
         verification_obligation_coverage=RUN.get("verification_obligation_coverage"),
         store=get_memory_store(),
         project_id=str(RUN.get("project_id") or "default"),
@@ -18236,8 +18336,17 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
                 "verification_aggregation": copy.deepcopy(
                     item.get("result", {}).get("verification_aggregation")
                 ),
+                "execution_verification_closure": copy.deepcopy(
+                    item.get("result", {}).get("execution_verification_closure")
+                ),
+                "execution_time_coverage": copy.deepcopy(
+                    item.get("result", {}).get("execution_time_coverage")
+                ),
                 "verification_evidence": copy.deepcopy(
                     item.get("result", {}).get("verification_evidence", [])
+                ),
+                "execution_obligation_evidence": copy.deepcopy(
+                    item.get("result", {}).get("execution_obligation_evidence", [])
                 ),
                 "raw_worker_result_ref": item.get("result", {}).get("worker_execution", {}).get(
                     "raw_worker_result_ref"
@@ -20573,6 +20682,12 @@ def run_stage6c_b_v25_4_2_self_test(
         persisted_applicability = _read(live_root, "verification_applicability.json")
         oracle_source = _read(live_root, "direct_behavior_oracle_source.json")
         oracle = oracle_source.get("oracle") if isinstance(oracle_source, dict) else {}
+        coverage_source = _read(live_root, "verification_obligation_coverage_source.json")
+        coverage_artifact = (
+            coverage_source.get("coverage")
+            if isinstance(coverage_source, dict)
+            else None
+        )
         final_summary = _read(live_root, "final_validation_summary.json")
         packet_audit = _read(live_root, "worker_packet_audit.json")
         approval_validation = _read(live_root, "approval_receipt_validation.json")
@@ -20777,11 +20892,50 @@ def run_stage6c_b_v25_4_2_self_test(
                 }
                 for item in command_results
             ]
-            aggregation = routing.aggregate_verification_evidence(
-                corrected_artifact, command_evidence,
-            )
             direct_result = stage6c_remediation.execute_direct_behavior_oracle(
                 oracle, execution_root,
+            )
+            direct_route = next(
+                (item for item in direct_routes if isinstance(item, dict)),
+                {},
+            )
+            direct_evidence = {
+                "tool": "run_file",
+                "target": direct_route.get("target"),
+                "result": {
+                    "passed": (
+                        direct_result.get("status") == stage6c_remediation.PASS
+                        and direct_result.get("valid") is True
+                    ),
+                    "verification_status": direct_result.get("status"),
+                    "oracle_id": direct_result.get("oracle_id"),
+                    "oracle_hash": direct_result.get("oracle_hash"),
+                    "exit_code": direct_result.get("exit_code"),
+                },
+                "verification_id": direct_route.get("verification_id"),
+                "route_type": direct_route.get("route_type"),
+                "execution_channel": direct_route.get("execution_channel"),
+            }
+            verification_evidence = command_evidence + [direct_evidence]
+            execution_obligation_evidence = [{
+                "authority_id": "INVARIANT-STATE-OWNER",
+                "oracle_id": "INVARIANT-STATE-OWNER",
+                "result": {
+                    "passed": True,
+                    "verification_status": routing.PASS,
+                },
+                "receipt_identity": "V2542-STATE-OWNER-INVARIANT-AUDIT",
+                "receipt_hash": "V2542-STATE-OWNER-INVARIANT-AUDIT",
+                "receipt_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+                "execution_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+                "receipt_valid": True,
+                "source": "provider_free_v25_4_2_invariant_validation",
+                "evidence_hash": "V2542-STATE-OWNER-INVARIANT-AUDIT",
+            }]
+            aggregation = routing.aggregate_verification_evidence(
+                corrected_artifact, verification_evidence,
+                execution_obligation_evidence=execution_obligation_evidence,
+                verification_obligation_coverage=coverage_artifact,
             )
             legacy_passes = {
                 item.get("target") for item in command_results
@@ -20797,6 +20951,25 @@ def run_stage6c_b_v25_4_2_self_test(
                 and direct_result.get("valid") is True
                 and direct_result.get("model_calls") == 0
                 and direct_result.get("worker_calls") == 0
+            )
+            checks["execution_verification_closure_passes"] = (
+                aggregation.get("execution_verification_closure", {}).get(
+                    "all_required_passed"
+                ) is True
+                and aggregation.get("execution_verification_closure", {}).get(
+                    "required_receipt_set_complete"
+                ) is True
+            )
+            checks["execution_time_obligation_closure_passes"] = (
+                aggregation.get("execution_time_coverage", {}).get(
+                    "all_required_passed"
+                ) is True
+                and not aggregation.get("execution_time_coverage", {}).get(
+                    "failed_obligation_ids", []
+                )
+                and not aggregation.get("execution_time_coverage", {}).get(
+                    "not_run_obligation_ids", []
+                )
             )
 
             parent_contract = {
@@ -20846,14 +21019,17 @@ def run_stage6c_b_v25_4_2_self_test(
                     "status": "done",
                     "summary": f"{child_id} exact routing replay passed",
                     "gate": {"verification_aggregation": copy.deepcopy(aggregation)},
-                    "builder": {"status": "done", "tool_evidence": copy.deepcopy(command_evidence)},
+                    "builder": {
+                        "status": "done",
+                        "tool_evidence": copy.deepcopy(verification_evidence),
+                    },
                 }
                 child_receipt = _create_verified_child_receipt_v21(
                     child_task, child_result, parent_id=parent["id"],
                     parent_contract=parent_contract,
                     verification_applicability=corrected_artifact,
                     verification_aggregation=aggregation,
-                    verification_evidence=command_evidence,
+                    verification_evidence=verification_evidence,
                     workspace=execution_root,
                     mutation_paths=[source],
                 )
@@ -20988,6 +21164,12 @@ def run_stage6c_b_v25_4_2_self_test(
             "direct_oracle_route": copy.deepcopy((corrected_artifact.get("direct_oracle_routes") or [None])[0]),
             "command_results": command_results,
             "verification_aggregation": copy.deepcopy(aggregation),
+            "execution_verification_closure": copy.deepcopy(
+                aggregation.get("execution_verification_closure")
+            ),
+            "execution_time_coverage": copy.deepcopy(
+                aggregation.get("execution_time_coverage")
+            ),
             "direct_oracle": copy.deepcopy(direct_result),
             "stage5b_readiness": copy.deepcopy(readiness),
             "stage5b_integration": copy.deepcopy(integration),

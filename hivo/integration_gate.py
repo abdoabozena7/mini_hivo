@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from hivo import verification_routing
+
 
 SCHEMA_VERSION = "V21.5B"
 RECEIPT_TYPE = "VerifiedChildReceipt"
@@ -35,6 +37,7 @@ NOT_READY_STALE_RECEIPT = "INTEGRATION_NOT_READY_STALE_RECEIPT"
 NOT_READY_COVERAGE_GAP = "NOT_READY_COVERAGE_GAP"
 NOT_READY_STALE_AUTHORITY = "INTEGRATION_NOT_READY_STALE_AUTHORITY"
 NOT_READY_PROVENANCE_VIOLATION = "INTEGRATION_NOT_READY_PROVENANCE_VIOLATION"
+NOT_READY_VERIFICATION_CLOSURE = "NOT_READY_VERIFICATION_CLOSURE"
 
 INTEGRATION_EVIDENCE_UNAVAILABLE = "INTEGRATION_EVIDENCE_UNAVAILABLE"
 PARENT_VERIFIED = "PARENT_VERIFIED"
@@ -366,6 +369,9 @@ def compact_verification_evidence(evidence: Iterable[dict] | None, limit: int = 
         for key in (
             "tool", "target", "path", "status", "passed", "verification_status",
             "failure_type", "result", "summary", "source", "kind",
+            "verification_id", "authority_id", "oracle_id", "oracle_hash",
+            "route_type", "execution_channel", "receipt_identity",
+            "receipt_hash",
         ):
             if key in item and str(key).casefold() not in _PRIVATE_KEYS:
                 value[key] = _safe_projection(item[key])
@@ -378,6 +384,8 @@ def _route_projection(route: dict) -> dict:
     keys = (
         "kind", "required", "applicable", "target", "result", "reason_codes",
         "evidence_refs", "resolution_status", "resolution_source", "requested_from_node",
+        "verification_id", "authority_id", "oracle_id", "oracle_hash",
+        "authority_type", "route_type", "execution_channel",
     )
     return {key: _safe_projection(route.get(key)) for key in keys if key in route}
 
@@ -440,6 +448,25 @@ def _receipt_verification_decision(
         reasons.append("UNAUTHORIZED_MUTATION_OR_PROVENANCE_VIOLATION")
     if aggregation.get("passed") is not True:
         reasons.append("STAGE5A_VERIFICATION_NOT_PASSED")
+    closure_required = (
+        verification_routing.requires_execution_verification_closure(artifact)
+        or isinstance(aggregation.get("execution_verification_closure"), dict)
+        or isinstance(aggregation.get("required_execution_verification_set"), dict)
+    )
+    closure = aggregation.get("execution_verification_closure")
+    if closure_required:
+        if not isinstance(closure, dict):
+            reasons.append("EXECUTION_VERIFICATION_CLOSURE_MISSING")
+        else:
+            checked_closure = verification_routing.validate_execution_verification_closure(
+                closure,
+                applicability=artifact,
+                required_set=aggregation.get("required_execution_verification_set")
+                if isinstance(aggregation.get("required_execution_verification_set"), dict)
+                else None,
+            )
+            if not checked_closure.get("valid") or closure.get("all_required_passed") is not True:
+                reasons.append("EXECUTION_VERIFICATION_CLOSURE_FAILED")
     failure_codes = {str(item) for item in aggregation.get("failure_codes", []) or []}
     if INTEGRATION_EVIDENCE_UNAVAILABLE in failure_codes or "VERIFICATION_EVIDENCE_UNAVAILABLE" in failure_codes:
         reasons.append("VERIFICATION_EVIDENCE_UNAVAILABLE")
@@ -499,9 +526,15 @@ def create_verified_child_receipt(
     aggregation = _aggregation_from_inputs(result, verification_aggregation)
     evidence = [item for item in (verification_evidence or []) if isinstance(item, dict)]
     if not evidence:
-        for source in (result, result.get("builder", {}), result.get("falsifier", {})):
+        for source in (
+            result, result.get("builder", {}), result.get("falsifier", {}),
+        ):
             if isinstance(source, dict):
-                evidence.extend(item for item in source.get("tool_evidence", []) or [] if isinstance(item, dict))
+                evidence.extend(
+                    item for key in ("tool_evidence", "verification_evidence")
+                    for item in source.get(key, []) or []
+                    if isinstance(item, dict)
+                )
     child_id = str(task.get("id") or task.get("task_id") or result.get("child_id") or "UNKNOWN")
     contract = task.get("execution_contract") if isinstance(task.get("execution_contract"), dict) else task
     contract = contract if isinstance(contract, dict) else {}
@@ -528,6 +561,16 @@ def create_verified_child_receipt(
             if isinstance(item, dict)
         ]
     safe_evidence = compact_verification_evidence(evidence)
+    closure = (
+        aggregation.get("execution_verification_closure")
+        if isinstance(aggregation.get("execution_verification_closure"), dict)
+        else None
+    )
+    required_set = (
+        aggregation.get("required_execution_verification_set")
+        if isinstance(aggregation.get("required_execution_verification_set"), dict)
+        else None
+    )
     verified, reasons = _receipt_verification_decision(
         task, result, artifact, aggregation,
         authority_valid=authority_valid,
@@ -581,6 +624,11 @@ def create_verified_child_receipt(
         "verification_applicability_hash": artifact.get("verification_applicability_hash"),
         "verification_routes_hash": artifact.get("verification_routes_hash"),
         "verification_routes": routes,
+        "required_execution_verification_set": copy.deepcopy(required_set),
+        "execution_verification_closure": copy.deepcopy(closure),
+        "execution_verification_closure_hash": (
+            closure.get("closure_hash") if closure else None
+        ),
         "browser": {
             "required": any(item.get("required") is True for item in browser_routes),
             "applicable": any(item.get("applicable") is True for item in browser_routes),
@@ -595,6 +643,10 @@ def create_verified_child_receipt(
             "actual_passes": [_route_projection(item) for item in aggregation.get("actual_passes", []) or [] if isinstance(item, dict)],
             "actual_failures": [_route_projection(item) for item in aggregation.get("actual_failures", []) or [] if isinstance(item, dict)],
             "skipped_not_applicable": [_route_projection(item) for item in aggregation.get("skipped_not_applicable", []) or [] if isinstance(item, dict)],
+            "required_execution_verification_set_hash": (
+                required_set.get("set_hash") if required_set else None
+            ),
+            "execution_verification_closure": copy.deepcopy(closure),
         },
         "verification_evidence": safe_evidence,
         "required_evidence": safe_evidence,
@@ -688,6 +740,40 @@ def validate_verified_child_receipt(
     ):
         if right in expected and expected.get(right) is not None and authority.get(left) != expected.get(right):
             errors.append(f"receipt authority mismatch: {left}")
+    closure = value.get("execution_verification_closure")
+    required_set = value.get("required_execution_verification_set")
+    closure_required = (
+        isinstance(closure, dict)
+        or isinstance(required_set, dict)
+        or any(
+            isinstance(item, dict)
+            and (
+                item.get("authority_id")
+                or item.get("route_type") == verification_routing.DIRECT_ORACLE
+                or item.get("execution_channel") == verification_routing.DIRECT_ORACLE_EXECUTION
+            )
+            for item in value.get("verification_routes", []) or []
+        )
+    )
+    closure_check = {
+        "valid": True, "all_required_passed": True, "errors": [], "model_calls": 0,
+    }
+    if closure_required:
+        if not isinstance(closure, dict):
+            errors.append("execution verification closure is missing")
+            closure_check = {
+                "valid": False, "all_required_passed": False,
+                "errors": ["execution verification closure is missing"],
+                "model_calls": 0,
+            }
+        else:
+            closure_required_set = required_set if isinstance(required_set, dict) else None
+            closure_check = verification_routing.validate_execution_verification_closure(
+                closure,
+                required_set=closure_required_set,
+            )
+            if not closure_check.get("valid") or closure.get("all_required_passed") is not True:
+                errors.append("execution verification closure is invalid or incomplete")
     freshness = (
         receipt_freshness(value, workspace)
         if check_freshness else {"fresh": True, "stale_paths": [], "reason": None}
@@ -701,6 +787,7 @@ def validate_verified_child_receipt(
         "errors": errors[:30],
         "stale_paths": list(freshness.get("stale_paths", [])),
         "freshness": freshness,
+        "execution_verification_closure": closure_check,
     }
 
 
@@ -923,6 +1010,8 @@ def assess_integration_readiness(
     stale: list[dict] = []
     invalid_receipts: list[str] = []
     coverage_receipts: list[str] = []
+    verification_closures: list[dict[str, Any]] = []
+    verification_closure_failures: list[str] = []
     for child_id in plan["required_child_ids"]:
         task, result = child_map.get(child_id, ({"id": child_id}, {"status": "pending"}))
         if _is_failure_status(task, result):
@@ -945,11 +1034,32 @@ def assess_integration_readiness(
             },
         )
         if not checked.get("valid") or receipt.get("verified") is not True:
+            closure_check = checked.get("execution_verification_closure")
+            if isinstance(receipt.get("execution_verification_closure"), dict):
+                verification_closures.append({
+                    "child_id": child_id,
+                    "closure_hash": receipt["execution_verification_closure"].get("closure_hash"),
+                    "all_required_passed": receipt["execution_verification_closure"].get("all_required_passed") is True,
+                    "valid": bool(closure_check and closure_check.get("valid")),
+                    "errors": list((closure_check or {}).get("errors", []) or [])[:12],
+                })
+                verification_closure_failures.append(child_id)
             if checked.get("stale_paths") or "stale" in " ".join(checked.get("errors", [])).casefold():
                 stale.append({"child_id": child_id, "stale_paths": checked.get("stale_paths", []), "errors": checked.get("errors", [])})
             else:
                 invalid_receipts.append(child_id)
             continue
+        closure_check = checked.get("execution_verification_closure")
+        if isinstance(receipt.get("execution_verification_closure"), dict):
+            verification_closures.append({
+                "child_id": child_id,
+                "closure_hash": receipt["execution_verification_closure"].get("closure_hash"),
+                "all_required_passed": receipt["execution_verification_closure"].get("all_required_passed") is True,
+                "valid": bool(closure_check and closure_check.get("valid")),
+                "errors": list((closure_check or {}).get("errors", []) or [])[:12],
+            })
+            if not closure_check.get("valid") or closure_check.get("all_required_passed") is not True:
+                verification_closure_failures.append(child_id)
         if not checked.get("fresh"):
             stale.append({"child_id": child_id, "stale_paths": checked.get("stale_paths", [])})
         coverage_receipts.extend(
@@ -978,6 +1088,8 @@ def assess_integration_readiness(
         reason = NOT_READY_CHILD_FAILURE
     elif stale:
         reason = NOT_READY_STALE_EVIDENCE
+    elif verification_closure_failures:
+        reason = NOT_READY_VERIFICATION_CLOSURE
     elif pending or missing_receipts or invalid_receipts:
         reason = NOT_READY_CHILD_UNVERIFIED
     elif plan["duplicate_child_ids"] or duplicate_coverage or missing_coverage:
@@ -1014,6 +1126,8 @@ def assess_integration_readiness(
         "pending_children": sorted(pending),
         "missing_receipts": sorted(missing_receipts),
         "unverified_children": sorted(set(invalid_receipts)),
+        "verification_closures": verification_closures,
+        "verification_closure_failures": sorted(set(verification_closure_failures)),
         "stale_evidence": stale,
         "coverage": {
             "source": plan["source"], "required_coverage_ids": plan["required_coverage_ids"],
@@ -1111,6 +1225,10 @@ def _parent_receipt(
                 )
             )
     dependency_paths = sorted(set(dependency_paths), key=str.casefold)
+    closure_summaries = [
+        copy.deepcopy(item) for item in readiness.get("verification_closures", []) or []
+        if isinstance(item, dict)
+    ]
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "artifact_type": PARENT_RECEIPT_TYPE,
@@ -1122,6 +1240,7 @@ def _parent_receipt(
         "readiness_hash": readiness.get("readiness_hash"),
         "child_receipts": child_refs,
         "child_receipt_hashes": [item.get("receipt_hash") for item in child_refs],
+        "execution_verification_closures": closure_summaries,
         "integration_routes": [_route_projection(item) for item in routes],
         "integration_route_results": [_route_projection(item) for item in route_results],
         "integration_evidence": compact_verification_evidence(integration_evidence),
@@ -1150,6 +1269,23 @@ def aggregate_parent_integration(
     contract = parent_contract if isinstance(parent_contract, dict) else {}
     gate = readiness if isinstance(readiness, dict) else {}
     evidence = [item for item in (integration_evidence or []) if isinstance(item, dict)]
+    closure_failures = [
+        str(item) for item in gate.get("verification_closure_failures", []) or []
+        if str(item)
+    ]
+    if closure_failures:
+        return {
+            "status": INTEGRATION_NOT_READY,
+            "integration_result": INTEGRATION_NOT_READY,
+            "failure_type": "EXECUTION_VERIFICATION_CLOSURE_FAILED",
+            "parent_verified": False,
+            "integration_executor_calls": 0,
+            "model_calls": 0,
+            "browser_verifier_calls": 0,
+            "verification_closure_failures": closure_failures,
+            "readiness": copy.deepcopy(gate),
+            "summary": "required execution verification closure was not complete",
+        }
     if gate.get("readiness") != READY and gate.get("status") != READY:
         return {
             "status": INTEGRATION_NOT_READY, "integration_result": INTEGRATION_NOT_READY,
