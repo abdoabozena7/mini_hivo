@@ -272,6 +272,53 @@ AuthorizedExecutionLineage = stage6d.AuthorizedExecutionLineage
 ApprovedRecoveryAuthorization = stage6d.ApprovedRecoveryAuthorization
 RecoveryMission = stage6d.RecoveryMission
 RecoveryWorkerPacket = stage6d.RecoveryWorkerPacket
+# V26.3 recovery-local mutation strategy diversification.  These aliases
+# deliberately live beside the V26 recovery aliases; they do not participate
+# in Stage 3 decomposition or the older post-failure strategy search.
+MAX_RECOVERY_STRATEGY_SWITCHES = stage6d.MAX_RECOVERY_STRATEGY_SWITCHES
+RECOVERY_STRATEGY_FAILURE_PATTERN = stage6d.RECOVERY_STRATEGY_FAILURE_PATTERN
+RECOVERY_MUTATION_STRATEGY = stage6d.RECOVERY_MUTATION_STRATEGY
+RECOVERY_STRATEGY_DIVERSIFICATION_DECISION = stage6d.RECOVERY_STRATEGY_DIVERSIFICATION_DECISION
+SYNTAX_INVALID_MUTATION = stage6d.SYNTAX_INVALID_MUTATION
+RECOVERY_STRATEGY_STAGNATION_DETECTED = stage6d.RECOVERY_STRATEGY_STAGNATION_DETECTED
+NO_SWITCH_REQUIRED = stage6d.NO_SWITCH_REQUIRED
+STRATEGY_SWITCH_READY = stage6d.STRATEGY_SWITCH_READY
+STRATEGY_SWITCH_UNAVAILABLE = stage6d.STRATEGY_SWITCH_UNAVAILABLE
+STRATEGY_SWITCH_BLOCKED_AUTHORITY = stage6d.STRATEGY_SWITCH_BLOCKED_AUTHORITY
+STRATEGY_SWITCH_BUDGET_EXHAUSTED = stage6d.STRATEGY_SWITCH_BUDGET_EXHAUSTED
+STRATEGY_SWITCH_NOT_EVALUABLE = stage6d.STRATEGY_SWITCH_NOT_EVALUABLE
+RECOVERY_STRATEGY_SEARCH_EXHAUSTED = stage6d.RECOVERY_STRATEGY_SEARCH_EXHAUSTED
+RECOVERY_STRATEGY_COMMITTED = stage6d.RECOVERY_STRATEGY_COMMITTED
+RECOVERY_STRATEGY_STAGNATION_THRESHOLD = stage6d.RECOVERY_STRATEGY_STAGNATION_THRESHOLD
+RecoveryStrategyFailurePattern = stage6d.RecoveryStrategyFailurePattern
+RecoveryMutationStrategy = stage6d.RecoveryMutationStrategy
+RecoveryStrategyDiversificationDecision = stage6d.RecoveryStrategyDiversificationDecision
+build_recovery_strategy_failure_pattern = stage6d.build_recovery_strategy_failure_pattern
+build_recovery_failure_pattern = stage6d.build_recovery_failure_pattern
+validate_recovery_strategy_failure_pattern = stage6d.validate_recovery_strategy_failure_pattern
+build_recovery_mutation_strategy = stage6d.build_recovery_mutation_strategy
+build_recovery_strategy = stage6d.build_recovery_strategy
+validate_recovery_mutation_strategy = stage6d.validate_recovery_mutation_strategy
+discover_legal_recovery_mutation_mechanisms = stage6d.discover_legal_recovery_mutation_mechanisms
+project_recovery_tool_schemas = stage6d.project_recovery_tool_schemas
+project_recovery_tool_schema = stage6d.project_recovery_tool_schema
+decide_recovery_strategy_diversification = stage6d.decide_recovery_strategy_diversification
+decide_recovery_strategy = stage6d.decide_recovery_strategy
+evaluate_recovery_strategy = stage6d.evaluate_recovery_strategy
+build_recovery_strategy_diversification_decision = stage6d.build_recovery_strategy_diversification_decision
+create_recovery_strategy_diversification_decision = stage6d.create_recovery_strategy_diversification_decision
+validate_recovery_strategy_diversification_decision = stage6d.validate_recovery_strategy_diversification_decision
+detect_recovery_strategy_stagnation = stage6d.detect_recovery_strategy_stagnation
+recovery_strategy_stagnation = stage6d.recovery_strategy_stagnation
+create_recovery_strategy_state = stage6d.create_recovery_strategy_state
+observe_recovery_mutation = stage6d.observe_recovery_mutation
+refresh_recovery_strategy_source = stage6d.refresh_recovery_strategy_source
+recovery_strategy_state_projection = stage6d.recovery_strategy_state_projection
+validate_recovery_strategy_state = stage6d.validate_recovery_strategy_state
+validate_recovery_strategy = stage6d.validate_recovery_strategy
+build_strategy_failure_pattern = stage6d.build_strategy_failure_pattern
+build_strategy_mutation = stage6d.build_strategy_mutation
+derive_legal_recovery_mutation_mechanisms = stage6d.derive_legal_recovery_mutation_mechanisms
 # V24 Stage 6B verified-state-aware planning. These names are aliases only;
 # the deterministic implementation remains in hivo.verified_planning.
 VERIFIED_STATE_REENTRY = stage6b.VERIFIED_STATE_REENTRY
@@ -1439,17 +1486,36 @@ def run_command(command):
         return f"tool error: {exc}"
 
 
-def tools_for_role(role, tool_policy=None):
+def tools_for_role(role, tool_policy=None, recovery_strategy=None):
+    """Return the role tools, optionally projected for one recovery epoch.
+
+    The default path is byte-for-byte equivalent to the existing role
+    projection.  Recovery suppression is opt-in and is applied only to the
+    supplied local recovery strategy state, never to the global registry.
+    """
     if role == "Falsifier":
         allowed = {"read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
-        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
-    if role == "Repairer":
+        base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    elif role == "Repairer":
         allowed = {"edit_file", "edit_file_range", "read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
-        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
-    if tool_policy == "coherent_rewrite":
+        base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    elif tool_policy == "coherent_rewrite":
         allowed = {"write_file", "read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
-        return [tool for tool in TOOLS if tool["function"]["name"] in allowed]
-    return TOOLS
+        base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
+    else:
+        base = TOOLS
+    if isinstance(recovery_strategy, dict):
+        strategy = recovery_strategy.get("current_strategy")
+        if not isinstance(strategy, dict) and recovery_strategy.get("artifact_type") == RECOVERY_MUTATION_STRATEGY:
+            strategy = recovery_strategy
+        if isinstance(strategy, dict):
+            return stage6d.project_recovery_tool_schemas(base, strategy)
+    return base
+
+
+def recovery_tools_for_epoch(role="Builder", recovery_strategy=None, tool_policy=None):
+    """Explicit public spelling for the local recovery tool projection."""
+    return tools_for_role(role, tool_policy=tool_policy, recovery_strategy=recovery_strategy)
 
 
 def _normalized_workspace_relative_path(raw_path):
@@ -10556,6 +10622,87 @@ def tool_recovery_hint(tool_name, result, repeated_failures):
     return ""
 
 
+def _recovery_strategy_target_state(target):
+    """Describe the current target without widening mutation authority."""
+    state = {"path": str(target or ""), "exists": False, "protected": False}
+    if WORKSPACE is None or not target:
+        return state
+    path = safe_path(target)
+    if path is None:
+        return state
+    try:
+        state["exists"] = path.is_file()
+    except OSError:
+        return state
+    # Existing project files are user/verified state for the purpose of
+    # write_file strategy discovery. Focused edits remain independently
+    # subject to the active Stage 4/V25.5 gates.
+    state["protected"] = bool(state["exists"])
+    return state
+
+
+def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
+    """Normalize a V26.3 state or strategy for one Builder lifecycle."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("artifact_type") == RECOVERY_MUTATION_STRATEGY:
+        strategy = copy.deepcopy(value)
+        return {
+            "schema_version": stage6d.SCHEMA_VERSION,
+            "recovery_execution_id": strategy.get("recovery_execution_id"),
+            "recovery_attempt_index": strategy.get("recovery_attempt_index", 1),
+            "strategy_epoch": strategy.get("strategy_epoch", 0),
+            "strategy_switch_count": 0,
+            "max_strategy_switches": MAX_RECOVERY_STRATEGY_SWITCHES,
+            "target_path": strategy.get("target_path") or target,
+            "current_subject_hash": strategy.get("source_subject_identity"),
+            "current_strategy": strategy,
+            "available_legal_mechanisms": list(strategy.get("allowed_mutation_mechanisms", []) or []),
+            "suppressed_mutation_mechanisms": list(strategy.get("suppressed_mutation_mechanisms", []) or []),
+            "recovery_authorization": {}, "lineage": {}, "mutation_authority": {}, "dnt": {},
+            "target_state": _recovery_strategy_target_state(target or strategy.get("target_path")),
+            "consecutive_failure_count": 0, "last_failure_key": None,
+            "strategy_failure_patterns": [], "strategy_switch_decisions": [],
+            "strategy_epoch_starts": [], "strategy_epoch_terminals": [],
+            "strategy_search_summary": {}, "terminal_state": None,
+            "current_source_refreshed": False,
+        }
+    state = copy.deepcopy(value)
+    if not state.get("recovery_execution_id") or not isinstance(state.get("current_strategy"), dict):
+        return None
+    state.setdefault("target_path", target or state.get("current_strategy", {}).get("target_path"))
+    state.setdefault("strategy_epoch", 0)
+    state.setdefault("strategy_switch_count", 0)
+    state.setdefault("max_strategy_switches", MAX_RECOVERY_STRATEGY_SWITCHES)
+    state.setdefault("strategy_failure_patterns", [])
+    state.setdefault("strategy_switch_decisions", [])
+    state.setdefault("suppressed_mutation_mechanisms", [])
+    state.setdefault("target_state", _recovery_strategy_target_state(state.get("target_path")))
+    if not state.get("available_legal_mechanisms"):
+        discovered = stage6d.discover_legal_recovery_mutation_mechanisms(
+            tool_schemas,
+            target=state.get("target_path"),
+            target_state=state.get("target_state"),
+            mutation_authority=state.get("mutation_authority"),
+            authority=state.get("recovery_authorization"),
+            dnt=state.get("dnt"),
+        )
+        state["available_legal_mechanisms"] = discovered
+        current = state.get("current_strategy")
+        if isinstance(current, dict) and not current.get("allowed_mutation_mechanisms"):
+            state["current_strategy"] = stage6d.build_recovery_mutation_strategy(
+                state["recovery_execution_id"],
+                strategy_epoch=int(state.get("strategy_epoch", 0) or 0),
+                target_path=state.get("target_path"),
+                allowed_mutation_mechanisms=discovered,
+                suppressed_mutation_mechanisms=state.get("suppressed_mutation_mechanisms", []),
+                source_subject_identity=state.get("current_subject_hash"),
+                transition_reason="initial recovery strategy",
+                recovery_authorization=state.get("recovery_authorization"),
+            )
+    return state
+
+
 def verification_failure_signature(result):
     try:
         payload = json.loads(str(result))
@@ -10634,7 +10781,27 @@ def verification_failure_digest(result, limit=1800):
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="",
                        tool_policy=None, max_steps=None, worker_callback=None,
                        worker_context=None, execution_contract=None,
-                       execution_authorization_check=None):
+                       execution_authorization_check=None, recovery_strategy=None,
+                       recovery_strategy_state=None):
+    # V26.3 is an opt-in local policy for one recovery Worker.  Keeping this
+    # state outside the ordinary path prevents initial Workers and Stage 3/4
+    # decomposition from inheriting strategy suppression.
+    recovery_strategy = recovery_strategy if recovery_strategy is not None else recovery_strategy_state
+    if recovery_strategy is None:
+        recovery_strategy = RUN.get("_recovery_strategy_state") or RUN.get("recovery_strategy_state")
+    recovery_state = None
+    recovery_terminal_state = None
+    recovery_strategy_events = []
+    recovery_task_text = str(task_text)
+    # Preserve only the caller's bounded RecoveryMission/authority packet for
+    # an epoch reset.  This is deliberately captured before the ordinary
+    # memory/context enrichment below, so rejected candidates and the prior
+    # model transcript cannot become epoch-1 context.
+    recovery_packet_context = compact_text(
+        worker_context if isinstance(worker_context, str) and worker_context.strip()
+        else (extra_context or recovery_task_text),
+        RECOVERY_WORKER_PACKET_MAX_CHARS,
+    )
     if RUN.get("stage6c_enabled") and role in {"Builder", "Worker"}:
         authority_gate = stage6c.worker_authorization_gate(
             RUN.get("execution_authorization"),
@@ -10799,6 +10966,16 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     status = "unknown"
     execution_budget_exhausted = False
     offered_tools = tools_for_role(role, tool_policy=tool_policy)
+    if role == "Builder" and isinstance(recovery_strategy, dict):
+        recovery_state = _recovery_strategy_state_for_execution(
+            recovery_strategy,
+            offered_tools,
+            target=(recovery_strategy.get("target_path") or recovery_strategy.get("target")),
+        )
+        if recovery_state is not None:
+            offered_tools = tools_for_role(
+                role, tool_policy=tool_policy, recovery_strategy=recovery_state,
+            )
     offered_names = {item["function"]["name"] for item in offered_tools}
     if role == "Builder":
         RUN["builder_calls"] = RUN.get("builder_calls", 0) + 1
@@ -10851,6 +11028,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 status = "done"
             break
         stop = False
+        restart_after_recovery_strategy_switch = False
         for call in tool_calls:
             try:
                 name = call["function"]["name"]
@@ -10921,6 +11099,111 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         context_source=recovery_packet.get("context_source"),
                         current_file_exists=recovery_packet.get("current_file_exists"),
                     )
+
+            # V26.3 observes only deterministic source-mutation failures in
+            # an explicitly supplied recovery state.  The first two failures
+            # remain ordinary Worker feedback; the eligible second failure
+            # changes only the model-visible mutation-tool projection and
+            # continues this same loop/lifecycle.
+            recovery_observation = None
+            if recovery_state is not None and role == "Builder":
+                is_source_mutation = name in {"write_file", "edit_file", "edit_file_range"}
+                if mutation_record is not None and mutation_record.get("category") == SYNTAX_INVALID_MUTATION:
+                    recovery_observation = stage6d.observe_recovery_mutation(
+                        recovery_state,
+                        target_path=str(target),
+                        mutation_mechanism=name,
+                        failure_class=mutation_record.get("category", SYNTAX_INVALID_MUTATION),
+                        diagnostic=mutation_record.get("summary", result),
+                        subject_identity_before=recovery_state.get("current_subject_hash"),
+                        subject_identity_after=recovery_state.get("current_subject_hash"),
+                        subject_unchanged=True,
+                        committed=False,
+                        commit_count=0,
+                        tool_schemas=offered_tools,
+                    )
+                elif is_source_mutation and not tool_result_failed(result):
+                    recovery_observation = stage6d.observe_recovery_mutation(
+                        recovery_state,
+                        target_path=str(target),
+                        mutation_mechanism=name,
+                        failure_class="MUTATION_COMMITTED",
+                        diagnostic="legal mutation candidate accepted by the guarded mutation seam",
+                        subject_identity_before=recovery_state.get("current_subject_hash"),
+                        subject_identity_after=None,
+                        subject_unchanged=False,
+                        committed=True,
+                        commit_count=1,
+                        tool_schemas=offered_tools,
+                    )
+                if recovery_observation is not None:
+                    recovery_state = recovery_observation["state"]
+                    decision = recovery_observation.get("decision", {})
+                    pattern = recovery_observation.get("pattern", {})
+                    recovery_strategy_events.append({
+                        "kind": "recovery_strategy_observation",
+                        "strategy_epoch": recovery_state.get("strategy_epoch", 0),
+                        "target": pattern.get("target_path"),
+                        "mechanism": pattern.get("mutation_mechanism"),
+                        "failure_class": pattern.get("failure_class"),
+                        "failure_count": pattern.get("failure_count"),
+                        "pattern_hash": pattern.get("canonical_hash"),
+                        "decision": decision.get("decision"),
+                        "decision_hash": decision.get("canonical_hash"),
+                    })
+                    if recovery_observation.get("switched"):
+                        recovery_state = stage6d.refresh_recovery_strategy_source(
+                            recovery_state,
+                            workspace=WORKSPACE,
+                            target_path=recovery_state.get("target_path") or target,
+                        )
+                        feedback = stage6d.build_recovery_strategy_transition_feedback(
+                            pattern,
+                            decision,
+                            recovery_state.get("current_strategy", {}),
+                            current_source_refreshed=recovery_state.get("current_source_refreshed") is True,
+                            current_source_identity=recovery_state.get("current_subject_hash"),
+                        )
+                        recovery_state["last_transition_feedback"] = feedback
+                        offered_tools = tools_for_role(
+                            role, tool_policy=tool_policy, recovery_strategy=recovery_state,
+                        )
+                        offered_names = {item["function"]["name"] for item in offered_tools}
+                        # Start a clean bounded model context for epoch 1.
+                        # The Worker identity, mission text, authority, and
+                        # subject identity remain in recovery_state; prior
+                        # transcript and rejected candidate text do not.
+                        messages = [{
+                            "role": "system",
+                            "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                        }, {
+                            "role": "user",
+                            "content": compact_text(
+                                "RECOVERY MISSION:\n" + recovery_packet_context + "\n\n" + feedback,
+                                RECOVERY_WORKER_PACKET_MAX_CHARS,
+                            ),
+                        }]
+                        verification_cycle = {"syntax_failures": {}}
+                        repeated_failures.clear()
+                        mutation_failure_counts.clear()
+                        last_verification_signature = ()
+                        stagnant_verifications = 0
+                        recovery_strategy_events.append({
+                            "kind": "strategy_epoch_start",
+                            "strategy_epoch": recovery_state.get("strategy_epoch"),
+                            "strategy_hash": recovery_state.get("current_strategy", {}).get("canonical_hash"),
+                            "suppressed_mutation_mechanisms": list(
+                                recovery_state.get("suppressed_mutation_mechanisms", []) or []
+                            ),
+                        })
+                        restart_after_recovery_strategy_switch = True
+                        break
+                    if recovery_observation.get("terminal_state"):
+                        recovery_terminal_state = recovery_observation.get("terminal_state")
+                        status = "failed"
+                        summary = recovery_terminal_state
+                        stop = True
+                        break
             projected = str(result)[:1600]
             evidence.append({"tool": name, "target": target, "result": projected})
             memory = update_memory(memory, name, args, result, role=role, task_id=task_id)
@@ -10935,7 +11218,14 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
 
             if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result):
                 mutation_failure_counts[str(target)] = mutation_failure_counts.get(str(target), 0) + 1
-                if mutation_failure_counts[str(target)] >= 4:
+                if recovery_state is not None and recovery_observation is not None and (
+                    recovery_observation.get("switched") or recovery_observation.get("terminal_state")
+                ):
+                    # An eligible epoch-0 switch or explicit epoch-1
+                    # exhaustion owns the terminal meaning for this recovery
+                    # state; the generic historical guard must not preempt it.
+                    pass
+                elif mutation_failure_counts[str(target)] >= 4:
                     status = "too_broad"
                     summary = "TASK_TOO_BROAD: repeated invalid mutations show the current node exceeds reliable focused capacity"
                     stop = True
@@ -10959,6 +11249,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 summary = "Deterministic browser verification passed; stop-on-proof completed this focused execution."
                 stop = True
                 break
+        if restart_after_recovery_strategy_switch:
+            continue
         if stop:
             break
     else:
@@ -10990,10 +11282,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "syntax_validation_failures": list(verification_cycle["syntax_failures"].values()),
         "mutation_failures": mutation_failure_records,
         "failure_type": (
+            recovery_terminal_state if recovery_terminal_state else
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
             ("ENVIRONMENT_ERROR" if status == "provider_failure" else None)
         ),
+        "recovery_strategy": stage6d.recovery_strategy_state_projection(recovery_state)
+        if recovery_state is not None else None,
+        "recovery_strategy_state": recovery_state,
+        "recovery_strategy_events": recovery_strategy_events,
     }
 
 
@@ -17940,6 +18237,7 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
             worker_context=worker_context or bounded_context,
             execution_contract=selected_contract,
             execution_authorization_check=authorization_check,
+            recovery_strategy=RUN.get("_recovery_strategy_state"),
         )
 
     def on_start(start_receipt):
@@ -17997,6 +18295,8 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
         )
     if isinstance(result, dict) and result.get("status") == "done" and result.get("verification_status") == VERIFICATION_PASSED:
         RUN["verified_executions"] = RUN.get("verified_executions", 0) + 1
+    if isinstance(result, dict) and isinstance(result.get("recovery_strategy_state"), dict):
+        RUN["_recovery_strategy_state"] = copy.deepcopy(result["recovery_strategy_state"])
     return result
 
 
