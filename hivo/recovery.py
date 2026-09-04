@@ -69,6 +69,31 @@ MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS = 1
 RECOVERY_WORKER_PACKET_MAX_CHARS = 4200
 MAX_RECOVERY_WORKER_PACKET_CHARS = RECOVERY_WORKER_PACKET_MAX_CHARS
 
+# V26.3 is deliberately narrower than the older adaptive planning/search
+# machinery in ``mini.py``.  These constants describe one recovery Worker
+# changing its local mutation mechanism once after deterministic stagnation.
+MAX_RECOVERY_STRATEGY_SWITCHES = 1
+RECOVERY_STRATEGY_FAILURE_PATTERN = "RecoveryStrategyFailurePattern"
+RECOVERY_MUTATION_STRATEGY = "RecoveryMutationStrategy"
+RECOVERY_STRATEGY_DIVERSIFICATION_DECISION = "RecoveryStrategyDiversificationDecision"
+RECOVERY_STRATEGY_EPOCH_START = "RecoveryStrategyEpochStart"
+RECOVERY_STRATEGY_EPOCH_TERMINAL = "RecoveryStrategyEpochTerminal"
+RECOVERY_STRATEGY_SEARCH_SUMMARY = "RecoveryStrategySearchSummary"
+
+SYNTAX_INVALID_MUTATION = "SYNTAX_INVALID_MUTATION"
+RECOVERY_STRATEGY_STAGNATION_DETECTED = "RECOVERY_STRATEGY_STAGNATION_DETECTED"
+NO_SWITCH_REQUIRED = "NO_SWITCH_REQUIRED"
+STRATEGY_SWITCH_READY = "STRATEGY_SWITCH_READY"
+STRATEGY_SWITCH_UNAVAILABLE = "STRATEGY_SWITCH_UNAVAILABLE"
+STRATEGY_SWITCH_BLOCKED_AUTHORITY = "STRATEGY_SWITCH_BLOCKED_AUTHORITY"
+STRATEGY_SWITCH_BUDGET_EXHAUSTED = "STRATEGY_SWITCH_BUDGET_EXHAUSTED"
+STRATEGY_SWITCH_NOT_EVALUABLE = "STRATEGY_SWITCH_NOT_EVALUABLE"
+RECOVERY_STRATEGY_SEARCH_EXHAUSTED = "RECOVERY_STRATEGY_SEARCH_EXHAUSTED"
+RECOVERY_STRATEGY_COMMITTED = "RECOVERY_STRATEGY_COMMITTED"
+RECOVERY_STRATEGY_EPOCH_0 = 0
+RECOVERY_STRATEGY_EPOCH_1 = 1
+RECOVERY_STRATEGY_STAGNATION_THRESHOLD = 2
+
 LIVE3_APPROVAL_ID = "APPROVAL-21A7FCFDBFB22CB9"
 LIVE3_APPROVAL_RECEIPT_HASH = "b94af87ad1847cd277a5f671dedcd276827c137219504cd9f3b0361360f194a3"
 LIVE3_PLAN_ID = "PLAN-5E9D01B255C2"
@@ -153,6 +178,18 @@ class RecoveryWorkerPacket(_FrozenRecord):
     """Fresh bounded Worker-facing context projection."""
 
 
+class RecoveryStrategyFailurePattern(_FrozenRecord):
+    """Immutable evidence for one same-strategy mutation-failure sequence."""
+
+
+class RecoveryMutationStrategy(_FrozenRecord):
+    """Immutable local mutation-tool projection for one recovery epoch."""
+
+
+class RecoveryStrategyDiversificationDecision(_FrozenRecord):
+    """Immutable decision to keep or switch a recovery mutation strategy."""
+
+
 def canonical_hash(value: Any) -> str:
     """Return the compact deterministic SHA-256 used by V26 artifacts."""
     encoded = json.dumps(
@@ -229,6 +266,1239 @@ def _without(value: Any, *keys: str) -> dict[str, Any]:
 
 def _json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str))
+
+
+def _safe_int(value: Any, default: int = -1) -> int:
+    """Parse bounded-record integers without allowing malformed evidence to raise."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _strategy_schema_list(value: Any) -> list[Any]:
+    """Normalize either an OpenAI tools list or a single schema envelope."""
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        for key in ("tools", "tool_schemas", "schemas", "functions"):
+            candidate = value.get(key)
+            if isinstance(candidate, (list, tuple)):
+                return list(candidate)
+        if "function" in value or "name" in value:
+            return [value]
+        return []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return list(value)
+    return []
+
+
+def _strategy_subject_identity(value: Any) -> str | None:
+    """Return the canonical subject identity used by strategy evidence."""
+    if isinstance(value, dict):
+        value = _get(
+            value, "subject_hash", "canonical_subject_hash", "current_subject_hash",
+            "current_failed_subject_hash", "hash",
+        )
+    if value in (None, ""):
+        return None
+    return _text(value, 128)
+
+
+def _strategy_tool_name(value: Any) -> str:
+    if isinstance(value, dict):
+        function = value.get("function") if isinstance(value.get("function"), dict) else {}
+        return str(function.get("name") or value.get("name") or "").strip()
+    return str(value or "").strip()
+
+
+def _strategy_tool_description(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    function = value.get("function") if isinstance(value.get("function"), dict) else value
+    return str(function.get("description") or "").strip()
+
+
+def _strategy_tool_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    function = value.get("function") if isinstance(value.get("function"), dict) else value
+    metadata: dict[str, Any] = {}
+    for container in (value.get("metadata"), value.get("x-hivo"), function):
+        if isinstance(container, dict):
+            for key, item in container.items():
+                metadata.setdefault(str(key), item)
+    for key in (
+        "mutation", "mutation_mechanism", "hivo_mutation_mechanism",
+        "authority_required", "requires_existing_target", "existing_target_protected",
+        "creates_new_only", "existing_target_policy",
+    ):
+        if key in function:
+            metadata[key] = function.get(key)
+    return metadata
+
+
+def _strategy_is_mutation_tool(value: Any) -> bool:
+    name = _strategy_tool_name(value).casefold()
+    if name in {"write_file", "edit_file", "edit_file_range"}:
+        return True
+    metadata = _strategy_tool_metadata(value)
+    if (
+        metadata.get("mutation") is True
+        or metadata.get("mutation_mechanism")
+        or metadata.get("hivo_mutation_mechanism")
+    ):
+        return True
+    description = _strategy_tool_description(value).casefold()
+    return bool(
+        "mutation mechanism" in description
+        or "replace" in description and "file" in description
+        or "edit" in description and "file" in description
+        or "create a new file" in description
+    )
+
+
+def _strategy_authority_paths(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    paths: list[Any] = []
+    for key in (
+        "allowed_mutation_paths", "approved_mutation_paths", "approved_targets",
+        "allowed_paths", "authorized_mutation_paths", "allowed_targets",
+        "mutation_targets", "approved_mutation_scope", "approved_scope",
+        "execution_scope", "paths", "scope", "mutation_scope",
+    ):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            candidate = (
+                candidate.get("paths")
+                or candidate.get("allowed_paths")
+                or candidate.get("approved_mutation_paths")
+                or candidate.get("targets")
+            )
+        if isinstance(candidate, (list, tuple, set, frozenset)):
+            paths.extend(candidate)
+        elif candidate not in (None, "") and key not in {"scope", "mutation_scope"}:
+            paths.append(candidate)
+    return _unique_strings(paths, paths=True, limit=80)
+
+
+def _strategy_dnt_paths(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    paths: list[Any] = []
+    for key in ("dnt_paths", "do_not_touch", "dnt", "approved_dnt", "dnt_scope"):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            candidate = candidate.get("paths") or candidate.get("dnt_paths") or candidate.get("targets")
+        if isinstance(candidate, (list, tuple, set, frozenset)):
+            paths.extend(candidate)
+        elif candidate not in (None, "") and key not in {"dnt", "approved_dnt"}:
+            paths.append(candidate)
+    return _unique_strings(paths, paths=True, limit=80)
+
+
+def _strategy_path_allowed(target: Any, paths: Iterable[Any]) -> bool:
+    target_value = _path(target).casefold()
+    if not target_value:
+        return False
+    normalized = [_path(item).casefold() for item in paths if _path(item)]
+    if not normalized:
+        return True
+    return any(
+        target_value == item or target_value.startswith(item.rstrip("/") + "/")
+        for item in normalized
+    )
+
+
+def _strategy_authority_allows_target(
+    target: Any,
+    authority: dict[str, Any] | None,
+    dnt: dict[str, Any] | None,
+) -> tuple[bool, str]:
+    authority = authority if isinstance(authority, dict) else {}
+    dnt = dnt if isinstance(dnt, dict) else {}
+    target_value = _path(target)
+    if authority.get("allowed") is False or authority.get("mutation_allowed") is False:
+        return False, "mutation authority is blocked"
+    if authority.get("authority_sufficient") is False or authority.get("scope_allowed") is False:
+        return False, "mutation authority is insufficient"
+    if authority.get("authority_delta_empty") is False or authority.get("user_reapproval_required") is True:
+        return False, "the strategy would require new user authority"
+    if authority.get("requires_dnt_change") is True:
+        return False, "the strategy requires a DNT change"
+    allowed_paths = _strategy_authority_paths(authority)
+    if allowed_paths and not _strategy_path_allowed(target_value, allowed_paths):
+        return False, "target is outside the approved mutation scope"
+    dnt_paths = _strategy_dnt_paths(dnt) or _strategy_dnt_paths(authority)
+    if dnt_paths and _strategy_path_allowed(target_value, dnt_paths):
+        return False, "target is inside the DNT scope"
+    return True, "approved mutation scope permits the target"
+
+
+def discover_legal_recovery_mutation_mechanisms(
+    tool_schemas: Iterable[dict[str, Any]] | None = None,
+    *,
+    target: str | None = None,
+    target_path: str | None = None,
+    target_state: dict[str, Any] | None = None,
+    mutation_authority: dict[str, Any] | None = None,
+    authority: dict[str, Any] | None = None,
+    dnt: dict[str, Any] | None = None,
+    execution_invariant_set: Any = None,
+    precommit_gate: Any = None,
+) -> list[str]:
+    """Derive legal mutation mechanisms from the actual Worker tool schema.
+
+    This function intentionally does not define an edit-file fallback table.
+    It projects the supplied schema through target authority, DNT, existing
+    file protection, and the existing precommit gate.  The production tool
+    names are recognized only as the schema's existing mutation mechanisms;
+    custom schema metadata can expose additional mechanisms without changing
+    this recovery policy.
+    """
+    schemas = _strategy_schema_list(tool_schemas)
+    target_value = _path(target_path or target)
+    if not target_value:
+        return []
+    state = target_state if isinstance(target_state, dict) else {}
+    authority_value = mutation_authority if isinstance(mutation_authority, dict) else (
+        authority if isinstance(authority, dict) else {}
+    )
+    dnt_value = dnt if isinstance(dnt, dict) else {}
+    allowed, _reason = _strategy_authority_allows_target(target_value, authority_value, dnt_value)
+    if not allowed:
+        return []
+    if execution_invariant_set is not None:
+        if isinstance(execution_invariant_set, dict):
+            status = str(execution_invariant_set.get("status", "")).casefold()
+            if (
+                execution_invariant_set.get("allowed") is False
+                or execution_invariant_set.get("valid") is False
+                or status in {"invalid", "fail", "failed", "blocked", "rejected"}
+            ):
+                return []
+        elif execution_invariant_set is False:
+            return []
+    if callable(precommit_gate):
+        try:
+            gate_result = precommit_gate(target_value)
+        except TypeError:
+            try:
+                gate_result = precommit_gate()
+            except Exception:
+                return []
+        except Exception:
+            return []
+        if isinstance(gate_result, dict):
+            if gate_result.get("allowed") is False or gate_result.get("valid") is False:
+                return []
+        elif gate_result is False:
+            return []
+
+    exists = bool(state.get("exists") or state.get("present") or state.get("current_source") is not None)
+    protected = bool(
+        state.get("protected") or state.get("user_owned") or state.get("verified")
+        or state.get("existing_file_protected")
+    )
+    legal: list[str] = []
+    for schema in schemas:
+        name = _strategy_tool_name(schema)
+        if not name or not _strategy_is_mutation_tool(schema):
+            continue
+        metadata = _strategy_tool_metadata(schema)
+        description = _strategy_tool_description(schema).casefold()
+        if (
+            metadata.get("requires_existing_target") is True
+            or metadata.get("existing_target_policy") == "required"
+        ) and not exists:
+            continue
+        if metadata.get("creates_new_only") is True and exists:
+            continue
+        if metadata.get("existing_target_protected") is True and not protected:
+            continue
+        # Existing production write_file semantics explicitly protect an
+        # existing user/verified file.  This is derived from its schema
+        # contract, while edit_file/edit_file_range remain available.
+        if exists and protected and name.casefold() == "write_file":
+            continue
+        if (
+            exists and protected and "existing" in description and "protected" in description
+            and name.casefold() == "write_file"
+        ):
+            continue
+        if name.casefold() not in {item.casefold() for item in legal}:
+            legal.append(name)
+    return legal
+
+
+def project_recovery_tool_schemas(
+    tool_schemas: Iterable[dict[str, Any]] | None,
+    strategy: dict[str, Any] | None = None,
+    *,
+    suppressed_mechanisms: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Apply one local recovery-epoch suppression to a tool projection."""
+    suppressed = {
+        str(item).casefold() for item in (
+            suppressed_mechanisms
+            if suppressed_mechanisms is not None
+            else ((strategy or {}).get("suppressed_mutation_mechanisms", []) if isinstance(strategy, dict) else [])
+        )
+    }
+    allowed = {
+        str(item).casefold()
+        for item in ((strategy or {}).get("allowed_mutation_mechanisms", [])
+                     if isinstance(strategy, dict) else [])
+    }
+    result: list[dict[str, Any]] = []
+    for schema in _strategy_schema_list(tool_schemas):
+        name = _strategy_tool_name(schema)
+        if name and name.casefold() in suppressed:
+            continue
+        # A strategy's allowed set is a local legal mutation projection. It
+        # filters only mutation tools; inspection and verification tools stay
+        # visible. An empty set means the caller supplied no legal projection
+        # and preserves the ordinary role schema for compatibility.
+        if allowed and _strategy_is_mutation_tool(schema) and name.casefold() not in allowed:
+            continue
+        result.append(_copy(schema))
+    return result
+
+
+recovery_tool_schema_projection = project_recovery_tool_schemas
+project_recovery_tools = project_recovery_tool_schemas
+
+
+def build_recovery_strategy_failure_pattern(
+    recovery_execution_id: str,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    target_path: str | None = None,
+    mutation_mechanism: str | None = None,
+    failure_class: str = SYNTAX_INVALID_MUTATION,
+    failure_count: int = 1,
+    commit_count: int = 0,
+    subject_identity_before: Any = None,
+    subject_identity_after: Any = None,
+    subject_unchanged: bool | None = None,
+    latest_deterministic_diagnostic: Any = "",
+    available_legal_mechanisms: Iterable[str] | None = None,
+    **kwargs: Any,
+) -> RecoveryStrategyFailurePattern:
+    """Create immutable canonical evidence for one failure sequence."""
+    strategy_epoch = kwargs.get("epoch", strategy_epoch)
+    target_path = target_path or kwargs.get("target") or kwargs.get("path")
+    mutation_mechanism = mutation_mechanism or kwargs.get("mechanism") or kwargs.get("tool")
+    failure_class = kwargs.get("failure_type") or kwargs.get("category") or failure_class
+    before = _strategy_subject_identity(
+        subject_identity_before if subject_identity_before is not None else kwargs.get("subject_before")
+    )
+    after = _strategy_subject_identity(
+        subject_identity_after if subject_identity_after is not None else kwargs.get("subject_after")
+    )
+    if subject_unchanged is None:
+        subject_unchanged = (before == after) if before is not None or after is not None else True
+    count = max(0, _safe_int(
+        kwargs.get(
+            "consecutive_failure_count",
+            kwargs.get("consecutive_failures", failure_count),
+        ) or 0,
+        0,
+    ))
+    commits = max(0, _safe_int(commit_count or kwargs.get("commits", 0) or 0, 0))
+    mechanisms = available_legal_mechanisms
+    if mechanisms is None:
+        mechanisms = kwargs.get("available_mechanisms") or kwargs.get("legal_alternatives") or []
+    value: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_STRATEGY_FAILURE_PATTERN,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "strategy_epoch": _safe_int(strategy_epoch, RECOVERY_STRATEGY_EPOCH_0),
+        "target_path": _path(target_path),
+        "target": _path(target_path),
+        "mutation_mechanism": _text(mutation_mechanism, 120),
+        "mechanism": _text(mutation_mechanism, 120),
+        "failure_class": _text(failure_class, 120),
+        "failure_count": count,
+        "consecutive_failure_count": count,
+        "commit_count": commits,
+        "subject_identity_before": before,
+        "subject_identity_after": after,
+        "subject_before": before,
+        "subject_after": after,
+        "subject_unchanged": bool(subject_unchanged),
+        "latest_deterministic_diagnostic": _text(latest_deterministic_diagnostic, 900),
+        "latest_diagnostic": _text(latest_deterministic_diagnostic, 900),
+        "available_legal_mechanisms": _unique_strings(mechanisms, limit=24),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryStrategyFailurePattern, value)  # type: ignore[return-value]
+
+
+build_recovery_failure_pattern = build_recovery_strategy_failure_pattern
+create_recovery_strategy_failure_pattern = build_recovery_strategy_failure_pattern
+RecoveryFailurePattern = RecoveryStrategyFailurePattern
+
+
+def validate_recovery_strategy_failure_pattern(
+    pattern: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = pattern if isinstance(pattern, dict) else {}
+    expected = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("strategy failure pattern schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_STRATEGY_FAILURE_PATTERN:
+        errors.append("strategy failure pattern artifact type is invalid")
+    if value.get("canonical_hash") != expected:
+        errors.append("strategy failure pattern hash is invalid")
+    for key in ("recovery_execution_id", "target_path", "mutation_mechanism", "failure_class"):
+        if not value.get(key):
+            errors.append(f"strategy failure pattern is missing {key}")
+    failure_count = _safe_int(value.get("failure_count"), -1)
+    commit_count = _safe_int(value.get("commit_count"), -1)
+    epoch = _safe_int(value.get("strategy_epoch"), -1)
+    if epoch not in {RECOVERY_STRATEGY_EPOCH_0, RECOVERY_STRATEGY_EPOCH_1}:
+        errors.append("strategy failure pattern epoch is invalid")
+    if failure_count < 0:
+        errors.append("strategy failure count is invalid")
+    if commit_count < 0:
+        errors.append("strategy commit count is invalid")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("strategy failure pattern grants Worker prose authority")
+    if value.get("subject_unchanged") is True and value.get("subject_identity_before") != value.get("subject_identity_after"):
+        errors.append("unchanged strategy pattern has different subject identities")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_mutation_strategy(
+    recovery_execution_id: str,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    target_path: str | None = None,
+    allowed_mutation_mechanisms: Iterable[str] | None = None,
+    suppressed_mutation_mechanisms: Iterable[str] | None = None,
+    source_subject_identity: Any = None,
+    transition_reason: str = "initial recovery strategy",
+    recovery_authorization: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> RecoveryMutationStrategy:
+    """Create one stable strategy identity without changing authority."""
+    auth = recovery_authorization if isinstance(recovery_authorization, dict) else {}
+    strategy_epoch = kwargs.get("epoch", strategy_epoch)
+    target_path = target_path or kwargs.get("target") or kwargs.get("path")
+    allowed = _unique_strings(
+        allowed_mutation_mechanisms if allowed_mutation_mechanisms is not None else kwargs.get("allowed_tools", []),
+        limit=24,
+    )
+    suppressed = _unique_strings(
+        suppressed_mutation_mechanisms if suppressed_mutation_mechanisms is not None else kwargs.get("suppressed_tools", []),
+        limit=24,
+    )
+    value: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_MUTATION_STRATEGY,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "strategy_epoch": _safe_int(strategy_epoch, RECOVERY_STRATEGY_EPOCH_0),
+        "target_path": _path(target_path),
+        "target": _path(target_path),
+        "allowed_mutation_mechanisms": allowed,
+        "suppressed_mutation_mechanisms": suppressed,
+        "current_mutation_mechanism": _text(
+            kwargs.get("current_mutation_mechanism") or kwargs.get("mechanism"), 120
+        ) or None,
+        "source_subject_identity": _strategy_subject_identity(source_subject_identity),
+        "transition_reason": _text(transition_reason, 900),
+        "recovery_authorization_id": auth.get("authorization_id") or kwargs.get("recovery_authorization_id"),
+        "recovery_authorization_hash": auth.get("authorization_hash") or kwargs.get("recovery_authorization_hash"),
+        "plan_hash": auth.get("plan_hash") or kwargs.get("plan_hash"),
+        "approval_receipt_hash": auth.get("approval_receipt_hash") or kwargs.get("approval_receipt_hash"),
+        "recovery_attempt_index": max(1, _safe_int(kwargs.get("recovery_attempt_index", 1) or 1, 1)),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryMutationStrategy, value)  # type: ignore[return-value]
+
+
+build_recovery_strategy = build_recovery_mutation_strategy
+create_recovery_mutation_strategy = build_recovery_mutation_strategy
+
+
+def validate_recovery_mutation_strategy(
+    strategy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = strategy if isinstance(strategy, dict) else {}
+    expected = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("recovery mutation strategy schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_MUTATION_STRATEGY:
+        errors.append("recovery mutation strategy artifact type is invalid")
+    if value.get("canonical_hash") != expected:
+        errors.append("recovery mutation strategy hash is invalid")
+    for key in ("recovery_execution_id", "target_path", "allowed_mutation_mechanisms"):
+        if key not in value:
+            errors.append(f"recovery mutation strategy is missing {key}")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("recovery mutation strategy grants Worker prose authority")
+    epoch = _safe_int(value.get("strategy_epoch"), -1)
+    if epoch not in {RECOVERY_STRATEGY_EPOCH_0, RECOVERY_STRATEGY_EPOCH_1}:
+        errors.append("recovery strategy epoch is invalid")
+    suppressed = {str(item).casefold() for item in value.get("suppressed_mutation_mechanisms", []) or []}
+    if suppressed.intersection({str(item).casefold() for item in value.get("allowed_mutation_mechanisms", []) or []}):
+        errors.append("suppressed mutation mechanism remains allowed")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def decide_recovery_strategy_diversification(
+    failure_pattern: dict[str, Any] | None,
+    *,
+    current_strategy: dict[str, Any] | None = None,
+    recovery_authorization: dict[str, Any] | None = None,
+    lineage: dict[str, Any] | None = None,
+    available_legal_mechanisms: Iterable[str] | None = None,
+    recovery_execution_id: str | None = None,
+    current_subject_hash: Any = None,
+    strategy_switch_count: int = 0,
+    max_strategy_switches: int = MAX_RECOVERY_STRATEGY_SWITCHES,
+    authority_delta: dict[str, Any] | None = None,
+    alternative_requires_authority: bool = False,
+    **kwargs: Any,
+) -> RecoveryStrategyDiversificationDecision:
+    """Decide whether one local mutation-strategy switch is authorized."""
+    current_strategy = current_strategy or kwargs.get("strategy")
+    recovery_authorization = recovery_authorization or kwargs.get("authorization")
+    if available_legal_mechanisms is None:
+        available_legal_mechanisms = kwargs.get("available_alternatives")
+    recovery_execution_id = recovery_execution_id or kwargs.get("execution_id")
+    if current_subject_hash is None:
+        current_subject_hash = kwargs.get("current_subject")
+    strategy_switch_count = kwargs.get("switch_count", strategy_switch_count)
+    max_strategy_switches = kwargs.get("max_switches", max_strategy_switches)
+    pattern = failure_pattern if isinstance(failure_pattern, dict) else {}
+    strategy = current_strategy if isinstance(current_strategy, dict) else {}
+    auth = recovery_authorization if isinstance(recovery_authorization, dict) else {}
+    lineage_value = lineage if isinstance(lineage, dict) else {}
+    pattern_check = validate_recovery_strategy_failure_pattern(pattern)
+    alternatives = _unique_strings(
+        available_legal_mechanisms
+        if available_legal_mechanisms is not None
+        else pattern.get("available_legal_mechanisms", []),
+        limit=24,
+    )
+    current_mechanism = _text(
+        pattern.get("mutation_mechanism") or pattern.get("mechanism")
+        or strategy.get("current_mutation_mechanism"), 120,
+    )
+    strategy_mechanism = _text(strategy.get("current_mutation_mechanism"), 120)
+    mechanism_ok = not strategy_mechanism or strategy_mechanism.casefold() == current_mechanism.casefold()
+    suppressed = {
+        str(item).casefold() for item in strategy.get("suppressed_mutation_mechanisms", []) or []
+    }
+    alternatives = [
+        item for item in alternatives
+        if item.casefold() != current_mechanism.casefold()
+        and item.casefold() not in suppressed
+    ]
+    epoch = _safe_int(pattern.get("strategy_epoch", strategy.get("strategy_epoch", 0)) or 0, -1)
+    strategy_epoch = _safe_int(strategy.get("strategy_epoch"), epoch)
+    switch_count = max(0, _safe_int(strategy_switch_count or 0, 0))
+    maximum = min(
+        MAX_RECOVERY_STRATEGY_SWITCHES,
+        max(0, _safe_int(max_strategy_switches, MAX_RECOVERY_STRATEGY_SWITCHES)),
+    )
+    reasons: list[str] = []
+    state = STRATEGY_SWITCH_NOT_EVALUABLE
+    ready = False
+    subject = _strategy_subject_identity(current_subject_hash)
+    pattern_subject = _strategy_subject_identity(pattern.get("subject_identity_after"))
+    subject_ok = pattern.get("subject_unchanged") is True
+    if subject is not None and pattern_subject is not None:
+        subject_ok = subject_ok and subject == pattern_subject
+    strategy_subject = _strategy_subject_identity(strategy.get("source_subject_identity"))
+    if subject is not None and strategy_subject is not None:
+        subject_ok = subject_ok and subject == strategy_subject
+    execution_ok = not recovery_execution_id or (
+        recovery_execution_id == pattern.get("recovery_execution_id")
+        and (
+            not strategy.get("recovery_execution_id")
+            or recovery_execution_id == strategy.get("recovery_execution_id")
+        )
+    )
+    pattern_target = _path(pattern.get("target_path") or pattern.get("target"))
+    strategy_target = _path(strategy.get("target_path") or strategy.get("target"))
+    target_ok = not strategy_target or pattern_target.casefold() == strategy_target.casefold()
+    epoch_ok = strategy_epoch == epoch
+    stagnation = bool(
+        pattern_check.get("valid")
+        and pattern.get("failure_class") == SYNTAX_INVALID_MUTATION
+        and pattern.get("subject_unchanged") is True
+        and _safe_int(pattern.get("commit_count"), -1) == 0
+        and _safe_int(pattern.get("failure_count"), -1) >= RECOVERY_STRATEGY_STAGNATION_THRESHOLD
+    )
+    authority_ok = True
+    if authority_delta is not None and isinstance(authority_delta, dict) and authority_delta.get("empty") is not True:
+        authority_ok = False
+        reasons.append("authority delta is not empty")
+    if auth:
+        if auth.get("status") == RECOVERY_AUTHORIZATION_BLOCKED or auth.get("user_reapproval_required") is True:
+            authority_ok = False
+            reasons.append("recovery authorization is blocked or requires reapproval")
+        if auth.get("authority_delta_empty") is False:
+            authority_ok = False
+            reasons.append("recovery authorization has a non-empty authority delta")
+        for auth_key, strategy_key in (
+            ("authorization_id", "recovery_authorization_id"),
+            ("authorization_hash", "recovery_authorization_hash"),
+            ("plan_hash", "plan_hash"),
+            ("approval_receipt_hash", "approval_receipt_hash"),
+        ):
+            expected = auth.get(auth_key)
+            bound = strategy.get(strategy_key)
+            if expected not in (None, "") and bound not in (None, "") and expected != bound:
+                authority_ok = False
+                reasons.append(f"recovery authorization binding changed: {auth_key}")
+    if lineage_value and (
+        lineage_value.get("valid") is False
+        or lineage_value.get("status") == INVALID_AUTHORIZED_EXECUTION_DESCENDANT
+    ):
+        authority_ok = False
+        reasons.append("authorized execution lineage is invalid")
+    if alternative_requires_authority:
+        authority_ok = False
+        reasons.append("the available alternative requires new authority")
+
+    if not pattern_check.get("valid"):
+        reasons.append("failure pattern is invalid")
+    elif not execution_ok:
+        reasons.append("recovery execution identity changed")
+    elif not target_ok:
+        reasons.append("recovery target changed")
+    elif not epoch_ok:
+        reasons.append("recovery strategy epoch changed")
+    elif not mechanism_ok:
+        reasons.append("recovery mutation mechanism changed")
+    elif pattern.get("failure_class") != SYNTAX_INVALID_MUTATION:
+        reasons.append("failure class is outside the V26.3 syntax trigger")
+    elif not subject_ok:
+        reasons.append("subject was not unchanged across the failure sequence")
+    elif _safe_int(pattern.get("commit_count", 0) or 0, 0) != 0:
+        reasons.append("a mutation commit occurred in the sequence")
+    elif _safe_int(pattern.get("failure_count", 0) or 0, 0) < RECOVERY_STRATEGY_STAGNATION_THRESHOLD:
+        state = NO_SWITCH_REQUIRED
+        reasons.append("stagnation threshold has not been reached")
+    elif not authority_ok:
+        state = STRATEGY_SWITCH_BLOCKED_AUTHORITY
+    elif switch_count >= maximum:
+        state = STRATEGY_SWITCH_BUDGET_EXHAUSTED
+        reasons.append("the bounded strategy-switch budget is exhausted")
+    elif not alternatives:
+        state = STRATEGY_SWITCH_UNAVAILABLE
+        reasons.append("no unused legal mutation mechanism is available")
+    else:
+        state = STRATEGY_SWITCH_READY
+        ready = True
+        reasons.append("one unused legal mutation mechanism is available")
+    next_epoch = epoch + 1 if ready else epoch
+    value: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_STRATEGY_DIVERSIFICATION_DECISION,
+        "decision": state,
+        "status": state,
+        "stagnation_detected": stagnation,
+        "switch_allowed": ready,
+        "recovery_execution_id": pattern.get("recovery_execution_id") or recovery_execution_id,
+        "current_strategy_epoch": epoch,
+        "next_strategy_epoch": next_epoch,
+        "strategy_switch_count": switch_count,
+        "max_strategy_switches": maximum,
+        "current_mutation_mechanism": current_mechanism,
+        "selected_alternative": alternatives[0] if ready else None,
+        "available_legal_mechanisms": alternatives,
+        "pattern_hash": pattern.get("canonical_hash"),
+        "recovery_authorization_id": auth.get("authorization_id"),
+        "recovery_authorization_hash": auth.get("authorization_hash"),
+        "authority_delta_empty": authority_delta.get("empty") if isinstance(authority_delta, dict) else auth.get("authority_delta_empty", True),
+        "USER_REAPPROVAL_REQUIRED": False if authority_ok else True,
+        "reasons": list(dict.fromkeys(reasons))[:12],
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryStrategyDiversificationDecision, value)  # type: ignore[return-value]
+
+
+decide_recovery_strategy = decide_recovery_strategy_diversification
+evaluate_recovery_strategy = decide_recovery_strategy_diversification
+build_recovery_strategy_diversification_decision = decide_recovery_strategy_diversification
+create_recovery_strategy_diversification_decision = decide_recovery_strategy_diversification
+
+
+def validate_recovery_strategy_diversification_decision(
+    decision: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate one immutable local switch decision without executing it."""
+    value = decision if isinstance(decision, dict) else {}
+    expected = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("strategy decision schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_STRATEGY_DIVERSIFICATION_DECISION:
+        errors.append("strategy decision artifact type is invalid")
+    if value.get("canonical_hash") != expected:
+        errors.append("strategy decision hash is invalid")
+    allowed_states = {
+        NO_SWITCH_REQUIRED,
+        STRATEGY_SWITCH_READY,
+        STRATEGY_SWITCH_UNAVAILABLE,
+        STRATEGY_SWITCH_BLOCKED_AUTHORITY,
+        STRATEGY_SWITCH_BUDGET_EXHAUSTED,
+        STRATEGY_SWITCH_NOT_EVALUABLE,
+    }
+    if value.get("decision") not in allowed_states:
+        errors.append("strategy decision state is invalid")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("strategy decision grants Worker prose authority")
+    current_epoch = _safe_int(value.get("current_strategy_epoch"), -1)
+    next_epoch = _safe_int(value.get("next_strategy_epoch"), -1)
+    if current_epoch not in {RECOVERY_STRATEGY_EPOCH_0, RECOVERY_STRATEGY_EPOCH_1}:
+        errors.append("current strategy epoch is invalid")
+    if next_epoch not in {RECOVERY_STRATEGY_EPOCH_0, RECOVERY_STRATEGY_EPOCH_1}:
+        errors.append("next strategy epoch is invalid")
+    switch_count = _safe_int(value.get("strategy_switch_count"), -1)
+    maximum = _safe_int(value.get("max_strategy_switches"), -1)
+    if switch_count < 0 or maximum < 0 or maximum > MAX_RECOVERY_STRATEGY_SWITCHES:
+        errors.append("strategy-switch budget is invalid")
+    if value.get("decision") == STRATEGY_SWITCH_READY:
+        if value.get("switch_allowed") is not True or not value.get("selected_alternative"):
+            errors.append("ready decision has no selected alternative")
+        if next_epoch != current_epoch + 1:
+            errors.append("ready decision does not advance exactly one epoch")
+    if value.get("decision") != STRATEGY_SWITCH_READY and value.get("switch_allowed") is True:
+        errors.append("non-ready decision allows a switch")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+validate_recovery_strategy_decision = validate_recovery_strategy_diversification_decision
+validate_strategy_diversification_decision = validate_recovery_strategy_diversification_decision
+
+
+def detect_recovery_strategy_stagnation(pattern: dict[str, Any] | None) -> dict[str, Any]:
+    value = pattern if isinstance(pattern, dict) else {}
+    valid = validate_recovery_strategy_failure_pattern(value)
+    detected = bool(
+        valid.get("valid")
+        and value.get("failure_class") == SYNTAX_INVALID_MUTATION
+        and _safe_int(value.get("failure_count", 0) or 0, 0) >= RECOVERY_STRATEGY_STAGNATION_THRESHOLD
+        and _safe_int(value.get("commit_count", 0) or 0, 0) == 0
+        and value.get("subject_unchanged") is True
+    )
+    return {
+        "status": RECOVERY_STRATEGY_STAGNATION_DETECTED if detected else NO_SWITCH_REQUIRED,
+        "detected": detected,
+        "threshold": RECOVERY_STRATEGY_STAGNATION_THRESHOLD,
+        "pattern_hash": value.get("canonical_hash"),
+        "validation": valid,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_strategy_transition_feedback(
+    pattern: dict[str, Any],
+    decision: dict[str, Any],
+    strategy: dict[str, Any],
+    *,
+    current_source_refreshed: bool = True,
+    current_source_identity: Any = None,
+    max_chars: int = 1800,
+) -> str:
+    """Render bounded transition facts, never a code patch or Worker prose."""
+    pattern = pattern if isinstance(pattern, dict) else {}
+    decision = decision if isinstance(decision, dict) else {}
+    strategy = strategy if isinstance(strategy, dict) else {}
+    remaining = decision.get("available_legal_mechanisms", []) or []
+    text = (
+        "RECOVERY STRATEGY TRANSITION\n"
+        "The previous mutation mechanism repeatedly produced deterministic "
+        "syntax-invalid candidates.\n"
+        f"Target: {pattern.get('target_path') or pattern.get('target') or '(unknown)'}\n"
+        f"Previous mechanism: {pattern.get('mutation_mechanism') or pattern.get('mechanism') or '(unknown)'}\n"
+        f"Last deterministic error: {_text(pattern.get('latest_deterministic_diagnostic') or pattern.get('latest_diagnostic'), 420)}\n"
+        f"Filesystem: {'unchanged' if pattern.get('subject_unchanged') else 'changed/unknown'}\n"
+        f"Current source: {'refreshed/current' if current_source_refreshed else 'refresh unavailable'}\n"
+        "Previous mechanism: temporarily exhausted for this strategy epoch\n"
+        f"Remaining legal mutation mechanisms: {', '.join(map(str, remaining)) or '(none)'}\n"
+        f"Strategy epoch: {int(decision.get('next_strategy_epoch', strategy.get('strategy_epoch', 1)) or 1)}\n"
+        "Continue the SAME RecoveryMission. Choose the implementation; no code patch is prescribed."
+    )
+    if current_source_identity not in (None, ""):
+        text += f"\nCurrent source identity: {_strategy_subject_identity(current_source_identity)}"
+    return _text(text, max(256, int(max_chars)))
+
+
+def refresh_recovery_strategy_source(
+    state: dict[str, Any] | None,
+    *,
+    workspace: str | os.PathLike[str] | Path | None = None,
+    target_path: str | None = None,
+) -> dict[str, Any]:
+    """Refresh current target metadata without injecting source content."""
+    value = _copy(state) if isinstance(state, dict) else {}
+    target = _path(target_path or value.get("target_path") or value.get("target"))
+    result: dict[str, Any] = {
+        "status": "REFRESHED",
+        "target_path": target,
+        "source_sha256": None,
+        "source_chars": None,
+        "source_available": False,
+    }
+    if workspace is not None and target:
+        root = Path(workspace).resolve()
+        try:
+            path = (root / target).resolve()
+            path.relative_to(root)
+            payload = path.read_bytes()
+        except (OSError, RuntimeError, ValueError):
+            result["status"] = "REFRESH_UNAVAILABLE"
+        else:
+            result.update({
+                "source_sha256": hashlib.sha256(payload).hexdigest(),
+                "source_chars": len(payload.decode("utf-8", errors="replace")),
+                "source_available": True,
+            })
+    value["current_source_refresh"] = result
+    value["current_source_refreshed"] = result["status"] == "REFRESHED"
+    return value
+
+
+def create_recovery_strategy_state(
+    recovery_execution_id: str,
+    *,
+    target_path: str,
+    tool_schemas: Iterable[dict[str, Any]] | None = None,
+    target_state: dict[str, Any] | None = None,
+    current_subject_hash: Any = None,
+    recovery_authorization: dict[str, Any] | None = None,
+    lineage: dict[str, Any] | None = None,
+    mutation_authority: dict[str, Any] | None = None,
+    dnt: dict[str, Any] | None = None,
+    execution_invariant_set: Any = None,
+    precommit_gate: Any = None,
+    available_legal_mechanisms: Iterable[str] | None = None,
+    max_strategy_switches: int = MAX_RECOVERY_STRATEGY_SWITCHES,
+) -> dict[str, Any]:
+    """Initialize mutable orchestration state for one recovery Worker."""
+    legal = (
+        _unique_strings(available_legal_mechanisms, limit=24)
+        if available_legal_mechanisms is not None
+        else discover_legal_recovery_mutation_mechanisms(
+            tool_schemas,
+            target=target_path,
+            target_state=target_state,
+            mutation_authority=mutation_authority,
+            authority=recovery_authorization,
+            dnt=dnt,
+            execution_invariant_set=execution_invariant_set,
+            precommit_gate=precommit_gate,
+        )
+    )
+    auth = recovery_authorization if isinstance(recovery_authorization, dict) else {}
+    strategy = build_recovery_mutation_strategy(
+        recovery_execution_id,
+        strategy_epoch=RECOVERY_STRATEGY_EPOCH_0,
+        target_path=target_path,
+        allowed_mutation_mechanisms=legal,
+        suppressed_mutation_mechanisms=[],
+        source_subject_identity=current_subject_hash,
+        recovery_authorization=auth,
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "recovery_attempt_index": 1,
+        "strategy_epoch": RECOVERY_STRATEGY_EPOCH_0,
+        "strategy_switch_count": 0,
+        "max_strategy_switches": min(
+            MAX_RECOVERY_STRATEGY_SWITCHES,
+            max(0, _safe_int(max_strategy_switches, MAX_RECOVERY_STRATEGY_SWITCHES)),
+        ),
+        "target_path": _path(target_path),
+        "current_subject_hash": _strategy_subject_identity(current_subject_hash),
+        "target_state": _copy(target_state or {}),
+        "recovery_authorization": _copy(auth),
+        "lineage": _copy(lineage or {}),
+        "mutation_authority": _copy(mutation_authority or {}),
+        "dnt": _copy(dnt or {}),
+        "current_strategy": strategy,
+        "available_legal_mechanisms": legal,
+        "suppressed_mutation_mechanisms": [],
+        "consecutive_failure_count": 0,
+        "last_failure_key": None,
+        "last_failure_pattern": None,
+        "strategy_failure_patterns": [],
+        "strategy_switch_decisions": [],
+        "strategy_epoch_starts": [{
+            "artifact_type": RECOVERY_STRATEGY_EPOCH_START,
+            "strategy_epoch": RECOVERY_STRATEGY_EPOCH_0,
+            "recovery_execution_id": _text(recovery_execution_id, 160),
+            "strategy_hash": strategy.get("canonical_hash"),
+        }],
+        "strategy_epoch_terminals": [],
+        "strategy_search_summary": {
+            "artifact_type": RECOVERY_STRATEGY_SEARCH_SUMMARY,
+            "recovery_execution_id": _text(recovery_execution_id, 160),
+            "switch_count": 0,
+            "strategy_epochs": [RECOVERY_STRATEGY_EPOCH_0],
+            "terminal_state": None,
+        },
+        "terminal_state": None,
+        "current_source_refreshed": False,
+    }
+
+
+initialize_recovery_strategy_state = create_recovery_strategy_state
+create_recovery_strategy_controller = create_recovery_strategy_state
+
+
+def _strategy_failure_key(
+    recovery_execution_id: Any,
+    strategy_epoch: Any,
+    target: Any,
+    mechanism: Any,
+    failure_class: Any,
+    subject_before: Any,
+    subject_after: Any,
+    subject_unchanged: Any,
+) -> tuple[Any, ...]:
+    return (
+        _text(recovery_execution_id, 160), int(strategy_epoch or 0), _path(target).casefold(),
+        _text(mechanism, 120).casefold(), _text(failure_class, 120).casefold(),
+        _strategy_subject_identity(subject_before), _strategy_subject_identity(subject_after),
+        bool(subject_unchanged),
+    )
+
+
+def observe_recovery_mutation(
+    state: dict[str, Any] | None,
+    *,
+    target_path: str | None = None,
+    target: str | None = None,
+    mutation_mechanism: str | None = None,
+    mechanism: str | None = None,
+    failure_class: str = SYNTAX_INVALID_MUTATION,
+    diagnostic: Any = "",
+    subject_identity_before: Any = None,
+    subject_identity_after: Any = None,
+    subject_unchanged: bool | None = None,
+    committed: bool = False,
+    commit_count: int = 0,
+    available_legal_mechanisms: Iterable[str] | None = None,
+    tool_schemas: Iterable[dict[str, Any]] | None = None,
+    target_state: dict[str, Any] | None = None,
+    authority_delta: dict[str, Any] | None = None,
+    alternative_requires_authority: bool = False,
+) -> dict[str, Any]:
+    """Record one mutation result and optionally enter epoch 1."""
+    current = _copy(state) if isinstance(state, dict) else {}
+    execution_id = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
+    epoch = _safe_int(current.get("strategy_epoch", 0) or 0, RECOVERY_STRATEGY_EPOCH_0)
+    target_value = _path(target_path or target or current.get("target_path"))
+    mechanism_value = _text(mutation_mechanism or mechanism, 120)
+    before = _strategy_subject_identity(
+        subject_identity_before if subject_identity_before is not None else current.get("current_subject_hash")
+    )
+    after = _strategy_subject_identity(
+        subject_identity_after if subject_identity_after is not None else before
+    )
+    if subject_unchanged is None:
+        subject_unchanged = before == after
+    key = _strategy_failure_key(
+        execution_id, epoch, target_value, mechanism_value, failure_class, before, after, subject_unchanged,
+    )
+    previous_key = tuple(current.get("last_failure_key") or ())
+    previous_count = max(0, _safe_int(current.get("consecutive_failure_count", 0) or 0, 0))
+    same_sequence = bool(not committed and previous_key == key)
+    count = previous_count + 1 if same_sequence else (0 if committed else 1)
+    if committed:
+        count = 0
+    mechanisms = available_legal_mechanisms
+    if mechanisms is None:
+        mechanisms = current.get("available_legal_mechanisms", [])
+    if tool_schemas is not None:
+        derived = discover_legal_recovery_mutation_mechanisms(
+            tool_schemas,
+            target=target_value,
+            target_state=target_state or current.get("target_state"),
+            mutation_authority=current.get("mutation_authority"),
+            authority=current.get("recovery_authorization"),
+            dnt=current.get("dnt"),
+        )
+        mechanisms = derived
+    pattern = build_recovery_strategy_failure_pattern(
+        execution_id,
+        strategy_epoch=epoch,
+        target_path=target_value,
+        mutation_mechanism=mechanism_value,
+        failure_class=failure_class,
+        failure_count=count,
+        commit_count=commit_count,
+        subject_identity_before=before,
+        subject_identity_after=after,
+        subject_unchanged=subject_unchanged,
+        latest_deterministic_diagnostic=diagnostic,
+        available_legal_mechanisms=mechanisms,
+    )
+    strategy = current.get("current_strategy") if isinstance(current.get("current_strategy"), dict) else {}
+    decision = decide_recovery_strategy_diversification(
+        pattern,
+        current_strategy=strategy,
+        recovery_authorization=current.get("recovery_authorization"),
+        lineage=current.get("lineage"),
+        available_legal_mechanisms=mechanisms,
+        recovery_execution_id=execution_id,
+        current_subject_hash=after,
+        strategy_switch_count=max(0, _safe_int(current.get("strategy_switch_count", 0) or 0, 0)),
+        max_strategy_switches=min(
+            MAX_RECOVERY_STRATEGY_SWITCHES,
+            max(0, _safe_int(
+                current.get("max_strategy_switches", MAX_RECOVERY_STRATEGY_SWITCHES) or 0,
+                0,
+            )),
+        ),
+        authority_delta=authority_delta,
+        alternative_requires_authority=alternative_requires_authority,
+    )
+    current["consecutive_failure_count"] = count
+    current["last_failure_key"] = key if not committed else None
+    current["last_failure_pattern"] = pattern
+    current.setdefault("strategy_failure_patterns", []).append(pattern)
+    current.setdefault("strategy_switch_decisions", []).append(decision)
+    current["strategy_failure_patterns"] = current["strategy_failure_patterns"][-16:]
+    current["strategy_switch_decisions"] = current["strategy_switch_decisions"][-16:]
+    switched = decision.get("decision") == STRATEGY_SWITCH_READY and epoch == RECOVERY_STRATEGY_EPOCH_0
+    transition_feedback = ""
+    if switched:
+        selected = decision.get("selected_alternative")
+        new_epoch = _safe_int(decision.get("next_strategy_epoch", epoch + 1) or epoch + 1, epoch + 1)
+        new_allowed = [
+            item for item in _unique_strings(mechanisms, limit=24)
+            if item.casefold() != mechanism_value.casefold()
+        ]
+        new_strategy = build_recovery_mutation_strategy(
+            execution_id,
+            strategy_epoch=new_epoch,
+            target_path=target_value,
+            allowed_mutation_mechanisms=new_allowed,
+            suppressed_mutation_mechanisms=[mechanism_value],
+            source_subject_identity=after,
+            current_mutation_mechanism=selected,
+            transition_reason=(
+                f"{RECOVERY_STRATEGY_STAGNATION_DETECTED}: switch from {mechanism_value} "
+                f"to unused legal mechanism {selected}"
+            ),
+            recovery_authorization=current.get("recovery_authorization"),
+            recovery_attempt_index=current.get("recovery_attempt_index", 1),
+        )
+        current["strategy_epoch"] = new_epoch
+        current["strategy_switch_count"] = min(
+            MAX_RECOVERY_STRATEGY_SWITCHES,
+            max(0, _safe_int(current.get("strategy_switch_count", 0) or 0, 0)) + 1,
+        )
+        current["current_strategy"] = new_strategy
+        current["suppressed_mutation_mechanisms"] = [mechanism_value]
+        current["consecutive_failure_count"] = 0
+        current["last_failure_key"] = None
+        current["current_subject_hash"] = after
+        transition_feedback = build_recovery_strategy_transition_feedback(
+            pattern,
+            decision,
+            new_strategy,
+            current_source_refreshed=bool(current.get("current_source_refreshed", True)),
+            current_source_identity=after,
+        )
+        current["last_transition_feedback"] = transition_feedback
+        current.setdefault("strategy_epoch_starts", []).append({
+            "artifact_type": RECOVERY_STRATEGY_EPOCH_START,
+            "strategy_epoch": new_epoch,
+            "recovery_execution_id": execution_id,
+            "strategy_hash": new_strategy.get("canonical_hash"),
+            "transition_reason": new_strategy.get("transition_reason"),
+        })
+    elif (
+        epoch >= RECOVERY_STRATEGY_EPOCH_1
+        and decision.get("stagnation_detected")
+        and decision.get("decision") in {
+            STRATEGY_SWITCH_BUDGET_EXHAUSTED,
+            STRATEGY_SWITCH_UNAVAILABLE,
+            STRATEGY_SWITCH_BLOCKED_AUTHORITY,
+        }
+    ):
+        current["terminal_state"] = RECOVERY_STRATEGY_SEARCH_EXHAUSTED
+        current.setdefault("strategy_epoch_terminals", []).append({
+            "artifact_type": RECOVERY_STRATEGY_EPOCH_TERMINAL,
+            "recovery_execution_id": execution_id,
+            "strategy_epoch": epoch,
+            "terminal_state": RECOVERY_STRATEGY_SEARCH_EXHAUSTED,
+            "decision": decision.get("decision"),
+            "pattern_hash": pattern.get("canonical_hash"),
+        })
+    if committed and epoch >= RECOVERY_STRATEGY_EPOCH_1:
+        already_closed = any(
+            isinstance(item, dict)
+            and item.get("strategy_epoch") == epoch
+            and item.get("terminal_state") == RECOVERY_STRATEGY_COMMITTED
+            for item in current.get("strategy_epoch_terminals", [])
+        )
+        if not already_closed:
+            current.setdefault("strategy_epoch_terminals", []).append({
+                "artifact_type": RECOVERY_STRATEGY_EPOCH_TERMINAL,
+                "recovery_execution_id": execution_id,
+                "strategy_epoch": epoch,
+                "terminal_state": RECOVERY_STRATEGY_COMMITTED,
+                "decision": RECOVERY_STRATEGY_COMMITTED,
+                "pattern_hash": pattern.get("canonical_hash"),
+            })
+    if committed and after is not None:
+        current["current_subject_hash"] = after
+    current["strategy_search_summary"] = {
+        "artifact_type": RECOVERY_STRATEGY_SEARCH_SUMMARY,
+        "recovery_execution_id": execution_id,
+        "switch_count": max(0, _safe_int(current.get("strategy_switch_count", 0) or 0, 0)),
+        "strategy_epochs": sorted({
+            _safe_int(item.get("strategy_epoch", 0) or 0, 0)
+            for item in current.get("strategy_epoch_starts", []) if isinstance(item, dict)
+        }),
+        "terminal_state": current.get("terminal_state"),
+        "last_outcome": (
+            RECOVERY_STRATEGY_COMMITTED
+            if committed and epoch >= RECOVERY_STRATEGY_EPOCH_1
+            else current.get("terminal_state")
+        ),
+        "failure_pattern_count": len(current.get("strategy_failure_patterns", [])),
+        "decision_count": len(current.get("strategy_switch_decisions", [])),
+        "worker_prose_authority": 0,
+    }
+    return {
+        "state": current,
+        "pattern": pattern,
+        "stagnation": detect_recovery_strategy_stagnation(pattern),
+        "decision": decision,
+        "switched": switched,
+        "transition_feedback": transition_feedback,
+        "terminal_state": current.get("terminal_state"),
+        "strategy": current.get("current_strategy"),
+    }
+
+
+observe_recovery_mutation_result = observe_recovery_mutation
+record_recovery_mutation_observation = observe_recovery_mutation
+
+
+def recovery_strategy_state_projection(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Return bounded internal strategy evidence without model transcript."""
+    value = state if isinstance(state, dict) else {}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "recovery_execution_id": value.get("recovery_execution_id"),
+        "recovery_attempt_index": value.get("recovery_attempt_index", 1),
+        "strategy_epoch": value.get("strategy_epoch", 0),
+        "strategy_switch_count": value.get("strategy_switch_count", 0),
+        "max_strategy_switches": value.get("max_strategy_switches", MAX_RECOVERY_STRATEGY_SWITCHES),
+        "current_strategy": _safe_projection(value.get("current_strategy") or {}),
+        "suppressed_mutation_mechanisms": list(value.get("suppressed_mutation_mechanisms", []) or []),
+        "last_failure_pattern": _safe_projection(value.get("last_failure_pattern") or {}),
+        "last_decision": _safe_projection((value.get("strategy_switch_decisions") or [{}])[-1]),
+        "last_transition_feedback": _text(value.get("last_transition_feedback"), 1800),
+        "strategy_epoch_starts": _safe_projection((value.get("strategy_epoch_starts") or [])[-4:]),
+        "strategy_epoch_terminals": _safe_projection((value.get("strategy_epoch_terminals") or [])[-4:]),
+        "strategy_search_summary": _safe_projection(value.get("strategy_search_summary") or {}),
+        "terminal_state": value.get("terminal_state"),
+        "worker_prose_authority": 0,
+    }
+
+
+def validate_recovery_strategy_state(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate the mutable orchestration envelope for one recovery Worker."""
+    value = state if isinstance(state, dict) else {}
+    errors: list[str] = []
+    execution_id = value.get("recovery_execution_id")
+    if not execution_id:
+        errors.append("recovery strategy state is missing execution identity")
+    attempt = _safe_int(value.get("recovery_attempt_index"), -1)
+    if attempt != 1:
+        errors.append("recovery strategy state does not bind attempt 1")
+    epoch = _safe_int(value.get("strategy_epoch"), -1)
+    if epoch not in {RECOVERY_STRATEGY_EPOCH_0, RECOVERY_STRATEGY_EPOCH_1}:
+        errors.append("recovery strategy state epoch is invalid")
+    switches = _safe_int(value.get("strategy_switch_count"), -1)
+    maximum = _safe_int(value.get("max_strategy_switches"), -1)
+    if switches < 0 or switches > MAX_RECOVERY_STRATEGY_SWITCHES:
+        errors.append("recovery strategy switch count is invalid")
+    if maximum < 0 or maximum > MAX_RECOVERY_STRATEGY_SWITCHES:
+        errors.append("recovery strategy switch budget is invalid")
+    if switches > maximum >= 0:
+        errors.append("recovery strategy switch count exceeds its budget")
+    strategy = value.get("current_strategy")
+    strategy_check = validate_recovery_mutation_strategy(strategy)
+    if not strategy_check.get("valid"):
+        errors.append("current recovery mutation strategy is invalid")
+    elif strategy.get("recovery_execution_id") != execution_id:
+        errors.append("current strategy execution identity changed")
+    if isinstance(strategy, dict) and _safe_int(strategy.get("strategy_epoch"), -1) != epoch:
+        errors.append("current strategy epoch does not match state epoch")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "strategy_hash": strategy.get("canonical_hash") if isinstance(strategy, dict) else None,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def validate_recovery_strategy(value: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate either a strategy record or its mutable recovery state."""
+    if isinstance(value, dict):
+        artifact_type = value.get("artifact_type")
+        if artifact_type == RECOVERY_STRATEGY_FAILURE_PATTERN:
+            return validate_recovery_strategy_failure_pattern(value)
+        if artifact_type == RECOVERY_MUTATION_STRATEGY:
+            return validate_recovery_mutation_strategy(value)
+        if artifact_type == RECOVERY_STRATEGY_DIVERSIFICATION_DECISION:
+            return validate_recovery_strategy_diversification_decision(value)
+    return validate_recovery_strategy_state(value)
+
+
+validate_recovery_strategy_controller = validate_recovery_strategy_state
+
+
+# Compatibility spellings keep the V26.3 surface discoverable without
+# coupling callers to one internal noun for the same deterministic records.
+build_strategy_failure_pattern = build_recovery_strategy_failure_pattern
+build_strategy_mutation = build_recovery_mutation_strategy
+derive_legal_recovery_mutation_mechanisms = discover_legal_recovery_mutation_mechanisms
+project_recovery_tool_schema = project_recovery_tool_schemas
+recovery_strategy_stagnation = detect_recovery_strategy_stagnation
 
 
 def _is_private_key(key: Any) -> bool:
