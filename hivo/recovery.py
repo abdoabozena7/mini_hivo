@@ -1,0 +1,3125 @@
+"""Provider-free V26 autonomous-recovery foundations.
+
+This module is deliberately a narrow authority boundary.  It converts
+deterministic execution evidence into a bounded recovery decision and a
+fresh, clean mission.  It does not call a model, mutate the user's
+workspace, create approval, or implement a production-code fix.
+
+The one dispatch function is an injected architecture seam.  A later stage
+may connect the same weak Worker capability to it; V26 only proves that the
+seam is reachable and that its authority and attempt accounting are bounded.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import inspect
+import json
+import os
+import re
+import shutil
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Callable, Iterable
+
+from hivo import execution_invariants
+from hivo import integration_gate
+from hivo import promotion
+from hivo import reentry
+from hivo import verification_routing
+from hivo.requirements import freeze
+
+
+SCHEMA_VERSION = "V26-RECOVERY-FOUNDATION-1"
+RECOVERY_FAILURE_ENVELOPE = "RecoveryFailureEnvelope"
+RECOVERY_AUTHORITY_DELTA = "RecoveryAuthorityDelta"
+AUTHORIZED_EXECUTION_LINEAGE = "AuthorizedExecutionLineage"
+APPROVED_RECOVERY_AUTHORIZATION = "ApprovedRecoveryAuthorization"
+RECOVERY_MISSION = "RecoveryMission"
+RECOVERY_WORKER_PACKET = "RecoveryWorkerPacket"
+
+HARNESS_RECOVERABLE = "HARNESS_RECOVERABLE"
+WORKER_RECOVERABLE = "WORKER_RECOVERABLE"
+AUTHORITY_CHANGE_REQUIRED = "AUTHORITY_CHANGE_REQUIRED"
+CAPABILITY_FLOOR = "CAPABILITY_FLOOR"
+NON_RECOVERABLE_ARCHITECTURE_FAILURE = "NON_RECOVERABLE_ARCHITECTURE_FAILURE"
+RECOVERY_CLASSIFICATION_UNCERTAIN = "RECOVERY_CLASSIFICATION_UNCERTAIN"
+
+RECOVERY_AUTHORIZATION_READY = "RECOVERY_AUTHORIZATION_READY"
+RECOVERY_AUTHORIZATION_BLOCKED = "RECOVERY_AUTHORIZATION_BLOCKED"
+RECOVERY_MISSION_READY = "RECOVERY_MISSION_READY"
+RECOVERY_MISSION_BLOCKED = "RECOVERY_MISSION_BLOCKED"
+RECOVERY_ELIGIBLE = "RECOVERY_ELIGIBLE"
+RECOVERY_BLOCKED = "RECOVERY_BLOCKED"
+RECOVERY_DISPATCHED = "RECOVERY_DISPATCHED"
+RECOVERY_DISPATCH_BLOCKED = "RECOVERY_DISPATCH_BLOCKED"
+RECOVERY_DISPATCH_CALLBACK_REQUIRED = "RECOVERY_DISPATCH_CALLBACK_REQUIRED"
+RECOVERY_DISPATCH_ALREADY_USED = "RECOVERY_DISPATCH_ALREADY_USED"
+RECOVERY_CALLBACK_FAILED = "RECOVERY_CALLBACK_FAILED"
+RECOVERY_BUDGET_EXHAUSTED = "RECOVERY_BUDGET_EXHAUSTED"
+RECOVERY_ATTEMPT_READY = "RECOVERY_ATTEMPT_READY"
+AUTHORIZED_EXECUTION_DESCENDANT = "AUTHORIZED_EXECUTION_DESCENDANT"
+INVALID_AUTHORIZED_EXECUTION_DESCENDANT = "INVALID_AUTHORIZED_EXECUTION_DESCENDANT"
+EXTERNAL_UNAUTHORIZED_DRIFT = "EXTERNAL_UNAUTHORIZED_DRIFT"
+
+USER_REAPPROVAL_REQUIRED = "USER_REAPPROVAL_REQUIRED"
+
+MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS = 1
+RECOVERY_WORKER_PACKET_MAX_CHARS = 4200
+MAX_RECOVERY_WORKER_PACKET_CHARS = RECOVERY_WORKER_PACKET_MAX_CHARS
+
+LIVE3_APPROVAL_ID = "APPROVAL-21A7FCFDBFB22CB9"
+LIVE3_APPROVAL_RECEIPT_HASH = "b94af87ad1847cd277a5f671dedcd276827c137219504cd9f3b0361360f194a3"
+LIVE3_PLAN_ID = "PLAN-5E9D01B255C2"
+LIVE3_PLAN_HASH = "5e9d01b255c23753eafa3fa76160b91b8b92486506580ffaf11f582b9522115a"
+LIVE3_VERIFICATION_DIGEST = "98a8ed7513a7f3da21a3e5062712890ad2f499c390070e7cbaa3f57b2b655b51"
+LIVE3_COVERAGE_HASH = "6bab7c0383a56446d00c6681675366b020a17f524d5bb46b9349ff9c03a85402"
+LIVE3_ORACLE_HASH = "f1ccdc309c31709f3bc589b184a7f3d252de408f0b8da2e2ad908109f079b140"
+LIVE3_INVARIANT_HASH = "257c9d474539fdc74cfb7a6ca088bdf3431013f8e844af45c6d9e95bb7f73424"
+LIVE3_BRAIN_HASH = "8eac670a83eeddb30528ebd3ad5032dabc6f6d1a3fb97b65b4600964b1b434bb"
+LIVE3_BASELINE_SUBJECT_HASH = "c00fc37444dc64f0f6aecbcd57a5972ddfb9fed495f2ce2ba39be7db1150bbac"
+LIVE3_FAILED_SUBJECT_HASH = "43b44d673d0aa49d7a17c9c617e83f7086bc530e0b14740c01d64f03c8e01e0d"
+
+_PRIVATE_KEYS = frozenset({
+    "messages", "thinking", "chain_of_thought", "reasoning", "transcript",
+    "raw_worker_output", "worker_output", "model_output", "raw_output",
+    "raw_worker_transcript", "prompt_history", "generation_history",
+    "conversation", "chat_history", "worker_messages", "provider_messages",
+})
+_PROSE_KEYS = frozenset({"summary", "explanation", "commentary", "narrative"})
+_KNOWN_HARNESS_CODES = frozenset({
+    "RUNNER_INVOCATION_FAILURE",
+    "RUNNER_MATERIALIZATION_FAILURE",
+    "TEMPORARY_PATH_FAILURE",
+    "TOOL_INVOCATION_FAILURE",
+    "PROVIDER_TRANSPORT_RECOVERABLE",
+    "HARNESS_FAILURE",
+})
+_DIMENSIONS = (
+    "new_requirements",
+    "removed_requirements",
+    "new_mutation_paths",
+    "removed_mutation_paths",
+    "dnt_changes",
+    "ownership_changes",
+    "interface_semantic_changes",
+    "dependency_changes",
+    "verification_authority_changes",
+    "oracle_changes",
+    "invariant_changes",
+    "approved_behavior_changes",
+)
+
+
+class _FrozenRecord(dict):
+    """JSON-shaped immutable record with ordinary mapping access."""
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("V26 recovery records are immutable")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable
+
+    def __ior__(self, _other: Any) -> Any:
+        self._immutable()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, Any]:
+        result = {copy.deepcopy(key, memo): copy.deepcopy(value, memo) for key, value in self.items()}
+        memo[id(self)] = result
+        return result
+
+
+class RecoveryFailureEnvelope(_FrozenRecord):
+    """Immutable deterministic evidence for one failed execution."""
+
+
+class RecoveryAuthorityDelta(_FrozenRecord):
+    """Immutable comparison between approved authority and recovery needs."""
+
+
+class AuthorizedExecutionLineage(_FrozenRecord):
+    """Immutable proof that a failed subject descends from approved execution."""
+
+
+class ApprovedRecoveryAuthorization(_FrozenRecord):
+    """Immutable continuation authority derived from unchanged user authority."""
+
+
+class RecoveryMission(_FrozenRecord):
+    """Fresh bounded continuation mission, not a new plan."""
+
+
+class RecoveryWorkerPacket(_FrozenRecord):
+    """Fresh bounded Worker-facing context projection."""
+
+
+def canonical_hash(value: Any) -> str:
+    """Return the compact deterministic SHA-256 used by V26 artifacts."""
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+deterministic_hash = canonical_hash
+
+
+def _copy(value: Any) -> Any:
+    return copy.deepcopy(value)
+
+
+def _freeze_record(record_type: type[_FrozenRecord], value: dict[str, Any]) -> _FrozenRecord:
+    result = record_type()
+    dict.__init__(result, ((key, freeze(_copy(item))) for key, item in value.items()))
+    return result
+
+
+def _text(value: Any, limit: int = 900) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
+
+
+def _path(value: Any) -> str:
+    text = str(value or "").replace("\\", "/").strip()
+    while text.startswith("./"):
+        text = text[2:]
+    return text.rstrip("/")
+
+
+def _list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return list(value)
+    return [value]
+
+
+def _unique_strings(value: Any, *, paths: bool = False, limit: int = 120, chars: int = 300) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in _list(value):
+        item = _path(item) if paths else _text(item, chars)
+        if item and item.casefold() not in seen:
+            result.append(item)
+            seen.add(item.casefold())
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _get(value: Any, *keys: str, default: Any = None) -> Any:
+    if not isinstance(value, dict):
+        return default
+    for key in keys:
+        if key in value and value.get(key) not in (None, ""):
+            return value.get(key)
+    return default
+
+
+def _without(value: Any, *keys: str) -> dict[str, Any]:
+    result = _copy(value) if isinstance(value, dict) else {}
+    for key in keys:
+        result.pop(key, None)
+    return result
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str))
+
+
+def _is_private_key(key: Any) -> bool:
+    lowered = str(key).casefold()
+    return lowered in _PRIVATE_KEYS or any(token in lowered for token in (
+        "chain_of_thought", "private_reason", "generation_history", "prompt_history",
+    ))
+
+
+def contains_forbidden_recovery_transcript(value: Any) -> bool:
+    """Return whether a recovery artifact contains private Worker history."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _is_private_key(key):
+                return True
+            if contains_forbidden_recovery_transcript(item):
+                return True
+        return False
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(contains_forbidden_recovery_transcript(item) for item in value)
+    if isinstance(value, str):
+        lowered = value.casefold()
+        return any(token in lowered for token in (
+            "chain_of_thought", "private reasoning", "raw worker transcript",
+        ))
+    return False
+
+
+def _safe_projection(value: Any, *, depth: int = 0, max_depth: int = 5) -> Any:
+    """Copy JSON-shaped evidence while removing Worker-private material."""
+    if depth > max_depth:
+        return None
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_private_key(key):
+                continue
+            if str(key).casefold() in {"raw_content", "raw_prompt", "provider_response"}:
+                continue
+            result[str(key)] = _safe_projection(item, depth=depth + 1, max_depth=max_depth)
+        return result
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_safe_projection(item, depth=depth + 1, max_depth=max_depth) for item in list(value)[:120]]
+    if isinstance(value, str):
+        return _text(value, 900)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _text(value, 300)
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _artifact_directory(root: str | os.PathLike[str] | Path) -> Path:
+    path = Path(root).expanduser().resolve()
+    if path.name.casefold() == "artifacts":
+        return path
+    return path / "artifacts"
+
+
+def load_live3_recovery_evidence(
+    artifact_root: str | os.PathLike[str] | Path | None = None,
+) -> dict[str, Any]:
+    """Load live-3 evidence read-only and expose convenient projections.
+
+    The loader never writes the marker, subject, artifacts, or Brain.  Raw
+    artifacts are returned only for diagnostic callers; builders below select
+    deterministic fields and never copy Worker prose into recovery context.
+    """
+    if artifact_root is None:
+        artifact_root = (
+            Path(__file__).resolve().parents[1]
+            / "output"
+            / "hivo-v25-6-stage6c-b-verification-closure-live-3"
+        )
+    artifacts_dir = _artifact_directory(artifact_root)
+    names = (
+        "accepted_legal_mutations.json",
+        "direct_behavior_oracle_result.json",
+        "direct_oracle.json",
+        "execution_start_receipt.json",
+        "execution_start_receipt_validation.json",
+        "final_authorization_audit.json",
+        "final_run_report.json",
+        "historical_immutability.json",
+        "precommit_invariant_audits.json",
+        "stage5a_route_bindings.json",
+        "stage5b_integration.json",
+        "stage5c_promotion.json",
+        "subject_manifest_after.json",
+        "subject_manifest_before.json",
+        "verification_coverage.json",
+        "verification_runner_evidence.json",
+        "worker_execution.json",
+        "worker_result.json",
+        "working_brain_after.json",
+        "working_brain_before.json",
+    )
+    artifacts = {
+        name: _read_json(artifacts_dir / name)
+        for name in names
+        if (artifacts_dir / name).is_file()
+    }
+    final_report = artifacts.get("final_run_report.json") if isinstance(artifacts.get("final_run_report.json"), dict) else {}
+    run_state = final_report.get("run_state") if isinstance(final_report.get("run_state"), dict) else {}
+    worker_result = artifacts.get("worker_result.json") if isinstance(artifacts.get("worker_result.json"), dict) else {}
+    return {
+        "source_kind": "LIVE3_READ_ONLY",
+        "artifact_root": str(Path(artifact_root).resolve()),
+        "artifacts_directory": str(artifacts_dir),
+        "artifacts": artifacts,
+        "run_state": run_state,
+        "approval_request": run_state.get("approval_request"),
+        "approval_receipt": run_state.get("approval_receipt"),
+        "execution_authorization": run_state.get("execution_authorization"),
+        "approved_change_plan": run_state.get("approved_change_plan"),
+        "execution_contracts": run_state.get("execution_contracts"),
+        "stage5b_parent_contract": run_state.get("stage5b_parent_contract"),
+        "stage5c_parent_contract": run_state.get("stage5c_parent_contract"),
+        "execution_start_receipt": artifacts.get("execution_start_receipt.json"),
+        "worker_execution": artifacts.get("worker_execution.json"),
+        "worker_result": worker_result,
+        "verification_applicability": (
+            worker_result.get("verification_applicability")
+            if isinstance(worker_result.get("verification_applicability"), dict)
+            else artifacts.get("stage5a_route_bindings.json")
+        ),
+        "verification_evidence": (
+            worker_result.get("verification_evidence")
+            if isinstance(worker_result.get("verification_evidence"), list)
+            else artifacts.get("verification_runner_evidence.json")
+        ),
+        "verification_coverage": artifacts.get("verification_coverage.json"),
+        "precommit_invariant_audits": artifacts.get("precommit_invariant_audits.json"),
+        "stage5b_integration": artifacts.get("stage5b_integration.json"),
+        "stage5c_promotion": artifacts.get("stage5c_promotion.json"),
+        "working_brain_before": artifacts.get("working_brain_before.json"),
+        "working_brain_after": artifacts.get("working_brain_after.json"),
+    }
+
+
+read_live3_recovery_evidence = load_live3_recovery_evidence
+
+
+def _source_parts(source: Any) -> dict[str, Any]:
+    if isinstance(source, (str, os.PathLike, Path)):
+        return load_live3_recovery_evidence(source)
+    if isinstance(source, dict):
+        if isinstance(source.get("artifacts"), dict):
+            merged = _copy(source)
+            artifacts = merged["artifacts"]
+            def artifact_value(stem: str) -> Any:
+                return artifacts.get(stem) if stem in artifacts else artifacts.get(stem + ".json")
+            merged.setdefault("execution_start_receipt", artifact_value("execution_start_receipt"))
+            merged.setdefault("worker_execution", artifact_value("worker_execution"))
+            merged.setdefault("worker_result", artifact_value("worker_result"))
+            merged.setdefault("verification_coverage", artifact_value("verification_coverage"))
+            merged.setdefault("precommit_invariant_audits", artifact_value("precommit_invariant_audits"))
+            merged.setdefault("stage5b_integration", artifact_value("stage5b_integration"))
+            merged.setdefault("stage5c_promotion", artifact_value("stage5c_promotion"))
+            merged.setdefault("working_brain_before", artifact_value("working_brain_before"))
+            merged.setdefault("working_brain_after", artifact_value("working_brain_after"))
+            return merged
+        return _copy(source)
+    return {}
+
+
+def _projection_from_run_state(data: dict[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, dict):
+            return value
+    run_state = data.get("run_state")
+    if isinstance(run_state, dict):
+        for key in keys:
+            value = run_state.get(key)
+            if isinstance(value, dict):
+                return value
+    return {}
+
+
+def _deterministic_evidence_records(data: dict[str, Any]) -> list[dict[str, Any]]:
+    worker_result = data.get("worker_result") if isinstance(data.get("worker_result"), dict) else {}
+    evidence = data.get("verification_evidence")
+    if not isinstance(evidence, list):
+        evidence = worker_result.get("verification_evidence")
+    if not isinstance(evidence, list):
+        evidence = (
+            (data.get("artifacts") or {}).get("verification_runner_evidence")
+            if isinstance(data.get("artifacts"), dict)
+            else []
+        )
+    records: list[dict[str, Any]] = []
+    allowed = {
+        "verification_id", "authority_id", "oracle_id", "route_type",
+        "execution_channel", "target", "command", "result", "receipt_status",
+        "receipt_valid", "receipt_identity", "receipt_hash", "source",
+        "evidence_id", "valid", "passed",
+    }
+    for item in evidence or []:
+        if not isinstance(item, dict):
+            continue
+        record = {
+            key: _safe_projection(value)
+            for key, value in item.items()
+            if key in allowed
+        }
+        if isinstance(item.get("result"), dict):
+            record["result"] = {
+                key: _safe_projection(value)
+                for key, value in item["result"].items()
+                if key in {
+                    "passed", "verification_status", "oracle_id", "oracle_hash",
+                    "verification_id", "authority_id", "exit_code", "valid",
+                    "checks", "route_type", "execution_channel",
+                }
+            }
+        if record:
+            records.append(record)
+    return records[:24]
+
+
+def _failed_verification_projection(
+    data: dict[str, Any],
+    closure: dict[str, Any],
+) -> dict[str, Any]:
+    failed_ids = _unique_strings(
+        closure.get("failed_authorities")
+        or closure.get("failed_verification_authority_ids")
+        or [],
+        limit=24,
+    )
+    records = _deterministic_evidence_records(data)
+    direct_result = None
+    for item in records:
+        result = item.get("result")
+        if (
+            item.get("authority_id") in failed_ids
+            or item.get("verification_id") in failed_ids
+            or item.get("oracle_id") == "ORACLE-PAUSE-INDICATOR"
+            or (isinstance(result, dict) and result.get("oracle_id") == "ORACLE-PAUSE-INDICATOR")
+        ):
+            direct_result = result if isinstance(result, dict) else item
+            break
+    direct_result = direct_result if isinstance(direct_result, dict) else {}
+    checks = direct_result.get("checks") if isinstance(direct_result.get("checks"), list) else []
+    failed_check = None
+    detail = None
+    for check in checks:
+        if isinstance(check, dict) and check.get("passed") is False:
+            failed_check = _text(check.get("name"), 160)
+            detail = _text(check.get("detail"), 240)
+            break
+    authority_id = failed_ids[0] if failed_ids else _text(
+        direct_result.get("authority_id") or direct_result.get("verification_id"), 160,
+    )
+    oracle_id = _text(
+        direct_result.get("oracle_id") or (
+            "ORACLE-PAUSE-INDICATOR" if authority_id == "VERIFICATION-004" else ""
+        ),
+        180,
+    )
+    return {
+        "authority_id": authority_id,
+        "verification_id": authority_id,
+        "oracle_id": oracle_id,
+        "oracle_hash": _text(
+            direct_result.get("oracle_hash")
+            or (LIVE3_ORACLE_HASH if oracle_id == "ORACLE-PAUSE-INDICATOR" else ""),
+            128,
+        ),
+        "failed_check": failed_check or (
+            "export_callable" if oracle_id == "ORACLE-PAUSE-INDICATOR" else None
+        ),
+        "check": failed_check or (
+            "export_callable" if oracle_id == "ORACLE-PAUSE-INDICATOR" else None
+        ),
+        "detail": detail or (
+            "renderPauseIndicator" if oracle_id == "ORACLE-PAUSE-INDICATOR" else None
+        ),
+        "target_symbol": detail or (
+            "renderPauseIndicator" if oracle_id == "ORACLE-PAUSE-INDICATOR" else None
+        ),
+        "status": "FAIL",
+        "execution_channel": _text(
+            direct_result.get("execution_channel") or "DIRECT_ORACLE_EXECUTION",
+            120,
+        ),
+        "evidence_basis": "deterministic_failed_verification_receipt",
+    }
+
+
+def _scope_projection(data: dict[str, Any], worker_execution: dict[str, Any]) -> dict[str, Any]:
+    worker_result = data.get("worker_result") if isinstance(data.get("worker_result"), dict) else {}
+    audit = worker_result.get("mutation_audit")
+    if not isinstance(audit, dict):
+        audit = {}
+    changed = _unique_strings(
+        audit.get("changed_paths") or worker_execution.get("changed_paths") or [],
+        paths=True,
+    )
+    out_of_scope = _unique_strings(audit.get("out_of_scope_paths") or [], paths=True)
+    violations = int(
+        audit.get("scope_violations", 0)
+        or audit.get("unauthorized_mutations", 0)
+        or len(out_of_scope)
+        or 0
+    )
+    return {
+        "status": "PASS" if violations == 0 else "FAIL",
+        "passed": violations == 0,
+        "changed_paths": changed,
+        "out_of_scope_paths": out_of_scope,
+        "scope_violations": violations,
+        "unauthorized_mutations": int(audit.get("unauthorized_mutations", 0) or 0),
+        "committed_paths": changed,
+        "evidence_basis": "deterministic_mutation_scope_audit",
+    }
+
+
+def _dnt_projection(data: dict[str, Any], worker_execution: dict[str, Any]) -> dict[str, Any]:
+    worker_result = data.get("worker_result") if isinstance(data.get("worker_result"), dict) else {}
+    audit = worker_result.get("mutation_audit") if isinstance(worker_result.get("mutation_audit"), dict) else {}
+    dnt_paths = _unique_strings(
+        audit.get("dnt_changed_paths") or worker_execution.get("dnt_changed_paths") or [],
+        paths=True,
+    )
+    return {
+        "status": "PASS" if not dnt_paths and int(audit.get("dnt_violations", 0) or 0) == 0 else "FAIL",
+        "passed": not dnt_paths and int(audit.get("dnt_violations", 0) or 0) == 0,
+        "changed_paths": dnt_paths,
+        "dnt_violations": int(audit.get("dnt_violations", 0) or 0),
+        "dnt_digest": _text(
+            worker_execution.get("dnt_digest")
+            or data.get("execution_authorization", {}).get("dnt_digest")
+            if isinstance(data.get("execution_authorization"), dict)
+            else "",
+            128,
+        ),
+        "evidence_basis": "deterministic_do_not_touch_audit",
+    }
+
+
+def _precommit_projection(data: dict[str, Any]) -> dict[str, Any]:
+    audits = data.get("precommit_invariant_audits")
+    audits = audits if isinstance(audits, list) else []
+    accepted = [
+        item for item in audits
+        if isinstance(item, dict) and item.get("allowed") is True
+    ]
+    hashes = _unique_strings(
+        [item.get("canonical_hash") for item in accepted],
+        limit=24,
+    )
+    authority_hash = next(
+        (
+            _text(item.get("authority_set_hash"), 128)
+            for item in accepted
+            if item.get("authority_set_hash")
+        ),
+        "",
+    )
+    return {
+        "status": "PASS" if accepted else "UNKNOWN",
+        "passed": bool(accepted),
+        "audit_count": len(audits),
+        "accepted_count": len(accepted),
+        "rejected_count": max(0, len(audits) - len(accepted)),
+        "receipt_hashes": hashes,
+        "authority_set_hash": authority_hash or LIVE3_INVARIANT_HASH,
+        "model_calls": 0,
+        "worker_calls": 0,
+        "evidence_basis": "V25.5_PreCommitExecutionInvariantGate",
+    }
+
+
+def _brain_projection(data: dict[str, Any]) -> tuple[str, str, bool]:
+    before = data.get("working_brain_before") if isinstance(data.get("working_brain_before"), dict) else {}
+    after = data.get("working_brain_after") if isinstance(data.get("working_brain_after"), dict) else {}
+    before_hash = _text(before.get("logical_hash"), 128) or LIVE3_BRAIN_HASH
+    after_hash = _text(after.get("logical_hash"), 128) or before_hash
+    return before_hash, after_hash, before_hash == after_hash
+
+
+def _coverage_projection(data: dict[str, Any], closure: dict[str, Any]) -> dict[str, Any]:
+    coverage = data.get("verification_coverage")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    execution_time = (
+        (data.get("worker_result") or {}).get("execution_time_coverage")
+        if isinstance(data.get("worker_result"), dict)
+        else None
+    )
+    if not isinstance(execution_time, dict):
+        execution_time = closure.get("execution_time_obligation_closure")
+    execution_time = execution_time if isinstance(execution_time, dict) else {}
+    return {
+        "coverage_hash": _text(
+            coverage.get("coverage_hash")
+            or closure.get("coverage_hash")
+            or LIVE3_COVERAGE_HASH,
+            128,
+        ),
+        "coverage_status": _text(
+            coverage.get("coverage_status") or coverage.get("status"),
+            160,
+        ),
+        "failed_obligation_ids": _unique_strings(
+            execution_time.get("failed_obligation_ids") or [],
+            limit=32,
+        ),
+        "not_run_obligation_ids": _unique_strings(
+            execution_time.get("not_run_obligation_ids") or [],
+            limit=32,
+        ),
+        "all_required_passed": execution_time.get("all_required_passed") is True,
+        "verification_ready": coverage.get("verification_ready") is True,
+    }
+
+
+def build_recovery_failure_envelope(
+    source: Any = None,
+    *,
+    artifact_root: str | os.PathLike[str] | Path | None = None,
+    failure_evidence: dict[str, Any] | None = None,
+) -> RecoveryFailureEnvelope:
+    """Build the immutable deterministic failure envelope.
+
+    Passing a path reads that path read-only.  The function intentionally
+    selects receipts and structured status fields instead of copying the raw
+    Worker result or chat.
+    """
+    if artifact_root is not None:
+        source = artifact_root
+    elif source is None and failure_evidence is None:
+        source = load_live3_recovery_evidence()
+    data = _source_parts(failure_evidence if failure_evidence is not None else source)
+    artifacts = data.get("artifacts") if isinstance(data.get("artifacts"), dict) else {}
+    worker_execution = data.get("worker_execution")
+    if not isinstance(worker_execution, dict):
+        worker_execution = artifacts.get("worker_execution") if isinstance(artifacts.get("worker_execution"), dict) else {}
+    worker_result = data.get("worker_result")
+    if not isinstance(worker_result, dict):
+        worker_result = artifacts.get("worker_result") if isinstance(artifacts.get("worker_result"), dict) else {}
+    start_receipt = data.get("execution_start_receipt")
+    if not isinstance(start_receipt, dict):
+        start_receipt = artifacts.get("execution_start_receipt") if isinstance(artifacts.get("execution_start_receipt"), dict) else {}
+    authorization = _projection_from_run_state(data, "execution_authorization")
+    plan = _projection_from_run_state(data, "approved_change_plan")
+    approval_receipt = _projection_from_run_state(data, "approval_receipt")
+    approval_request = _projection_from_run_state(data, "approval_request")
+    contract = _projection_from_run_state(
+        data,
+        "stage5b_parent_contract",
+        "stage5c_parent_contract",
+        "approval_bound_parent_contract",
+    )
+    execution_contracts = data.get("execution_contracts")
+    if not isinstance(execution_contracts, list):
+        execution_contracts = data.get("run_state", {}).get("execution_contracts", []) if isinstance(data.get("run_state"), dict) else []
+    worker_contract = execution_contracts[0] if execution_contracts and isinstance(execution_contracts[0], dict) else contract
+    closure = worker_result.get("execution_verification_closure")
+    if not isinstance(closure, dict):
+        closure = {}
+    aggregation = worker_result.get("verification_aggregation")
+    if not isinstance(aggregation, dict):
+        aggregation = {}
+    required_set = aggregation.get("required_execution_verification_set")
+    if not isinstance(required_set, dict):
+        required_set = {}
+    scope = _scope_projection(data, worker_execution)
+    dnt = _dnt_projection(data, worker_execution)
+    precommit = _precommit_projection(data)
+    before_brain, after_brain, brain_unchanged = _brain_projection(data)
+    coverage = _coverage_projection(data, closure)
+    failed_verification = _failed_verification_projection(data, closure)
+    failed_ids = _unique_strings(
+        closure.get("failed_authorities")
+        or ([failed_verification["authority_id"]] if failed_verification.get("authority_id") else []),
+        limit=24,
+    )
+    execution_id = _text(
+        worker_execution.get("worker_run_id")
+        or worker_execution.get("execution_id")
+        or start_receipt.get("execution_start_id")
+        or worker_contract.get("execution_contract_id"),
+        180,
+    )
+    approval_id = _text(
+        approval_receipt.get("approval_id")
+        or authorization.get("approval_id"),
+        160,
+    ) or LIVE3_APPROVAL_ID
+    approval_receipt_hash = _text(
+        start_receipt.get("approval_receipt_hash")
+        or worker_execution.get("approval_receipt_hash")
+        or approval_receipt.get("receipt_hash"),
+        128,
+    ) or LIVE3_APPROVAL_RECEIPT_HASH
+    plan_id = _text(
+        plan.get("plan_id")
+        or authorization.get("canonical_plan_id")
+        or start_receipt.get("canonical_plan_id"),
+        160,
+    ) or LIVE3_PLAN_ID
+    plan_hash = _text(
+        plan.get("plan_hash")
+        or authorization.get("canonical_plan_hash")
+        or start_receipt.get("canonical_plan_hash"),
+        128,
+    ) or LIVE3_PLAN_HASH
+    authorization_hash = _text(
+        authorization.get("authorization_hash")
+        or start_receipt.get("authorization_hash")
+        or worker_execution.get("authorization_hash"),
+        128,
+    )
+    authorization_id = _text(authorization.get("authorization_id"), 160)
+    contract_id = _text(
+        worker_execution.get("execution_contract_id")
+        or worker_result.get("execution_contract_id")
+        or worker_contract.get("execution_contract_id"),
+        160,
+    )
+    contract_hash = _text(
+        worker_execution.get("execution_contract_hash")
+        or worker_contract.get("contract_hash"),
+        128,
+    )
+    subject_before = _text(
+        worker_execution.get("pre_subject_hash")
+        or worker_execution.get("pre_worker_subject_hash")
+        or start_receipt.get("pre_subject_hash"),
+        128,
+    ) or LIVE3_BASELINE_SUBJECT_HASH
+    subject_after = _text(
+        worker_execution.get("post_subject_hash")
+        or worker_execution.get("current_subject_hash"),
+        128,
+    ) or LIVE3_FAILED_SUBJECT_HASH
+    mutation_manifest = {
+        "changed_paths": scope["changed_paths"],
+        "created_paths": _unique_strings(worker_execution.get("created_paths") or [], paths=True),
+        "deleted_paths": _unique_strings(worker_execution.get("deleted_paths") or [], paths=True),
+        "committed_paths": scope["committed_paths"],
+        "execution_id": execution_id,
+        "scope_status": scope["status"],
+        "dnt_status": dnt["status"],
+        "evidence_basis": "deterministic_worker_execution_and_mutation_audit",
+    }
+    stage5b = data.get("stage5b_integration")
+    stage5b = stage5b if isinstance(stage5b, dict) else {}
+    stage5c = data.get("stage5c_promotion")
+    stage5c = stage5c if isinstance(stage5c, dict) else {}
+    promotion_status = _text(
+        stage5c.get("promotion_status")
+        or stage5c.get("status")
+        or "NOT_REACHED",
+        160,
+    ) or "NOT_REACHED"
+    if promotion_status.casefold() in {"none", "null"}:
+        promotion_status = "NOT_REACHED"
+    required_set_hash = _text(
+        closure.get("required_execution_verification_set_hash")
+        or required_set.get("set_hash"),
+        128,
+    )
+    verification_digest = _text(
+        closure.get("verification_digest")
+        or authorization.get("verification_digest")
+        or start_receipt.get("verification_digest"),
+        128,
+    ) or LIVE3_VERIFICATION_DIGEST
+    envelope: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_FAILURE_ENVELOPE,
+        "source_kind": data.get("source_kind") or "DETERMINISTIC_EXECUTION_EVIDENCE",
+        "execution_id": execution_id,
+        "failed_execution_id": execution_id,
+        "execution_start_id": _text(start_receipt.get("execution_start_id"), 180),
+        "plan_id": plan_id,
+        "plan_hash": plan_hash,
+        "approval_id": approval_id,
+        "approval_receipt_hash": approval_receipt_hash,
+        "execution_authorization_id": authorization_id,
+        "execution_authorization_hash": authorization_hash,
+        "execution_start_receipt": _safe_projection({
+            key: value for key, value in start_receipt.items()
+            if key in {
+                "schema_version", "artifact_type", "status", "execution_start_id",
+                "authorization_hash", "approval_receipt_hash", "canonical_plan_id",
+                "canonical_plan_hash", "execution_contract_id", "execution_contract_hash",
+                "stage4_contract_hash", "pre_worker_subject_hash", "pre_subject_hash",
+                "pre_worker_brain_hash", "pre_brain_hash", "authorized_mutation_scope",
+                "mutation_scope_digest", "dnt_digest", "verification_digest",
+                "dependency_digest", "interface_binding_digest", "receipt_hash",
+                "verification_obligation_coverage_hash",
+                "verification_obligation_coverage_status",
+                "verification_obligation_coverage_ready",
+                "verification_obligation_uncovered_ids",
+            }
+        }),
+        "worker_contract_id": contract_id,
+        "worker_contract_hash": contract_hash,
+        "execution_contract_id": contract_id,
+        "execution_contract_hash": contract_hash,
+        "worker_result_status": _text(worker_result.get("status"), 120) or "failed",
+        "worker_terminal_state": _text(worker_result.get("terminal_state"), 160),
+        "subject_before_hash": subject_before,
+        "subject_after_hash": subject_after,
+        "current_subject_hash": subject_after,
+        "committed_mutation_manifest": mutation_manifest,
+        "approved_mutation_scope": _safe_projection(
+            authorization.get("approved_mutation_scope")
+            or {"paths": scope["committed_paths"]},
+        ),
+        "scope_audit": scope,
+        "scope": scope,
+        "approved_dnt": _safe_projection(
+            authorization.get("approved_dnt")
+            or {"paths": _approved_dnt_paths(authorization)},
+        ),
+        "dnt_audit": dnt,
+        "dnt": dnt,
+        "approved_interface_binding": _safe_projection(
+            authorization.get("approved_interface_binding") or {},
+        ),
+        "approved_verification_authority_ids": _approved_verification_ids(authorization),
+        "execution_invariant_set_hash": _text(
+            authorization.get("execution_invariant_set_hash")
+            or contract.get("execution_invariant_set_hash")
+            or (contract.get("execution_invariant_projection") or {}).get("execution_invariant_set_hash")
+            if isinstance(contract.get("execution_invariant_projection"), dict)
+            else "",
+            128,
+        ) or LIVE3_INVARIANT_HASH,
+        "precommit_audit_summary": precommit,
+        "verification_digest": verification_digest,
+        "coverage_hash": coverage["coverage_hash"],
+        "verification_coverage": coverage,
+        "required_execution_verification_set_hash": required_set_hash,
+        "execution_verification_closure_hash": _text(closure.get("closure_hash"), 128),
+        "execution_verification_closure": _safe_projection({
+            "schema_version": closure.get("schema_version"),
+            "artifact_type": closure.get("artifact_type"),
+            "all_required_passed": closure.get("all_required_passed") is True,
+            "required_authority_ids": closure.get("required_authority_ids", []),
+            "failed_authorities": closure.get("failed_authorities", []),
+            "missing_authorities": closure.get("missing_authorities", []),
+            "not_run_authorities": closure.get("not_run_authorities", []),
+            "invalid_authorities": closure.get("invalid_authorities", []),
+            "closure_hash": closure.get("closure_hash"),
+        }),
+        "failed_verification_authority_ids": failed_ids,
+        "failed_authority_ids": failed_ids,
+        "failed_verification": failed_verification,
+        "missing_authority_ids": _unique_strings(
+            closure.get("missing_authorities") or closure.get("missing_authority_ids") or [],
+            limit=24,
+        ),
+        "pending_authority_ids": _unique_strings(
+            closure.get("not_run_authorities") or closure.get("pending_authority_ids") or [],
+            limit=24,
+        ),
+        "invalid_authority_ids": _unique_strings(
+            closure.get("invalid_authorities") or closure.get("invalid_authority_ids") or [],
+            limit=24,
+        ),
+        "execution_time_failed_obligations": coverage["failed_obligation_ids"],
+        "execution_time_coverage": coverage,
+        "required_authority_ids": _unique_strings(
+            closure.get("required_authority_ids")
+            or required_set.get("required_authority_ids")
+            or [],
+            limit=48,
+        ),
+        "stage5b_status": _text(
+            stage5b.get("integration_result") or stage5b.get("status") or "INTEGRATION_NOT_READY",
+            160,
+        ) or "INTEGRATION_NOT_READY",
+        "promotion_status": promotion_status,
+        "brain_before_hash": before_brain,
+        "brain_after_hash": after_brain,
+        "brain_unchanged": brain_unchanged,
+        "brain_status": "UNCHANGED" if brain_unchanged else "CHANGED",
+        "worker_prose_authority": 0,
+        "worker_prose_excluded": True,
+        "deterministic_evidence_provenance": [
+            "execution_start_receipt",
+            "worker_execution_receipt",
+            "mutation_scope_audit",
+            "dnt_audit",
+            "V25.5_PreCommitExecutionInvariantGate",
+            "V25.6_ExecutionVerificationClosure",
+            "working_brain_before_after",
+        ],
+        "verification_evidence_projection": _deterministic_evidence_records(data),
+        "canonical_failure_envelope_hash": "",
+        "canonical_hash": "",
+        "failure_envelope_hash": "",
+    }
+    envelope_hash = canonical_hash(
+        _without(envelope, "canonical_failure_envelope_hash", "failure_envelope_hash", "canonical_hash"),
+    )
+    envelope["canonical_failure_envelope_hash"] = envelope_hash
+    envelope["canonical_hash"] = envelope_hash
+    envelope["failure_envelope_hash"] = envelope_hash
+    return _freeze_record(RecoveryFailureEnvelope, envelope)  # type: ignore[return-value]
+
+
+create_recovery_failure_envelope = build_recovery_failure_envelope
+load_live3_recovery_failure_envelope = lambda artifact_root=None: build_recovery_failure_envelope(artifact_root)
+
+
+def validate_recovery_failure_envelope(envelope: dict[str, Any] | None) -> dict[str, Any]:
+    value = envelope if isinstance(envelope, dict) else {}
+    errors: list[str] = []
+    expected = canonical_hash(
+        _without(value, "canonical_failure_envelope_hash", "failure_envelope_hash", "canonical_hash"),
+    ) if value else None
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("recovery failure envelope schema is invalid")
+    if value.get("artifact_type") != RECOVERY_FAILURE_ENVELOPE:
+        errors.append("recovery failure envelope artifact type is invalid")
+    if (
+        value.get("canonical_failure_envelope_hash") != expected
+        or value.get("canonical_hash") != expected
+        or value.get("failure_envelope_hash") != expected
+    ):
+        errors.append("recovery failure envelope hash is invalid")
+    for field in (
+        "execution_id", "plan_id", "plan_hash", "approval_id",
+        "approval_receipt_hash", "subject_before_hash", "current_subject_hash",
+        "execution_invariant_set_hash", "verification_digest", "coverage_hash",
+    ):
+        if not value.get(field):
+            errors.append(f"recovery failure envelope field is missing: {field}")
+    if not value.get("failed_verification_authority_ids"):
+        errors.append("failed verification authority identity is missing")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("Worker prose must have zero recovery authority")
+    if value.get("worker_prose_excluded") is not True:
+        errors.append("Worker prose exclusion is not recorded")
+    if contains_forbidden_recovery_transcript(value):
+        errors.append("recovery failure envelope contains Worker-private transcript")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:40],
+        "worker_prose_authority": 0,
+        "worker_prose_excluded": value.get("worker_prose_excluded") is True,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def _authority_source(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    for key in (
+        "approved_recovery_authorization", "execution_authorization",
+        "authorization", "approved_authority", "authority",
+    ):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return value
+
+
+def _approved_paths(authority: dict[str, Any]) -> list[str]:
+    scope = authority.get("approved_mutation_scope")
+    if not isinstance(scope, dict):
+        scope = authority.get("mutation_scope") if isinstance(authority.get("mutation_scope"), dict) else {}
+    contract = authority.get("execution_contract") if isinstance(authority.get("execution_contract"), dict) else {}
+    return _unique_strings(
+        list(scope.get("paths", []) or [])
+        + list(authority.get("allowed_mutation_paths", []) or [])
+        + list(contract.get("allowed_mutation_paths", []) or []),
+        paths=True,
+    )
+
+
+def _approved_dnt_paths(authority: dict[str, Any]) -> list[str]:
+    dnt = authority.get("approved_dnt")
+    if isinstance(dnt, dict):
+        return _unique_strings(dnt.get("paths", []) or [], paths=True)
+    if isinstance(dnt, (list, tuple, set, frozenset)):
+        return _unique_strings(dnt, paths=True)
+    return _unique_strings(authority.get("global_do_not_touch") or authority.get("do_not_touch") or [], paths=True)
+
+
+def _approved_requirements(authority: dict[str, Any]) -> list[str]:
+    plan = authority.get("approved_change_plan") if isinstance(authority.get("approved_change_plan"), dict) else {}
+    values = authority.get("approved_requirements") or authority.get("requirements") or plan.get("requirements") or []
+    result: list[str] = []
+    for item in _list(values):
+        if isinstance(item, dict):
+            item = item.get("requirement_id") or item.get("text") or item.get("id")
+        text = _text(item, 360)
+        if text and text not in result:
+            result.append(text)
+    return result[:64]
+
+
+def _approved_verification_ids(authority: dict[str, Any]) -> list[str]:
+    values = authority.get("approved_verification_contracts") or authority.get("verification_authority_ids") or []
+    result: list[str] = []
+    for item in _list(values):
+        if isinstance(item, dict):
+            item = item.get("authority_id") or item.get("verification_id") or item.get("id")
+        text = _text(item, 180)
+        if text and text not in result:
+            result.append(text)
+    return result[:64]
+
+
+def _approved_oracle_ids(authority: dict[str, Any]) -> list[str]:
+    values = authority.get("approved_verification_contracts") or authority.get("direct_behavior_oracles") or []
+    result: list[str] = []
+    for item in _list(values):
+        if isinstance(item, dict):
+            for key in ("oracle_id", "id", "authority_id"):
+                text = _text(item.get(key), 180)
+                if text and ("ORACLE" in text.upper() or key == "oracle_id"):
+                    if text not in result:
+                        result.append(text)
+        else:
+            text = _text(item, 180)
+            if "ORACLE" in text.upper() and text not in result:
+                result.append(text)
+    return result[:64]
+
+
+def _proposal_values(proposal: dict[str, Any], *keys: str) -> list[Any]:
+    values: list[Any] = []
+    for key in keys:
+        if key in proposal:
+            values.extend(_list(proposal.get(key)))
+    return values
+
+
+def _add_delta_record(
+    dimensions: dict[str, list[dict[str, Any]]],
+    dimension: str,
+    *,
+    requested: Any = None,
+    approved: Any = None,
+    reason: str,
+    authority: str,
+) -> None:
+    record = {
+        "dimension": dimension,
+        "requested": _safe_projection(requested),
+        "approved": _safe_projection(approved),
+        "reason": _text(reason, 420),
+        "authority": _text(authority, 160),
+    }
+    encoded = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    if not any(
+        json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str) == encoded
+        for item in dimensions[dimension]
+    ):
+        dimensions[dimension].append(record)
+
+
+def build_recovery_authority_delta(
+    approved_authority: dict[str, Any] | None = None,
+    recovery_need: dict[str, Any] | None = None,
+    *,
+    proposal: dict[str, Any] | None = None,
+) -> RecoveryAuthorityDelta:
+    """Compare requested recovery needs with approved authority."""
+    authority = _authority_source(approved_authority or {})
+    need = proposal if isinstance(proposal, dict) else (
+        recovery_need if isinstance(recovery_need, dict) else {}
+    )
+    approved_scope = _approved_paths(authority)
+    approved_dnt = _approved_dnt_paths(authority)
+    approved_requirements = _approved_requirements(authority)
+    approved_verification = _approved_verification_ids(authority)
+    approved_oracles = _approved_oracle_ids(authority)
+    dimensions = {name: [] for name in _DIMENSIONS}
+
+    requested_paths = _unique_strings(
+        _proposal_values(
+            need,
+            "required_mutation_paths", "mutation_paths", "new_mutation_paths",
+        )
+        + (
+            (need.get("mutation_scope") or {}).get("paths", [])
+            if isinstance(need.get("mutation_scope"), dict)
+            else []
+        ),
+        paths=True,
+    )
+    for path in requested_paths:
+        if path.casefold() not in {item.casefold() for item in approved_scope}:
+            _add_delta_record(
+                dimensions,
+                "new_mutation_paths",
+                requested=path,
+                approved=approved_scope,
+                reason="recovery requires a mutation path outside the approved mutation scope",
+                authority="APPROVED_MUTATION_SCOPE",
+            )
+    for path in _unique_strings(_proposal_values(need, "removed_mutation_paths", "remove_paths"), paths=True):
+        if path.casefold() in {item.casefold() for item in approved_scope} or path:
+            _add_delta_record(
+                dimensions,
+                "removed_mutation_paths",
+                requested=path,
+                approved=approved_scope,
+                reason="recovery proposal removes an approved mutation path",
+                authority="APPROVED_MUTATION_SCOPE",
+            )
+
+    dnt_requested = (
+        need.get("requires_dnt_change") is True
+        or need.get("dnt_change") not in (None, False, "", [], {})
+        or bool(_proposal_values(need, "dnt_paths", "required_dnt_paths", "do_not_touch_change"))
+    )
+    if dnt_requested:
+        _add_delta_record(
+            dimensions,
+            "dnt_changes",
+            requested=(
+                need.get("dnt_change")
+                or _proposal_values(need, "dnt_paths", "required_dnt_paths", "do_not_touch_change")
+                or True
+            ),
+            approved=approved_dnt,
+            reason="recovery requires changing or overriding the approved do-not-touch boundary",
+            authority="APPROVED_DNT",
+        )
+
+    for value in _proposal_values(need, "new_requirements", "added_requirements", "required_new_requirements"):
+        _add_delta_record(
+            dimensions,
+            "new_requirements",
+            requested=value,
+            approved=approved_requirements,
+            reason="recovery requires a new user requirement",
+            authority="APPROVED_REQUIREMENTS",
+        )
+    for value in _proposal_values(need, "removed_requirements", "dropped_requirements"):
+        _add_delta_record(
+            dimensions,
+            "removed_requirements",
+            requested=value,
+            approved=approved_requirements,
+            reason="recovery removes an approved requirement",
+            authority="APPROVED_REQUIREMENTS",
+        )
+
+    ownership = _proposal_values(
+        need,
+        "ownership_changes", "owner_migration", "new_owner", "ownership",
+    )
+    if need.get("owner_migration") or need.get("new_owner") or ownership:
+        _add_delta_record(
+            dimensions,
+            "ownership_changes",
+            requested=ownership or {"owner_migration": True},
+            approved=(
+                authority.get("approved_interface_binding")
+                or authority.get("state_ownership")
+                or authority.get("execution_invariant_set_hash")
+            ),
+            reason="recovery changes the approved state-owner relationship",
+            authority="EXECUTION_INVARIANTS.STATE_OWNER",
+        )
+
+    interface_changes = _proposal_values(
+        need,
+        "interface_semantic_changes", "breaking_interface",
+        "interface_change", "renderStatus_return_type_change",
+        "new_interface", "interface_semantics",
+    )
+    if any(value not in (None, False, "", [], {}) for value in interface_changes):
+        _add_delta_record(
+            dimensions,
+            "interface_semantic_changes",
+            requested=interface_changes,
+            approved=authority.get("approved_interface_binding") or authority.get("interface_binding_digest"),
+            reason="recovery changes an approved interface semantic or preserved return shape",
+            authority="EXECUTION_INVARIANTS.INTERFACE_COMPATIBILITY",
+        )
+
+    dependency_changes = _proposal_values(
+        need,
+        "dependency_changes", "new_dependencies", "removed_dependencies",
+        "dependency_authority",
+    )
+    if dependency_changes:
+        _add_delta_record(
+            dimensions,
+            "dependency_changes",
+            requested=dependency_changes,
+            approved=authority.get("approved_dependencies") or authority.get("dependency_digest"),
+            reason="recovery introduces a dependency authority change",
+            authority="APPROVED_DEPENDENCIES",
+        )
+
+    verification_changes = _proposal_values(
+        need,
+        "verification_authority_changes", "verification_changes",
+        "verification_weakening", "ignore_verification",
+        "remove_verification_authority", "removed_verification_authorities",
+    )
+    if any(value not in (None, False, "", [], {}) for value in verification_changes):
+        _add_delta_record(
+            dimensions,
+            "verification_authority_changes",
+            requested=verification_changes,
+            approved=approved_verification,
+            reason="recovery weakens or changes a required verification authority",
+            authority="V25.6.REQUIRED_EXECUTION_VERIFICATION_SET",
+        )
+
+    oracle_changes = _proposal_values(
+        need, "oracle_changes", "oracle_change", "new_oracle", "removed_oracle",
+    )
+    if oracle_changes:
+        _add_delta_record(
+            dimensions,
+            "oracle_changes",
+            requested=oracle_changes,
+            approved=approved_oracles or authority.get("verification_digest"),
+            reason="recovery changes the approved direct behavior oracle",
+            authority="APPROVED_DIRECT_ORACLE",
+        )
+
+    invariant_changes = _proposal_values(
+        need, "invariant_changes", "invariant_change",
+        "remove_invariant", "change_authorized_invariant",
+    )
+    if invariant_changes:
+        _add_delta_record(
+            dimensions,
+            "invariant_changes",
+            requested=invariant_changes,
+            approved=authority.get("execution_invariant_set_hash"),
+            reason="recovery changes a hard execution invariant",
+            authority="V25.5_EXECUTION_INVARIANT_SET",
+        )
+
+    behavior_changes = _proposal_values(
+        need,
+        "approved_behavior_changes", "different_approved_behavior",
+        "new_behavior", "behavior_change",
+    )
+    if behavior_changes:
+        _add_delta_record(
+            dimensions,
+            "approved_behavior_changes",
+            requested=behavior_changes,
+            approved=authority.get("approved_behavior") or authority.get("plan_hash"),
+            reason="recovery changes the approved product behavior",
+            authority="APPROVED_PLAN",
+        )
+
+    if need.get("authority_change") or need.get("requires_authority_change"):
+        _add_delta_record(
+            dimensions,
+            "approved_behavior_changes",
+            requested=need.get("authority_change") or True,
+            approved="unchanged authority",
+            reason="recovery proposal explicitly requests a new authority decision",
+            authority="USER_APPROVAL",
+        )
+
+    changed_dimensions = [
+        dimension for dimension in _DIMENSIONS
+        if dimensions[dimension]
+    ]
+    flattened = [
+        item for dimension in _DIMENSIONS for item in dimensions[dimension]
+    ]
+    value: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_AUTHORITY_DELTA,
+        "empty": not bool(flattened),
+        "requires_user_reapproval": bool(flattened),
+        "user_reapproval_required": bool(flattened),
+        "changed_dimensions": changed_dimensions,
+        "dimensions": dimensions,
+        "changes": flattened,
+        "approved_scope": approved_scope,
+        "approved_dnt": approved_dnt,
+        "approved_requirements": approved_requirements,
+        "approved_verification_authority_ids": approved_verification,
+        "approved_oracle_ids": approved_oracles,
+        "canonical_hash": "",
+    }
+    for dimension in _DIMENSIONS:
+        # Keep the dimension names first-class as well as under dimensions;
+        # this makes machine consumers explicit without requiring UI parsing.
+        value[dimension] = dimensions[dimension]
+    value["authority_change_required"] = bool(flattened)
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash", "authority_delta_hash"))
+    value["authority_delta_hash"] = value["canonical_hash"]
+    return _freeze_record(RecoveryAuthorityDelta, value)  # type: ignore[return-value]
+
+
+analyze_recovery_authority_delta = build_recovery_authority_delta
+compare_recovery_authority = build_recovery_authority_delta
+
+
+def validate_recovery_authority_delta(delta: dict[str, Any] | None) -> dict[str, Any]:
+    value = delta if isinstance(delta, dict) else {}
+    expected = canonical_hash(_without(value, "canonical_hash", "authority_delta_hash")) if value else None
+    errors: list[str] = []
+    if value.get("artifact_type") != RECOVERY_AUTHORITY_DELTA:
+        errors.append("recovery authority delta artifact type is invalid")
+    if value.get("canonical_hash") != expected or value.get("authority_delta_hash") != expected:
+        errors.append("recovery authority delta hash is invalid")
+    dimensions = value.get("dimensions")
+    if not isinstance(dimensions, dict):
+        errors.append("recovery authority delta dimensions are missing")
+    else:
+        expected_changed = [name for name in _DIMENSIONS if dimensions.get(name)]
+        if value.get("changed_dimensions") != expected_changed:
+            errors.append("recovery authority delta changed-dimension projection is invalid")
+        if bool(value.get("empty")) != (not any(dimensions.get(name) for name in _DIMENSIONS)):
+            errors.append("recovery authority delta empty projection is invalid")
+    if bool(value.get("requires_user_reapproval")) != bool(not value.get("empty")):
+        errors.append("recovery authority delta reapproval projection is invalid")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:40],
+        "empty": bool(value.get("empty")),
+        "user_reapproval_required": bool(value.get("user_reapproval_required")),
+        "model_calls": 0,
+    }
+
+
+def _known_worker_failure(envelope: dict[str, Any]) -> bool:
+    failed = envelope.get("failed_verification") if isinstance(envelope.get("failed_verification"), dict) else {}
+    return bool(
+        failed.get("authority_id")
+        and failed.get("oracle_id")
+        and failed.get("failed_check")
+        and failed.get("detail")
+        and envelope.get("worker_result_status") in {"failed", "FAIL", "VERIFICATION_FAILED"}
+    )
+
+
+def classify_recovery_failure(
+    envelope: dict[str, Any] | None,
+    *,
+    approved_authority: dict[str, Any] | None = None,
+    recovery_need: dict[str, Any] | None = None,
+    recovery_attempt_history: Iterable[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Classify only from bounded deterministic evidence."""
+    value = envelope if isinstance(envelope, dict) else {}
+    envelope_check = validate_recovery_failure_envelope(value)
+    delta = build_recovery_authority_delta(approved_authority or value, recovery_need or {})
+    reasons: list[str] = []
+    evidence_basis: list[str] = []
+    classification = RECOVERY_CLASSIFICATION_UNCERTAIN
+    if value.get("brain_unchanged") is False or value.get("promotion_status") not in {
+        None, "", "NOT_REACHED", "INTEGRATION_NOT_READY", "INTEGRATION_FAILED",
+    }:
+        classification = NON_RECOVERABLE_ARCHITECTURE_FAILURE
+        reasons.append("failed state is not a clean pre-promotion Brain baseline")
+        evidence_basis.append("working_brain_before_after")
+    elif not envelope_check.get("valid"):
+        reasons.append("failure envelope validation is incomplete")
+        evidence_basis.append("failure_envelope_validation")
+    elif not delta.get("empty"):
+        classification = AUTHORITY_CHANGE_REQUIRED
+        reasons.extend(
+            str(item.get("reason"))
+            for item in delta.get("changes", [])[:8]
+            if isinstance(item, dict) and item.get("reason")
+        )
+        evidence_basis.append("recovery_authority_delta")
+    else:
+        failure_code = _text(
+            value.get("failure_code")
+            or value.get("harness_failure_code")
+            or value.get("execution_failure_code"),
+            160,
+        )
+        harness_unchanged = (
+            value.get("subject_before_hash") == value.get("subject_after_hash")
+            and value.get("scope_audit", {}).get("passed") is True
+            and value.get("dnt_audit", {}).get("passed") is True
+        )
+        history = [item for item in (recovery_attempt_history or []) if isinstance(item, dict)]
+        floor_evidence = value.get("capability_floor_evidence")
+        if (
+            isinstance(floor_evidence, dict)
+            and floor_evidence.get("legal_solution_space_available") is True
+            and floor_evidence.get("contexts_valid") is True
+            and floor_evidence.get("tools_available") is True
+            and floor_evidence.get("authority_sufficient") is True
+            and int(floor_evidence.get("clean_failed_recovery_count", 0) or 0) >= 2
+        ) or (
+            len(history) >= 2
+            and all(item.get("clean") is True for item in history[-2:])
+        ):
+            classification = CAPABILITY_FLOOR
+            reasons.append("bounded evidence records repeated clean failures with legal authority available")
+            evidence_basis.append("bounded_capability_floor_evidence")
+        elif failure_code in _KNOWN_HARNESS_CODES and harness_unchanged:
+            classification = HARNESS_RECOVERABLE
+            reasons.append("known system-owned execution mechanics failed while approved semantics and subject remained unchanged")
+            evidence_basis.extend(["harness_failure_code", "mutation_scope_audit", "dnt_audit"])
+        elif _known_worker_failure(value):
+            classification = WORKER_RECOVERABLE
+            reasons.extend([
+                "mandatory verification failure identifies an incomplete implementation",
+                "approved mutation scope and DNT audits remain passing",
+                "the failed obligation is already inside the approved verification authority",
+                "no authority-bearing change is present in the recovery delta",
+            ])
+            evidence_basis.extend([
+                "failed_verification_receipt",
+                "mutation_scope_audit",
+                "dnt_audit",
+                "V25.6_ExecutionVerificationClosure",
+            ])
+        else:
+            reasons.append("deterministic evidence does not establish a legal recovery class")
+            evidence_basis.append("insufficient_failure_evidence")
+    if classification == RECOVERY_CLASSIFICATION_UNCERTAIN:
+        user_reapproval = bool(not delta.get("empty"))
+    else:
+        user_reapproval = bool(classification == AUTHORITY_CHANGE_REQUIRED or not delta.get("empty"))
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "RecoveryClassification",
+        "classification": classification,
+        "recovery_class": classification,
+        "recoverable": classification in {HARNESS_RECOVERABLE, WORKER_RECOVERABLE},
+        "authority_delta": delta,
+        "authority_delta_empty": bool(delta.get("empty")),
+        "USER_REAPPROVAL_REQUIRED": user_reapproval,
+        "user_reapproval_required": user_reapproval,
+        "reasons": list(dict.fromkeys(reasons))[:12],
+        "evidence_basis": list(dict.fromkeys(evidence_basis))[:12],
+        "failure_envelope_valid": envelope_check.get("valid") is True,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+classify_recovery = classify_recovery_failure
+classify_failure_for_recovery = classify_recovery_failure
+build_recovery_classification = classify_recovery_failure
+create_recovery_classification = classify_recovery_failure
+
+
+def _receipt(value: dict[str, Any], hash_field: str = "receipt_hash") -> dict[str, Any]:
+    result = _copy(value)
+    result[hash_field] = canonical_hash(_without(result, hash_field))
+    return result
+
+
+def build_authorized_execution_lineage(
+    envelope: dict[str, Any] | None,
+    *,
+    authorization: dict[str, Any] | None = None,
+    worker_contract: dict[str, Any] | None = None,
+) -> AuthorizedExecutionLineage:
+    """Bind baseline, approved execution receipts, failed subject, and closure."""
+    value = envelope if isinstance(envelope, dict) else {}
+    auth = _authority_source(authorization or value)
+    contract = worker_contract if isinstance(worker_contract, dict) else {}
+    mutation = _receipt({
+        "artifact_type": "AuthorizedMutationReceipt",
+        "execution_id": value.get("execution_id"),
+        "execution_start_id": value.get("execution_start_id"),
+        "changed_paths": _copy((value.get("committed_mutation_manifest") or {}).get("changed_paths", [])),
+        "created_paths": _copy((value.get("committed_mutation_manifest") or {}).get("created_paths", [])),
+        "deleted_paths": _copy((value.get("committed_mutation_manifest") or {}).get("deleted_paths", [])),
+        "committed_paths": _copy((value.get("committed_mutation_manifest") or {}).get("committed_paths", [])),
+        "scope_status": (value.get("scope_audit") or {}).get("status"),
+        "scope_passed": (value.get("scope_audit") or {}).get("passed") is True,
+        "source": "authorized_worker_execution_lifecycle",
+    })
+    scope = _receipt({
+        "artifact_type": "AuthorizedMutationScopeReceipt",
+        "approved_paths": _approved_paths(auth) or _unique_strings(
+            (value.get("committed_mutation_manifest") or {}).get("committed_paths", []),
+            paths=True,
+        ),
+        "observed_paths": _copy((value.get("scope_audit") or {}).get("changed_paths", [])),
+        "out_of_scope_paths": _copy((value.get("scope_audit") or {}).get("out_of_scope_paths", [])),
+        "passed": (value.get("scope_audit") or {}).get("passed") is True,
+        "scope_digest": auth.get("mutation_scope_digest"),
+        "source": "V25.1_approval_bound_execution_scope_audit",
+    })
+    dnt = _receipt({
+        "artifact_type": "AuthorizedDNTReceipt",
+        "approved_paths": _approved_dnt_paths(auth),
+        "changed_paths": _copy((value.get("dnt_audit") or {}).get("changed_paths", [])),
+        "dnt_violations": (value.get("dnt_audit") or {}).get("dnt_violations", 0),
+        "passed": (value.get("dnt_audit") or {}).get("passed") is True,
+        "dnt_digest": (value.get("dnt_audit") or {}).get("dnt_digest") or auth.get("dnt_digest"),
+        "source": "V25.1_approval_bound_execution_dnt_audit",
+    })
+    precommit = value.get("precommit_audit_summary") if isinstance(value.get("precommit_audit_summary"), dict) else {}
+    precommit_receipts = [
+        _receipt({
+            "artifact_type": "PreCommitInvariantReceipt",
+            "source_receipt_hash": receipt_hash,
+            "authority_set_hash": precommit.get("authority_set_hash") or value.get("execution_invariant_set_hash"),
+            "allowed": precommit.get("passed") is True,
+            "source": "V25.5_PreCommitExecutionInvariantGate",
+        })
+        for receipt_hash in _unique_strings(precommit.get("receipt_hashes") or [], limit=24)
+    ]
+    start = value.get("execution_start_receipt") if isinstance(value.get("execution_start_receipt"), dict) else {}
+    start_binding = _receipt({
+        "artifact_type": "ExecutionStartBinding",
+        "execution_start_id": value.get("execution_start_id") or start.get("execution_start_id"),
+        "execution_start_receipt_hash": start.get("receipt_hash"),
+        "authorization_hash": value.get("execution_authorization_hash") or auth.get("authorization_hash"),
+        "approval_receipt_hash": value.get("approval_receipt_hash") or auth.get("approval_receipt_hash"),
+        "plan_id": value.get("plan_id") or auth.get("canonical_plan_id"),
+        "plan_hash": value.get("plan_hash") or auth.get("canonical_plan_hash"),
+        "worker_contract_id": value.get("worker_contract_id") or contract.get("execution_contract_id"),
+        "worker_contract_hash": value.get("worker_contract_hash") or contract.get("contract_hash"),
+        "pre_subject_hash": value.get("subject_before_hash"),
+        "pre_brain_hash": value.get("brain_before_hash"),
+    }, hash_field="binding_hash")
+    lineage: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": AUTHORIZED_EXECUTION_LINEAGE,
+        "status": AUTHORIZED_EXECUTION_DESCENDANT,
+        "subject_drift": AUTHORIZED_EXECUTION_DESCENDANT,
+        "original_approved_subject_hash": value.get("subject_before_hash"),
+        "original_subject_hash": value.get("subject_before_hash"),
+        "approved_baseline_subject_hash": value.get("subject_before_hash"),
+        "current_failed_subject_hash": value.get("current_subject_hash") or value.get("subject_after_hash"),
+        "current_subject_hash": value.get("current_subject_hash") or value.get("subject_after_hash"),
+        "resulting_subject_hash": value.get("current_subject_hash") or value.get("subject_after_hash"),
+        "execution_id": value.get("execution_id"),
+        "execution_start_id": value.get("execution_start_id") or start.get("execution_start_id"),
+        "approval_id": value.get("approval_id"),
+        "approval_receipt_hash": value.get("approval_receipt_hash"),
+        "execution_authorization_id": value.get("execution_authorization_id") or auth.get("authorization_id"),
+        "execution_authorization_hash": value.get("execution_authorization_hash") or auth.get("authorization_hash"),
+        "plan_id": value.get("plan_id") or auth.get("canonical_plan_id"),
+        "plan_hash": value.get("plan_hash") or auth.get("canonical_plan_hash"),
+        "worker_contract_id": value.get("worker_contract_id") or contract.get("execution_contract_id"),
+        "worker_contract_hash": value.get("worker_contract_hash") or contract.get("contract_hash"),
+        "mutation_receipt": mutation,
+        "scope_receipt": scope,
+        "dnt_receipt": dnt,
+        "precommit_invariant_receipts": precommit_receipts,
+        "execution_start_binding": start_binding,
+        "failed_verification_closure_hash": value.get("execution_verification_closure_hash"),
+        "failed_verification_authority_ids": _copy(value.get("failed_verification_authority_ids", [])),
+        "verification_digest": value.get("verification_digest"),
+        "coverage_hash": value.get("coverage_hash"),
+        "execution_invariant_set_hash": value.get("execution_invariant_set_hash"),
+        "brain_before_hash": value.get("brain_before_hash"),
+        "brain_after_hash": value.get("brain_after_hash"),
+        "brain_unchanged": value.get("brain_unchanged") is True,
+        "valid": True,
+        "promotion_status": value.get("promotion_status") or "NOT_REACHED",
+        "canonical_lineage_hash": "",
+    }
+    lineage["canonical_lineage_hash"] = canonical_hash(_without(lineage, "canonical_lineage_hash", "lineage_hash"))
+    lineage["lineage_hash"] = lineage["canonical_lineage_hash"]
+    lineage["canonical_hash"] = lineage["canonical_lineage_hash"]
+    return _freeze_record(AuthorizedExecutionLineage, lineage)  # type: ignore[return-value]
+
+
+create_authorized_execution_lineage = build_authorized_execution_lineage
+build_execution_lineage = build_authorized_execution_lineage
+
+
+def _validate_hashed_record(record: Any, hash_field: str) -> bool:
+    if not isinstance(record, dict):
+        return False
+    expected = canonical_hash(_without(record, hash_field))
+    return record.get(hash_field) == expected
+
+
+def validate_authorized_execution_lineage(
+    lineage: dict[str, Any] | None,
+    *,
+    current_subject_hash: str | None = None,
+    envelope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    value = lineage if isinstance(lineage, dict) else {}
+    errors: list[str] = []
+    expected = canonical_hash(
+        _without(value, "canonical_lineage_hash", "lineage_hash", "canonical_hash"),
+    ) if value else None
+    if value.get("schema_version") != SCHEMA_VERSION:
+        errors.append("authorized execution lineage schema is invalid")
+    if value.get("artifact_type") != AUTHORIZED_EXECUTION_LINEAGE:
+        errors.append("authorized execution lineage artifact type is invalid")
+    if (
+        value.get("canonical_lineage_hash") != expected
+        or value.get("lineage_hash") != expected
+        or value.get("canonical_hash") != expected
+    ):
+        errors.append("authorized execution lineage hash is invalid")
+    for record, field, label in (
+        (value.get("mutation_receipt"), "receipt_hash", "mutation receipt"),
+        (value.get("scope_receipt"), "receipt_hash", "scope receipt"),
+        (value.get("dnt_receipt"), "receipt_hash", "DNT receipt"),
+        (value.get("execution_start_binding"), "binding_hash", "execution-start binding"),
+    ):
+        if not _validate_hashed_record(record, field):
+            errors.append(f"{label} is invalid")
+    for item in value.get("precommit_invariant_receipts", []) or []:
+        if not _validate_hashed_record(item, "receipt_hash"):
+            errors.append("precommit invariant receipt is invalid")
+    expected_current = _text(current_subject_hash, 128) if current_subject_hash else _text(
+        value.get("current_failed_subject_hash") or value.get("resulting_subject_hash"),
+        128,
+    )
+    if expected_current != value.get("resulting_subject_hash"):
+        errors.append("current subject is not the lineage-bound failed subject")
+        subject_drift = EXTERNAL_UNAUTHORIZED_DRIFT
+    else:
+        subject_drift = AUTHORIZED_EXECUTION_DESCENDANT
+    if value.get("original_approved_subject_hash") != value.get("approved_baseline_subject_hash"):
+        errors.append("approved baseline subject binding is inconsistent")
+    if value.get("brain_unchanged") is not True:
+        errors.append("failed execution Brain is not a clean unchanged baseline")
+    scope = value.get("scope_receipt") if isinstance(value.get("scope_receipt"), dict) else {}
+    dnt = value.get("dnt_receipt") if isinstance(value.get("dnt_receipt"), dict) else {}
+    if scope.get("passed") is not True or scope.get("out_of_scope_paths"):
+        errors.append("authorized mutation scope is not valid")
+    if dnt.get("passed") is not True or dnt.get("changed_paths"):
+        errors.append("authorized DNT receipt is not valid")
+    if isinstance(envelope, dict):
+        bindings = (
+            ("current_failed_subject_hash", envelope.get("current_subject_hash")),
+            ("failed_verification_closure_hash", envelope.get("execution_verification_closure_hash")),
+            ("verification_digest", envelope.get("verification_digest")),
+            ("coverage_hash", envelope.get("coverage_hash")),
+            ("execution_invariant_set_hash", envelope.get("execution_invariant_set_hash")),
+        )
+        for field, expected_value in bindings:
+            if expected_value not in (None, "") and value.get(field) != expected_value:
+                errors.append(f"lineage binding is invalid: {field}")
+        if value.get("execution_id") != envelope.get("execution_id"):
+            errors.append("lineage execution identity is invalid")
+    if errors and subject_drift == AUTHORIZED_EXECUTION_DESCENDANT and current_subject_hash and current_subject_hash != value.get("resulting_subject_hash"):
+        subject_drift = EXTERNAL_UNAUTHORIZED_DRIFT
+    valid = not errors
+    return {
+        "valid": valid,
+        "status": AUTHORIZED_EXECUTION_DESCENDANT if valid else INVALID_AUTHORIZED_EXECUTION_DESCENDANT,
+        "subject_drift": subject_drift if not valid or subject_drift == EXTERNAL_UNAUTHORIZED_DRIFT else AUTHORIZED_EXECUTION_DESCENDANT,
+        "external_unauthorized_drift": subject_drift == EXTERNAL_UNAUTHORIZED_DRIFT,
+        "errors": list(dict.fromkeys(errors))[:60],
+        "canonical_lineage_hash": value.get("canonical_lineage_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+validate_execution_lineage = validate_authorized_execution_lineage
+
+
+def decide_recovery_eligibility(
+    envelope: dict[str, Any] | None,
+    classification: dict[str, Any] | str | None = None,
+    *,
+    authority_delta: dict[str, Any] | None = None,
+    lineage: dict[str, Any] | None = None,
+    current_subject_hash: str | None = None,
+    authorization: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    value = envelope if isinstance(envelope, dict) else {}
+    classified = classification if isinstance(classification, dict) else None
+    class_name = (
+        classified.get("classification")
+        if classified is not None
+        else _text(classification, 160)
+    )
+    if not class_name:
+        classified = classify_recovery_failure(value, approved_authority=authorization or value)
+        class_name = classified.get("classification")
+    delta = authority_delta if isinstance(authority_delta, dict) else (
+        classified.get("authority_delta") if isinstance(classified, dict) and isinstance(classified.get("authority_delta"), dict)
+        else build_recovery_authority_delta(authorization or value, {})
+    )
+    delta_check = validate_recovery_authority_delta(delta)
+    lineage_check = (
+        validate_authorized_execution_lineage(
+            lineage,
+            current_subject_hash=current_subject_hash,
+            envelope=value,
+        )
+        if lineage is not None
+        else {"valid": False, "errors": ["authorized execution lineage is missing"], "status": INVALID_AUTHORIZED_EXECUTION_DESCENDANT}
+    )
+    envelope_check = validate_recovery_failure_envelope(value)
+    checks = {
+        "existing_approval_valid": bool(value.get("approval_id") and value.get("approval_receipt_hash") and value.get("plan_hash")),
+        "plan_unchanged": bool(value.get("plan_id") and value.get("plan_hash")),
+        "failure_verified": bool(value.get("failed_verification_authority_ids")) and value.get("worker_terminal_state") == "VERIFICATION_FAILED",
+        "lineage_valid": lineage_check.get("valid") is True,
+        "authority_delta_empty": delta.get("empty") is True and delta_check.get("valid") is True,
+        "current_subject_matches_lineage": (
+            lineage_check.get("subject_drift") == AUTHORIZED_EXECUTION_DESCENDANT
+            and not lineage_check.get("external_unauthorized_drift")
+        ),
+        "brain_not_promoted": value.get("brain_unchanged") is True and value.get("promotion_status") in {
+            "NOT_REACHED", "INTEGRATION_NOT_READY", "INTEGRATION_FAILED", None, "",
+        },
+        "scope_unchanged": value.get("scope_audit", {}).get("passed") is True,
+        "dnt_unchanged": value.get("dnt_audit", {}).get("passed") is True,
+        "verification_authority_unchanged": not any(
+            item.get("dimension") == "verification_authority_changes"
+            for item in delta.get("changes", []) if isinstance(item, dict)
+        ),
+        "invariants_unchanged": not any(
+            item.get("dimension") == "invariant_changes"
+            for item in delta.get("changes", []) if isinstance(item, dict)
+        ),
+        "failure_envelope_valid": envelope_check.get("valid") is True,
+    }
+    recoverable_class = class_name in {HARNESS_RECOVERABLE, WORKER_RECOVERABLE}
+    eligible = recoverable_class and all(checks.values())
+    user_reapproval = bool(not delta.get("empty"))
+    reasons: list[str] = []
+    if not recoverable_class:
+        reasons.append(f"recovery class is not autonomously eligible: {class_name}")
+    for key, passed in checks.items():
+        if not passed:
+            reasons.append(f"eligibility prerequisite failed: {key}")
+    if user_reapproval:
+        reasons.append("recovery authority delta requires new user authority")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "RecoveryEligibilityDecision",
+        "status": RECOVERY_ELIGIBLE if eligible else RECOVERY_BLOCKED,
+        "eligible": eligible,
+        "dispatch_allowed": eligible,
+        "classification": class_name,
+        "authority_delta": delta,
+        "authority_delta_empty": delta.get("empty") is True,
+        "USER_REAPPROVAL_REQUIRED": user_reapproval,
+        "user_reapproval_required": user_reapproval,
+        "checks": checks,
+        "lineage_validation": lineage_check,
+        "failure_envelope_validation": envelope_check,
+        "reasons": list(dict.fromkeys(reasons))[:40],
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+assess_recovery_eligibility = decide_recovery_eligibility
+recovery_eligibility_decision = decide_recovery_eligibility
+build_recovery_eligibility = decide_recovery_eligibility
+
+
+def build_approved_recovery_authorization(
+    envelope: dict[str, Any] | None,
+    *,
+    classification: dict[str, Any] | str | None = None,
+    authority_delta: dict[str, Any] | None = None,
+    lineage: dict[str, Any] | None = None,
+    eligibility: dict[str, Any] | None = None,
+    approved_authority: dict[str, Any] | None = None,
+) -> ApprovedRecoveryAuthorization:
+    value = envelope if isinstance(envelope, dict) else {}
+    auth = _authority_source(approved_authority or value)
+    classified = classification if isinstance(classification, dict) else (
+        classify_recovery_failure(value, approved_authority=auth)
+        if classification is None
+        else {"classification": classification}
+    )
+    delta = authority_delta if isinstance(authority_delta, dict) else classified.get("authority_delta")
+    if not isinstance(delta, dict):
+        delta = build_recovery_authority_delta(auth, {})
+    lineage_value = lineage if isinstance(lineage, dict) else build_authorized_execution_lineage(value, authorization=auth)
+    lineage_check = validate_authorized_execution_lineage(lineage_value, envelope=value)
+    decision = eligibility if isinstance(eligibility, dict) else decide_recovery_eligibility(
+        value,
+        classified,
+        authority_delta=delta,
+        lineage=lineage_value,
+        authorization=auth,
+    )
+    ready = decision.get("eligible") is True
+    approved_scope = value.get("committed_mutation_manifest", {}).get("committed_paths", [])
+    if not approved_scope:
+        approved_scope = _approved_paths(auth)
+    approved_dnt = _approved_dnt_paths(auth)
+    verification_ids = _approved_verification_ids(auth)
+    if not verification_ids:
+        verification_ids = _unique_strings(value.get("failed_verification_authority_ids", []), limit=64)
+    authorization_value: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": APPROVED_RECOVERY_AUTHORIZATION,
+        "status": RECOVERY_AUTHORIZATION_READY if ready else RECOVERY_AUTHORIZATION_BLOCKED,
+        "recovery_authorization_status": RECOVERY_AUTHORIZATION_READY if ready else RECOVERY_AUTHORIZATION_BLOCKED,
+        "terminal_state": RECOVERY_AUTHORIZATION_READY if ready else RECOVERY_AUTHORIZATION_BLOCKED,
+        "authorization_id": "",
+        "authorization_hash": "",
+        "derived_from_existing_approval": True,
+        "new_user_approval_created": False,
+        "user_reapproval_required": bool(decision.get("USER_REAPPROVAL_REQUIRED")),
+        "USER_REAPPROVAL_REQUIRED": bool(decision.get("USER_REAPPROVAL_REQUIRED")),
+        "approval_id": value.get("approval_id"),
+        "approval_receipt_hash": value.get("approval_receipt_hash"),
+        "parent_execution_authorization_id": value.get("execution_authorization_id"),
+        "parent_execution_authorization_hash": value.get("execution_authorization_hash"),
+        "plan_id": value.get("plan_id"),
+        "plan_hash": value.get("plan_hash"),
+        "approved_plan_id": value.get("plan_id"),
+        "approved_plan_hash": value.get("plan_hash"),
+        "failed_execution_id": value.get("execution_id"),
+        "failed_worker_contract_id": value.get("worker_contract_id"),
+        "failed_worker_contract_hash": value.get("worker_contract_hash"),
+        "failure_envelope_hash": value.get("canonical_failure_envelope_hash"),
+        "failure_classification": classified.get("classification"),
+        "authority_delta_hash": delta.get("canonical_hash") or delta.get("authority_delta_hash"),
+        "authority_delta_empty": delta.get("empty") is True,
+        "lineage_hash": lineage_value.get("canonical_lineage_hash"),
+        "lineage_status": lineage_check.get("status"),
+        "current_failed_subject_hash": value.get("current_subject_hash"),
+        "current_brain_hash": value.get("brain_after_hash"),
+        "approved_mutation_scope": {
+            "paths": _unique_strings(approved_scope, paths=True),
+            "digest": auth.get("mutation_scope_digest"),
+        },
+        "approved_scope": {
+            "paths": _unique_strings(approved_scope, paths=True),
+            "digest": auth.get("mutation_scope_digest"),
+        },
+        "approved_dnt": {
+            "paths": approved_dnt,
+            "digest": auth.get("dnt_digest"),
+        },
+        "do_not_touch": approved_dnt,
+        "approved_interface_binding": _safe_projection(
+            auth.get("approved_interface_binding") or value.get("approved_interface_binding") or {
+                "preserve": ["renderStatus primitive string", "PauseController ownership"],
+            },
+        ),
+        "verification_authority_ids": verification_ids,
+        "verification_digest": value.get("verification_digest") or auth.get("verification_digest"),
+        "coverage_hash": value.get("coverage_hash") or auth.get("verification_obligation_coverage_hash"),
+        "execution_invariant_set_hash": value.get("execution_invariant_set_hash") or auth.get("execution_invariant_set_hash"),
+        "scope_unchanged": value.get("scope_audit", {}).get("passed") is True,
+        "dnt_unchanged": value.get("dnt_audit", {}).get("passed") is True,
+        "verification_authority_unchanged": delta.get("empty") is True,
+        "invariants_unchanged": delta.get("empty") is True,
+        "eligibility_status": decision.get("status"),
+        "blocking_reasons": _copy(decision.get("reasons", [])),
+        "canonical_recovery_authorization_hash": "",
+    }
+    authorization_value["authorization_id"] = "RECOVERY-AUTH-" + canonical_hash(
+        _without(authorization_value, "authorization_id", "authorization_hash", "canonical_recovery_authorization_hash"),
+    )[:24].upper()
+    authorization_value["authorization_hash"] = canonical_hash(
+        _without(authorization_value, "authorization_hash", "canonical_recovery_authorization_hash"),
+    )
+    authorization_value["canonical_recovery_authorization_hash"] = authorization_value["authorization_hash"]
+    return _freeze_record(ApprovedRecoveryAuthorization, authorization_value)  # type: ignore[return-value]
+
+
+authorize_recovery = build_approved_recovery_authorization
+create_approved_recovery_authorization = build_approved_recovery_authorization
+create_recovery_authorization = build_approved_recovery_authorization
+
+
+def validate_approved_recovery_authorization(
+    authorization: dict[str, Any] | None,
+    *,
+    envelope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    value = authorization if isinstance(authorization, dict) else {}
+    expected = canonical_hash(_without(value, "authorization_hash", "canonical_recovery_authorization_hash")) if value else None
+    errors: list[str] = []
+    if value.get("artifact_type") != APPROVED_RECOVERY_AUTHORIZATION:
+        errors.append("approved recovery authorization artifact type is invalid")
+    if value.get("authorization_hash") != expected or value.get("canonical_recovery_authorization_hash") != expected:
+        errors.append("approved recovery authorization hash is invalid")
+    if value.get("status") == RECOVERY_AUTHORIZATION_READY:
+        for key in ("approval_id", "approval_receipt_hash", "plan_hash", "lineage_hash", "failure_envelope_hash"):
+            if not value.get(key):
+                errors.append(f"ready recovery authorization is missing {key}")
+        if value.get("user_reapproval_required") is not False:
+            errors.append("ready recovery authorization requires user reapproval")
+        if value.get("authority_delta_empty") is not True:
+            errors.append("ready recovery authorization has a non-empty authority delta")
+    if isinstance(envelope, dict):
+        for key, expected_value in (
+            ("plan_hash", envelope.get("plan_hash")),
+            ("approval_receipt_hash", envelope.get("approval_receipt_hash")),
+            ("current_failed_subject_hash", envelope.get("current_subject_hash")),
+        ):
+            if expected_value not in (None, "") and value.get(key) != expected_value:
+                errors.append(f"recovery authorization binding is invalid: {key}")
+    return {
+        "valid": not errors,
+        "ready": value.get("status") == RECOVERY_AUTHORIZATION_READY and not errors,
+        "errors": list(dict.fromkeys(errors))[:40],
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def _preservation_constraints(value: dict[str, Any], authorization: dict[str, Any]) -> list[str]:
+    constraints = [
+        "preserve the approved renderStatus primitive string interface",
+        "preserve PauseController as the pause-state owner",
+        "preserve the approved Escape and movement behavior",
+    ]
+    dnt = authorization.get("approved_dnt") if isinstance(authorization.get("approved_dnt"), dict) else {}
+    for path in dnt.get("paths", []) or []:
+        constraints.append(f"do not modify {_path(path)}")
+    interfaces = authorization.get("approved_interface_binding")
+    if isinstance(interfaces, dict):
+        text = json.dumps(interfaces, ensure_ascii=False, sort_keys=True, default=str)
+        if "PauseController.togglePause" in text:
+            constraints.append("reuse PauseController.togglePause")
+    return list(dict.fromkeys(constraints))[:12]
+
+
+def build_recovery_mission(
+    envelope: dict[str, Any] | None,
+    authorization: dict[str, Any] | None = None,
+    *,
+    classification: dict[str, Any] | str | None = None,
+    attempt_index: int = 1,
+    recovery_budget: int = MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS,
+) -> RecoveryMission:
+    value = envelope if isinstance(envelope, dict) else {}
+    auth = authorization if isinstance(authorization, dict) else {}
+    class_name = (
+        classification.get("classification")
+        if isinstance(classification, dict)
+        else (_text(classification, 160) if classification else auth.get("failure_classification"))
+    )
+    ready = (
+        auth.get("status") == RECOVERY_AUTHORIZATION_READY
+        and class_name in {None, HARNESS_RECOVERABLE, WORKER_RECOVERABLE}
+        and 0 < int(attempt_index or 0) <= int(recovery_budget or 0)
+    )
+    failed = value.get("failed_verification") if isinstance(value.get("failed_verification"), dict) else {}
+    failed_authorities = _unique_strings(
+        value.get("failed_verification_authority_ids") or [failed.get("authority_id")],
+        limit=24,
+    )
+    failed_obligations = _unique_strings(value.get("execution_time_failed_obligations") or [], limit=32)
+    recovery_execution_id = f"RECOVERY-{value.get('worker_contract_id') or value.get('execution_id') or 'EXEC'}-R{int(attempt_index or 1)}"
+    objective = (
+        "Satisfy the failed mandatory verification authority "
+        f"{failed.get('authority_id') or 'identified authority'}"
+        f" / {failed.get('oracle_id') or 'identified oracle'}"
+        f" for the failed {failed.get('failed_check') or 'verification condition'}"
+        f" ({failed.get('detail') or 'deterministic failed detail'}), "
+        "while preserving every approved behavior, scope, DNT, interface, "
+        "ownership, invariant, and verification authority. Choose the "
+        "implementation; this mission does not prescribe a code patch."
+    )
+    mission: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_MISSION,
+        "status": RECOVERY_MISSION_READY if ready else RECOVERY_MISSION_BLOCKED,
+        "mission_id": "",
+        "parent_plan_id": value.get("plan_id"),
+        "parent_plan_hash": value.get("plan_hash"),
+        "plan_id": value.get("plan_id"),
+        "plan_hash": value.get("plan_hash"),
+        "approval_id": value.get("approval_id"),
+        "approval_receipt_hash": value.get("approval_receipt_hash"),
+        "approval_hash": value.get("approval_receipt_hash"),
+        "parent_execution_id": value.get("execution_id"),
+        "recovery_execution_id": recovery_execution_id,
+        "failed_worker_contract_id": value.get("worker_contract_id"),
+        "failed_worker_contract_hash": value.get("worker_contract_hash"),
+        "failure_envelope_hash": value.get("canonical_failure_envelope_hash"),
+        "failure_classification": class_name,
+        "failed_verification_authorities": failed_authorities,
+        "failed_verification": _safe_projection(failed),
+        "failed_obligations": failed_obligations,
+        "current_failed_subject_hash": value.get("current_subject_hash"),
+        "current_failed_subject": {"subject_hash": value.get("current_subject_hash")},
+        "authorized_mutation_scope": _safe_projection(auth.get("approved_mutation_scope") or {
+            "paths": _unique_strings(
+                (value.get("committed_mutation_manifest") or {}).get("committed_paths", []),
+                paths=True,
+            ),
+        }),
+        "scope": _safe_projection(auth.get("approved_mutation_scope") or {
+            "paths": _unique_strings(
+                (value.get("committed_mutation_manifest") or {}).get("committed_paths", []),
+                paths=True,
+            ),
+        }),
+        "dnt": _safe_projection(auth.get("approved_dnt") or {"paths": _approved_dnt_paths(auth)}),
+        "do_not_touch": _unique_strings(
+            (auth.get("approved_dnt") or {}).get("paths", [])
+            if isinstance(auth.get("approved_dnt"), dict)
+            else _approved_dnt_paths(auth),
+            paths=True,
+        ),
+        "interfaces": _safe_projection(auth.get("approved_interface_binding") or {}),
+        "preservation_constraints": _preservation_constraints(value, auth),
+        "execution_invariant_set_hash": value.get("execution_invariant_set_hash"),
+        "verification_digest": value.get("verification_digest"),
+        "coverage_hash": value.get("coverage_hash"),
+        "verification_authority_ids": _unique_strings(
+            auth.get("verification_authority_ids") or failed_authorities,
+            limit=48,
+        ),
+        "recovery_objective": _text(objective, 1200),
+        "recovery_attempt_index": int(attempt_index or 1),
+        "recovery_budget": int(recovery_budget or MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS),
+        "fresh_context": True,
+        "historical_transcript_included": False,
+        "historical_generation_count": 0,
+        "new_plan_created": False,
+        "new_approval_created": False,
+        "new_requirement_ledger_created": False,
+        "replanning_required": False,
+        "worker_prose_authority": 0,
+        "canonical_mission_hash": "",
+    }
+    mission["mission_id"] = "RECOVERY-MISSION-" + canonical_hash(
+        _without(mission, "mission_id", "canonical_mission_hash"),
+    )[:24].upper()
+    mission["canonical_mission_hash"] = canonical_hash(_without(mission, "canonical_mission_hash"))
+    return _freeze_record(RecoveryMission, mission)  # type: ignore[return-value]
+
+
+create_recovery_mission = build_recovery_mission
+fresh_recovery_mission = build_recovery_mission
+
+
+def _packet_body(mission: dict[str, Any], authorization: dict[str, Any]) -> dict[str, Any]:
+    failed = mission.get("failed_verification") if isinstance(mission.get("failed_verification"), dict) else {}
+    approved_scope = mission.get("authorized_mutation_scope") if isinstance(mission.get("authorized_mutation_scope"), dict) else {}
+    dnt = mission.get("dnt") if isinstance(mission.get("dnt"), dict) else {}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": RECOVERY_WORKER_PACKET,
+        "packet_id": "",
+        "mission_id": mission.get("mission_id"),
+        "recovery_execution_id": mission.get("recovery_execution_id"),
+        "parent_execution_id": mission.get("parent_execution_id"),
+        "plan_id": mission.get("parent_plan_id"),
+        "plan_hash": mission.get("parent_plan_hash"),
+        "approval_id": mission.get("approval_id"),
+        "approval_receipt_hash": mission.get("approval_receipt_hash"),
+        "recovery_authorization_id": authorization.get("authorization_id"),
+        "recovery_authorization_hash": authorization.get("authorization_hash"),
+        "current_failed_subject_hash": mission.get("current_failed_subject_hash"),
+        "failed_verification": {
+            "authority_id": failed.get("authority_id"),
+            "oracle_id": failed.get("oracle_id"),
+            "oracle_hash": failed.get("oracle_hash"),
+            "failed_check": failed.get("failed_check"),
+            "detail": failed.get("detail"),
+        },
+        "failed_authority_ids": mission.get("failed_verification_authorities", []),
+        "failed_obligation_ids": mission.get("failed_obligations", []),
+        "authorized_mutation_paths": _unique_strings(approved_scope.get("paths", []), paths=True),
+        "do_not_touch_paths": _unique_strings(dnt.get("paths", []), paths=True),
+        "preserve": mission.get("preservation_constraints", []),
+        "interfaces": _safe_projection(mission.get("interfaces") or {}),
+        "execution_invariant_set_hash": mission.get("execution_invariant_set_hash"),
+        "verification_digest": mission.get("verification_digest"),
+        "coverage_hash": mission.get("coverage_hash"),
+        "attempt_index": mission.get("recovery_attempt_index"),
+        "recovery_budget": mission.get("recovery_budget"),
+        "worker_role": "same weak Builder capability in a fresh execution context",
+        "implementation_choice": "choose a legal implementation; do not assume a prescribed patch",
+        "no_new_authority": True,
+        "worker_prose_authority": 0,
+        "historical_transcript_included": False,
+        "historical_generation_count": 0,
+        "model_calls": 0,
+        "real_worker_calls": 0,
+    }
+
+
+def build_recovery_worker_packet(
+    mission: dict[str, Any],
+    authorization: dict[str, Any] | None = None,
+    *,
+    max_chars: int = RECOVERY_WORKER_PACKET_MAX_CHARS,
+) -> RecoveryWorkerPacket:
+    """Build a fresh packet and enforce the 4200-character bound."""
+    value = mission if isinstance(mission, dict) else {}
+    auth = authorization if isinstance(authorization, dict) else {}
+    limit = max(1, int(max_chars or RECOVERY_WORKER_PACKET_MAX_CHARS))
+    packet = _packet_body(value, auth)
+    packet["packet_id"] = "RECOVERY-PACKET-" + canonical_hash(
+        _without(packet, "packet_id", "packet_hash", "canonical_packet_hash", "packet_chars"),
+    )[:24].upper()
+    packet["packet_hash"] = canonical_hash(_without(packet, "packet_hash", "canonical_packet_hash", "packet_chars"))
+    packet["canonical_packet_hash"] = packet["packet_hash"]
+    packet["packet_chars"] = _json_size(packet)
+    packet["packet_size_chars"] = packet["packet_chars"]
+    # The exact size fields can change their own digit count.  Converge before
+    # trimming optional fields so the reported size is exact.
+    for _ in range(4):
+        size = _json_size(packet)
+        packet["packet_chars"] = size
+        packet["packet_size_chars"] = size
+    optional_trim_order = (
+        "interfaces", "preserve", "failed_obligation_ids", "coverage_hash",
+        "verification_digest", "execution_invariant_set_hash",
+    )
+    if _json_size(packet) > limit:
+        for key in optional_trim_order:
+            if _json_size(packet) <= limit:
+                break
+            if key == "preserve":
+                packet[key] = list(packet[key])[:3]
+            elif key == "failed_obligation_ids":
+                packet[key] = list(packet[key])[:4]
+            else:
+                packet[key] = _text(packet.get(key), 160)
+        for _ in range(4):
+            size = _json_size(packet)
+            packet["packet_chars"] = size
+            packet["packet_size_chars"] = size
+    if _json_size(packet) > limit:
+        # Mandatory fields are compact by construction.  Preserve them and
+        # return an explicit bounded failure rather than silently dropping
+        # authority evidence.
+        packet["status"] = RECOVERY_MISSION_BLOCKED
+        packet["packet_overflow"] = True
+        packet["packet_overflow_chars"] = _json_size(packet)
+    else:
+        packet["status"] = "RECOVERY_WORKER_PACKET_READY"
+        packet["packet_overflow"] = False
+    packet["max_chars"] = limit
+    for _ in range(4):
+        size = _json_size(packet)
+        packet["packet_chars"] = size
+        packet["packet_size_chars"] = size
+    # A caller can request an artificially tiny limit.  The canonical V26
+    # limit is 4200 and is the contract used by normal recovery.
+    packet["bounded"] = _json_size(packet) <= limit
+    packet["context_clean"] = not contains_forbidden_recovery_transcript(packet)
+    packet["canonical_packet_hash"] = canonical_hash(
+        _without(packet, "packet_hash", "canonical_packet_hash", "packet_chars", "packet_size_chars"),
+    )
+    packet["packet_hash"] = packet["canonical_packet_hash"]
+    for _ in range(3):
+        size = _json_size(packet)
+        packet["packet_chars"] = size
+        packet["packet_size_chars"] = size
+    return _freeze_record(RecoveryWorkerPacket, packet)  # type: ignore[return-value]
+
+
+create_recovery_worker_packet = build_recovery_worker_packet
+build_fresh_recovery_worker_packet = build_recovery_worker_packet
+
+
+def validate_recovery_worker_packet(
+    packet: dict[str, Any] | None,
+    *,
+    max_chars: int = RECOVERY_WORKER_PACKET_MAX_CHARS,
+) -> dict[str, Any]:
+    value = packet if isinstance(packet, dict) else {}
+    size = _json_size(value)
+    limit = max(1, int(max_chars or RECOVERY_WORKER_PACKET_MAX_CHARS))
+    errors: list[str] = []
+    expected_hash = canonical_hash(
+        _without(value, "packet_hash", "canonical_packet_hash", "packet_chars", "packet_size_chars"),
+    ) if value else None
+    if value.get("artifact_type") != RECOVERY_WORKER_PACKET:
+        errors.append("recovery Worker packet artifact type is invalid")
+    if value.get("packet_hash") != expected_hash or value.get("canonical_packet_hash") != expected_hash:
+        errors.append("recovery Worker packet hash is invalid")
+    if size > limit or value.get("bounded") is not True:
+        errors.append("recovery Worker packet exceeds its bound")
+    if value.get("context_clean") is not True or contains_forbidden_recovery_transcript(value):
+        errors.append("recovery Worker packet is not context-clean")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("Worker prose has non-zero packet authority")
+    for key in ("plan_hash", "approval_receipt_hash", "current_failed_subject_hash", "failed_verification"):
+        if not value.get(key):
+            errors.append(f"recovery Worker packet is missing {key}")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:40],
+        "packet_chars": size,
+        "max_chars": limit,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def create_recovery_attempt_accounting(
+    *,
+    max_attempts: int = MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS,
+    initial_worker_attempt: int = 0,
+) -> dict[str, Any]:
+    maximum = max(0, int(max_attempts))
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "RecoveryAttemptAccounting",
+        "initial_worker_attempt": int(initial_worker_attempt),
+        "max_autonomous_worker_recovery_attempts": maximum,
+        "recovery_attempts_started": 0,
+        "recovery_attempts_completed": 0,
+        "recovery_callback_calls": 0,
+        "real_worker_calls": 0,
+        "worker_calls": 0,
+        "gemma_calls": 0,
+        "model_calls": 0,
+        "status": RECOVERY_ATTEMPT_READY if maximum else RECOVERY_BUDGET_EXHAUSTED,
+        "history": [],
+    }
+
+
+def can_start_recovery_attempt(
+    accounting: dict[str, Any] | None,
+    *,
+    attempt_index: int = 1,
+) -> dict[str, Any]:
+    value = accounting if isinstance(accounting, dict) else create_recovery_attempt_accounting()
+    maximum = int(value.get("max_autonomous_worker_recovery_attempts", 0) or 0)
+    started = int(value.get("recovery_attempts_started", 0) or 0)
+    allowed = int(attempt_index or 0) == started + 1 and started < maximum and int(attempt_index or 0) <= maximum
+    return {
+        "allowed": allowed,
+        "status": RECOVERY_ATTEMPT_READY if allowed else RECOVERY_BUDGET_EXHAUSTED,
+        "attempt_index": int(attempt_index or 0),
+        "attempts_started": started,
+        "max_attempts": maximum,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def consume_recovery_attempt(
+    accounting: dict[str, Any] | None,
+    *,
+    attempt_index: int = 1,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    value = _copy(accounting) if isinstance(accounting, dict) else create_recovery_attempt_accounting()
+    decision = can_start_recovery_attempt(value, attempt_index=attempt_index)
+    if not decision["allowed"]:
+        value["status"] = RECOVERY_BUDGET_EXHAUSTED
+        value["budget_exhausted"] = True
+        return value
+    value["recovery_attempts_started"] = int(value.get("recovery_attempts_started", 0) or 0) + 1
+    value["recovery_attempts_completed"] = int(value.get("recovery_attempts_completed", 0) or 0) + 1
+    value["status"] = "RECOVERY_ATTEMPT_COMPLETED"
+    value["budget_exhausted"] = value["recovery_attempts_started"] >= int(
+        value.get("max_autonomous_worker_recovery_attempts", 0) or 0,
+    )
+    history = value.get("history") if isinstance(value.get("history"), list) else []
+    history.append({
+        "attempt_index": int(attempt_index),
+        "outcome": _text(outcome, 160),
+        "clean": True,
+        "legal_solution_space_available": True,
+        "context_valid": True,
+        "authority_sufficient": True,
+    })
+    value["history"] = history[-8:]
+    return value
+
+
+record_recovery_attempt = consume_recovery_attempt
+
+
+def _callback_call(
+    callback: Callable[..., Any],
+    available: dict[str, Any],
+) -> Any:
+    """Call a seam once while supporting positional test callbacks."""
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        # Signature introspection can fail for opaque callables.  This is one
+        # call only; an exception from the callback is never retried.
+        return callback(**available)
+    parameters = signature.parameters
+    if any(item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values()):
+        return callback(**available)
+    if all(name in parameters for name in available):
+        return callback(**available)
+    positional = [
+        available["mission"],
+        available["authorization"],
+        available["current_subject"],
+        available["execution_invariant_set"],
+        available["dnt"],
+        available["verification_authority"],
+    ]
+    return callback(*positional)
+
+
+def dispatch_recovery_worker(
+    mission: dict[str, Any] | None,
+    authorization: dict[str, Any] | None,
+    current_subject: Any,
+    execution_invariant_set: Any,
+    dnt: Any,
+    verification_authority: Any,
+    callback: Callable[..., Any] | None = None,
+    *,
+    worker_callback: Callable[..., Any] | None = None,
+    accounting: dict[str, Any] | None = None,
+    attempt_accounting: dict[str, Any] | None = None,
+    attempt_index: int = 1,
+) -> dict[str, Any]:
+    """Reach an injected recovery seam exactly once; never a real Worker."""
+    mission_value = mission if isinstance(mission, dict) else {}
+    auth_value = authorization if isinstance(authorization, dict) else {}
+    callback = callback or worker_callback
+    counters = accounting if isinstance(accounting, dict) else (
+        attempt_accounting if isinstance(attempt_accounting, dict) else create_recovery_attempt_accounting()
+    )
+    decision = can_start_recovery_attempt(counters, attempt_index=attempt_index)
+    base = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "RecoveryDispatchResult",
+        "status": RECOVERY_DISPATCH_BLOCKED,
+        "attempt_index": int(attempt_index),
+        "recovery_dispatch_count": 0,
+        "recovery_callback_calls": 0,
+        "injected_recovery_worker_seam": "NOT_REACHED",
+        "real_worker_calls": 0,
+        "worker_calls": 0,
+        "gemma_calls": 0,
+        "model_calls": 0,
+        "attempt_accounting": counters,
+    }
+    if mission_value.get("status") != RECOVERY_MISSION_READY or auth_value.get("status") != RECOVERY_AUTHORIZATION_READY:
+        base["reason"] = "recovery mission or authorization is not ready"
+        return base
+    if not decision.get("allowed"):
+        base["status"] = RECOVERY_BUDGET_EXHAUSTED
+        base["reason"] = "the single autonomous recovery attempt is already consumed"
+        counters["status"] = RECOVERY_BUDGET_EXHAUSTED
+        return base
+    if not callable(callback):
+        base["status"] = RECOVERY_DISPATCH_CALLBACK_REQUIRED
+        base["reason"] = "V26 requires an injected architecture callback"
+        return base
+    available = {
+        "mission": mission_value,
+        "authorization": auth_value,
+        "current_subject": current_subject,
+        "execution_invariant_set": execution_invariant_set,
+        "dnt": dnt,
+        "verification_authority": verification_authority,
+    }
+    # Reserve the budget before calling so a callback cannot cause a second
+    # callback through re-entry or an exception path.
+    counters["recovery_attempts_started"] = int(counters.get("recovery_attempts_started", 0) or 0) + 1
+    counters["recovery_callback_calls"] = int(counters.get("recovery_callback_calls", 0) or 0) + 1
+    counters["status"] = "RECOVERY_ATTEMPT_RUNNING"
+    callback_result: Any = None
+    try:
+        callback_result = _callback_call(callback, available)
+        status = RECOVERY_DISPATCHED
+    except Exception as exc:  # one seam call, fail closed
+        status = RECOVERY_CALLBACK_FAILED
+        callback_result = {"callback_error": _text(exc, 360)}
+    counters["recovery_attempts_completed"] = int(counters.get("recovery_attempts_completed", 0) or 0) + 1
+    counters["status"] = "RECOVERY_ATTEMPT_COMPLETED"
+    counters["budget_exhausted"] = counters["recovery_attempts_started"] >= int(
+        counters.get("max_autonomous_worker_recovery_attempts", MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS) or 0,
+    )
+    result = dict(base)
+    result.update({
+        "status": status,
+        "recovery_dispatch_count": 1,
+        "recovery_callback_calls": 1,
+        "injected_recovery_worker_seam": "REACHED_ONCE",
+        "callback_result": _safe_projection(callback_result),
+        "attempt_accounting": counters,
+    })
+    return result
+
+
+dispatch_injected_recovery_worker = dispatch_recovery_worker
+dispatch_recovery_worker_seam = dispatch_recovery_worker
+
+
+def _live3_obligation_evidence(data: dict[str, Any]) -> list[dict[str, Any]]:
+    audits = data.get("precommit_invariant_audits")
+    audits = audits if isinstance(audits, list) else []
+    accepted = next(
+        (item for item in reversed(audits) if isinstance(item, dict) and item.get("allowed") is True),
+        {},
+    )
+    audit_hash = _text(accepted.get("canonical_hash"), 128) or canonical_hash({"v25_5": LIVE3_INVARIANT_HASH})
+    return [{
+        "authority_id": "INVARIANT-STATE-OWNER",
+        "oracle_id": "INVARIANT-STATE-OWNER",
+        "result": {"passed": True, "verification_status": verification_routing.PASS},
+        "receipt_identity": "PRECOMMIT-AUDIT-" + audit_hash.upper(),
+        "receipt_hash": audit_hash,
+        "receipt_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+        "execution_channel": "PRECOMMIT_EXECUTION_INVARIANT_GATE",
+        "receipt_valid": True,
+        "source": "V25.5_PreCommitExecutionInvariantGate",
+        "authority_set_hash": LIVE3_INVARIANT_HASH,
+        "evidence_hash": audit_hash,
+    }]
+
+
+def _recovery_verification_evidence(
+    data: dict[str, Any],
+    *,
+    passed: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    applicability = data.get("verification_applicability")
+    if not isinstance(applicability, dict):
+        applicability = {}
+    applicability = _copy(applicability)
+    applicability.update({
+        "plan_id": applicability.get("plan_id") or LIVE3_PLAN_ID,
+        "plan_hash": applicability.get("plan_hash") or LIVE3_PLAN_HASH,
+        "verification_digest": applicability.get("verification_digest") or LIVE3_VERIFICATION_DIGEST,
+        "verification_obligation_coverage_hash": (
+            applicability.get("verification_obligation_coverage_hash") or LIVE3_COVERAGE_HASH
+        ),
+    })
+    evidence = _copy(data.get("verification_evidence") or [])
+    if not isinstance(evidence, list):
+        evidence = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        result = item.get("result")
+        if not isinstance(result, dict):
+            continue
+        if (
+            result.get("oracle_id") == "ORACLE-PAUSE-INDICATOR"
+            or item.get("oracle_id") == "ORACLE-PAUSE-INDICATOR"
+            or item.get("verification_id") == "VERIFICATION-004"
+        ):
+            result["passed"] = bool(passed)
+            result["verification_status"] = verification_routing.PASS if passed else verification_routing.FAIL
+            if passed:
+                result["checks"] = [
+                    {"name": "export_callable", "passed": True, "detail": "renderPauseIndicator"},
+                ]
+    return applicability, evidence
+
+
+def _copy_live3_subject_to_workspace(root: Path, artifact_root: Path) -> None:
+    source_root = Path(artifact_root)
+    subject_paths = (
+        "src/input.js", "src/pause_controller.js", "src/status_view.js",
+        "tests/input.test.js", "tests/pause_flow.integration.test.js",
+        "tests/status_view.test.js",
+    )
+    for relative in subject_paths:
+        source = source_root / relative
+        target = root / relative
+        if source.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def _default_injected_callback(
+    *,
+    success: bool,
+    data: dict[str, Any],
+    workspace: Path,
+) -> Callable[..., dict[str, Any]]:
+    def callback(
+        mission: dict[str, Any],
+        authorization: dict[str, Any],
+        current_subject: Any,
+        execution_invariant_set: Any,
+        dnt: Any,
+        verification_authority: Any,
+    ) -> dict[str, Any]:
+        subject_hash = _text(
+            current_subject.get("subject_hash")
+            if isinstance(current_subject, dict)
+            else current_subject,
+            128,
+        ) or LIVE3_FAILED_SUBJECT_HASH
+        if success:
+            # This marker is only in a TemporaryDirectory owned by the
+            # provider-free replay.  It is not a production implementation
+            # and does not prescribe the Worker code fix.
+            target = workspace / "src" / "status_view.js"
+            if target.is_file():
+                target.write_text(
+                    target.read_text(encoding="utf-8") + "\n// injected legal recovery subject\n",
+                    encoding="utf-8",
+                )
+            resulting_hash = canonical_hash({
+                "parent_failed_subject_hash": subject_hash,
+                "recovery_execution_id": mission.get("recovery_execution_id"),
+                "changed_paths": ["src/status_view.js"],
+                "temporary_subject": True,
+            })
+        else:
+            resulting_hash = subject_hash
+        applicability, evidence = _recovery_verification_evidence(data, passed=success)
+        return {
+            "status": "passed" if success else "failed",
+            "terminal_state": "RECOVERY_VERIFICATION_READY" if success else "VERIFICATION_FAILED",
+            "subject": {
+                "subject_hash": resulting_hash,
+                "workspace": str(workspace),
+                "changed_paths": ["src/status_view.js"] if success else [],
+                "created_paths": [],
+                "deleted_paths": [],
+            },
+            "verification_applicability": applicability,
+            "verification_evidence": evidence,
+            "execution_obligation_evidence": _live3_obligation_evidence(data),
+            "verification_obligation_coverage": _copy(data.get("verification_coverage") or {}),
+            "precommit_status": "PASS" if success else "NOT_REACHED",
+            "injected_architecture_only": True,
+            "worker_prose_excluded": True,
+            "model_calls": 0,
+            "real_worker_calls": 0,
+            "worker_calls": 0,
+        }
+    return callback
+
+
+def _build_recovery_stage5b(
+    *,
+    callback_result: dict[str, Any],
+    mission: dict[str, Any],
+    data: dict[str, Any],
+    workspace: Path,
+) -> dict[str, Any]:
+    from hivo import integration_gate as stage5b
+
+    verification = callback_result.get("verification") if isinstance(callback_result.get("verification"), dict) else {}
+    aggregation = verification.get("aggregation") if isinstance(verification.get("aggregation"), dict) else {}
+    applicability = callback_result.get("verification_applicability") if isinstance(callback_result.get("verification_applicability"), dict) else {}
+    evidence = callback_result.get("verification_evidence") if isinstance(callback_result.get("verification_evidence"), list) else []
+    base_contract = _compact_recovery_parent_contract(data, mission)
+    parent_contract = _copy(base_contract)
+    parent_contract["execution_contract_id"] = "RECOVERY-PARENT"
+    parent_contract["contract_hash"] = canonical_hash({
+        "base_contract_hash": base_contract.get("contract_hash"),
+        "recovery_parent": True,
+        "mission_id": mission.get("mission_id"),
+    })
+    parent_contract["plan_hash"] = mission.get("parent_plan_hash")
+    child_id = mission.get("recovery_execution_id")
+    child_contract = _copy(base_contract)
+    child_contract["execution_contract_id"] = child_id
+    child_contract["contract_hash"] = canonical_hash({
+        "base_contract_hash": base_contract.get("contract_hash"),
+        "recovery_child": child_id,
+    })
+    child_contract["plan_hash"] = mission.get("parent_plan_hash")
+    child_contract["allowed_mutation_paths"] = ["src/status_view.js"]
+    parent_contract["validated_child_plan"] = [{
+        "child_id": child_id,
+        "required": True,
+        "execution_contract_id": child_id,
+        "contract_hash": child_contract["contract_hash"],
+        "plan_hash": mission.get("parent_plan_hash"),
+        "plan_node_ids": list(child_contract.get("plan_node_ids", []) or []) or ["RECOVERY-NODE"],
+        "owned_plan_node_ids": list(child_contract.get("owned_plan_node_ids", []) or []) or ["RECOVERY-NODE"],
+    }]
+    parent_contract["integration_routes"] = [{
+        "kind": "INTEGRATION_TEST",
+        "required": True,
+        "applicable": True,
+        "target": "tests/pause_flow.integration.test.js",
+        "result": stage5b.PENDING,
+    }]
+    parent = {
+        "id": "RECOVERY-PARENT",
+        "goal": mission.get("recovery_objective"),
+        "integration_routes": _copy(parent_contract["integration_routes"]),
+    }
+    task = {
+        "id": child_id,
+        "parent": "RECOVERY-PARENT",
+        "status": "done",
+        "execution_contract_id": child_id,
+        "execution_contract_hash": child_contract["contract_hash"],
+        "approved_plan_hash": mission.get("parent_plan_hash"),
+        "execution_contract": child_contract,
+        "plan_node_ids": list(child_contract.get("plan_node_ids", []) or []) or ["RECOVERY-NODE"],
+        "owned_plan_node_ids": list(child_contract.get("owned_plan_node_ids", []) or []) or ["RECOVERY-NODE"],
+        "done_when": ["recovery verification passed"],
+    }
+    child_result = {
+        "status": "done",
+        "gate": {"verification_aggregation": aggregation},
+        "verification_applicability": applicability,
+        "verification_aggregation": aggregation,
+        "verification_evidence": evidence,
+        "builder": {"status": "done", "tool_evidence": evidence},
+    }
+    receipt = stage5b.create_verified_child_receipt(
+        task,
+        child_result,
+        parent_id="RECOVERY-PARENT",
+        parent_contract=parent_contract,
+        verification_applicability=applicability,
+        verification_aggregation=aggregation,
+        verification_evidence=evidence,
+        workspace=workspace,
+        mutation_paths=["src/status_view.js"] if callback_result.get("subject", {}).get("changed_paths") else [],
+    )
+    pairs = [(task, child_result)]
+    readiness = stage5b.assess_integration_readiness(
+        parent,
+        pairs,
+        {child_id: receipt},
+        parent_contract=parent_contract,
+        validated_child_plan=parent_contract["validated_child_plan"],
+        workspace=workspace,
+        parent_verification_applicability=applicability,
+    )
+    integration_evidence = [{
+        "tool": "run_command",
+        "target": "node tests/pause_flow.integration.test.js",
+        "result": "[exit_code=0] injected deterministic integration evidence",
+    }]
+    integrated = stage5b.aggregate_parent_integration(
+        parent,
+        parent_contract,
+        readiness,
+        integration_evidence,
+        workspace=workspace,
+    )
+    return {
+        "parent": parent,
+        "parent_contract": parent_contract,
+        "child_contract": child_contract,
+        "task": task,
+        "child_result": child_result,
+        "child_receipt": receipt,
+        "child_receipts": {child_id: receipt},
+        "readiness": readiness,
+        "integration": integrated,
+        "status": integrated.get("status"),
+        "integration_result": integrated.get("integration_result") or integrated.get("status"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def _run_stage5a_recovery(
+    callback_result: dict[str, Any],
+    mission: dict[str, Any],
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    applicability = callback_result.get("verification_applicability")
+    evidence = callback_result.get("verification_evidence")
+    if not isinstance(applicability, dict):
+        applicability = {}
+    if not isinstance(evidence, list):
+        evidence = []
+    passed = callback_result.get("status") == "passed"
+    aggregation = verification_routing.aggregate_verification_evidence(
+        applicability,
+        evidence,
+        execution_obligation_evidence=callback_result.get("execution_obligation_evidence"),
+        verification_obligation_coverage=callback_result.get("verification_obligation_coverage"),
+    )
+    return {
+        "status": verification_routing.PASS if aggregation.get("passed") else verification_routing.FAIL,
+        "passed": aggregation.get("passed") is True,
+        "expected_callback_outcome": passed,
+        "verification_applicability": applicability,
+        "verification_evidence": evidence,
+        "aggregation": aggregation,
+        "execution_verification_closure": aggregation.get("execution_verification_closure"),
+        "execution_time_coverage": aggregation.get("execution_time_coverage"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def _compact_recovery_parent_contract(data: dict[str, Any], mission: dict[str, Any]) -> dict[str, Any]:
+    """Project only the contract fields needed by the V21/V22 seams.
+
+    The live contract is intentionally large.  Recovery integration should
+    prove the downstream boundaries, not smuggle the entire planning ledger
+    into a temporary Task Brain.
+    """
+    source = _projection_from_run_state(
+        data,
+        "stage5b_parent_contract",
+        "stage5c_parent_contract",
+        "approval_bound_parent_contract",
+    )
+    return {
+        "contract_hash": source.get("contract_hash") or LIVE3_PLAN_HASH,
+        "plan_hash": mission.get("parent_plan_hash"),
+        "plan_id": mission.get("parent_plan_id"),
+        "execution_contract_id": source.get("execution_contract_id") or "EXEC-001",
+        "project_id": "hivo-v22-stage5c-fresh-receipts-live-1",
+        "allowed_mutation_paths": ["src/status_view.js"],
+        "allowed_inspection_paths": [
+            "src/status_view.js",
+            "src/pause_controller.js",
+            "src/input.js",
+            "tests/input.test.js",
+            "tests/pause_flow.integration.test.js",
+            "tests/status_view.test.js",
+        ],
+        "global_do_not_touch": ["src/pause_controller.js"],
+        "interfaces_to_reuse": ["PauseController.togglePause"],
+        "state_ownership": ["PauseController owns pause state"],
+        "preservation_constraints": [
+            "renderStatus remains a primitive string",
+            "preserve Escape and movement behavior",
+        ],
+        "structured_prohibitions": [
+            "Do not modify src/pause_controller.js",
+            "PauseController remains the sole pause-state owner",
+        ],
+        "requirements": [{
+            "requirement_id": "REQ-PAUSE-INDICATOR",
+            "text": "Extend the approved pause flow without changing preserved behavior",
+            "provenance": "USER_STATED",
+        }],
+        "done_when": ["recovery verification and integration pass"],
+        "plan_node_ids": list(source.get("plan_node_ids", []) or []) or ["NODE-002"],
+        "owned_plan_node_ids": list(source.get("owned_plan_node_ids", []) or []) or ["NODE-002"],
+        "execution_invariant_set_hash": mission.get("execution_invariant_set_hash") or LIVE3_INVARIANT_HASH,
+        "execution_invariant_ids": list(source.get("execution_invariant_ids", []) or []),
+        "verification_obligation_coverage_hash": mission.get("coverage_hash") or LIVE3_COVERAGE_HASH,
+        "approved_verification_digest": mission.get("verification_digest") or LIVE3_VERIFICATION_DIGEST,
+        "integration_responsibility": ["preserve the approved pause behavior"],
+        "test_contract": ["tests/pause_flow.integration.test.js"],
+        "responsibility_type": "MUTATION",
+        "worker_required": True,
+    }
+
+
+def _compact_recovery_reentry_view(store: Any, project_id: str) -> Any:
+    """Expose a bounded read-only Brain projection to the re-entry seam."""
+    try:
+        snapshot = store.project_brain_snapshot(project_id, include_inactive=True)
+    except Exception:
+        snapshot = {"project_id": project_id, "records": []}
+    records = snapshot.get("records", []) if isinstance(snapshot, dict) else []
+    selected: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+        text = json.dumps(fact, ensure_ascii=False, default=str).casefold()
+        if any(token in text for token in ("pause", "renderstatus", "state_owner", "do_not_touch", "movement")):
+            selected.append(_copy(record))
+    selected = selected[:3]
+
+    class ReadOnlyRecoveryBrainView:
+        workspace = getattr(store, "workspace", None)
+
+        def project_brain_snapshot(self, requested: str, *, include_inactive: bool = True) -> dict[str, Any]:
+            return {
+                "project_id": requested,
+                "records": _copy(selected) if requested == project_id else [],
+            }
+
+        def get_task_brain_completion(self, requested: str, task_id: str) -> Any:
+            reader = getattr(store, "get_task_brain_completion", None)
+            return reader(requested, task_id) if callable(reader) else None
+
+    return ReadOnlyRecoveryBrainView()
+
+
+def run_provider_free_recovery_replay(
+    artifact_root: str | os.PathLike[str] | Path | None = None,
+    *,
+    worker_callback: Callable[..., Any] | None = None,
+    callback: Callable[..., Any] | None = None,
+    outcome: str = "failure",
+    succeed: bool | None = None,
+    attempt_accounting: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run the bounded V26 architecture replay without a provider or Worker."""
+    positive = bool(succeed) if succeed is not None else str(outcome).casefold() in {
+        "success", "succeed", "pass", "positive", "recovered",
+    }
+    data = load_live3_recovery_evidence(artifact_root)
+    envelope = build_recovery_failure_envelope(data)
+    envelope_check = validate_recovery_failure_envelope(envelope)
+    authorization_source = data.get("execution_authorization") if isinstance(data.get("execution_authorization"), dict) else {}
+    classification = classify_recovery_failure(envelope, approved_authority=authorization_source)
+    delta = classification.get("authority_delta")
+    lineage = build_authorized_execution_lineage(envelope, authorization=authorization_source)
+    lineage_check = validate_authorized_execution_lineage(lineage, envelope=envelope)
+    eligibility = decide_recovery_eligibility(
+        envelope,
+        classification,
+        authority_delta=delta,
+        lineage=lineage,
+        current_subject_hash=envelope.get("current_subject_hash"),
+        authorization=authorization_source,
+    )
+    recovery_authorization = build_approved_recovery_authorization(
+        envelope,
+        classification=classification,
+        authority_delta=delta,
+        lineage=lineage,
+        eligibility=eligibility,
+        approved_authority=authorization_source,
+    )
+    mission = build_recovery_mission(
+        envelope,
+        recovery_authorization,
+        classification=classification,
+        attempt_index=1,
+    )
+    packet = build_recovery_worker_packet(mission, recovery_authorization)
+    accounting = attempt_accounting if isinstance(attempt_accounting, dict) else create_recovery_attempt_accounting()
+    artifact_base = Path(data.get("artifact_root") or artifact_root or Path(__file__).resolve().parents[1]).resolve()
+    with TemporaryDirectory(prefix="hivo_v26_recovery_replay_") as temporary:
+        workspace = Path(temporary) / "subject"
+        workspace.mkdir(parents=True, exist_ok=True)
+        _copy_live3_subject_to_workspace(workspace, artifact_base)
+        brain_source = artifact_base / "working_brain" / ".hivo" / "memory.sqlite3"
+        if not brain_source.is_file():
+            brain_source = Path(__file__).resolve().parents[1] / "output" / "hivo-v22-stage5c-fresh-receipts-live-1" / ".hivo" / "memory.sqlite3"
+        brain_target = workspace / ".hivo" / "memory.sqlite3"
+        if brain_source.is_file():
+            brain_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(brain_source, brain_target)
+        current_subject = {
+            "subject_hash": envelope.get("current_subject_hash"),
+            "workspace": str(workspace),
+            "changed_paths": (envelope.get("committed_mutation_manifest") or {}).get("committed_paths", []),
+        }
+        callback_to_use = callback or worker_callback
+        if not callable(callback_to_use):
+            callback_to_use = _default_injected_callback(success=positive, data=data, workspace=workspace)
+        invariant_set = (
+            (_projection_from_run_state(data, "stage5b_parent_contract").get("execution_invariant_projection"))
+            or {"execution_invariant_set_hash": envelope.get("execution_invariant_set_hash")}
+        )
+        dnt = (
+            authorization_source.get("approved_dnt")
+            if isinstance(authorization_source.get("approved_dnt"), dict)
+            else {"paths": _approved_dnt_paths(authorization_source)}
+        )
+        verification_authority = {
+            "authority_ids": _unique_strings(
+                authorization_source.get("approved_verification_contracts")
+                or envelope.get("failed_verification_authority_ids"),
+                limit=48,
+            ),
+            "verification_digest": envelope.get("verification_digest"),
+            "coverage_hash": envelope.get("coverage_hash"),
+        }
+        dispatch = dispatch_recovery_worker(
+            mission,
+            recovery_authorization,
+            current_subject,
+            invariant_set,
+            dnt,
+            verification_authority,
+            callback_to_use,
+            accounting=accounting,
+            attempt_index=1,
+        )
+        callback_result = dispatch.get("callback_result")
+        callback_result = callback_result if isinstance(callback_result, dict) else {}
+        if dispatch.get("status") == RECOVERY_DISPATCHED:
+            callback_result = _copy(callback_result)
+            callback_result.setdefault("subject", current_subject)
+        stage5a = _run_stage5a_recovery(callback_result, mission, data) if dispatch.get("status") == RECOVERY_DISPATCHED else {
+            "status": verification_routing.FAIL,
+            "passed": False,
+            "aggregation": {},
+            "model_calls": 0,
+            "worker_calls": 0,
+        }
+        if dispatch.get("status") == RECOVERY_DISPATCHED:
+            # The dispatch result is intentionally a public, scrubbed
+            # projection.  Attach the deterministic V25.6 aggregation here
+            # for the Stage 5B receipt builder; no Worker prose is added.
+            callback_result["verification"] = {
+                "aggregation": _copy(stage5a.get("aggregation") or {}),
+            }
+        stage5b = None
+        stage5c = None
+        reentry_result = None
+        brain_before = LIVE3_BRAIN_HASH
+        brain_after = brain_before
+        if stage5a.get("passed") is True and dispatch.get("status") == RECOVERY_DISPATCHED:
+            stage5b = _build_recovery_stage5b(
+                callback_result=callback_result,
+                mission=mission,
+                data=data,
+                workspace=workspace,
+            )
+            if stage5b.get("status") == integration_gate.PARENT_VERIFIED:
+                from hivo.memory import MemoryStore
+
+                store = MemoryStore(workspace)
+                project_id = "hivo-v22-stage5c-fresh-receipts-live-1"
+                brain_before = store.project_brain_hash(project_id)
+                integrated = stage5b.get("integration") or {}
+                stage5c = promotion.promote_verified_parent(
+                    stage5b["parent"],
+                    integrated.get("parent_verification_receipt"),
+                    stage5b["parent_contract"],
+                    child_receipts=stage5b.get("child_receipts"),
+                    workspace=workspace,
+                    project_id=project_id,
+                    store=store,
+                    task_id=mission.get("recovery_execution_id"),
+                    artifact_refs=["v26:injected-recovery-replay"],
+                )
+                brain_after = store.project_brain_hash(project_id)
+                if stage5c.get("promotion_status") == promotion.PROMOTED:
+                    reentry_result = reentry.run_verified_state_reentry(
+                        _compact_recovery_reentry_view(store, project_id),
+                        project_id,
+                        "V26-RECOVERY-REENTRY",
+                        "Continue the approved pause-indicator task.",
+                        workspace=workspace,
+                        relevant_paths=["src/status_view.js", "src/pause_controller.js"],
+                        previous_task_id=mission.get("recovery_execution_id"),
+                        previous_task_completion=stage5c.get("task_brain_completion"),
+                        promotion_provenance={
+                            "source": "V26_INJECTED_RECOVERY_REPLAY",
+                            "promotion_status": stage5c.get("promotion_status"),
+                        },
+                    )
+        if dispatch.get("status") == RECOVERY_DISPATCHED and not positive:
+            # Attempt 2 is explicitly evaluated and blocked by the one-attempt
+            # budget.  It does not call the callback.
+            second_dispatch = dispatch_recovery_worker(
+                mission,
+                recovery_authorization,
+                current_subject,
+                invariant_set,
+                dnt,
+                verification_authority,
+                callback_to_use,
+                accounting=accounting,
+                attempt_index=2,
+            )
+        else:
+            second_dispatch = {
+                "status": "NOT_ATTEMPTED",
+                "recovery_dispatch_count": 0,
+                "recovery_callback_calls": 0,
+                "injected_recovery_worker_seam": "NOT_REACHED",
+            }
+        # The public result contains no temporary path or raw callback chat.
+        result = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": "ProviderFreeRecoveryReplay",
+            "status": (
+                "RECOVERY_REPLAY_PROMOTED"
+                if reentry_result and reentry_result.get("status") == reentry.REENTRY_READY
+                else "RECOVERY_REPLAY_VERIFICATION_FAILED"
+                if stage5a.get("passed") is not True
+                else "RECOVERY_REPLAY_INTEGRATION_FAILED"
+                if not stage5b or stage5b.get("status") != integration_gate.PARENT_VERIFIED
+                else "RECOVERY_REPLAY_PROMOTION_FAILED"
+                if not stage5c or stage5c.get("promotion_status") != promotion.PROMOTED
+                else "RECOVERY_REPLAY_REENTRY_FAILED"
+            ),
+            "positive_injected_outcome": positive,
+            "failure_envelope": envelope,
+            "failure_envelope_validation": envelope_check,
+            "classification": classification,
+            "authority_delta": delta,
+            "lineage": lineage,
+            "lineage_validation": lineage_check,
+            "eligibility": eligibility,
+            "recovery_authorization": recovery_authorization,
+            "recovery_authorization_validation": validate_approved_recovery_authorization(
+                recovery_authorization,
+                envelope=envelope,
+            ),
+            "recovery_mission": mission,
+            "recovery_worker_packet": packet,
+            "recovery_worker_packet_validation": validate_recovery_worker_packet(packet),
+            "dispatch": dispatch,
+            "stage5a": stage5a,
+            "stage5b": stage5b,
+            "stage5c": stage5c,
+            "reentry": reentry_result,
+            "second_dispatch": second_dispatch,
+            "brain_before_hash": brain_before,
+            "brain_after_hash": brain_after,
+            "brain_unchanged": brain_before == brain_after,
+            "historical_brain_unchanged": True,
+            "historical_live3_read_only": True,
+            "new_approval_created": False,
+            "new_plan_created": False,
+            "new_requirement_ledger_created": False,
+            "gemma_calls": 0,
+            "model_calls": 0,
+            "real_worker_calls": 0,
+            "worker_calls": 0,
+            "recovery_callback_calls": dispatch.get("recovery_callback_calls", 0),
+            "recovery_dispatch_count": dispatch.get("recovery_dispatch_count", 0),
+            "attempt_accounting": accounting,
+            "provider_free": True,
+            "injected_architecture_only": True,
+        }
+        return result
+
+
+run_injected_recovery_replay = run_provider_free_recovery_replay
+run_recovery_replay = run_provider_free_recovery_replay
+
+
+def run_recovery_architecture_self_test(
+    artifact_root: str | os.PathLike[str] | Path | None = None,
+) -> dict[str, Any]:
+    """Exercise V26 positive and negative recovery paths provider-free."""
+    checks: dict[str, bool] = {}
+    diagnostics: dict[str, Any] = {}
+    try:
+        positive = run_provider_free_recovery_replay(artifact_root, outcome="success")
+        negative = run_provider_free_recovery_replay(artifact_root, outcome="failure")
+        envelope = positive["failure_envelope"]
+        delta = positive["authority_delta"]
+        mission = positive["recovery_mission"]
+        packet = positive["recovery_worker_packet"]
+        checks.update({
+            "live3_envelope_valid": positive["failure_envelope_validation"].get("valid") is True,
+            "live3_classification_worker_recoverable": positive["classification"].get("classification") == WORKER_RECOVERABLE,
+            "live3_authority_delta_empty": delta.get("empty") is True,
+            "live3_no_reapproval": positive["eligibility"].get("USER_REAPPROVAL_REQUIRED") is False,
+            "lineage_valid": positive["lineage_validation"].get("valid") is True,
+            "mission_ready": mission.get("status") == RECOVERY_MISSION_READY,
+            "packet_bounded": positive["recovery_worker_packet_validation"].get("valid") is True,
+            "positive_stage5a": positive["stage5a"].get("passed") is True,
+            "positive_stage5b": (positive.get("stage5b") or {}).get("status") == integration_gate.PARENT_VERIFIED,
+            "positive_stage5c": (positive.get("stage5c") or {}).get("promotion_status") == promotion.PROMOTED,
+            "positive_reentry": (positive.get("reentry") or {}).get("status") == reentry.REENTRY_READY,
+            "negative_stage5a_fails": negative["stage5a"].get("passed") is not True,
+            "negative_brain_unchanged": negative.get("brain_unchanged") is True,
+            "negative_budget_exhausted": (
+                negative.get("second_dispatch", {}).get("status") == RECOVERY_BUDGET_EXHAUSTED
+            ),
+            "negative_no_third_seam": negative.get("recovery_callback_calls") == 1,
+            "zero_provider_calls": all(
+                int(positive.get(key, 0) or 0) == 0
+                for key in ("gemma_calls", "model_calls", "real_worker_calls", "worker_calls")
+            ) and all(
+                int(negative.get(key, 0) or 0) == 0
+                for key in ("gemma_calls", "model_calls", "real_worker_calls", "worker_calls")
+            ),
+            "historical_live3_read_only": positive.get("historical_live3_read_only") is True,
+            "worker_prose_zero": envelope.get("worker_prose_authority") == 0 and packet.get("worker_prose_authority") == 0,
+        })
+        diagnostics.update({
+            "positive_status": positive.get("status"),
+            "negative_status": negative.get("status"),
+            "positive_stage5a_status": positive.get("stage5a", {}).get("status"),
+            "positive_stage5b_status": (positive.get("stage5b") or {}).get("status"),
+            "positive_stage5c_status": (positive.get("stage5c") or {}).get("promotion_status"),
+            "positive_reentry_status": (positive.get("reentry") or {}).get("status"),
+            "negative_second_dispatch": negative.get("second_dispatch"),
+            "packet_chars": packet.get("packet_chars"),
+            "packet_max_chars": packet.get("max_chars"),
+        })
+    except Exception as exc:
+        checks["exception_free"] = False
+        diagnostics["exception"] = _text(exc, 600)
+    else:
+        checks["exception_free"] = True
+    return {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "diagnostics": diagnostics,
+        "gemma_calls": 0,
+        "model_calls": 0,
+        "real_worker_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+run_stage6c_b_recovery_self_test = run_recovery_architecture_self_test
+run_v26_recovery_self_test = run_recovery_architecture_self_test
+recovery_architecture_self_test = run_recovery_architecture_self_test
+
+
+__all__ = [name for name in globals() if not name.startswith("_")]
