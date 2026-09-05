@@ -2527,12 +2527,84 @@ _RECOVERY_MUTATION_MECHANISM_NAMES = frozenset({
 })
 
 
+RECOVERY_TOOL_INTENT_ACTIVE_MUTATION = "ACTIVE_MUTATION_MECHANISM"
+RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION = "SUPPRESSED_STRATEGY_MUTATION_MECHANISM"
+RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION = "ACTIVE_NON_MUTATION_TOOL"
+RECOVERY_TOOL_INTENT_UNAVAILABLE = "UNAVAILABLE_OR_UNKNOWN_TOOL"
+
+
 def is_recovery_mutation_mechanism(value: Any) -> bool:
     """Return whether a Worker-selected tool is a recognized mutation path."""
     name = _strategy_tool_name(value).casefold()
     if name in _RECOVERY_MUTATION_MECHANISM_NAMES:
         return True
     return isinstance(value, dict) and _strategy_is_mutation_tool(value)
+
+
+def classify_recovery_tool_intent(
+    value: Any,
+    *,
+    active_tool_schema: Iterable[Any] | None = None,
+    suppressed_mutation_mechanisms: Iterable[Any] | None = None,
+    known_mutation_mechanisms: Iterable[Any] | None = None,
+) -> str:
+    """Classify a Worker tool request using the current runtime projection.
+
+    The legacy ``is_recovery_mutation_mechanism`` predicate answers a static
+    question about a tool name.  V26.6 reset semantics need a runtime answer:
+    a name is an active mutation only when it is present in the current
+    model-visible schema.  A missing name can still be a suppressed mutation
+    only when the current strategy explicitly records that known mutation
+    mechanism as suppressed.  Everything else is unavailable/unknown.
+    """
+    name = _strategy_tool_name(value).casefold()
+    if not name:
+        return RECOVERY_TOOL_INTENT_UNAVAILABLE
+
+    active_matches = [
+        schema for schema in _strategy_schema_list(active_tool_schema)
+        if _strategy_tool_name(schema).casefold() == name
+    ]
+    if active_matches:
+        if any(_strategy_is_mutation_tool(schema) for schema in active_matches):
+            return RECOVERY_TOOL_INTENT_ACTIVE_MUTATION
+        return RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION
+
+    known_names = set(_RECOVERY_MUTATION_MECHANISM_NAMES)
+    known_candidates = _strategy_schema_list(known_mutation_mechanisms)
+    if known_mutation_mechanisms is not None and not known_candidates:
+        if isinstance(known_mutation_mechanisms, (str, bytes)):
+            known_candidates = [known_mutation_mechanisms]
+        else:
+            try:
+                known_candidates = list(known_mutation_mechanisms)
+            except TypeError:
+                known_candidates = [known_mutation_mechanisms]
+    for candidate in known_candidates:
+        candidate_name = _strategy_tool_name(candidate).casefold()
+        # This argument is already an authoritative mutation-mechanism
+        # projection from the active strategy.  Keep custom mechanisms
+        # schema-dependent instead of requiring a lexical built-in name.
+        if candidate_name:
+            known_names.add(candidate_name)
+
+    suppressed_candidates = _strategy_schema_list(suppressed_mutation_mechanisms)
+    if suppressed_mutation_mechanisms is not None and not suppressed_candidates:
+        if isinstance(suppressed_mutation_mechanisms, (str, bytes)):
+            suppressed_candidates = [suppressed_mutation_mechanisms]
+        else:
+            try:
+                suppressed_candidates = list(suppressed_mutation_mechanisms)
+            except TypeError:
+                suppressed_candidates = [suppressed_mutation_mechanisms]
+    suppressed_names = {
+        _strategy_tool_name(candidate).casefold()
+        for candidate in suppressed_candidates
+        if _strategy_tool_name(candidate)
+    }
+    if name in suppressed_names and name in known_names:
+        return RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION
+    return RECOVERY_TOOL_INTENT_UNAVAILABLE
 
 
 def _v266_authority_explicitly_blocks(state: dict[str, Any]) -> bool:

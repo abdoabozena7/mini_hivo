@@ -399,6 +399,11 @@ validate_recovery_completion_contract_repair = stage6d.validate_recovery_complet
 build_recovery_no_mutation_search_interaction = stage6d.build_recovery_no_mutation_search_interaction
 validate_recovery_no_mutation_search_interaction = stage6d.validate_recovery_no_mutation_search_interaction
 is_recovery_mutation_mechanism = stage6d.is_recovery_mutation_mechanism
+classify_recovery_tool_intent = stage6d.classify_recovery_tool_intent
+RECOVERY_TOOL_INTENT_ACTIVE_MUTATION = stage6d.RECOVERY_TOOL_INTENT_ACTIVE_MUTATION
+RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION = stage6d.RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION
+RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION = stage6d.RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION
+RECOVERY_TOOL_INTENT_UNAVAILABLE = stage6d.RECOVERY_TOOL_INTENT_UNAVAILABLE
 initialize_recovery_no_mutation_search_state = stage6d.initialize_recovery_no_mutation_search_state
 reset_recovery_no_mutation_search_state = stage6d.reset_recovery_no_mutation_search_state
 build_recovery_no_mutation_search_pattern = stage6d.build_recovery_no_mutation_search_pattern
@@ -11440,7 +11445,6 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             # deterministic recovery gates remain true.
             recovery_no_mutation_observation = None
             if recovery_state is not None and role == "Builder":
-                is_recovery_mutation = stage6d.is_recovery_mutation_mechanism(name)
                 recovery_target = recovery_state.get("target_path") or target
                 active_legal = (
                     recovery_state.get("current_strategy", {}).get(
@@ -11449,6 +11453,23 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     if isinstance(recovery_state.get("current_strategy"), dict)
                     else recovery_state.get("available_legal_mechanisms", [])
                 )
+                suppressed_mutations = stage6d.recovery_strategy_suppressed_tools(
+                    recovery_state
+                )
+                tool_intent = stage6d.classify_recovery_tool_intent(
+                    name,
+                    active_tool_schema=offered_tools,
+                    suppressed_mutation_mechanisms=suppressed_mutations,
+                    known_mutation_mechanisms=list(active_legal or [])
+                    + list(suppressed_mutations or []),
+                )
+                is_active_mutation = (
+                    tool_intent == stage6d.RECOVERY_TOOL_INTENT_ACTIVE_MUTATION
+                )
+                is_mutation_path_intent = tool_intent in {
+                    stage6d.RECOVERY_TOOL_INTENT_ACTIVE_MUTATION,
+                    stage6d.RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION,
+                }
                 recovery_no_mutation_observation = (
                     stage6d.observe_recovery_no_mutation_search_interaction(
                         recovery_state,
@@ -11459,13 +11480,16 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         event_id=(
                             f"{task_id}:generation:{int(_step) + 1}:tool:{len(evidence)}"
                         ),
-                        recognized_tool=name in offered_names,
-                        mutation_attempt=is_recovery_mutation,
+                        recognized_tool=tool_intent in {
+                            stage6d.RECOVERY_TOOL_INTENT_ACTIVE_MUTATION,
+                            stage6d.RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION,
+                        },
+                        mutation_attempt=is_mutation_path_intent,
                         committed=(
-                            is_recovery_mutation and not tool_result_failed(result)
+                            is_active_mutation and not tool_result_failed(result)
                         ),
                         commit_count=(
-                            1 if is_recovery_mutation and not tool_result_failed(result) else 0
+                            1 if is_active_mutation and not tool_result_failed(result) else 0
                         ),
                         recovery_active=True,
                         behavior_changing_mission_unresolved=recovery_state.get(

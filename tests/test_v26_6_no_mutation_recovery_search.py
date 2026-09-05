@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import mini
@@ -500,15 +501,15 @@ class V266NoMutationRecoverySearchTests(unittest.TestCase):
         self.assertEqual(recovery.LIVE3_ORACLE_HASH, "f1ccdc309c31709f3bc589b184a7f3d252de408f0b8da2e2ad908109f079b140")
 
     def test_21_no_provider_calls_marker_or_live_workspace_are_used(self):
-        self.assertFalse(
-            Path(
-                r"D:\projects\Ai\mini_hivo\output\hivo-v26-6-stage6c-b-no-mutation-recovery-live-1"
-            ).exists()
-        )
-        with patch.object(mini, "ask_ollama") as ask:
-            state, _ = self._four_search_interactions(self._state())
-            self.assertEqual(state["mutation_path_reorientations_used"], 1)
-            ask.assert_not_called()
+        with TemporaryDirectory(prefix="v2662-unused-live-") as temp_root:
+            unused_workspace = Path(temp_root) / "future-live"
+            self.assertFalse(unused_workspace.exists())
+            unused_workspace.mkdir()
+            self.assertTrue(unused_workspace.exists())
+            with patch.object(mini, "ask_ollama") as ask:
+                state, _ = self._four_search_interactions(self._state())
+                self.assertEqual(state["mutation_path_reorientations_used"], 1)
+                ask.assert_not_called()
 
     def test_22_brain_and_authority_are_unchanged_by_adaptation(self):
         state, _ = self._four_search_interactions(self._state())
@@ -760,12 +761,13 @@ class V266NoMutationRecoverySearchTests(unittest.TestCase):
         historical = Path(
             r"D:\projects\Ai\mini_hivo\output\hivo-v26-5-stage6c-b-pre-verification-recovery-live-1"
         )
-        future_live = Path(
-            r"D:\projects\Ai\mini_hivo\output\hivo-v26-6-stage6c-b-no-mutation-recovery-live-1"
-        )
         self.assertTrue(historical.is_dir())
-        self.assertFalse(future_live.exists())
         self.assertFalse((historical / "marker.json").exists())
+        with TemporaryDirectory(prefix="v2662-uniqueness-") as temp_root:
+            future_live = Path(temp_root) / "future-live"
+            self.assertFalse(future_live.exists())
+            future_live.mkdir()
+            self.assertTrue(future_live.exists())
 
     def test_38_model_visible_context_has_no_private_transcript_or_exact_solution(self):
         state = self._state()
