@@ -293,6 +293,64 @@ RECOVERY_STRATEGY_STAGNATION_THRESHOLD = stage6d.RECOVERY_STRATEGY_STAGNATION_TH
 RecoveryStrategyFailurePattern = stage6d.RecoveryStrategyFailurePattern
 RecoveryMutationStrategy = stage6d.RecoveryMutationStrategy
 RecoveryStrategyDiversificationDecision = stage6d.RecoveryStrategyDiversificationDecision
+RECOVERY_V264_SCHEMA_VERSION = stage6d.RECOVERY_V264_SCHEMA_VERSION
+MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS = stage6d.MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS
+MAX_RECOVERY_EPOCH_REANCHORS = stage6d.MAX_RECOVERY_EPOCH_REANCHORS
+MAX_RECOVERY_COMPLETION_REPAIRS = stage6d.MAX_RECOVERY_COMPLETION_REPAIRS
+RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN = stage6d.RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN
+RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT = stage6d.RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT
+RECOVERY_EPOCH_REANCHOR = stage6d.RECOVERY_EPOCH_REANCHOR
+RECOVERY_EPOCH_REANCHOR_EVENT = stage6d.RECOVERY_EPOCH_REANCHOR_EVENT
+RECOVERY_COMPLETION_CONTRACT_REPAIR = stage6d.RECOVERY_COMPLETION_CONTRACT_REPAIR
+RECOVERY_COMPLETION_REPAIR_EVENT = stage6d.RECOVERY_COMPLETION_REPAIR_EVENT
+EDIT_EXACT_MATCH_AMBIGUOUS = stage6d.EDIT_EXACT_MATCH_AMBIGUOUS
+SUPPRESSED_STRATEGY_TOOL_REQUESTED = stage6d.SUPPRESSED_STRATEGY_TOOL_REQUESTED
+TOOL_CONTRACT_STAGNATION_DETECTED = stage6d.TOOL_CONTRACT_STAGNATION_DETECTED
+TOOL_CONTRACT_FEEDBACK_ONLY = stage6d.TOOL_CONTRACT_FEEDBACK_ONLY
+TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED = stage6d.TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED
+STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED = stage6d.STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED
+RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED = stage6d.RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED
+COMPLETION_CONTRACT_REPAIR_READY = stage6d.COMPLETION_CONTRACT_REPAIR_READY
+RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED = stage6d.RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED
+RecoveryToolContractFailurePattern = stage6d.RecoveryToolContractFailurePattern
+RecoveryToolContractGuidanceEvent = stage6d.RecoveryToolContractGuidanceEvent
+RecoveryEpochReanchor = stage6d.RecoveryEpochReanchor
+RecoveryEpochReanchorEvent = stage6d.RecoveryEpochReanchorEvent
+RecoveryCompletionContractRepair = stage6d.RecoveryCompletionContractRepair
+RecoveryCompletionRepairEvent = stage6d.RecoveryCompletionRepairEvent
+classify_edit_exact_match_ambiguity = stage6d.classify_edit_exact_match_ambiguity
+build_recovery_tool_contract_failure_pattern = stage6d.build_recovery_tool_contract_failure_pattern
+validate_recovery_tool_contract_failure_pattern = stage6d.validate_recovery_tool_contract_failure_pattern
+build_recovery_tool_contract_guidance = stage6d.build_recovery_tool_contract_guidance
+build_recovery_tool_contract_guidance_event = stage6d.build_recovery_tool_contract_guidance_event
+validate_recovery_tool_contract_guidance_event = stage6d.validate_recovery_tool_contract_guidance_event
+observe_recovery_tool_contract_failure = stage6d.observe_recovery_tool_contract_failure
+observe_tool_contract_failure = stage6d.observe_tool_contract_failure
+record_recovery_tool_contract_failure = stage6d.record_recovery_tool_contract_failure
+reset_recovery_tool_contract_failure_pattern = stage6d.reset_recovery_tool_contract_failure_pattern
+reset_tool_contract_failure_pattern = stage6d.reset_tool_contract_failure_pattern
+build_suppressed_strategy_tool_feedback = stage6d.build_suppressed_strategy_tool_feedback
+build_recovery_epoch_reanchor_context = stage6d.build_recovery_epoch_reanchor_context
+build_recovery_epoch_reanchor_event = stage6d.build_recovery_epoch_reanchor_event
+build_recovery_epoch_reanchor = stage6d.build_recovery_epoch_reanchor
+observe_recovery_epoch_reanchor = stage6d.observe_recovery_epoch_reanchor
+validate_recovery_epoch_reanchor_event = stage6d.validate_recovery_epoch_reanchor_event
+observe_suppressed_strategy_tool_request = stage6d.observe_suppressed_strategy_tool_request
+observe_suppressed_tool_request = stage6d.observe_suppressed_tool_request
+record_suppressed_strategy_tool_request = stage6d.record_suppressed_strategy_tool_request
+reanchor_recovery_epoch = stage6d.reanchor_recovery_epoch
+recovery_strategy_suppressed_tools = stage6d.recovery_strategy_suppressed_tools
+validate_recovery_completion_contract = stage6d.validate_recovery_completion_contract
+build_recovery_completion_contract = stage6d.build_recovery_completion_contract
+build_recovery_completion_contract_repair = stage6d.build_recovery_completion_contract_repair
+build_recovery_completion_repair_event = stage6d.build_recovery_completion_repair_event
+build_recovery_completion_repair_feedback = stage6d.build_recovery_completion_repair_feedback
+validate_recovery_completion_repair_event = stage6d.validate_recovery_completion_repair_event
+validate_recovery_completion_contract_repair = stage6d.validate_recovery_completion_contract_repair
+observe_recovery_completion_attempt = stage6d.observe_recovery_completion_attempt
+observe_completion_attempt = stage6d.observe_completion_attempt
+record_recovery_completion_attempt = stage6d.record_recovery_completion_attempt
+build_completion_contract_repair = stage6d.build_completion_contract_repair
 build_recovery_strategy_failure_pattern = stage6d.build_recovery_strategy_failure_pattern
 build_recovery_failure_pattern = stage6d.build_recovery_failure_pattern
 validate_recovery_strategy_failure_pattern = stage6d.validate_recovery_strategy_failure_pattern
@@ -10666,7 +10724,28 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
             "strategy_epoch_starts": [], "strategy_epoch_terminals": [],
             "strategy_search_summary": {}, "terminal_state": None,
             "current_source_refreshed": False,
-        }
+            "tool_contract_failure_count": 0,
+            "last_tool_contract_failure_key": None,
+            "last_tool_contract_failure_pattern": None,
+            "tool_contract_failure_patterns": [],
+            "tool_contract_guidance_events_used": 0,
+            "tool_contract_guidance_events": [],
+            "last_tool_contract_guidance": "",
+            "suppressed_tool_request_count": 0,
+            "last_suppressed_tool_request_key": None,
+            "suppressed_tool_requests": [],
+            "epoch_reanchors_used": 0,
+            "epoch_reanchors": [],
+            "last_epoch_reanchor": None,
+            "last_epoch_reanchor_context": "",
+            "completion_repairs_used": 0,
+            "completion_repair_events": [],
+            "last_completion_repair": None,
+            "recovery_mission_id": strategy.get("recovery_mission_id") or strategy.get("mission_id"),
+            "completion_contract": copy.deepcopy(
+                strategy.get("completion_contract") or {}
+            ),
+            }
     state = copy.deepcopy(value)
     if not state.get("recovery_execution_id") or not isinstance(state.get("current_strategy"), dict):
         return None
@@ -10677,6 +10756,28 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
     state.setdefault("strategy_failure_patterns", [])
     state.setdefault("strategy_switch_decisions", [])
     state.setdefault("suppressed_mutation_mechanisms", [])
+    state.setdefault("tool_contract_failure_count", 0)
+    state.setdefault("last_tool_contract_failure_key", None)
+    state.setdefault("last_tool_contract_failure_pattern", None)
+    state.setdefault("tool_contract_failure_patterns", [])
+    state.setdefault("tool_contract_guidance_events_used", 0)
+    state.setdefault("tool_contract_guidance_events", [])
+    state.setdefault("last_tool_contract_guidance", "")
+    state.setdefault("suppressed_tool_request_count", 0)
+    state.setdefault("last_suppressed_tool_request_key", None)
+    state.setdefault("suppressed_tool_requests", [])
+    state.setdefault("epoch_reanchors_used", 0)
+    state.setdefault("epoch_reanchors", [])
+    state.setdefault("last_epoch_reanchor", None)
+    state.setdefault("last_epoch_reanchor_context", "")
+    state.setdefault("completion_repairs_used", 0)
+    state.setdefault("completion_repair_events", [])
+    state.setdefault("last_completion_repair", None)
+    state.setdefault(
+        "recovery_mission_id",
+        state.get("mission_id") or state.get("current_strategy", {}).get("recovery_mission_id"),
+    )
+    state.setdefault("completion_contract", {})
     state.setdefault("target_state", _recovery_strategy_target_state(state.get("target_path")))
     if not state.get("available_legal_mechanisms"):
         discovered = stage6d.discover_legal_recovery_mutation_mechanisms(
@@ -10782,7 +10883,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        tool_policy=None, max_steps=None, worker_callback=None,
                        worker_context=None, execution_contract=None,
                        execution_authorization_check=None, recovery_strategy=None,
-                       recovery_strategy_state=None):
+                       recovery_strategy_state=None, recovery_completion_contract=None):
     # V26.3 is an opt-in local policy for one recovery Worker.  Keeping this
     # state outside the ordinary path prevents initial Workers and Stage 3/4
     # decomposition from inheriting strategy suppression.
@@ -10792,7 +10893,12 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     recovery_state = None
     recovery_terminal_state = None
     recovery_strategy_events = []
+    recovery_tool_contract_events = []
+    recovery_epoch_reanchor_events = []
+    recovery_completion_events = []
     recovery_task_text = str(task_text)
+    if recovery_completion_contract is None:
+        recovery_completion_contract = RUN.get("recovery_completion_contract")
     # Preserve only the caller's bounded RecoveryMission/authority packet for
     # an epoch reset.  This is deliberately captured before the ordinary
     # memory/context enrichment below, so rejected candidates and the prior
@@ -10973,6 +11079,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             target=(recovery_strategy.get("target_path") or recovery_strategy.get("target")),
         )
         if recovery_state is not None:
+            if isinstance(recovery_completion_contract, dict):
+                recovery_state["completion_contract"] = copy.deepcopy(
+                    recovery_completion_contract
+                )
             offered_tools = tools_for_role(
                 role, tool_policy=tool_policy, recovery_strategy=recovery_state,
             )
@@ -10996,6 +11106,84 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
             content = assistant_message.get("content", "") or ""
+            completion_contract = (
+                recovery_completion_contract
+                if isinstance(recovery_completion_contract, dict)
+                else recovery_state.get("completion_contract", {})
+                if isinstance(recovery_state, dict)
+                else {}
+            )
+            completion_attempt_signaled = bool(str(content).strip()) or any(
+                key in assistant_message
+                for key in (
+                    "completion_payload",
+                    "completed",
+                    "status",
+                    "failure_type",
+                    "verified_child_receipt",
+                    "worker_execution",
+                    "execution_verification_closure",
+                    "coverage_ids",
+                    "verification_handoff_ready",
+                )
+            )
+            if (
+                recovery_state is not None
+                and role == "Builder"
+                and isinstance(completion_contract, dict)
+                and completion_contract.get("enabled", True)
+                and completion_attempt_signaled
+            ):
+                completion_payload = assistant_message.get("completion_payload")
+                if not isinstance(completion_payload, dict):
+                    completion_payload = assistant_message
+                completion_observation = stage6d.observe_recovery_completion_attempt(
+                    recovery_state,
+                    completion_payload=completion_payload,
+                    required_completion_fields=completion_contract.get(
+                        "required_completion_fields",
+                        completion_contract.get("required_fields", []),
+                    ),
+                    required_coverage_ids=completion_contract.get(
+                        "required_coverage_ids",
+                        completion_contract.get("coverage_ids", []),
+                    ),
+                    verification_handoff_ready=completion_contract.get(
+                        "verification_handoff_ready"
+                    ),
+                    remaining_tool_steps=max(0, int(step_budget) - (_step + 1)),
+                    child_status=assistant_message.get("status", "done"),
+                    completed=bool(assistant_message.get("completed", False)),
+                    failure_type=assistant_message.get(
+                        "failure_type", WORKER_OUTPUT_INVALID
+                    ),
+                )
+                recovery_state = completion_observation["state"]
+                if completion_observation.get("event") is not None:
+                    recovery_completion_events.append(
+                        copy.deepcopy(completion_observation["event"])
+                    )
+                if completion_observation.get("repair"):
+                    messages.append({
+                        "role": "user",
+                        "content": completion_observation.get("feedback", ""),
+                    })
+                    recovery_strategy_events.append({
+                        "kind": "completion_contract_repair",
+                        "status": completion_observation.get("status"),
+                        "event": copy.deepcopy(completion_observation.get("event")),
+                        "validation": copy.deepcopy(
+                            completion_observation.get("validation", {})
+                        ),
+                    })
+                    continue
+                if completion_observation.get("terminal_state"):
+                    recovery_terminal_state = completion_observation.get(
+                        "terminal_state"
+                    )
+                    status = "failed"
+                    summary = recovery_terminal_state
+                    break
             previous = messages[-2] if len(messages) >= 2 else {}
             last_evidence = evidence[-1] if evidence else {}
             last_tool_verified = (
@@ -11029,6 +11217,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             break
         stop = False
         restart_after_recovery_strategy_switch = False
+        restart_after_recovery_epoch_reanchor = False
         for call in tool_calls:
             try:
                 name = call["function"]["name"]
@@ -11210,9 +11399,192 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
 
+            # V26.4 observes deterministic tool-contract failures without
+            # changing the tool result or the active authority. A repeated
+            # exact-match ambiguity receives one bounded, model-visible
+            # guidance event. A prior-epoch suppressed tool receives current
+            # epoch feedback and can trigger one same-Worker re-anchor.
+            recovery_contract_observation = None
+            recovery_suppressed_observation = None
+            if recovery_state is not None and role == "Builder":
+                schema_hash = stage6d.canonical_hash(offered_tools)
+                ambiguity = (
+                    stage6d.classify_edit_exact_match_ambiguity(result)
+                    if name == "edit_file"
+                    else None
+                )
+                if ambiguity is not None:
+                    recovery_contract_observation = (
+                        stage6d.observe_recovery_tool_contract_failure(
+                            recovery_state,
+                            tool=name,
+                            target_path=str(target),
+                            result=result,
+                            expected_replacements=ambiguity.get("expected_replacements"),
+                            actual_matches=ambiguity.get("actual_matches"),
+                            subject_identity_before=recovery_state.get(
+                                "current_subject_hash"
+                            ),
+                            subject_identity_after=recovery_state.get(
+                                "current_subject_hash"
+                            ),
+                            subject_unchanged=True,
+                            active_tool_schema_hash=schema_hash,
+                            active_legal_mutation_mechanisms=(
+                                recovery_state.get("current_strategy", {}).get(
+                                    "allowed_mutation_mechanisms", []
+                                )
+                                if isinstance(
+                                    recovery_state.get("current_strategy"), dict
+                                )
+                                else recovery_state.get(
+                                    "available_legal_mechanisms", []
+                                )
+                            ),
+                        )
+                    )
+                    recovery_state = recovery_contract_observation["state"]
+                    recovery_tool_contract_events.append({
+                        "kind": "tool_contract_failure_pattern",
+                        "pattern": copy.deepcopy(
+                            recovery_contract_observation.get("pattern", {})
+                        ),
+                        "status": recovery_contract_observation.get("status"),
+                    })
+                    if recovery_contract_observation.get("guidance_event") is not None:
+                        recovery_tool_contract_events.append({
+                            "kind": "tool_contract_guidance",
+                            "event": copy.deepcopy(
+                                recovery_contract_observation["guidance_event"]
+                            ),
+                        })
+                else:
+                    # A contract failure must be consecutive. Preserve the
+                    # immutable history, but do not let an intervening read,
+                    # different tool error, or successful mutation carry the
+                    # previous ambiguity count forward.
+                    recovery_state = (
+                        stage6d.reset_recovery_tool_contract_failure_pattern(
+                            recovery_state
+                        )
+                    )
+                if (
+                    name not in offered_names
+                    and str(name).casefold()
+                    in {
+                        str(item).casefold()
+                        for item in stage6d.recovery_strategy_suppressed_tools(
+                            recovery_state
+                        )
+                    }
+                ):
+                    recovery_suppressed_observation = (
+                        stage6d.observe_suppressed_strategy_tool_request(
+                            recovery_state,
+                            requested_tool=name,
+                            target_path=str(target),
+                            active_tool_schema_hash=schema_hash,
+                            active_legal_mutation_mechanisms=(
+                                recovery_state.get("current_strategy", {}).get(
+                                    "allowed_mutation_mechanisms", []
+                                )
+                                if isinstance(
+                                    recovery_state.get("current_strategy"), dict
+                                )
+                                else recovery_state.get(
+                                    "available_legal_mechanisms", []
+                                )
+                            ),
+                            subject_identity=recovery_state.get(
+                                "current_subject_hash"
+                            ),
+                            latest_feedback=result,
+                            base_context=recovery_packet_context,
+                            remaining_tool_steps=max(
+                                0, int(step_budget) - (_step + 1)
+                            ),
+                        )
+                    )
+                    recovery_state = recovery_suppressed_observation["state"]
+                    if recovery_suppressed_observation.get("event") is not None:
+                        recovery_tool_contract_events.append({
+                            "kind": "suppressed_strategy_tool",
+                            "event": copy.deepcopy(
+                                recovery_suppressed_observation["event"]
+                            ),
+                        })
+                        if recovery_suppressed_observation.get("reanchored"):
+                            recovery_epoch_reanchor_events.append(
+                                copy.deepcopy(
+                                    recovery_suppressed_observation["event"]
+                                )
+                            )
+
+            special_feedback = ""
+            special_observation = (
+                recovery_contract_observation or recovery_suppressed_observation
+            )
+            if special_observation is not None:
+                if recovery_contract_observation is not None:
+                    # The ordinary edit_file result is already in the tool
+                    # message. Only the bounded escalation is appended as a
+                    # new user-visible instruction; repeating the raw error
+                    # would alter the legacy feedback shape.
+                    special_feedback = recovery_contract_observation.get("guidance") or ""
+                else:
+                    special_feedback = recovery_suppressed_observation.get("feedback") or ""
+                if special_feedback:
+                    messages.append({
+                        "role": "user",
+                        "content": special_feedback,
+                    })
+                recovery_strategy_events.append({
+                    "kind": "v26_4_tool_contract_adaptation",
+                    "status": special_observation.get("status"),
+                    "feedback": special_feedback,
+                    "reanchored": bool(
+                        special_observation.get("reanchored")
+                    ),
+                })
+                if recovery_suppressed_observation is not None and (
+                    recovery_suppressed_observation.get("reanchored")
+                ):
+                    offered_tools = tools_for_role(
+                        role, tool_policy=tool_policy,
+                        recovery_strategy=recovery_state,
+                    )
+                    offered_names = {
+                        item["function"]["name"] for item in offered_tools
+                    }
+                    messages = [{
+                        "role": "system",
+                        "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                    }, {
+                        "role": "user",
+                        "content": compact_text(
+                            "RECOVERY MISSION:\n" + recovery_packet_context
+                            + "\n\n" + special_feedback,
+                            RECOVERY_WORKER_PACKET_MAX_CHARS,
+                        ),
+                    }]
+                    restart_after_recovery_epoch_reanchor = True
+                    break
+                if special_observation.get("terminal_state"):
+                    recovery_terminal_state = special_observation.get(
+                        "terminal_state"
+                    )
+                    status = "failed"
+                    summary = recovery_terminal_state
+                    stop = True
+                    break
+
             failure_key = (name, str(target))
             repeated_failures[failure_key] = repeated_failures.get(failure_key, 0) + 1 if tool_result_failed(result) else 0
-            hint = tool_recovery_hint(name, result, repeated_failures[failure_key])
+            hint = (
+                ""
+                if special_observation is not None
+                else tool_recovery_hint(name, result, repeated_failures[failure_key])
+            )
             if hint:
                 messages.append({"role": "user", "content": hint})
 
@@ -11250,6 +11622,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 stop = True
                 break
         if restart_after_recovery_strategy_switch:
+            continue
+        if restart_after_recovery_epoch_reanchor:
             continue
         if stop:
             break
@@ -11291,6 +11665,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         if recovery_state is not None else None,
         "recovery_strategy_state": recovery_state,
         "recovery_strategy_events": recovery_strategy_events,
+        "recovery_tool_contract_events": recovery_tool_contract_events,
+        "recovery_epoch_reanchor_events": recovery_epoch_reanchor_events,
+        "recovery_completion_events": recovery_completion_events,
     }
 
 

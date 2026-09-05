@@ -94,6 +94,31 @@ RECOVERY_STRATEGY_EPOCH_0 = 0
 RECOVERY_STRATEGY_EPOCH_1 = 1
 RECOVERY_STRATEGY_STAGNATION_THRESHOLD = 2
 
+# V26.4 keeps all adaptation local to one recovery Worker lifecycle.  These
+# bounds are deliberately independent from the V26.3 strategy-switch budget.
+RECOVERY_V264_SCHEMA_VERSION = "V26.4-RECOVERY-ADAPTATION-1"
+MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS = 1
+MAX_RECOVERY_EPOCH_REANCHORS = 1
+MAX_RECOVERY_COMPLETION_REPAIRS = 1
+
+RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN = "RecoveryToolContractFailurePattern"
+RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT = "RecoveryToolContractGuidanceEvent"
+RECOVERY_EPOCH_REANCHOR = "RecoveryEpochReanchor"
+RECOVERY_EPOCH_REANCHOR_EVENT = "RecoveryEpochReanchorEvent"
+RECOVERY_COMPLETION_CONTRACT_REPAIR = "RecoveryCompletionContractRepair"
+RECOVERY_COMPLETION_REPAIR_EVENT = "RecoveryCompletionRepairEvent"
+
+EDIT_EXACT_MATCH_AMBIGUOUS = "EDIT_EXACT_MATCH_AMBIGUOUS"
+SUPPRESSED_STRATEGY_TOOL_REQUESTED = "SUPPRESSED_STRATEGY_TOOL_REQUESTED"
+TOOL_CONTRACT_STAGNATION_DETECTED = "TOOL_CONTRACT_STAGNATION_DETECTED"
+TOOL_CONTRACT_FEEDBACK_ONLY = "TOOL_CONTRACT_FEEDBACK_ONLY"
+TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED = "TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED"
+STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED = "STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED"
+RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED = "RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED"
+COMPLETION_CONTRACT_REPAIR_READY = "COMPLETION_CONTRACT_REPAIR_READY"
+RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED = "RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED"
+WORKER_OUTPUT_INVALID = "WORKER_OUTPUT_INVALID"
+
 LIVE3_APPROVAL_ID = "APPROVAL-21A7FCFDBFB22CB9"
 LIVE3_APPROVAL_RECEIPT_HASH = "b94af87ad1847cd277a5f671dedcd276827c137219504cd9f3b0361360f194a3"
 LIVE3_PLAN_ID = "PLAN-5E9D01B255C2"
@@ -190,6 +215,30 @@ class RecoveryStrategyDiversificationDecision(_FrozenRecord):
     """Immutable decision to keep or switch a recovery mutation strategy."""
 
 
+class RecoveryToolContractFailurePattern(_FrozenRecord):
+    """Immutable evidence for one deterministic tool-contract failure run."""
+
+
+class RecoveryToolContractGuidanceEvent(_FrozenRecord):
+    """Immutable, bounded model-visible tool-contract guidance."""
+
+
+class RecoveryEpochReanchor(_FrozenRecord):
+    """Immutable same-Worker re-anchoring of the current strategy epoch."""
+
+
+class RecoveryEpochReanchorEvent(RecoveryEpochReanchor):
+    """Compatibility spelling for the canonical re-anchor event."""
+
+
+class RecoveryCompletionContractRepair(_FrozenRecord):
+    """Immutable one-shot completion-contract repair opportunity."""
+
+
+class RecoveryCompletionRepairEvent(RecoveryCompletionContractRepair):
+    """Compatibility spelling for the canonical completion repair event."""
+
+
 def canonical_hash(value: Any) -> str:
     """Return the compact deterministic SHA-256 used by V26 artifacts."""
     encoded = json.dumps(
@@ -274,6 +323,1136 @@ def _safe_int(value: Any, default: int = -1) -> int:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+def classify_edit_exact_match_ambiguity(result: Any) -> dict[str, Any] | None:
+    """Extract the generic exact-replacement contract error from tool output.
+
+    The classifier intentionally knows nothing about the requested feature or
+    source language. It only recognizes the deterministic contract emitted by
+    the existing edit_file tool.
+    """
+    text = " ".join(str(result or "").strip().split())
+    match = re.search(
+        r"\bexpected\s+(\d+)\s+exact\s+replacement(?:\(s\)|s?)\s*,\s*found\s+(\d+)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    expected = _safe_int(match.group(1), -1)
+    actual = _safe_int(match.group(2), -1)
+    if expected < 0 or actual < 0 or expected == actual:
+        return None
+    return {
+        "failure_class": EDIT_EXACT_MATCH_AMBIGUOUS,
+        "normalized_error_class": EDIT_EXACT_MATCH_AMBIGUOUS,
+        "expected_replacements": expected,
+        "actual_matches": actual,
+        "diagnostic": _text(text, 900),
+        "commit": False,
+        "filesystem_changed": False,
+    }
+
+
+def _v264_subject_pair(
+    state: dict[str, Any],
+    subject_identity_before: Any = None,
+    subject_identity_after: Any = None,
+    subject_unchanged: bool | None = None,
+) -> tuple[str | None, str | None, bool]:
+    before = _strategy_subject_identity(
+        subject_identity_before
+        if subject_identity_before is not None
+        else state.get("current_subject_hash")
+    )
+    after = _strategy_subject_identity(
+        subject_identity_after if subject_identity_after is not None else before
+    )
+    unchanged = before == after if subject_unchanged is None else bool(subject_unchanged)
+    return before, after, unchanged
+
+
+def build_recovery_tool_contract_failure_pattern(
+    recovery_execution_id: str,
+    *,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    tool: str = "edit_file",
+    target_path: str | None = None,
+    failure_class: str = EDIT_EXACT_MATCH_AMBIGUOUS,
+    normalized_error_class: str | None = None,
+    failure_count: int = 1,
+    subject_identity_before: Any = None,
+    subject_identity_after: Any = None,
+    subject_unchanged: bool | None = None,
+    commit_count: int = 0,
+    active_tool_schema_hash: str | None = None,
+    active_legal_mutation_mechanisms: Iterable[str] | None = None,
+    expected_replacements: int | None = None,
+    actual_matches: int | None = None,
+    deterministic_diagnostic: Any = "",
+    **kwargs: Any,
+) -> RecoveryToolContractFailurePattern:
+    """Build immutable, generic evidence for one repeated tool mistake."""
+    before = _strategy_subject_identity(
+        subject_identity_before if subject_identity_before is not None
+        else kwargs.get("subject_before")
+    )
+    after = _strategy_subject_identity(
+        subject_identity_after if subject_identity_after is not None
+        else kwargs.get("subject_after", before)
+    )
+    unchanged = before == after if subject_unchanged is None else bool(subject_unchanged)
+    expected = expected_replacements
+    actual = actual_matches
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "strategy_epoch": _safe_int(strategy_epoch, RECOVERY_STRATEGY_EPOCH_0),
+        "tool": _text(tool, 120),
+        "target_path": _path(target_path),
+        "target": _path(target_path),
+        "mechanism": _text(tool, 120),
+        "failure_class": _text(failure_class, 160),
+        "normalized_error_class": _text(
+            normalized_error_class or failure_class, 160
+        ),
+        "failure_count": max(0, _safe_int(failure_count, 0)),
+        "subject_identity_before": before,
+        "subject_identity_after": after,
+        "subject_identity": after or before,
+        "subject_unchanged": unchanged,
+        "commit_count": max(0, _safe_int(commit_count, 0)),
+        "commit": bool(commit_count),
+        "filesystem_changed": bool(commit_count),
+        "active_tool_schema_hash": _text(active_tool_schema_hash, 128) or None,
+        "active_legal_mutation_mechanisms": _unique_strings(
+            active_legal_mutation_mechanisms
+            if active_legal_mutation_mechanisms is not None
+            else kwargs.get("active_legal_mutation_mechanisms", []),
+            limit=24,
+        ),
+        "expected_replacements": (
+            max(0, _safe_int(expected, 0)) if expected is not None else None
+        ),
+        "actual_matches": (
+            max(0, _safe_int(actual, 0)) if actual is not None else None
+        ),
+        "deterministic_diagnostic": _text(deterministic_diagnostic, 900),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryToolContractFailurePattern, value)  # type: ignore[return-value]
+
+
+def validate_recovery_tool_contract_failure_pattern(
+    pattern: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = pattern if isinstance(pattern, dict) else {}
+    expected_hash = (
+        canonical_hash(_without(value, "canonical_hash")) if value else None
+    )
+    errors: list[str] = []
+    if value.get("schema_version") != RECOVERY_V264_SCHEMA_VERSION:
+        errors.append("tool-contract failure pattern schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN:
+        errors.append("tool-contract failure pattern artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("tool-contract failure pattern hash is invalid")
+    for key in (
+        "recovery_execution_id",
+        "tool",
+        "target_path",
+        "failure_class",
+        "normalized_error_class",
+    ):
+        if not value.get(key):
+            errors.append(f"tool-contract failure pattern is missing {key}")
+    if _safe_int(value.get("strategy_epoch"), -1) not in {
+        RECOVERY_STRATEGY_EPOCH_0,
+        RECOVERY_STRATEGY_EPOCH_1,
+    }:
+        errors.append("tool-contract failure pattern epoch is invalid")
+    if _safe_int(value.get("failure_count"), -1) < 1:
+        errors.append("tool-contract failure count is invalid")
+    if _safe_int(value.get("commit_count"), -1) != 0:
+        errors.append("tool-contract failure pattern contains a commit")
+    if value.get("commit") is not False:
+        errors.append("tool-contract failure pattern commit flag is invalid")
+    if value.get("filesystem_changed") is not False:
+        errors.append("tool-contract failure pattern changed the filesystem")
+    if value.get("subject_unchanged") is True and (
+        value.get("subject_identity_before") != value.get("subject_identity_after")
+    ):
+        errors.append("unchanged tool-contract pattern has different subjects")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("tool-contract failure pattern grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_tool_contract_guidance(
+    pattern: dict[str, Any],
+    *,
+    active_legal_mutation_mechanisms: Iterable[str] | None = None,
+    match_locations: Iterable[Any] | None = None,
+    max_chars: int = 1600,
+) -> str:
+    """Render one bounded, patch-free escalation for repeated ambiguity."""
+    value = pattern if isinstance(pattern, dict) else {}
+    mechanisms = _unique_strings(
+        active_legal_mutation_mechanisms
+        if active_legal_mutation_mechanisms is not None
+        else value.get("active_legal_mutation_mechanisms", []),
+        limit=16,
+        chars=120,
+    )
+    expected = value.get("expected_replacements")
+    actual = value.get("actual_matches")
+    text = (
+        "TOOL CONTRACT GUIDANCE\n"
+        f"{value.get('tool') or 'edit_file'} rejected the request for "
+        f"{value.get('target_path') or '(unknown target)'}: the selected old "
+        f"fragment matched {actual if actual is not None else '(unknown)'} "
+        f"locations, but exactly {expected if expected is not None else '(unknown)'} "
+        "replacement(s) were required.\n"
+        "The filesystem was unchanged. The selected old fragment is not unique "
+        "enough. Re-read the relevant enclosing block and choose a uniquely "
+        "identifying old fragment before retrying.\n"
+        f"Active legal mutation mechanisms: {', '.join(mechanisms) or '(none)'}.\n"
+        "Continue the SAME RecoveryMission; choose the implementation. No code "
+        "patch is prescribed."
+    )
+    locations = _unique_strings(match_locations, limit=8, chars=120)
+    if locations:
+        text += "\nBounded match locations: " + ", ".join(locations)
+    return _text(text, max(256, int(max_chars)))
+
+
+def build_recovery_tool_contract_guidance_event(
+    pattern: dict[str, Any],
+    guidance: str,
+    *,
+    guidance_ordinal: int = 1,
+    subject_identity: Any = None,
+) -> RecoveryToolContractGuidanceEvent:
+    value = pattern if isinstance(pattern, dict) else {}
+    text = _text(guidance, 1600)
+    event: dict[str, Any] = {
+        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT,
+        "recovery_execution_id": value.get("recovery_execution_id"),
+        "strategy_epoch": _safe_int(value.get("strategy_epoch"), 0),
+        "tool": value.get("tool"),
+        "target_path": value.get("target_path"),
+        "failure_pattern_hash": value.get("canonical_hash"),
+        "guidance_class": TOOL_CONTRACT_STAGNATION_DETECTED,
+        "failure_class": value.get("failure_class"),
+        "normalized_error_class": value.get("normalized_error_class"),
+        "failure_count": _safe_int(value.get("failure_count"), 0),
+        "commit_count": _safe_int(value.get("commit_count"), 0),
+        "active_tool_schema_hash": value.get("active_tool_schema_hash"),
+        "active_legal_mutation_mechanisms": _unique_strings(
+            value.get("active_legal_mutation_mechanisms", []), limit=24
+        ),
+        "guidance_ordinal": max(1, _safe_int(guidance_ordinal, 1)),
+        "model_visible_guidance": text,
+        "model_visible_guidance_hash": canonical_hash(text),
+        "subject_identity": _strategy_subject_identity(
+            subject_identity
+            if subject_identity is not None
+            else value.get("subject_identity_after")
+        ),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    event["canonical_hash"] = canonical_hash(_without(event, "canonical_hash"))
+    return _freeze_record(RecoveryToolContractGuidanceEvent, event)  # type: ignore[return-value]
+
+
+def validate_recovery_tool_contract_guidance_event(
+    event: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = event if isinstance(event, dict) else {}
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != RECOVERY_V264_SCHEMA_VERSION:
+        errors.append("tool-contract guidance schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT:
+        errors.append("tool-contract guidance artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("tool-contract guidance hash is invalid")
+    for key in ("recovery_execution_id", "failure_pattern_hash", "model_visible_guidance"):
+        if not value.get(key):
+            errors.append(f"tool-contract guidance is missing {key}")
+    if value.get("model_visible_guidance_hash") != canonical_hash(
+        value.get("model_visible_guidance", "")
+    ):
+        errors.append("tool-contract guidance hash is invalid")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("tool-contract guidance grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def observe_recovery_tool_contract_failure(
+    state: dict[str, Any] | None,
+    *,
+    tool: str = "edit_file",
+    target_path: str | None = None,
+    result: Any = "",
+    failure_class: str | None = None,
+    normalized_error_class: str | None = None,
+    expected_replacements: int | None = None,
+    actual_matches: int | None = None,
+    subject_identity_before: Any = None,
+    subject_identity_after: Any = None,
+    subject_unchanged: bool | None = None,
+    active_tool_schema_hash: str | None = None,
+    active_legal_mutation_mechanisms: Iterable[str] | None = None,
+    match_locations: Iterable[Any] | None = None,
+    commit_count: int = 0,
+) -> dict[str, Any]:
+    """Record contract failure and escalate at most once per Worker."""
+    current = _copy(state) if isinstance(state, dict) else {}
+    current.setdefault("tool_contract_failure_patterns", [])
+    current.setdefault("tool_contract_guidance_events", [])
+    current.setdefault("tool_contract_guidance_events_used", 0)
+    current.setdefault("last_tool_contract_failure_key", None)
+    current.setdefault("tool_contract_failure_count", 0)
+    current.setdefault("last_tool_contract_failure_pattern", None)
+    current.setdefault("last_tool_contract_guidance", "")
+    classification = classify_edit_exact_match_ambiguity(result)
+    if (
+        classification is None
+        and failure_class is None
+        and normalized_error_class is None
+        and not commit_count
+    ):
+        return {
+            "state": current,
+            "pattern": None,
+            "status": None,
+            "guidance": "",
+            "feedback": "",
+            "guidance_event": None,
+            "escalated": False,
+            "failure_count": 0,
+            "recognized": False,
+        }
+    if classification:
+        failure_class = failure_class or classification["failure_class"]
+        normalized_error_class = normalized_error_class or classification["normalized_error_class"]
+        if expected_replacements is None:
+            expected_replacements = classification["expected_replacements"]
+        if actual_matches is None:
+            actual_matches = classification["actual_matches"]
+    failure_class = failure_class or EDIT_EXACT_MATCH_AMBIGUOUS
+    normalized_error_class = normalized_error_class or failure_class
+    before, after, unchanged = _v264_subject_pair(
+        current,
+        subject_identity_before,
+        subject_identity_after,
+        subject_unchanged,
+    )
+    epoch = _safe_int(current.get("strategy_epoch", 0), 0)
+    execution = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
+    target = _path(target_path or current.get("target_path"))
+    key = (
+        _text(execution, 160),
+        epoch,
+        _text(tool, 120).casefold(),
+        target.casefold(),
+        _text(normalized_error_class, 160).casefold(),
+        before,
+        after,
+        bool(unchanged),
+    )
+    same = tuple(current.get("last_tool_contract_failure_key") or ()) == key
+    count = (
+        max(0, _safe_int(current.get("tool_contract_failure_count"), 0)) + 1
+        if same and not commit_count
+        else 1
+    )
+    if commit_count:
+        count = 0
+    pattern = build_recovery_tool_contract_failure_pattern(
+        execution,
+        strategy_epoch=epoch,
+        tool=tool,
+        target_path=target,
+        failure_class=failure_class,
+        normalized_error_class=normalized_error_class,
+        failure_count=count,
+        subject_identity_before=before,
+        subject_identity_after=after,
+        subject_unchanged=unchanged,
+        commit_count=commit_count,
+        active_tool_schema_hash=active_tool_schema_hash,
+        active_legal_mutation_mechanisms=active_legal_mutation_mechanisms,
+        expected_replacements=expected_replacements,
+        actual_matches=actual_matches,
+        deterministic_diagnostic=(
+            classification.get("diagnostic") if classification else result
+        ),
+    )
+    current["tool_contract_failure_count"] = count
+    current["last_tool_contract_failure_key"] = None if commit_count else key
+    current["last_tool_contract_failure_pattern"] = pattern
+    current["tool_contract_failure_patterns"] = (
+        list(current.get("tool_contract_failure_patterns", [])) + [pattern]
+    )[-16:]
+    guidance = ""
+    guidance_event = None
+    escalated = False
+    if (
+        count >= RECOVERY_STRATEGY_STAGNATION_THRESHOLD
+        and not commit_count
+        and _safe_int(current.get("tool_contract_guidance_events_used"), 0)
+        < MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS
+    ):
+        guidance = build_recovery_tool_contract_guidance(
+            {
+                **dict(pattern),
+                "active_legal_mutation_mechanisms": list(
+                    active_legal_mutation_mechanisms
+                    if active_legal_mutation_mechanisms is not None
+                    else current.get("available_legal_mechanisms", [])
+                ),
+            },
+            active_legal_mutation_mechanisms=active_legal_mutation_mechanisms,
+            match_locations=match_locations,
+        )
+        guidance_event = build_recovery_tool_contract_guidance_event(
+            pattern,
+            guidance,
+            guidance_ordinal=_safe_int(
+                current.get("tool_contract_guidance_events_used"), 0
+            ) + 1,
+            subject_identity=after,
+        )
+        current["tool_contract_guidance_events"] = (
+            list(current.get("tool_contract_guidance_events", [])) + [guidance_event]
+        )[-MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS:]
+        current["tool_contract_guidance_events_used"] = (
+            _safe_int(current.get("tool_contract_guidance_events_used"), 0) + 1
+        )
+        current["last_tool_contract_guidance"] = guidance
+        escalated = True
+        status = TOOL_CONTRACT_STAGNATION_DETECTED
+    elif count >= RECOVERY_STRATEGY_STAGNATION_THRESHOLD and not commit_count:
+        status = TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED
+        current["terminal_state"] = TOOL_CONTRACT_GUIDANCE_BUDGET_EXHAUSTED
+    else:
+        status = TOOL_CONTRACT_FEEDBACK_ONLY
+    return {
+        "state": current,
+        "pattern": pattern,
+        "status": status,
+        "guidance": guidance,
+        "feedback": _text(result, 1600),
+        "guidance_event": guidance_event,
+        "escalated": escalated,
+        "failure_count": count,
+        "recognized": True,
+    }
+
+
+observe_tool_contract_failure = observe_recovery_tool_contract_failure
+record_recovery_tool_contract_failure = observe_recovery_tool_contract_failure
+
+
+def reset_recovery_tool_contract_failure_pattern(
+    state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Reset only the consecutive tool-contract sequence for this Worker.
+
+    The immutable pattern/guidance history is retained for evidence.  A
+    different tool, target, subject, epoch, commit, or other intervening
+    action must not let two non-consecutive ambiguities trigger escalation.
+    """
+    current = _copy(state) if isinstance(state, dict) else {}
+    current["tool_contract_failure_count"] = 0
+    current["last_tool_contract_failure_key"] = None
+    current["last_tool_contract_failure_pattern"] = None
+    return current
+
+
+reset_tool_contract_failure_pattern = reset_recovery_tool_contract_failure_pattern
+
+
+def _recovery_strategy_suppressed_tools(state: dict[str, Any]) -> list[str]:
+    strategy = state.get("current_strategy")
+    values = state.get("suppressed_mutation_mechanisms", [])
+    if isinstance(strategy, dict):
+        values = list(values or []) + list(
+            strategy.get("suppressed_mutation_mechanisms", []) or []
+        )
+    return _unique_strings(values, limit=24, chars=120)
+
+
+def build_suppressed_strategy_tool_feedback(
+    *,
+    requested_tool: str,
+    strategy_epoch: int,
+    active_legal_mutation_mechanisms: Iterable[str] | None = None,
+    suppressed_tools: Iterable[str] | None = None,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    max_chars: int = 1400,
+) -> str:
+    legal = _unique_strings(active_legal_mutation_mechanisms, limit=16, chars=120)
+    suppressed = _unique_strings(suppressed_tools, limit=16, chars=120)
+    return _text(
+        "SUPPRESSED STRATEGY TOOL REQUEST\n"
+        f"Requested tool: {_text(requested_tool, 120)}\n"
+        f"Target: {_path(target_path)}\n"
+        f"Current strategy epoch: {int(strategy_epoch)}\n"
+        "The requested mutation mechanism was legal in a prior epoch but is "
+        "unavailable in the current strategy epoch. The filesystem and "
+        f"subject identity ({_strategy_subject_identity(subject_identity) or 'unknown'}) "
+        "are unchanged.\n"
+        f"Suppressed mechanisms: {', '.join(suppressed) or '(none)'}\n"
+        f"Active legal mutation mechanisms: {', '.join(legal) or '(none)'}\n"
+        "Continue the SAME RecoveryMission using the current tool contract.",
+        max(256, int(max_chars)),
+    )
+
+
+def build_recovery_epoch_reanchor_context(
+    state: dict[str, Any],
+    *,
+    requested_tool: str,
+    latest_feedback: Any = "",
+    base_context: Any = "",
+    remaining_tool_steps: int | None = None,
+    max_chars: int = 1800,
+) -> str:
+    """Build a fresh current-epoch projection without old transcript."""
+    value = state if isinstance(state, dict) else {}
+    strategy = value.get("current_strategy") if isinstance(value.get("current_strategy"), dict) else {}
+    legal = _unique_strings(
+        strategy.get("allowed_mutation_mechanisms")
+        or value.get("available_legal_mechanisms", []),
+        limit=16,
+        chars=120,
+    )
+    suppressed = _recovery_strategy_suppressed_tools(value)
+    mission_id = (
+        value.get("recovery_mission_id")
+        or value.get("mission_id")
+        or "same RecoveryMission"
+    )
+    remaining = (
+        max(0, _safe_int(remaining_tool_steps, 0))
+        if remaining_tool_steps is not None
+        else value.get("remaining_tool_steps", "unchanged")
+    )
+    refresh = value.get("current_source_refresh")
+    if isinstance(refresh, dict):
+        source_refresh = (
+            f"status={_text(refresh.get('status'), 80) or 'unknown'}, "
+            f"target={_path(refresh.get('target_path') or value.get('target_path'))}, "
+            f"source_sha256={_text(refresh.get('source_sha256'), 128) or 'unavailable'}"
+        )
+    else:
+        source_refresh = (
+            "status=REFRESHED" if value.get("current_source_refreshed") is True
+            else "status=not recorded"
+        )
+    text = (
+        "RECOVERY EPOCH RE-ANCHOR\n"
+        f"RecoveryMission: {_text(mission_id, 160)}\n"
+        f"Recovery execution: {_text(value.get('recovery_execution_id'), 160)}\n"
+        f"Strategy epoch: {_safe_int(value.get('strategy_epoch'), 0)}\n"
+        f"Target: {_path(value.get('target_path'))}\n"
+        f"Current subject identity: {_strategy_subject_identity(value.get('current_subject_hash')) or 'unknown'}\n"
+        f"Requested suppressed tool: {_text(requested_tool, 120)}\n"
+        f"Suppressed mechanisms: {', '.join(suppressed) or '(none)'}\n"
+        f"Active legal mutation mechanisms: {', '.join(legal) or '(none)'}\n"
+        f"Current-source refresh: {source_refresh}\n"
+        f"Latest deterministic feedback: {_text(latest_feedback, 500)}\n"
+        f"Remaining normal tool steps: {remaining}\n"
+        "Use only the current epoch contract. Continue the SAME RecoveryMission; "
+        "no implementation patch is prescribed."
+    )
+    if base_context:
+        text = "MISSION ANCHOR:\n" + _text(base_context, 800) + "\n\n" + text
+    return _text(text, max(256, int(max_chars)))
+
+
+def build_recovery_epoch_reanchor_event(
+    state: dict[str, Any],
+    *,
+    reason: str,
+    active_tool_schema_hash: str | None = None,
+    suppressed_tools: Iterable[str] | None = None,
+    legal_tools: Iterable[str] | None = None,
+    context_projection: Any = "",
+    reanchor_ordinal: int = 1,
+) -> RecoveryEpochReanchorEvent:
+    value = state if isinstance(state, dict) else {}
+    context = _text(context_projection, 1800)
+    event: dict[str, Any] = {
+        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_EPOCH_REANCHOR_EVENT,
+        "recovery_execution_id": value.get("recovery_execution_id"),
+        "strategy_epoch": _safe_int(value.get("strategy_epoch"), 0),
+        "reason": _text(reason, 420),
+        "active_tool_schema_hash": _text(active_tool_schema_hash, 128) or None,
+        "suppressed_tools": _unique_strings(suppressed_tools, limit=24, chars=120),
+        "legal_tools": _unique_strings(legal_tools, limit=24, chars=120),
+        "subject_identity": _strategy_subject_identity(value.get("current_subject_hash")),
+        "recovery_mission_id": value.get("recovery_mission_id") or value.get("mission_id"),
+        "recovery_authorization_id": (
+            (value.get("recovery_authorization") or {}).get("authorization_id")
+            if isinstance(value.get("recovery_authorization"), dict)
+            else None
+        ),
+        "recovery_authorization_hash": (
+            (value.get("recovery_authorization") or {}).get("authorization_hash")
+            if isinstance(value.get("recovery_authorization"), dict)
+            else None
+        ),
+        "context_projection": context,
+        "context_projection_hash": canonical_hash(context),
+        "reanchor_ordinal": max(1, _safe_int(reanchor_ordinal, 1)),
+        "strategy_switch_count": _safe_int(value.get("strategy_switch_count"), 0),
+        "recovery_attempt_index": _safe_int(value.get("recovery_attempt_index"), 1),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    event["canonical_hash"] = canonical_hash(_without(event, "canonical_hash"))
+    return _freeze_record(RecoveryEpochReanchorEvent, event)  # type: ignore[return-value]
+
+
+def validate_recovery_epoch_reanchor_event(
+    event: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = event if isinstance(event, dict) else {}
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != RECOVERY_V264_SCHEMA_VERSION:
+        errors.append("epoch re-anchor schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_EPOCH_REANCHOR_EVENT:
+        errors.append("epoch re-anchor artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("epoch re-anchor hash is invalid")
+    for key in (
+        "recovery_execution_id",
+        "reason",
+        "context_projection",
+        "context_projection_hash",
+    ):
+        if not value.get(key):
+            errors.append(f"epoch re-anchor is missing {key}")
+    if value.get("context_projection_hash") != canonical_hash(
+        value.get("context_projection", "")
+    ):
+        errors.append("epoch re-anchor context hash is invalid")
+    authorization = value.get("recovery_authorization_id")
+    authorization_hash = value.get("recovery_authorization_hash")
+    if authorization is not None and not authorization_hash:
+        errors.append("epoch re-anchor authorization hash is missing")
+    if _safe_int(value.get("reanchor_ordinal"), 0) < 1:
+        errors.append("epoch re-anchor ordinal is invalid")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("epoch re-anchor grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def observe_suppressed_strategy_tool_request(
+    state: dict[str, Any] | None,
+    *,
+    requested_tool: str,
+    target_path: str | None = None,
+    active_tool_schema_hash: str | None = None,
+    active_legal_mutation_mechanisms: Iterable[str] | None = None,
+    subject_identity: Any = None,
+    latest_feedback: Any = "",
+    base_context: Any = "",
+    remaining_tool_steps: int | None = None,
+) -> dict[str, Any]:
+    """Handle stale prior-epoch tool requests without changing the epoch."""
+    current = _copy(state) if isinstance(state, dict) else {}
+    suppressed = _recovery_strategy_suppressed_tools(current)
+    requested = _text(requested_tool, 120)
+    if requested.casefold() not in {item.casefold() for item in suppressed}:
+        return {
+            "state": current,
+            "recognized": False,
+            "status": None,
+            "feedback": "",
+            "reanchored": False,
+            "event": None,
+        }
+    current.setdefault("suppressed_tool_request_count", 0)
+    current.setdefault("last_suppressed_tool_request_key", None)
+    current.setdefault("suppressed_tool_requests", [])
+    current.setdefault("epoch_reanchors", [])
+    current.setdefault("epoch_reanchors_used", 0)
+    execution = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
+    epoch = _safe_int(current.get("strategy_epoch"), 0)
+    subject = _strategy_subject_identity(
+        subject_identity
+        if subject_identity is not None
+        else current.get("current_subject_hash")
+    )
+    strategy = current.get("current_strategy") if isinstance(
+        current.get("current_strategy"), dict
+    ) else {}
+    key = (
+        _text(execution, 160),
+        epoch,
+        requested.casefold(),
+        _path(target_path or current.get("target_path")).casefold(),
+        subject,
+        _text(strategy.get("canonical_hash"), 128),
+    )
+    same = tuple(current.get("last_suppressed_tool_request_key") or ()) == key
+    count = _safe_int(current.get("suppressed_tool_request_count"), 0) + 1 if same else 1
+    current["suppressed_tool_request_count"] = count
+    current["last_suppressed_tool_request_key"] = key
+    request_evidence = {
+        "artifact_type": "RecoverySuppressedStrategyToolRequest",
+        "recovery_execution_id": execution,
+        "strategy_epoch": epoch,
+        "requested_tool": requested,
+        "target_path": _path(target_path or current.get("target_path")),
+        "subject_identity": subject,
+        "subject_unchanged": True,
+        "commit_count": 0,
+        "filesystem_changed": False,
+        "request_count": count,
+        "active_tool_schema_hash": _text(active_tool_schema_hash, 128) or None,
+        "suppressed_tools": suppressed,
+        "canonical_hash": "",
+    }
+    request_evidence["canonical_hash"] = canonical_hash(
+        _without(request_evidence, "canonical_hash")
+    )
+    current["suppressed_tool_requests"] = (
+        list(current.get("suppressed_tool_requests", [])) + [request_evidence]
+    )[-16:]
+    legal = _unique_strings(
+        active_legal_mutation_mechanisms
+        if active_legal_mutation_mechanisms is not None
+        else strategy.get("allowed_mutation_mechanisms", [])
+        or current.get("available_legal_mechanisms", []),
+        limit=16,
+        chars=120,
+    )
+    if count < RECOVERY_STRATEGY_STAGNATION_THRESHOLD:
+        feedback = build_suppressed_strategy_tool_feedback(
+            requested_tool=requested,
+            strategy_epoch=epoch,
+            active_legal_mutation_mechanisms=legal,
+            suppressed_tools=suppressed,
+            target_path=target_path or current.get("target_path"),
+            subject_identity=subject,
+        )
+        return {
+            "state": current,
+            "recognized": True,
+            "status": SUPPRESSED_STRATEGY_TOOL_REQUESTED,
+            "feedback": feedback,
+            "reanchored": False,
+            "event": request_evidence,
+            "request_count": count,
+        }
+    if _safe_int(current.get("epoch_reanchors_used"), 0) >= MAX_RECOVERY_EPOCH_REANCHORS:
+        current["terminal_state"] = RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED
+        return {
+            "state": current,
+            "recognized": True,
+            "status": RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED,
+            "feedback": (
+                "The bounded recovery epoch re-anchor budget is exhausted. "
+                "The suppressed strategy tool remains unavailable; the Worker "
+                "cannot continue with an obsolete tool contract."
+            ),
+            "reanchored": False,
+            "event": request_evidence,
+            "request_count": count,
+        }
+    context = build_recovery_epoch_reanchor_context(
+        current,
+        requested_tool=requested,
+        latest_feedback=latest_feedback,
+        base_context=base_context,
+        remaining_tool_steps=remaining_tool_steps,
+    )
+    current["epoch_reanchors_used"] = _safe_int(
+        current.get("epoch_reanchors_used"), 0
+    ) + 1
+    reanchor = build_recovery_epoch_reanchor_event(
+        current,
+        reason=STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED,
+        active_tool_schema_hash=active_tool_schema_hash,
+        suppressed_tools=suppressed,
+        legal_tools=legal,
+        context_projection=context,
+        reanchor_ordinal=current["epoch_reanchors_used"],
+    )
+    current["epoch_reanchors"] = (
+        list(current.get("epoch_reanchors", [])) + [reanchor]
+    )[-MAX_RECOVERY_EPOCH_REANCHORS:]
+    current["last_epoch_reanchor"] = reanchor
+    current["last_epoch_reanchor_context"] = context
+    return {
+        "state": current,
+        "recognized": True,
+        "status": STRATEGY_EPOCH_CONTEXT_STALE_OR_IGNORED,
+        "feedback": context,
+        "reanchored": True,
+        "event": reanchor,
+        "request_count": count,
+    }
+
+
+observe_suppressed_tool_request = observe_suppressed_strategy_tool_request
+record_suppressed_strategy_tool_request = observe_suppressed_strategy_tool_request
+reanchor_recovery_epoch = observe_suppressed_strategy_tool_request
+recovery_strategy_suppressed_tools = _recovery_strategy_suppressed_tools
+build_recovery_epoch_reanchor = build_recovery_epoch_reanchor_event
+observe_recovery_epoch_reanchor = observe_suppressed_strategy_tool_request
+
+
+def validate_recovery_completion_contract(
+    completion_payload: dict[str, Any] | None,
+    *,
+    required_completion_fields: Iterable[str] | None = None,
+    required_coverage_ids: Iterable[str] | None = None,
+    verification_handoff_ready: bool | None = None,
+) -> dict[str, Any]:
+    """Validate shape only; never promote Worker self-reported verification."""
+    payload = completion_payload if isinstance(completion_payload, dict) else {}
+    fields = _unique_strings(
+        required_completion_fields
+        if required_completion_fields is not None
+        else payload.get("required_completion_fields", []),
+        limit=32,
+        chars=160,
+    )
+    coverage_required = _unique_strings(
+        required_coverage_ids
+        if required_coverage_ids is not None
+        else payload.get("required_coverage_ids", []),
+        limit=64,
+        chars=160,
+    )
+    missing_fields = [
+        field for field in fields
+        if field not in payload or payload.get(field) in (None, "", [], {})
+    ]
+    coverage = payload.get("coverage_ids")
+    if coverage is None:
+        coverage = payload.get("coverage")
+    if coverage is None and isinstance(payload.get("execution_verification_closure"), dict):
+        coverage = payload["execution_verification_closure"].get("covered_ids", [])
+    covered = set(_unique_strings(coverage, limit=128, chars=160))
+    missing_coverage = [item for item in coverage_required if item not in covered]
+    invalid_fields = [
+        field for field in fields
+        if field in payload and payload.get(field) is False
+    ]
+    handoff = (
+        verification_handoff_ready
+        if verification_handoff_ready is not None
+        else payload.get("verification_handoff_ready")
+    )
+    return {
+        "valid": not missing_fields and not missing_coverage and not invalid_fields,
+        "missing_completion_fields": missing_fields,
+        "missing_coverage_ids": missing_coverage,
+        "invalid_completion_fields": invalid_fields,
+        "required_completion_fields": fields,
+        "required_coverage_ids": coverage_required,
+        "verification_handoff_ready": bool(handoff) if handoff is not None else False,
+        "worker_self_report_non_authoritative": True,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_completion_contract(
+    *,
+    required_completion_fields: Iterable[str] | None = None,
+    required_coverage_ids: Iterable[str] | None = None,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Build the bounded shape contract used at the recovery completion seam.
+
+    This is deliberately a contract projection, not a verification receipt.
+    The default fields name the existing lifecycle handoff objects; a Worker
+    cannot satisfy them by self-reporting because downstream V25.6 and
+    integration gates still create and validate the authoritative receipts.
+    """
+    fields = _unique_strings(
+        required_completion_fields
+        if required_completion_fields is not None
+        else ("verified_child_receipt", "worker_execution", "execution_verification_closure"),
+        limit=32,
+        chars=160,
+    )
+    coverage = _unique_strings(
+        required_coverage_ids if required_coverage_ids is not None else ("NODE-002",),
+        limit=64,
+        chars=160,
+    )
+    return {
+        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "artifact_type": "RecoveryCompletionContract",
+        "enabled": bool(enabled),
+        "required_completion_fields": fields,
+        "required_coverage_ids": coverage,
+        "worker_self_report_non_authoritative": True,
+        "worker_prose_authority": 0,
+    }
+
+
+def build_recovery_completion_contract_repair(
+    recovery_execution_id: str,
+    *,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    recovery_mission_id: str | None = None,
+    recovery_authorization_id: str | None = None,
+    recovery_authorization_hash: str | None = None,
+    current_subject_identity: Any = None,
+    missing_completion_fields: Iterable[str] | None = None,
+    missing_coverage_ids: Iterable[str] | None = None,
+    verification_handoff_ready: bool = False,
+    remaining_tool_steps: int = 0,
+    repair_ordinal: int = 1,
+    child_status: Any = "failed",
+    completed: bool = False,
+    failure_type: Any = WORKER_OUTPUT_INVALID,
+    model_visible_feedback: Any = "",
+) -> RecoveryCompletionContractRepair:
+    feedback = _text(model_visible_feedback, 1600)
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_COMPLETION_REPAIR_EVENT,
+        "repair_type": RECOVERY_COMPLETION_CONTRACT_REPAIR,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "strategy_epoch": _safe_int(strategy_epoch, 0),
+        "recovery_mission_id": _text(recovery_mission_id, 160) or None,
+        "recovery_authorization_id": _text(recovery_authorization_id, 160) or None,
+        "recovery_authorization_hash": _text(recovery_authorization_hash, 128) or None,
+        "current_subject_identity": _strategy_subject_identity(current_subject_identity),
+        "missing_completion_fields": _unique_strings(
+            missing_completion_fields, limit=32, chars=160
+        ),
+        "missing_coverage_ids": _unique_strings(
+            missing_coverage_ids, limit=64, chars=160
+        ),
+        "verification_handoff_ready": bool(verification_handoff_ready),
+        "remaining_tool_steps": max(0, _safe_int(remaining_tool_steps, 0)),
+        "repair_ordinal": max(1, _safe_int(repair_ordinal, 1)),
+        "child_status": _text(child_status, 120),
+        "completed": bool(completed),
+        "failure_type": _text(failure_type, 160),
+        "model_visible_feedback": feedback,
+        "model_visible_feedback_hash": canonical_hash(feedback),
+        "worker_self_report_non_authoritative": True,
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryCompletionRepairEvent, value)  # type: ignore[return-value]
+
+
+def build_recovery_completion_repair_feedback(
+    validation: dict[str, Any],
+    *,
+    remaining_tool_steps: int,
+    current_subject_identity: Any = None,
+    max_chars: int = 1500,
+) -> str:
+    value = validation if isinstance(validation, dict) else {}
+    missing_fields = _unique_strings(
+        value.get("missing_completion_fields", []), limit=16, chars=160
+    )
+    missing_coverage = _unique_strings(
+        value.get("missing_coverage_ids", []), limit=24, chars=160
+    )
+    return _text(
+        "COMPLETION CONTRACT REPAIR\n"
+        "Completion was rejected because the current Worker result is not "
+        "structurally ready for the existing lifecycle.\n"
+        f"Missing completion components: {', '.join(missing_fields) or '(none)'}\n"
+        f"Unresolved coverage IDs: {', '.join(missing_coverage) or '(none)'}\n"
+        f"Verification handoff ready: {bool(value.get('verification_handoff_ready'))}\n"
+        f"Current project subject identity: "
+        f"{_strategy_subject_identity(current_subject_identity) or 'unchanged/unknown'}\n"
+        f"Remaining normal tool steps: {max(0, int(remaining_tool_steps))}\n"
+        "Continue the SAME RecoveryMission and earn the missing deterministic "
+        "evidence. Do not self-certify verification or promotion.",
+        max(256, int(max_chars)),
+    )
+
+
+def validate_recovery_completion_repair_event(
+    event: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = event if isinstance(event, dict) else {}
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    errors: list[str] = []
+    if value.get("schema_version") != RECOVERY_V264_SCHEMA_VERSION:
+        errors.append("completion repair schema version is invalid")
+    if value.get("artifact_type") not in {
+        RECOVERY_COMPLETION_CONTRACT_REPAIR,
+        RECOVERY_COMPLETION_REPAIR_EVENT,
+    }:
+        errors.append("completion repair artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("completion repair hash is invalid")
+    for key in ("recovery_execution_id", "model_visible_feedback"):
+        if not value.get(key):
+            errors.append(f"completion repair is missing {key}")
+    if value.get("model_visible_feedback_hash") != canonical_hash(
+        value.get("model_visible_feedback", "")
+    ):
+        errors.append("completion repair feedback hash is invalid")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("completion repair grants Worker prose authority")
+    if value.get("worker_self_report_non_authoritative") is not True:
+        errors.append("completion repair does not reject Worker self-certification")
+    if value.get("recovery_authorization_id") and not value.get(
+        "recovery_authorization_hash"
+    ):
+        errors.append("completion repair authorization hash is missing")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def observe_recovery_completion_attempt(
+    state: dict[str, Any] | None,
+    *,
+    completion_payload: dict[str, Any] | None = None,
+    required_completion_fields: Iterable[str] | None = None,
+    required_coverage_ids: Iterable[str] | None = None,
+    verification_handoff_ready: bool | None = None,
+    remaining_tool_steps: int = 0,
+    child_status: Any = "failed",
+    completed: bool = False,
+    failure_type: Any = WORKER_OUTPUT_INVALID,
+) -> dict[str, Any]:
+    """Offer exactly one same-Worker contract repair while budget remains."""
+    current = _copy(state) if isinstance(state, dict) else {}
+    current.setdefault("completion_repairs_used", 0)
+    current.setdefault("completion_repair_events", [])
+    current.setdefault("last_completion_repair", None)
+    validation = validate_recovery_completion_contract(
+        completion_payload,
+        required_completion_fields=required_completion_fields,
+        required_coverage_ids=required_coverage_ids,
+        verification_handoff_ready=verification_handoff_ready,
+    )
+    if validation.get("valid"):
+        return {
+            "state": current,
+            "status": "COMPLETION_CONTRACT_VALID",
+            "repair": False,
+            "terminal_state": None,
+            "validation": validation,
+            "event": None,
+            "feedback": "",
+        }
+    remaining = max(0, _safe_int(remaining_tool_steps, 0))
+    used = _safe_int(current.get("completion_repairs_used"), 0)
+    if remaining <= 0 or used >= MAX_RECOVERY_COMPLETION_REPAIRS:
+        terminal = (
+            RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED
+            if used >= MAX_RECOVERY_COMPLETION_REPAIRS
+            else WORKER_OUTPUT_INVALID
+        )
+        current["terminal_state"] = terminal
+        return {
+            "state": current,
+            "status": terminal,
+            "repair": False,
+            "terminal_state": terminal,
+            "validation": validation,
+            "event": None,
+            "feedback": "",
+        }
+    feedback = build_recovery_completion_repair_feedback(
+        validation,
+        remaining_tool_steps=remaining,
+        current_subject_identity=current.get("current_subject_hash"),
+    )
+    execution = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
+    epoch = _safe_int(current.get("strategy_epoch"), 0)
+    event = build_recovery_completion_contract_repair(
+        execution,
+        strategy_epoch=epoch,
+        recovery_mission_id=current.get("recovery_mission_id") or current.get("mission_id"),
+        recovery_authorization_id=(
+            (current.get("recovery_authorization") or {}).get("authorization_id")
+            if isinstance(current.get("recovery_authorization"), dict)
+            else None
+        ),
+        recovery_authorization_hash=(
+            (current.get("recovery_authorization") or {}).get("authorization_hash")
+            if isinstance(current.get("recovery_authorization"), dict)
+            else None
+        ),
+        current_subject_identity=current.get("current_subject_hash"),
+        missing_completion_fields=validation.get("missing_completion_fields"),
+        missing_coverage_ids=validation.get("missing_coverage_ids"),
+        verification_handoff_ready=validation.get("verification_handoff_ready", False),
+        remaining_tool_steps=remaining,
+        repair_ordinal=used + 1,
+        child_status=child_status,
+        completed=completed,
+        failure_type=failure_type,
+        model_visible_feedback=feedback,
+    )
+    current["completion_repairs_used"] = used + 1
+    current["completion_repair_events"] = (
+        list(current.get("completion_repair_events", [])) + [event]
+    )[-MAX_RECOVERY_COMPLETION_REPAIRS:]
+    current["last_completion_repair"] = event
+    return {
+        "state": current,
+        "status": COMPLETION_CONTRACT_REPAIR_READY,
+        "repair": True,
+        "terminal_state": None,
+        "validation": validation,
+        "event": event,
+        "feedback": feedback,
+    }
+
+
+observe_completion_attempt = observe_recovery_completion_attempt
+record_recovery_completion_attempt = observe_recovery_completion_attempt
+build_completion_contract_repair = build_recovery_completion_contract_repair
+build_recovery_completion_repair_event = build_recovery_completion_contract_repair
+validate_recovery_completion_contract_repair = validate_recovery_completion_repair_event
 
 
 def _strategy_schema_list(value: Any) -> list[Any]:
@@ -1107,6 +2286,8 @@ def create_recovery_strategy_state(
     precommit_gate: Any = None,
     available_legal_mechanisms: Iterable[str] | None = None,
     max_strategy_switches: int = MAX_RECOVERY_STRATEGY_SWITCHES,
+    recovery_mission_id: str | None = None,
+    completion_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Initialize mutable orchestration state for one recovery Worker."""
     legal = (
@@ -1137,6 +2318,7 @@ def create_recovery_strategy_state(
         "schema_version": SCHEMA_VERSION,
         "recovery_execution_id": _text(recovery_execution_id, 160),
         "recovery_attempt_index": 1,
+        "recovery_mission_id": _text(recovery_mission_id, 160) if recovery_mission_id else None,
         "strategy_epoch": RECOVERY_STRATEGY_EPOCH_0,
         "strategy_switch_count": 0,
         "max_strategy_switches": min(
@@ -1174,6 +2356,27 @@ def create_recovery_strategy_state(
         },
         "terminal_state": None,
         "current_source_refreshed": False,
+        # V26.4 local tool-contract adaptation state.  These counters are
+        # execution-local and intentionally do not participate in the
+        # cross-run Brain or the V26.3 strategy-switch budget.
+        "tool_contract_failure_count": 0,
+        "last_tool_contract_failure_key": None,
+        "last_tool_contract_failure_pattern": None,
+        "tool_contract_failure_patterns": [],
+        "tool_contract_guidance_events_used": 0,
+        "tool_contract_guidance_events": [],
+        "last_tool_contract_guidance": "",
+        "suppressed_tool_request_count": 0,
+        "last_suppressed_tool_request_key": None,
+        "suppressed_tool_requests": [],
+        "epoch_reanchors_used": 0,
+        "epoch_reanchors": [],
+        "last_epoch_reanchor": None,
+        "last_epoch_reanchor_context": "",
+        "completion_repairs_used": 0,
+        "completion_repair_events": [],
+        "last_completion_repair": None,
+        "completion_contract": _copy(completion_contract or {}),
     }
 
 
@@ -1422,6 +2625,10 @@ def recovery_strategy_state_projection(state: dict[str, Any] | None) -> dict[str
         "schema_version": SCHEMA_VERSION,
         "recovery_execution_id": value.get("recovery_execution_id"),
         "recovery_attempt_index": value.get("recovery_attempt_index", 1),
+        "recovery_mission_id": value.get("recovery_mission_id") or value.get("mission_id"),
+        "current_subject_hash": _strategy_subject_identity(
+            value.get("current_subject_hash")
+        ),
         "strategy_epoch": value.get("strategy_epoch", 0),
         "strategy_switch_count": value.get("strategy_switch_count", 0),
         "max_strategy_switches": value.get("max_strategy_switches", MAX_RECOVERY_STRATEGY_SWITCHES),
@@ -1433,6 +2640,32 @@ def recovery_strategy_state_projection(state: dict[str, Any] | None) -> dict[str
         "strategy_epoch_starts": _safe_projection((value.get("strategy_epoch_starts") or [])[-4:]),
         "strategy_epoch_terminals": _safe_projection((value.get("strategy_epoch_terminals") or [])[-4:]),
         "strategy_search_summary": _safe_projection(value.get("strategy_search_summary") or {}),
+        "tool_contract_failure_count": value.get("tool_contract_failure_count", 0),
+        "last_tool_contract_failure_pattern": _safe_projection(
+            value.get("last_tool_contract_failure_pattern") or {}
+        ),
+        "tool_contract_guidance_events_used": value.get(
+            "tool_contract_guidance_events_used", 0
+        ),
+        "tool_contract_guidance_events": _safe_projection(
+            (value.get("tool_contract_guidance_events") or [])[-1:]
+        ),
+        "suppressed_tool_request_count": value.get("suppressed_tool_request_count", 0),
+        "suppressed_tool_requests": _safe_projection(
+            (value.get("suppressed_tool_requests") or [])[-4:]
+        ),
+        "epoch_reanchors_used": value.get("epoch_reanchors_used", 0),
+        "epoch_reanchors": _safe_projection((value.get("epoch_reanchors") or [])[-1:]),
+        "last_epoch_reanchor_context": _text(
+            value.get("last_epoch_reanchor_context"), 1800
+        ),
+        "completion_repairs_used": value.get("completion_repairs_used", 0),
+        "completion_repair_events": _safe_projection(
+            (value.get("completion_repair_events") or [])[-1:]
+        ),
+        "completion_contract": _safe_projection(
+            value.get("completion_contract") or {}
+        ),
         "terminal_state": value.get("terminal_state"),
         "worker_prose_authority": 0,
     }
@@ -1459,6 +2692,22 @@ def validate_recovery_strategy_state(state: dict[str, Any] | None) -> dict[str, 
         errors.append("recovery strategy switch budget is invalid")
     if switches > maximum >= 0:
         errors.append("recovery strategy switch count exceeds its budget")
+    for key, maximum_value, label in (
+        (
+            "tool_contract_guidance_events_used",
+            MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS,
+            "tool-contract guidance",
+        ),
+        ("epoch_reanchors_used", MAX_RECOVERY_EPOCH_REANCHORS, "epoch re-anchor"),
+        (
+            "completion_repairs_used",
+            MAX_RECOVERY_COMPLETION_REPAIRS,
+            "completion repair",
+        ),
+    ):
+        counter = _safe_int(value.get(key, 0), -1)
+        if counter < 0 or counter > maximum_value:
+            errors.append(f"{label} budget is invalid")
     strategy = value.get("current_strategy")
     strategy_check = validate_recovery_mutation_strategy(strategy)
     if not strategy_check.get("valid"):
@@ -1486,6 +2735,16 @@ def validate_recovery_strategy(value: dict[str, Any] | None) -> dict[str, Any]:
             return validate_recovery_mutation_strategy(value)
         if artifact_type == RECOVERY_STRATEGY_DIVERSIFICATION_DECISION:
             return validate_recovery_strategy_diversification_decision(value)
+        if artifact_type == RECOVERY_TOOL_CONTRACT_FAILURE_PATTERN:
+            return validate_recovery_tool_contract_failure_pattern(value)
+        if artifact_type == RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENT:
+            return validate_recovery_tool_contract_guidance_event(value)
+        if artifact_type == RECOVERY_EPOCH_REANCHOR_EVENT:
+            return validate_recovery_epoch_reanchor_event(value)
+        if artifact_type == RECOVERY_COMPLETION_CONTRACT_REPAIR:
+            return validate_recovery_completion_repair_event(value)
+        if artifact_type == RECOVERY_COMPLETION_REPAIR_EVENT:
+            return validate_recovery_completion_repair_event(value)
     return validate_recovery_strategy_state(value)
 
 
