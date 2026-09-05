@@ -130,6 +130,38 @@ RECOVERY_EPOCH_REANCHOR_EVENT = "RecoveryEpochReanchorEvent"
 RECOVERY_COMPLETION_CONTRACT_REPAIR = "RecoveryCompletionContractRepair"
 RECOVERY_COMPLETION_REPAIR_EVENT = "RecoveryCompletionRepairEvent"
 
+# V26.6 adds one independent, execution-local response to a different
+# failure predicate: the Worker keeps inspecting the unchanged subject but
+# never invokes any currently legal behavior-changing mutation mechanism.
+# This is deliberately not a strategy epoch transition and does not consume
+# any V26.3/V26.4 adaptation budget.
+RECOVERY_V266_SCHEMA_VERSION = "V26.6-RECOVERY-NO-MUTATION-SEARCH-1"
+RECOVERY_NO_MUTATION_SEARCH_INTERACTION = "RecoveryNoMutationSearchInteraction"
+RECOVERY_NO_MUTATION_SEARCH_PATTERN = "RecoveryNoMutationSearchPattern"
+RECOVERY_MUTATION_PATH_REORIENTATION = "RecoveryMutationPathReorientation"
+RECOVERY_MUTATION_PATH_REORIENTATION_EVENT = "RecoveryMutationPathReorientationEvent"
+RECOVERY_NO_MUTATION_SEARCH_STAGNATION = "RECOVERY_NO_MUTATION_SEARCH_STAGNATION"
+RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED = "RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED"
+RECOVERY_NO_MUTATION_SEARCH_RESET = "RECOVERY_NO_MUTATION_SEARCH_RESET"
+RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED = "RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED"
+RECOVERY_NO_MUTATION_SEARCH_BLOCKED = "RECOVERY_NO_MUTATION_SEARCH_BLOCKED"
+RECOVERY_NO_MUTATION_SEARCH_PROGRESS = "RECOVERY_NO_MUTATION_SEARCH_PROGRESS"
+MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION = 4
+MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS = 1
+
+# The current Worker loop spends one normal step on the continuation that
+# follows a reorientation and needs one further step to select a mutation.
+# Completion/handoff is not an additional mutation authority or provider
+# budget; it remains owned by the existing completion/V25.6 lifecycle.  The
+# smallest deterministic floor that preserves those opportunities is 3.
+MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION = 3
+RECOVERY_MUTATION_PATH_REORIENTATION_SAFETY_FLOOR = (
+    MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION
+)
+MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS = (
+    MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION
+)
+
 EDIT_EXACT_MATCH_AMBIGUOUS = "EDIT_EXACT_MATCH_AMBIGUOUS"
 SUPPRESSED_STRATEGY_TOOL_REQUESTED = "SUPPRESSED_STRATEGY_TOOL_REQUESTED"
 TOOL_CONTRACT_STAGNATION_DETECTED = "TOOL_CONTRACT_STAGNATION_DETECTED"
@@ -272,6 +304,22 @@ class RecoveryCompletionContractRepair(_FrozenRecord):
 
 class RecoveryCompletionRepairEvent(RecoveryCompletionContractRepair):
     """Compatibility spelling for the canonical completion repair event."""
+
+
+class RecoveryNoMutationSearchPattern(_FrozenRecord):
+    """Immutable evidence for one bounded no-mutation search window."""
+
+
+class RecoveryNoMutationSearchInteraction(_FrozenRecord):
+    """Immutable projection of one counted Worker search interaction."""
+
+
+class RecoveryMutationPathReorientation(_FrozenRecord):
+    """Immutable same-Worker, execution-local mutation-path reorientation."""
+
+
+class RecoveryMutationPathReorientationEvent(RecoveryMutationPathReorientation):
+    """Compatibility spelling for the canonical V26.6 reorientation event."""
 
 
 def canonical_hash(value: Any) -> str:
@@ -2470,6 +2518,952 @@ recovery_tool_schema_projection = project_recovery_tool_schemas
 project_recovery_tools = project_recovery_tool_schemas
 
 
+# ---------------------------------------------------------------------------
+# V26.6 bounded no-mutation search control
+# ---------------------------------------------------------------------------
+
+_RECOVERY_MUTATION_MECHANISM_NAMES = frozenset({
+    "write_file", "edit_file", "edit_file_range",
+})
+
+
+def is_recovery_mutation_mechanism(value: Any) -> bool:
+    """Return whether a Worker-selected tool is a recognized mutation path."""
+    name = _strategy_tool_name(value).casefold()
+    if name in _RECOVERY_MUTATION_MECHANISM_NAMES:
+        return True
+    return isinstance(value, dict) and _strategy_is_mutation_tool(value)
+
+
+def _v266_authority_explicitly_blocks(state: dict[str, Any]) -> bool:
+    """Detect explicit authority failure without guessing from missing fields."""
+    authority = state.get("recovery_authorization")
+    if not isinstance(authority, dict):
+        return False
+    if authority.get("status") in {
+        RECOVERY_AUTHORIZATION_BLOCKED,
+        RECOVERY_BLOCKED,
+        AUTHORITY_CHANGE_REQUIRED,
+    }:
+        return True
+    return bool(
+        authority.get("allowed") is False
+        or authority.get("mutation_allowed") is False
+        or authority.get("authority_sufficient") is False
+        or authority.get("scope_allowed") is False
+        or authority.get("authority_delta_empty") is False
+        or authority.get("user_reapproval_required") is True
+        or authority.get("requires_dnt_change") is True
+    )
+
+
+def _v266_legal_mechanisms(
+    state: dict[str, Any],
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+) -> list[str]:
+    if legal_mutation_mechanisms is not None:
+        return _unique_strings(legal_mutation_mechanisms, limit=24, chars=120)
+    # An explicitly empty active set is an authoritative no-legal-space
+    # result. Do not fall back to the strategy's original set in that case.
+    if "available_legal_mechanisms" in state and state.get(
+        "available_legal_mechanisms"
+    ) == []:
+        return []
+    strategy = state.get("current_strategy")
+    if isinstance(strategy, dict) and strategy.get("allowed_mutation_mechanisms"):
+        return _unique_strings(
+            strategy.get("allowed_mutation_mechanisms"), limit=24, chars=120
+        )
+    return _unique_strings(
+        state.get("available_legal_mechanisms", []), limit=24, chars=120
+    )
+
+
+def _v266_legal_space_identity(legal: Iterable[str]) -> str:
+    return canonical_hash(sorted({str(item).casefold() for item in legal}))
+
+
+def _v266_state_bool(
+    state: dict[str, Any],
+    key: str,
+    default: bool = True,
+    *fallback_keys: str,
+) -> bool:
+    if key in state:
+        return bool(state.get(key))
+    for fallback in fallback_keys:
+        if fallback in state:
+            return bool(state.get(fallback))
+    return bool(default)
+
+
+def initialize_recovery_no_mutation_search_state(
+    state: dict[str, Any] | None,
+    *,
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Add bounded V26.6 state to one existing recovery Worker state.
+
+    The function is intentionally additive.  It preserves the RecoveryMission,
+    authorization, strategy epoch, and all pre-existing V26.3/V26.4 state.
+    """
+    current = _copy(state) if isinstance(state, dict) else {}
+    legal = _v266_legal_mechanisms(current, legal_mutation_mechanisms)
+    current.setdefault("no_mutation_search_interaction_count", 0)
+    current.setdefault("no_mutation_search_window_key", None)
+    current.setdefault("no_mutation_search_window_first_event_id", None)
+    current.setdefault("no_mutation_search_pattern", None)
+    current.setdefault("no_mutation_search_patterns", [])
+    current.setdefault("no_mutation_search_interaction_events", [])
+    current.setdefault("no_mutation_search_reset_reason", None)
+    current.setdefault("no_mutation_search_window_ordinal", 1)
+    current.setdefault("mutation_path_reorientations_used", 0)
+    current.setdefault("max_mutation_path_reorientations", MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS)
+    current.setdefault("mutation_path_reorientation_events", [])
+    current.setdefault("last_mutation_path_reorientation", None)
+    current.setdefault("last_mutation_path_reorientation_context", "")
+    current.setdefault("no_mutation_search_exhausted", False)
+    current.setdefault("no_mutation_search_exhaustion_evidence", None)
+    current.setdefault("no_mutation_search_terminal_state", None)
+    current.setdefault("recovery_mission_unresolved", True)
+    current.setdefault("provider_healthy", True)
+    current.setdefault("provider_harness_blocked", False)
+    current.setdefault("authority_unchanged", True)
+    current.setdefault("scope_valid", True)
+    current.setdefault("dnt_valid", True)
+    current.setdefault("current_target_known", bool(current.get("target_path")))
+    current.setdefault("legal_mutation_space_identity", _v266_legal_space_identity(legal))
+    return current
+
+
+def reset_recovery_no_mutation_search_state(
+    state: dict[str, Any] | None,
+    *,
+    reason: str = "state_changed",
+) -> dict[str, Any]:
+    """Reset only the active V26.6 search window, retaining immutable history."""
+    current = initialize_recovery_no_mutation_search_state(state)
+    current["no_mutation_search_interaction_count"] = 0
+    current["no_mutation_search_window_key"] = None
+    current["no_mutation_search_window_first_event_id"] = None
+    current["no_mutation_search_reset_reason"] = _text(reason, 160)
+    current["no_mutation_search_window_ordinal"] = max(
+        1, _safe_int(current.get("no_mutation_search_window_ordinal"), 1)
+    ) + 1
+    current["legal_mutation_space_identity"] = _v266_legal_space_identity(
+        _v266_legal_mechanisms(current)
+    )
+    return current
+
+
+def build_recovery_no_mutation_search_interaction(
+    recovery_execution_id: str,
+    *,
+    event_id: str,
+    tool_name: str,
+    recovery_attempt_index: int = 1,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    interaction_count: int = 1,
+    tool_steps_used: int = 0,
+    tool_steps_remaining: int = 0,
+) -> RecoveryNoMutationSearchInteraction:
+    """Build one bounded counted-interaction projection for external tracing."""
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V266_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_NO_MUTATION_SEARCH_INTERACTION,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "recovery_attempt_index": max(1, _safe_int(recovery_attempt_index, 1)),
+        "strategy_epoch": max(0, _safe_int(strategy_epoch, 0)),
+        "event_id": _text(event_id, 180),
+        "tool_name": _text(tool_name, 120),
+        "target_path": _path(target_path),
+        "subject_identity": _strategy_subject_identity(subject_identity),
+        "interaction_count": max(1, _safe_int(interaction_count, 1)),
+        "tool_steps_used": max(0, _safe_int(tool_steps_used, 0)),
+        "tool_steps_remaining": max(0, _safe_int(tool_steps_remaining, 0)),
+        "mutation_attempt": False,
+        "commit_count": 0,
+        "subject_unchanged": True,
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryNoMutationSearchInteraction, value)  # type: ignore[return-value]
+
+
+def validate_recovery_no_mutation_search_interaction(
+    interaction: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = interaction if isinstance(interaction, dict) else {}
+    errors: list[str] = []
+    expected = canonical_hash(_without(value, "canonical_hash")) if value else None
+    if value.get("schema_version") != RECOVERY_V266_SCHEMA_VERSION:
+        errors.append("no-mutation interaction schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_NO_MUTATION_SEARCH_INTERACTION:
+        errors.append("no-mutation interaction artifact type is invalid")
+    if value.get("canonical_hash") != expected:
+        errors.append("no-mutation interaction hash is invalid")
+    for key in (
+        "recovery_execution_id", "event_id", "tool_name", "target_path",
+        "subject_identity", "interaction_count",
+    ):
+        if value.get(key) in (None, "", []):
+            errors.append(f"no-mutation interaction is missing {key}")
+    if value.get("mutation_attempt") is not False:
+        errors.append("no-mutation interaction contains a mutation attempt")
+    if _safe_int(value.get("commit_count"), -1) != 0:
+        errors.append("no-mutation interaction contains a commit")
+    if value.get("subject_unchanged") is not True:
+        errors.append("no-mutation interaction subject is not unchanged")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("no-mutation interaction grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_no_mutation_search_pattern(
+    recovery_execution_id: str,
+    *,
+    recovery_attempt_index: int = 1,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+    interaction_count: int = 0,
+    mutation_attempts: int = 0,
+    commit_count: int = 0,
+    provider_healthy: bool = True,
+    provider_harness_blocked: bool = False,
+    tool_steps_used: int = 0,
+    tool_steps_remaining: int = 0,
+    first_interaction_event_id: str | None = None,
+    latest_interaction_event_id: str | None = None,
+    behavior_changing_mission_unresolved: bool = True,
+    current_target_known: bool = True,
+    subject_unchanged: bool = True,
+    scope_valid: bool = True,
+    dnt_valid: bool = True,
+    authority_unchanged: bool = True,
+    legal_mutation_space_available: bool = True,
+    threshold: int = MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION,
+    **kwargs: Any,
+) -> RecoveryNoMutationSearchPattern:
+    """Build immutable, deterministic evidence for a no-mutation window."""
+    legal = _unique_strings(legal_mutation_mechanisms, limit=24, chars=120)
+    target = _path(target_path)
+    subject = _strategy_subject_identity(subject_identity)
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V266_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_NO_MUTATION_SEARCH_PATTERN,
+        "recovery_execution_id": _text(recovery_execution_id, 160),
+        "recovery_attempt_index": max(1, _safe_int(recovery_attempt_index, 1)),
+        "strategy_epoch": max(0, _safe_int(strategy_epoch, 0)),
+        "target_path": target,
+        "subject_identity": subject,
+        "legal_mutation_mechanisms": legal,
+        "legal_mutation_space_identity": _v266_legal_space_identity(legal),
+        "interaction_count": max(0, _safe_int(interaction_count, 0)),
+        "threshold": max(1, _safe_int(threshold, MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION)),
+        "mutation_attempts": max(0, _safe_int(mutation_attempts, 0)),
+        "commit_count": max(0, _safe_int(commit_count, 0)),
+        "provider_healthy": bool(provider_healthy),
+        "provider_harness_blocked": bool(provider_harness_blocked),
+        "tool_steps_used": max(0, _safe_int(tool_steps_used, 0)),
+        "tool_steps_remaining": max(0, _safe_int(tool_steps_remaining, 0)),
+        "first_interaction_event_id": _text(first_interaction_event_id, 180) or None,
+        "latest_interaction_event_id": _text(latest_interaction_event_id, 180) or None,
+        "behavior_changing_mission_unresolved": bool(behavior_changing_mission_unresolved),
+        "current_target_known": bool(current_target_known),
+        "subject_unchanged": bool(subject_unchanged),
+        "scope_valid": bool(scope_valid),
+        "dnt_valid": bool(dnt_valid),
+        "authority_unchanged": bool(authority_unchanged),
+        "legal_mutation_space_available": bool(legal_mutation_space_available),
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    # Ignore unknown keyword arguments intentionally.  Callers may carry
+    # external trace metadata, but it is never allowed to enter the
+    # authoritative pattern without an explicit bounded field above.
+    del kwargs
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryNoMutationSearchPattern, value)  # type: ignore[return-value]
+
+
+def validate_recovery_no_mutation_search_pattern(
+    pattern: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = pattern if isinstance(pattern, dict) else {}
+    errors: list[str] = []
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    if value.get("schema_version") != RECOVERY_V266_SCHEMA_VERSION:
+        errors.append("no-mutation search pattern schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_NO_MUTATION_SEARCH_PATTERN:
+        errors.append("no-mutation search pattern artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("no-mutation search pattern hash is invalid")
+    for key in (
+        "recovery_execution_id", "target_path", "subject_identity",
+        "legal_mutation_mechanisms", "interaction_count", "threshold",
+        "first_interaction_event_id", "latest_interaction_event_id",
+    ):
+        if value.get(key) in (None, "", []):
+            errors.append(f"no-mutation search pattern is missing {key}")
+    if _safe_int(value.get("interaction_count"), 0) < 1:
+        errors.append("no-mutation search pattern interaction count is invalid")
+    if _safe_int(value.get("mutation_attempts"), -1) != 0:
+        errors.append("no-mutation search pattern contains a mutation attempt")
+    if _safe_int(value.get("commit_count"), -1) != 0:
+        errors.append("no-mutation search pattern contains a commit")
+    if not value.get("provider_healthy"):
+        errors.append("no-mutation search pattern provider is unhealthy")
+    if value.get("provider_harness_blocked"):
+        errors.append("no-mutation search pattern has a provider/harness blocker")
+    if not value.get("legal_mutation_space_available"):
+        errors.append("no-mutation search pattern has no legal mutation space")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("no-mutation search pattern grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def detect_recovery_no_mutation_search_stagnation(
+    pattern: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = pattern if isinstance(pattern, dict) else {}
+    valid = validate_recovery_no_mutation_search_pattern(value)
+    threshold = max(
+        1,
+        _safe_int(
+            value.get("threshold"),
+            MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION,
+        ),
+    )
+    detected = bool(
+        valid.get("valid")
+        and _safe_int(value.get("interaction_count"), 0) >= threshold
+        and value.get("behavior_changing_mission_unresolved") is True
+        and value.get("current_target_known") is True
+        and value.get("subject_unchanged") is True
+        and value.get("scope_valid") is True
+        and value.get("dnt_valid") is True
+        and value.get("authority_unchanged") is True
+    )
+    return {
+        "detected": detected,
+        "status": RECOVERY_NO_MUTATION_SEARCH_STAGNATION if detected else RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED,
+        "threshold": threshold,
+        "interaction_count": _safe_int(value.get("interaction_count"), 0),
+        "canonical_hash": value.get("canonical_hash"),
+        "valid": bool(valid.get("valid")),
+        "errors": list(valid.get("errors", [])),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_mutation_path_reorientation_context(
+    state: dict[str, Any] | None,
+    *,
+    pattern: dict[str, Any] | None = None,
+    target_path: str | None = None,
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+    current_source_hash: Any = None,
+    max_chars: int = 1800,
+) -> str:
+    """Build bounded model-visible state without patch or transcript content."""
+    value = state if isinstance(state, dict) else {}
+    target = _path(target_path or value.get("target_path"))
+    legal = _v266_legal_mechanisms(value, legal_mutation_mechanisms)
+    subject = _strategy_subject_identity(
+        value.get("current_subject_hash")
+    ) or _strategy_subject_identity((pattern or {}).get("subject_identity"))
+    mission = _text(
+        value.get("recovery_mission_id") or value.get("mission_id") or "same RecoveryMission",
+        160,
+    )
+    source_hash = _strategy_subject_identity(current_source_hash)
+    if source_hash is None:
+        refresh = value.get("current_source_refresh")
+        if isinstance(refresh, dict):
+            source_hash = _text(refresh.get("source_sha256"), 128) or None
+    contract = value.get("completion_contract") if isinstance(value.get("completion_contract"), dict) else {}
+    coverage = _unique_strings(
+        contract.get("required_coverage_ids") or contract.get("coverage_ids", []),
+        limit=16,
+        chars=120,
+    )
+    text = (
+        "RECOVERY MUTATION-PATH REORIENTATION\n"
+        "The behavior-changing RecoveryMission remains unresolved.\n"
+        "No approved mutation has been attempted in the current recovery search window.\n"
+        f"RecoveryMission: {mission}\n"
+        f"Authorized mutation target: {target or '(unknown)'}\n"
+        f"Current legal mutation mechanisms: {', '.join(legal) or '(none)'}\n"
+        f"Current subject is unchanged: {'yes' if subject else 'unknown'}"
+        f" ({subject or 'unknown'})\n"
+        "Scope and DNT remain unchanged.\n"
+        "The approved plan and approval remain unchanged; no new approval is requested.\n"
+        "Full verification remains required before completion or handoff.\n"
+        f"Current strategy epoch: {_safe_int(value.get('strategy_epoch'), 0)}\n"
+        f"Remaining normal tool steps: {max(0, _safe_int(value.get('remaining_tool_steps'), 0))}\n"
+    )
+    if source_hash:
+        text += f"Current source identity: {source_hash}\n"
+    if coverage:
+        text += f"Required verification coverage remains: {', '.join(coverage)}\n"
+    text += "Continue the SAME RecoveryMission (the same RecoveryMission) using the current source and approved authority."
+    return _text(text, max(256, int(max_chars)))
+
+
+def build_recovery_mutation_path_reorientation_event(
+    state: dict[str, Any] | None,
+    *,
+    trigger_pattern: dict[str, Any],
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+    tool_steps_used: int = 0,
+    tool_steps_remaining: int = 0,
+    reorientation_ordinal: int = 1,
+    model_visible_context: Any = "",
+    active_tool_schema_hash: str | None = None,
+) -> RecoveryMutationPathReorientationEvent:
+    value = state if isinstance(state, dict) else {}
+    legal = _v266_legal_mechanisms(value, legal_mutation_mechanisms)
+    context = _text(model_visible_context, 1800)
+    event: dict[str, Any] = {
+        "schema_version": RECOVERY_V266_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_MUTATION_PATH_REORIENTATION_EVENT,
+        "reorientation_type": RECOVERY_MUTATION_PATH_REORIENTATION,
+        "recovery_execution_id": value.get("recovery_execution_id"),
+        "recovery_attempt_index": _safe_int(value.get("recovery_attempt_index"), 1),
+        "recovery_mission_id": value.get("recovery_mission_id") or value.get("mission_id"),
+        "recovery_authorization_id": (
+            (value.get("recovery_authorization") or {}).get("authorization_id")
+            if isinstance(value.get("recovery_authorization"), dict) else None
+        ),
+        "recovery_authorization_hash": (
+            (value.get("recovery_authorization") or {}).get("authorization_hash")
+            if isinstance(value.get("recovery_authorization"), dict) else None
+        ),
+        "plan_id": (
+            (value.get("recovery_authorization") or {}).get("plan_id")
+            or (value.get("recovery_authorization") or {}).get("parent_plan_id")
+            if isinstance(value.get("recovery_authorization"), dict) else None
+        ),
+        "plan_hash": (
+            (value.get("recovery_authorization") or {}).get("plan_hash")
+            or (value.get("recovery_authorization") or {}).get("parent_plan_hash")
+            if isinstance(value.get("recovery_authorization"), dict) else None
+        ),
+        "approval_receipt_hash": (
+            (value.get("recovery_authorization") or {}).get("approval_receipt_hash")
+            or (value.get("recovery_authorization") or {}).get("approval_hash")
+            if isinstance(value.get("recovery_authorization"), dict) else None
+        ),
+        "strategy_epoch": _safe_int(value.get("strategy_epoch"), 0),
+        "strategy_switch_count": _safe_int(value.get("strategy_switch_count"), 0),
+        "trigger_pattern_hash": (trigger_pattern or {}).get("canonical_hash"),
+        "target_path": _path(target_path or value.get("target_path")),
+        "subject_identity": _strategy_subject_identity(
+            subject_identity if subject_identity is not None else value.get("current_subject_hash")
+        ),
+        "legal_mutation_mechanisms": legal,
+        "legal_mutation_space_identity": _v266_legal_space_identity(legal),
+        "active_tool_schema_hash": _text(active_tool_schema_hash, 128) or None,
+        "tool_steps_used": max(0, _safe_int(tool_steps_used, 0)),
+        "tool_steps_remaining": max(0, _safe_int(tool_steps_remaining, 0)),
+        "reorientation_ordinal": max(1, _safe_int(reorientation_ordinal, 1)),
+        "reorientation_budget_max": MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        "reorientation_budget_used": max(0, _safe_int(value.get("mutation_path_reorientations_used"), 0)),
+        "model_visible_context": context,
+        "model_visible_context_hash": canonical_hash(context),
+        "same_recovery_worker": True,
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    event["canonical_hash"] = canonical_hash(_without(event, "canonical_hash"))
+    return _freeze_record(RecoveryMutationPathReorientationEvent, event)  # type: ignore[return-value]
+
+
+def validate_recovery_mutation_path_reorientation_event(
+    event: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = event if isinstance(event, dict) else {}
+    errors: list[str] = []
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    if value.get("schema_version") != RECOVERY_V266_SCHEMA_VERSION:
+        errors.append("V26.6 reorientation schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_MUTATION_PATH_REORIENTATION_EVENT:
+        errors.append("V26.6 reorientation artifact type is invalid")
+    if value.get("reorientation_type") != RECOVERY_MUTATION_PATH_REORIENTATION:
+        errors.append("V26.6 reorientation type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("V26.6 reorientation hash is invalid")
+    for key in (
+        "recovery_execution_id", "target_path", "subject_identity",
+        "legal_mutation_mechanisms", "trigger_pattern_hash",
+        "model_visible_context", "model_visible_context_hash",
+    ):
+        if value.get(key) in (None, "", []):
+            errors.append(f"V26.6 reorientation is missing {key}")
+    if value.get("model_visible_context_hash") != canonical_hash(
+        value.get("model_visible_context", "")
+    ):
+        errors.append("V26.6 reorientation context hash is invalid")
+    if value.get("same_recovery_worker") is not True:
+        errors.append("V26.6 reorientation is not bound to the same Worker")
+    if _safe_int(value.get("reorientation_ordinal"), 0) != 1:
+        errors.append("V26.6 reorientation ordinal exceeds the one-shot budget")
+    if _safe_int(value.get("reorientation_budget_max"), -1) != MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS:
+        errors.append("V26.6 reorientation budget changed")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("V26.6 reorientation grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_visible_context_hash": value.get("model_visible_context_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def observe_recovery_no_mutation_search_interaction(
+    state: dict[str, Any] | None,
+    *,
+    tool_name: str | None = None,
+    tool: str | None = None,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    subject_unchanged: bool | None = None,
+    event_id: str | None = None,
+    recognized_tool: bool = True,
+    mutation_attempt: bool | None = None,
+    committed: bool = False,
+    commit_count: int = 0,
+    recovery_active: bool = True,
+    behavior_changing_mission_unresolved: bool | None = None,
+    current_target_known: bool | None = None,
+    legal_mutation_mechanisms: Iterable[str] | None = None,
+    strategy_epoch: int | None = None,
+    provider_healthy: bool | None = None,
+    provider_harness_blocked: bool | None = None,
+    authority_unchanged: bool | None = None,
+    scope_valid: bool | None = None,
+    dnt_valid: bool | None = None,
+    remaining_tool_steps: int | None = None,
+    tool_steps_used: int | None = None,
+    terminal_state: Any = None,
+    completion_attempt: bool = False,
+    empty_response: bool = False,
+    active_tool_schema_hash: str | None = None,
+    base_context: Any = "",
+    current_source_hash: Any = None,
+    safety_floor: int = MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION,
+) -> dict[str, Any]:
+    """Observe one Worker interaction and, at most once, reorient mutation search.
+
+    Every gate is fail-closed.  The returned state is a mutable orchestration
+    copy; all pattern and event records stored in it are immutable records.
+    """
+    current = initialize_recovery_no_mutation_search_state(
+        state, legal_mutation_mechanisms=legal_mutation_mechanisms
+    )
+    name = _text(tool_name or tool, 120)
+    execution = _text(current.get("recovery_execution_id"), 160)
+    attempt = max(1, _safe_int(current.get("recovery_attempt_index"), 1))
+    epoch = max(
+        0,
+        _safe_int(
+            strategy_epoch if strategy_epoch is not None else current.get("strategy_epoch"),
+            0,
+        ),
+    )
+    target = _path(
+        current.get("target_path") if target_path is None else target_path
+    )
+    if target_path is not None:
+        current["target_path"] = target
+        current["current_target_known"] = bool(target)
+    subject = _strategy_subject_identity(
+        subject_identity if subject_identity is not None
+        else current.get("current_subject_hash")
+    )
+    legal = _v266_legal_mechanisms(current, legal_mutation_mechanisms)
+    current["available_legal_mechanisms"] = legal
+    current["legal_mutation_space_identity"] = _v266_legal_space_identity(legal)
+    if behavior_changing_mission_unresolved is None:
+        behavior_changing_mission_unresolved = _v266_state_bool(
+            current, "recovery_mission_unresolved", True,
+        )
+    if current_target_known is None:
+        current_target_known = bool(target)
+    if provider_healthy is None:
+        provider_healthy = _v266_state_bool(current, "provider_healthy", True)
+    if provider_harness_blocked is None:
+        provider_harness_blocked = _v266_state_bool(
+            current, "provider_harness_blocked", False,
+        )
+    if authority_unchanged is None:
+        authority_unchanged = _v266_state_bool(current, "authority_unchanged", True)
+    if scope_valid is None:
+        scope_valid = _v266_state_bool(current, "scope_valid", True)
+    if dnt_valid is None:
+        dnt_valid = _v266_state_bool(current, "dnt_valid", True)
+    lifecycle_active = _v266_state_bool(
+        current, "worker_lifecycle_active", True, "recovery_worker_active"
+    )
+    lineage = current.get("lineage")
+    lineage_valid = not isinstance(lineage, dict) or (
+        lineage.get("valid") is not False
+        and str(lineage.get("status", "")).casefold()
+        not in {"invalid", "blocked", "drift", "unknown"}
+    )
+    if subject_unchanged is None:
+        subject_unchanged = bool(subject)
+    if mutation_attempt is None:
+        mutation_attempt = (
+            is_recovery_mutation_mechanism(name)
+            or name.casefold() in {item.casefold() for item in legal}
+        )
+    if remaining_tool_steps is None:
+        remaining_tool_steps = _safe_int(current.get("remaining_tool_steps"), -1)
+    if tool_steps_used is None:
+        tool_steps_used = _safe_int(current.get("tool_steps_used"), 0)
+    remaining = _safe_int(remaining_tool_steps, -1)
+    used_steps = max(0, _safe_int(tool_steps_used, 0))
+    current["remaining_tool_steps"] = remaining
+    current["tool_steps_used"] = used_steps
+
+    def _result(status: str, **extra: Any) -> dict[str, Any]:
+        result = {
+            "state": current,
+            "status": status,
+            "counted": False,
+            "interaction_count": _safe_int(
+                current.get("no_mutation_search_interaction_count"), 0
+            ),
+            "pattern": current.get("no_mutation_search_pattern"),
+            "reoriented": False,
+            "event": None,
+            "feedback": "",
+            "exhausted": bool(current.get("no_mutation_search_exhausted")),
+            "reset": False,
+            "model_calls": 0,
+            "worker_calls": 0,
+        }
+        result.update(extra)
+        return result
+
+    # A recognized mutation invocation owns the next adaptation decision even
+    # when the candidate later fails syntax/V25.5/transaction/commit gates.
+    if bool(mutation_attempt) or bool(committed) or _safe_int(commit_count, 0) > 0:
+        current = reset_recovery_no_mutation_search_state(
+            current, reason="mutation_attempt_or_commit"
+        )
+        current["current_subject_hash"] = subject or current.get("current_subject_hash")
+        return {
+            **_result(RECOVERY_NO_MUTATION_SEARCH_RESET),
+            "state": current,
+            "reset": True,
+            "reset_reason": "mutation_attempt_or_commit",
+        }
+
+    # Empty provider responses and structured completion attempts remain
+    # ordinary Worker-runtime evidence but are never search interactions.
+    if empty_response or completion_attempt or not name or not recognized_tool:
+        reason = (
+            "empty_response" if empty_response else
+            "completion_attempt" if completion_attempt else
+            "unrecognized_tool" if not recognized_tool else "no_tool"
+        )
+        current["last_non_counted_search_reason"] = reason
+        return _result(RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED, reason=reason)
+
+    # These are eligibility predicates, not Worker prose.  Failure is fail
+    # closed and clears the active window so stale search evidence cannot
+    # cross a provider, authority, subject, or terminal boundary.
+    blockers: list[str] = []
+    if not recovery_active or not lifecycle_active:
+        blockers.append("recovery_inactive")
+    if not lineage_valid:
+        blockers.append("lineage_invalid")
+    if not behavior_changing_mission_unresolved:
+        blockers.append("mission_resolved")
+    if not current_target_known or not target:
+        blockers.append("target_unknown")
+    if not subject:
+        blockers.append("subject_unknown")
+    if not legal:
+        blockers.append("no_legal_mutation_space")
+    if not provider_healthy:
+        blockers.append("provider_unhealthy")
+    if provider_harness_blocked:
+        blockers.append("provider_or_harness_blocked")
+    if not authority_unchanged:
+        blockers.append("authority_changed")
+    if _v266_authority_explicitly_blocks(current):
+        blockers.append("authority_blocked")
+    if not scope_valid:
+        blockers.append("scope_invalid")
+    if not dnt_valid:
+        blockers.append("dnt_invalid")
+    subject_changed = not subject_unchanged
+    if terminal_state not in (None, "") or current.get("terminal_state") not in (None, ""):
+        blockers.append("terminal_state")
+    if remaining < max(0, _safe_int(safety_floor, MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION)):
+        blockers.append("insufficient_remaining_budget")
+    if blockers:
+        current = reset_recovery_no_mutation_search_state(
+            current, reason=";".join(blockers)
+        )
+        current["last_no_mutation_search_blockers"] = blockers[:16]
+        return {
+            **_result(RECOVERY_NO_MUTATION_SEARCH_BLOCKED),
+            "state": current,
+            "blockers": blockers[:16],
+            "reason": blockers[0],
+            "reset": True,
+        }
+
+    # A changed subject starts a new window. The current non-mutating
+    # interaction may be the first observation in that window, but it can
+    # never inherit the old subject's count.
+    if subject_changed:
+        current["current_subject_hash"] = subject
+        current = reset_recovery_no_mutation_search_state(
+            current, reason="subject_changed"
+        )
+        current["current_subject_hash"] = subject
+
+    authority_identity = _get(
+        current, "authority_state_identity", "recovery_authorization_hash",
+        "authority_hash", default="",
+    )
+    if not authority_identity and isinstance(
+        current.get("recovery_authorization"), dict
+    ):
+        authority = current["recovery_authorization"]
+        authority_identity = (
+            authority.get("authorization_hash")
+            or authority.get("plan_hash")
+            or canonical_hash({
+                key: authority.get(key)
+                for key in (
+                    "authorization_id", "plan_id", "approval_receipt_hash",
+                    "verification_digest", "authority_delta_empty",
+                    "user_reapproval_required",
+                )
+                if key in authority
+            })
+        )
+    window_key = (
+        execution, attempt, epoch, target.casefold(), subject,
+        _v266_legal_space_identity(legal), _text(authority_identity, 160),
+    )
+    previous_key = tuple(current.get("no_mutation_search_window_key") or ())
+    if previous_key != window_key:
+        current["no_mutation_search_interaction_count"] = 0
+        current["no_mutation_search_window_first_event_id"] = None
+        current["no_mutation_search_window_key"] = window_key
+        current["no_mutation_search_window_ordinal"] = max(
+            1, _safe_int(current.get("no_mutation_search_window_ordinal"), 1)
+        )
+    count = max(
+        0,
+        _safe_int(current.get("no_mutation_search_interaction_count"), 0),
+    ) + 1
+    current["no_mutation_search_interaction_count"] = count
+    event_value = _text(event_id, 180) or (
+        f"{execution}:search:{max(1, _safe_int(current.get('no_mutation_search_window_ordinal'), 1))}:{count}"
+    )
+    if not current.get("no_mutation_search_window_first_event_id"):
+        current["no_mutation_search_window_first_event_id"] = event_value
+    pattern = build_recovery_no_mutation_search_pattern(
+        execution,
+        recovery_attempt_index=attempt,
+        strategy_epoch=epoch,
+        target_path=target,
+        subject_identity=subject,
+        legal_mutation_mechanisms=legal,
+        interaction_count=count,
+        mutation_attempts=0,
+        commit_count=0,
+        provider_healthy=bool(provider_healthy),
+        provider_harness_blocked=bool(provider_harness_blocked),
+        tool_steps_used=used_steps,
+        tool_steps_remaining=max(0, remaining),
+        first_interaction_event_id=current.get("no_mutation_search_window_first_event_id"),
+        latest_interaction_event_id=event_value,
+        behavior_changing_mission_unresolved=bool(behavior_changing_mission_unresolved),
+        current_target_known=bool(current_target_known),
+        subject_unchanged=True,
+        scope_valid=bool(scope_valid),
+        dnt_valid=bool(dnt_valid),
+        authority_unchanged=bool(authority_unchanged),
+        legal_mutation_space_available=True,
+    )
+    current["no_mutation_search_pattern"] = pattern
+    current["no_mutation_search_patterns"] = (
+        list(current.get("no_mutation_search_patterns", [])) + [pattern]
+    )[-32:]
+    interaction = build_recovery_no_mutation_search_interaction(
+        execution,
+        event_id=event_value,
+        tool_name=name,
+        recovery_attempt_index=attempt,
+        strategy_epoch=epoch,
+        target_path=target,
+        subject_identity=subject,
+        interaction_count=count,
+        tool_steps_used=used_steps,
+        tool_steps_remaining=max(0, remaining),
+    )
+    current["no_mutation_search_interaction_events"] = (
+        list(current.get("no_mutation_search_interaction_events", [])) + [interaction]
+    )[-32:]
+    if count < MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION:
+        return _result(
+            RECOVERY_NO_MUTATION_SEARCH_PROGRESS,
+            counted=True,
+            interaction_count=count,
+            pattern=pattern,
+            interaction=interaction,
+        )
+
+    detected = detect_recovery_no_mutation_search_stagnation(pattern)
+    if not detected.get("detected"):
+        return _result(
+            RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED,
+            counted=True,
+            interaction_count=count,
+            pattern=pattern,
+            interaction=interaction,
+        )
+
+    used = max(0, _safe_int(current.get("mutation_path_reorientations_used"), 0))
+    maximum = min(
+        MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        max(0, _safe_int(
+            current.get("max_mutation_path_reorientations"),
+            MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        )),
+    )
+    if used >= maximum:
+        if not current.get("no_mutation_search_exhausted"):
+            exhaustion = {
+                "artifact_type": RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED,
+                "recovery_execution_id": execution,
+                "recovery_attempt_index": attempt,
+                "strategy_epoch": epoch,
+                "pattern_hash": pattern.get("canonical_hash"),
+                "interaction_count": count,
+                "reorientations_used": used,
+                "reorientation_budget": maximum,
+                "target_path": target,
+                "subject_identity": subject,
+                "worker_prose_authority": 0,
+                "canonical_hash": "",
+            }
+            exhaustion["canonical_hash"] = canonical_hash(
+                _without(exhaustion, "canonical_hash")
+            )
+            current["no_mutation_search_exhaustion_evidence"] = _freeze_record(
+                RecoveryNoMutationSearchPattern, exhaustion
+            )
+            current["no_mutation_search_exhausted"] = True
+            current["no_mutation_search_terminal_state"] = RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED
+        return _result(
+            RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED,
+            counted=True,
+            interaction_count=count,
+            pattern=pattern,
+            interaction=interaction,
+            exhausted=True,
+            adaptation_budget_exhausted=True,
+        )
+
+    # A reorientation starts a fresh local search window.  The triggering
+    # pattern remains immutable evidence; the counter itself does not leak
+    # into the next window or across an epoch/Worker boundary.
+    current_for_context = _copy(current)
+    current_for_context["remaining_tool_steps"] = max(0, remaining)
+    context = build_recovery_mutation_path_reorientation_context(
+        current_for_context,
+        pattern=pattern,
+        target_path=target,
+        legal_mutation_mechanisms=legal,
+        current_source_hash=current_source_hash,
+    )
+    current["mutation_path_reorientations_used"] = used + 1
+    current["last_mutation_path_reorientation_context"] = context
+    event = build_recovery_mutation_path_reorientation_event(
+        current,
+        trigger_pattern=pattern,
+        target_path=target,
+        subject_identity=subject,
+        legal_mutation_mechanisms=legal,
+        tool_steps_used=used_steps,
+        tool_steps_remaining=max(0, remaining),
+        reorientation_ordinal=used + 1,
+        model_visible_context=context,
+        active_tool_schema_hash=active_tool_schema_hash,
+    )
+    current["mutation_path_reorientation_events"] = (
+        list(current.get("mutation_path_reorientation_events", [])) + [event]
+    )[-MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS:]
+    current["last_mutation_path_reorientation"] = event
+    current["no_mutation_search_interaction_count"] = 0
+    current["no_mutation_search_window_key"] = None
+    current["no_mutation_search_window_first_event_id"] = None
+    current["no_mutation_search_window_ordinal"] = max(
+        1, _safe_int(current.get("no_mutation_search_window_ordinal"), 1)
+    ) + 1
+    current["no_mutation_search_reset_reason"] = "reorientation"
+    return {
+        **_result(RECOVERY_NO_MUTATION_SEARCH_STAGNATION),
+        "state": current,
+        "counted": True,
+        "interaction_count": count,
+        "pattern": pattern,
+        "interaction": interaction,
+        "reoriented": True,
+        "event": event,
+        "feedback": context,
+        "exhausted": False,
+        "reorientation_ordinal": used + 1,
+    }
+
+
+# Compatibility/discoverability spellings for callers that use the V26.6
+# nouns directly.  They all retain the same immutable records and one-shot
+# state machine; none creates a new Worker or changes authority.
+observe_recovery_no_mutation_search = observe_recovery_no_mutation_search_interaction
+evaluate_recovery_no_mutation_search = observe_recovery_no_mutation_search_interaction
+decide_recovery_no_mutation_search = observe_recovery_no_mutation_search_interaction
+record_recovery_no_mutation_search_interaction = observe_recovery_no_mutation_search_interaction
+record_recovery_no_mutation_search = observe_recovery_no_mutation_search_interaction
+detect_no_mutation_search_stagnation = detect_recovery_no_mutation_search_stagnation
+build_recovery_mutation_path_reorientation = build_recovery_mutation_path_reorientation_event
+build_mutation_path_reorientation = build_recovery_mutation_path_reorientation_event
+validate_recovery_mutation_path_reorientation = validate_recovery_mutation_path_reorientation_event
+reset_no_mutation_search_state = reset_recovery_no_mutation_search_state
+
+
 def build_recovery_strategy_failure_pattern(
     recovery_execution_id: str,
     strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
@@ -3098,6 +4092,32 @@ def create_recovery_strategy_state(
         "completion_repair_events": [],
         "last_completion_repair": None,
         "completion_contract": _copy(completion_contract or {}),
+        # V26.6 execution-local no-mutation search control.  These fields are
+        # independent of the V26.3 strategy and V26.4 adaptation budgets.
+        "no_mutation_search_interaction_count": 0,
+        "no_mutation_search_window_key": None,
+        "no_mutation_search_window_first_event_id": None,
+        "no_mutation_search_pattern": None,
+        "no_mutation_search_patterns": [],
+        "no_mutation_search_interaction_events": [],
+        "no_mutation_search_reset_reason": None,
+        "no_mutation_search_window_ordinal": 1,
+        "mutation_path_reorientations_used": 0,
+        "max_mutation_path_reorientations": MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        "mutation_path_reorientation_events": [],
+        "last_mutation_path_reorientation": None,
+        "last_mutation_path_reorientation_context": "",
+        "no_mutation_search_exhausted": False,
+        "no_mutation_search_exhaustion_evidence": None,
+        "no_mutation_search_terminal_state": None,
+        "recovery_mission_unresolved": True,
+        "provider_healthy": True,
+        "provider_harness_blocked": False,
+        "authority_unchanged": True,
+        "scope_valid": True,
+        "dnt_valid": True,
+        "current_target_known": bool(target_path),
+        "legal_mutation_space_identity": _v266_legal_space_identity(legal),
     }
 
 
@@ -3145,6 +4165,13 @@ def observe_recovery_mutation(
 ) -> dict[str, Any]:
     """Record one mutation result and optionally enter epoch 1."""
     current = _copy(state) if isinstance(state, dict) else {}
+    # Any recognized mutation invocation owns the no-mutation search window,
+    # including a candidate that later fails syntax, V25.5, transaction, or
+    # commit validation.  Keep the reset here as well as at the Worker seam
+    # so provider-free callers cannot accidentally carry a stale V26.6 count.
+    current = reset_recovery_no_mutation_search_state(
+        current, reason="mutation_observation"
+    )
     execution_id = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
     epoch = _safe_int(current.get("strategy_epoch", 0) or 0, RECOVERY_STRATEGY_EPOCH_0)
     target_value = _path(target_path or target or current.get("target_path"))
@@ -3254,6 +4281,9 @@ def observe_recovery_mutation(
         current["consecutive_failure_count"] = 0
         current["last_failure_key"] = None
         current["current_subject_hash"] = after
+        current = reset_recovery_no_mutation_search_state(
+            current, reason="strategy_epoch_change"
+        )
         transition_feedback = build_recovery_strategy_transition_feedback(
             pattern,
             decision,
@@ -3387,6 +4417,42 @@ def recovery_strategy_state_projection(state: dict[str, Any] | None) -> dict[str
         "completion_contract": _safe_projection(
             value.get("completion_contract") or {}
         ),
+        "no_mutation_search_interaction_count": value.get(
+            "no_mutation_search_interaction_count", 0
+        ),
+        "no_mutation_search_threshold": MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION,
+        "no_mutation_search_safety_floor": MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION,
+        "no_mutation_search_pattern": _safe_projection(
+            value.get("no_mutation_search_pattern") or {}
+        ),
+        "no_mutation_search_patterns": _safe_projection(
+            (value.get("no_mutation_search_patterns") or [])[-4:]
+        ),
+        "no_mutation_search_interaction_events": _safe_projection(
+            (value.get("no_mutation_search_interaction_events") or [])[-4:]
+        ),
+        "mutation_path_reorientations_used": value.get(
+            "mutation_path_reorientations_used", 0
+        ),
+        "max_mutation_path_reorientations": value.get(
+            "max_mutation_path_reorientations",
+            MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        ),
+        "mutation_path_reorientation_events": _safe_projection(
+            (value.get("mutation_path_reorientation_events") or [])[-1:]
+        ),
+        "last_mutation_path_reorientation_context": _text(
+            value.get("last_mutation_path_reorientation_context"), 1800
+        ),
+        "no_mutation_search_exhausted": bool(
+            value.get("no_mutation_search_exhausted", False)
+        ),
+        "no_mutation_search_exhaustion_evidence": _safe_projection(
+            value.get("no_mutation_search_exhaustion_evidence") or {}
+        ),
+        "no_mutation_search_terminal_state": value.get(
+            "no_mutation_search_terminal_state"
+        ),
         "terminal_state": value.get("terminal_state"),
         "worker_prose_authority": 0,
     }
@@ -3425,10 +4491,39 @@ def validate_recovery_strategy_state(state: dict[str, Any] | None) -> dict[str, 
             MAX_RECOVERY_COMPLETION_REPAIRS,
             "completion repair",
         ),
+        (
+            "mutation_path_reorientations_used",
+            MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+            "mutation-path reorientation",
+        ),
     ):
         counter = _safe_int(value.get(key, 0), -1)
         if counter < 0 or counter > maximum_value:
             errors.append(f"{label} budget is invalid")
+    v266_max = _safe_int(
+        value.get(
+            "max_mutation_path_reorientations",
+            MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+        ),
+        -1,
+    )
+    if v266_max < 0 or v266_max > MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS:
+        errors.append("mutation-path reorientation budget is invalid")
+    if (
+        _safe_int(value.get("mutation_path_reorientations_used", 0), 0)
+        > v266_max >= 0
+    ):
+        errors.append("mutation-path reorientation count exceeds its budget")
+    pattern = value.get("no_mutation_search_pattern")
+    if isinstance(pattern, dict) and pattern:
+        pattern_check = validate_recovery_no_mutation_search_pattern(pattern)
+        if not pattern_check.get("valid"):
+            errors.append("last no-mutation search pattern is invalid")
+    event = value.get("last_mutation_path_reorientation")
+    if isinstance(event, dict) and event:
+        event_check = validate_recovery_mutation_path_reorientation_event(event)
+        if not event_check.get("valid"):
+            errors.append("last mutation-path reorientation is invalid")
     strategy = value.get("current_strategy")
     strategy_check = validate_recovery_mutation_strategy(strategy)
     if not strategy_check.get("valid"):
@@ -3466,6 +4561,12 @@ def validate_recovery_strategy(value: dict[str, Any] | None) -> dict[str, Any]:
             return validate_recovery_completion_repair_event(value)
         if artifact_type == RECOVERY_COMPLETION_REPAIR_EVENT:
             return validate_recovery_completion_repair_event(value)
+        if artifact_type == RECOVERY_NO_MUTATION_SEARCH_PATTERN:
+            return validate_recovery_no_mutation_search_pattern(value)
+        if artifact_type == RECOVERY_NO_MUTATION_SEARCH_INTERACTION:
+            return validate_recovery_no_mutation_search_interaction(value)
+        if artifact_type == RECOVERY_MUTATION_PATH_REORIENTATION_EVENT:
+            return validate_recovery_mutation_path_reorientation_event(value)
     return validate_recovery_strategy_state(value)
 
 

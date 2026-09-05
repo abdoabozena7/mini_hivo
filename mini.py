@@ -324,6 +324,30 @@ RECOVERY_EPOCH_REANCHOR = stage6d.RECOVERY_EPOCH_REANCHOR
 RECOVERY_EPOCH_REANCHOR_EVENT = stage6d.RECOVERY_EPOCH_REANCHOR_EVENT
 RECOVERY_COMPLETION_CONTRACT_REPAIR = stage6d.RECOVERY_COMPLETION_CONTRACT_REPAIR
 RECOVERY_COMPLETION_REPAIR_EVENT = stage6d.RECOVERY_COMPLETION_REPAIR_EVENT
+RECOVERY_V266_SCHEMA_VERSION = stage6d.RECOVERY_V266_SCHEMA_VERSION
+RECOVERY_NO_MUTATION_SEARCH_INTERACTION = stage6d.RECOVERY_NO_MUTATION_SEARCH_INTERACTION
+RECOVERY_NO_MUTATION_SEARCH_PATTERN = stage6d.RECOVERY_NO_MUTATION_SEARCH_PATTERN
+RECOVERY_MUTATION_PATH_REORIENTATION = stage6d.RECOVERY_MUTATION_PATH_REORIENTATION
+RECOVERY_MUTATION_PATH_REORIENTATION_EVENT = stage6d.RECOVERY_MUTATION_PATH_REORIENTATION_EVENT
+RECOVERY_NO_MUTATION_SEARCH_STAGNATION = stage6d.RECOVERY_NO_MUTATION_SEARCH_STAGNATION
+RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED = stage6d.RECOVERY_NO_MUTATION_SEARCH_EXHAUSTED
+RECOVERY_NO_MUTATION_SEARCH_RESET = stage6d.RECOVERY_NO_MUTATION_SEARCH_RESET
+RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED = stage6d.RECOVERY_NO_MUTATION_SEARCH_NOT_COUNTED
+RECOVERY_NO_MUTATION_SEARCH_BLOCKED = stage6d.RECOVERY_NO_MUTATION_SEARCH_BLOCKED
+RECOVERY_NO_MUTATION_SEARCH_PROGRESS = stage6d.RECOVERY_NO_MUTATION_SEARCH_PROGRESS
+MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION = (
+    stage6d.MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS_BEFORE_REORIENTATION
+)
+MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS = stage6d.MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS
+MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION = (
+    stage6d.MIN_RECOVERY_TOOL_STEPS_FOR_MUTATION_PATH_REORIENTATION
+)
+RECOVERY_MUTATION_PATH_REORIENTATION_SAFETY_FLOOR = (
+    stage6d.RECOVERY_MUTATION_PATH_REORIENTATION_SAFETY_FLOOR
+)
+MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS = (
+    stage6d.MAX_RECOVERY_NO_MUTATION_SEARCH_INTERACTIONS
+)
 EDIT_EXACT_MATCH_AMBIGUOUS = stage6d.EDIT_EXACT_MATCH_AMBIGUOUS
 SUPPRESSED_STRATEGY_TOOL_REQUESTED = stage6d.SUPPRESSED_STRATEGY_TOOL_REQUESTED
 TOOL_CONTRACT_STAGNATION_DETECTED = stage6d.TOOL_CONTRACT_STAGNATION_DETECTED
@@ -339,6 +363,10 @@ RecoveryEpochReanchor = stage6d.RecoveryEpochReanchor
 RecoveryEpochReanchorEvent = stage6d.RecoveryEpochReanchorEvent
 RecoveryCompletionContractRepair = stage6d.RecoveryCompletionContractRepair
 RecoveryCompletionRepairEvent = stage6d.RecoveryCompletionRepairEvent
+RecoveryNoMutationSearchPattern = stage6d.RecoveryNoMutationSearchPattern
+RecoveryNoMutationSearchInteraction = stage6d.RecoveryNoMutationSearchInteraction
+RecoveryMutationPathReorientation = stage6d.RecoveryMutationPathReorientation
+RecoveryMutationPathReorientationEvent = stage6d.RecoveryMutationPathReorientationEvent
 classify_edit_exact_match_ambiguity = stage6d.classify_edit_exact_match_ambiguity
 build_recovery_tool_contract_failure_pattern = stage6d.build_recovery_tool_contract_failure_pattern
 validate_recovery_tool_contract_failure_pattern = stage6d.validate_recovery_tool_contract_failure_pattern
@@ -368,6 +396,25 @@ build_recovery_completion_repair_event = stage6d.build_recovery_completion_repai
 build_recovery_completion_repair_feedback = stage6d.build_recovery_completion_repair_feedback
 validate_recovery_completion_repair_event = stage6d.validate_recovery_completion_repair_event
 validate_recovery_completion_contract_repair = stage6d.validate_recovery_completion_contract_repair
+build_recovery_no_mutation_search_interaction = stage6d.build_recovery_no_mutation_search_interaction
+validate_recovery_no_mutation_search_interaction = stage6d.validate_recovery_no_mutation_search_interaction
+is_recovery_mutation_mechanism = stage6d.is_recovery_mutation_mechanism
+initialize_recovery_no_mutation_search_state = stage6d.initialize_recovery_no_mutation_search_state
+reset_recovery_no_mutation_search_state = stage6d.reset_recovery_no_mutation_search_state
+build_recovery_no_mutation_search_pattern = stage6d.build_recovery_no_mutation_search_pattern
+validate_recovery_no_mutation_search_pattern = stage6d.validate_recovery_no_mutation_search_pattern
+detect_recovery_no_mutation_search_stagnation = stage6d.detect_recovery_no_mutation_search_stagnation
+observe_recovery_no_mutation_search_interaction = stage6d.observe_recovery_no_mutation_search_interaction
+observe_recovery_no_mutation_search = stage6d.observe_recovery_no_mutation_search
+evaluate_recovery_no_mutation_search = stage6d.evaluate_recovery_no_mutation_search
+decide_recovery_no_mutation_search = stage6d.decide_recovery_no_mutation_search
+record_recovery_no_mutation_search_interaction = stage6d.record_recovery_no_mutation_search_interaction
+record_recovery_no_mutation_search = stage6d.record_recovery_no_mutation_search
+build_recovery_mutation_path_reorientation_context = stage6d.build_recovery_mutation_path_reorientation_context
+build_recovery_mutation_path_reorientation_event = stage6d.build_recovery_mutation_path_reorientation_event
+build_recovery_mutation_path_reorientation = stage6d.build_recovery_mutation_path_reorientation
+validate_recovery_mutation_path_reorientation_event = stage6d.validate_recovery_mutation_path_reorientation_event
+validate_recovery_mutation_path_reorientation = stage6d.validate_recovery_mutation_path_reorientation
 observe_recovery_completion_attempt = stage6d.observe_recovery_completion_attempt
 observe_completion_attempt = stage6d.observe_completion_attempt
 record_recovery_completion_attempt = stage6d.record_recovery_completion_attempt
@@ -10780,6 +10827,32 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
             "completion_contract": copy.deepcopy(
                 strategy.get("completion_contract") or {}
             ),
+            "no_mutation_search_interaction_count": 0,
+            "no_mutation_search_window_key": None,
+            "no_mutation_search_window_first_event_id": None,
+            "no_mutation_search_pattern": None,
+            "no_mutation_search_patterns": [],
+            "no_mutation_search_interaction_events": [],
+            "no_mutation_search_reset_reason": None,
+            "no_mutation_search_window_ordinal": 1,
+            "mutation_path_reorientations_used": 0,
+            "max_mutation_path_reorientations": MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
+            "mutation_path_reorientation_events": [],
+            "last_mutation_path_reorientation": None,
+            "last_mutation_path_reorientation_context": "",
+            "no_mutation_search_exhausted": False,
+            "no_mutation_search_exhaustion_evidence": None,
+            "no_mutation_search_terminal_state": None,
+            "recovery_mission_unresolved": True,
+            "provider_healthy": True,
+            "provider_harness_blocked": False,
+            "authority_unchanged": True,
+            "scope_valid": True,
+            "dnt_valid": True,
+            "current_target_known": bool(strategy.get("target_path") or target),
+            "legal_mutation_space_identity": stage6d.canonical_hash(
+                sorted({str(item).casefold() for item in strategy.get("allowed_mutation_mechanisms", []) or []})
+            ),
             }
     state = copy.deepcopy(value)
     if not state.get("recovery_execution_id") or not isinstance(state.get("current_strategy"), dict):
@@ -10836,7 +10909,7 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
                 transition_reason="initial recovery strategy",
                 recovery_authorization=state.get("recovery_authorization"),
             )
-    return state
+    return stage6d.initialize_recovery_no_mutation_search_state(state)
 
 
 def verification_failure_signature(result):
@@ -10931,6 +11004,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     recovery_tool_contract_events = []
     recovery_epoch_reanchor_events = []
     recovery_completion_events = []
+    recovery_no_mutation_search_events = []
+    recovery_mutation_path_reorientation_events = []
     recovery_task_text = str(task_text)
     if recovery_completion_contract is None:
         recovery_completion_contract = RUN.get("recovery_completion_contract")
@@ -11162,6 +11237,39 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "verification_handoff_ready",
                 )
             )
+            if recovery_state is not None and role == "Builder":
+                # Preserve empty responses and completion attempts as runtime
+                # evidence while explicitly excluding both from the V26.6
+                # meaningful-search counter.
+                idle_observation = stage6d.observe_recovery_no_mutation_search_interaction(
+                    recovery_state,
+                    tool_name=None,
+                    target_path=recovery_state.get("target_path"),
+                    subject_identity=recovery_state.get("current_subject_hash"),
+                    recognized_tool=False,
+                    empty_response=not completion_attempt_signaled,
+                    completion_attempt=completion_attempt_signaled,
+                    remaining_tool_steps=max(0, int(step_budget) - (int(_step) + 1)),
+                    tool_steps_used=int(_step) + 1,
+                )
+                recovery_state = idle_observation["state"]
+                recovery_no_mutation_search_events.append({
+                    "status": idle_observation.get("status"),
+                    "counted": False,
+                    "interaction_count": idle_observation.get(
+                        "interaction_count", 0
+                    ),
+                    "reason": idle_observation.get("reason"),
+                })
+                recovery_strategy_events.append({
+                    "kind": "v26_6_no_mutation_search",
+                    "status": idle_observation.get("status"),
+                    "counted": False,
+                    "interaction_count": idle_observation.get(
+                        "interaction_count", 0
+                    ),
+                    "reason": idle_observation.get("reason"),
+                })
             if (
                 recovery_state is not None
                 and role == "Builder"
@@ -11253,6 +11361,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         stop = False
         restart_after_recovery_strategy_switch = False
         restart_after_recovery_epoch_reanchor = False
+        restart_after_recovery_mutation_path_reorientation = False
         for call in tool_calls:
             try:
                 name = call["function"]["name"]
@@ -11322,6 +11431,105 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         category=recovery_packet.get("category"),
                         context_source=recovery_packet.get("context_source"),
                         current_file_exists=recovery_packet.get("current_file_exists"),
+                    )
+
+            # V26.6 observes the absence of mutation-path search before the
+            # older mutation-failure adaptations run.  A recognized mutation
+            # invocation resets this window even when the guarded seam later
+            # rejects its candidate; non-mutating tools count only while all
+            # deterministic recovery gates remain true.
+            recovery_no_mutation_observation = None
+            if recovery_state is not None and role == "Builder":
+                is_recovery_mutation = stage6d.is_recovery_mutation_mechanism(name)
+                recovery_target = recovery_state.get("target_path") or target
+                active_legal = (
+                    recovery_state.get("current_strategy", {}).get(
+                        "allowed_mutation_mechanisms", []
+                    )
+                    if isinstance(recovery_state.get("current_strategy"), dict)
+                    else recovery_state.get("available_legal_mechanisms", [])
+                )
+                recovery_no_mutation_observation = (
+                    stage6d.observe_recovery_no_mutation_search_interaction(
+                        recovery_state,
+                        tool_name=name,
+                        target_path=recovery_target,
+                        subject_identity=recovery_state.get("current_subject_hash"),
+                        subject_unchanged=True,
+                        event_id=(
+                            f"{task_id}:generation:{int(_step) + 1}:tool:{len(evidence)}"
+                        ),
+                        recognized_tool=name in offered_names,
+                        mutation_attempt=is_recovery_mutation,
+                        committed=(
+                            is_recovery_mutation and not tool_result_failed(result)
+                        ),
+                        commit_count=(
+                            1 if is_recovery_mutation and not tool_result_failed(result) else 0
+                        ),
+                        recovery_active=True,
+                        behavior_changing_mission_unresolved=recovery_state.get(
+                            "recovery_mission_unresolved", True
+                        ),
+                        current_target_known=recovery_state.get(
+                            "current_target_known", bool(recovery_target)
+                        ),
+                        legal_mutation_mechanisms=active_legal,
+                        strategy_epoch=recovery_state.get("strategy_epoch", 0),
+                        provider_healthy=recovery_state.get("provider_healthy", True),
+                        provider_harness_blocked=recovery_state.get(
+                            "provider_harness_blocked", False
+                        ),
+                        authority_unchanged=recovery_state.get(
+                            "authority_unchanged", True
+                        ),
+                        scope_valid=recovery_state.get("scope_valid", True),
+                        dnt_valid=recovery_state.get("dnt_valid", True),
+                        remaining_tool_steps=max(
+                            0, int(step_budget) - (int(_step) + 1)
+                        ),
+                        tool_steps_used=int(_step) + 1,
+                        terminal_state=recovery_state.get("terminal_state"),
+                        active_tool_schema_hash=stage6d.canonical_hash(offered_tools),
+                        base_context=recovery_packet_context,
+                    )
+                )
+                recovery_state = recovery_no_mutation_observation["state"]
+                recovery_no_mutation_search_events.append({
+                    "status": recovery_no_mutation_observation.get("status"),
+                    "counted": bool(recovery_no_mutation_observation.get("counted")),
+                    "interaction_count": recovery_no_mutation_observation.get(
+                        "interaction_count", 0
+                    ),
+                    "pattern": copy.deepcopy(
+                        recovery_no_mutation_observation.get("pattern") or {}
+                    ),
+                    "interaction": copy.deepcopy(
+                        recovery_no_mutation_observation.get("interaction") or {}
+                    ),
+                    "event": copy.deepcopy(
+                        recovery_no_mutation_observation.get("event") or {}
+                    ),
+                    "reason": recovery_no_mutation_observation.get("reason"),
+                })
+                recovery_strategy_events.append({
+                    "kind": "v26_6_no_mutation_search",
+                    "status": recovery_no_mutation_observation.get("status"),
+                    "counted": bool(recovery_no_mutation_observation.get("counted")),
+                    "interaction_count": recovery_no_mutation_observation.get(
+                        "interaction_count", 0
+                    ),
+                    "pattern": copy.deepcopy(
+                        recovery_no_mutation_observation.get("pattern") or {}
+                    ),
+                    "event": copy.deepcopy(
+                        recovery_no_mutation_observation.get("event") or {}
+                    ),
+                    "reason": recovery_no_mutation_observation.get("reason"),
+                })
+                if recovery_no_mutation_observation.get("event") is not None:
+                    recovery_mutation_path_reorientation_events.append(
+                        copy.deepcopy(recovery_no_mutation_observation["event"])
                     )
 
             # V26.3 observes only deterministic source-mutation failures in
@@ -11433,6 +11641,37 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             memory = update_memory(memory, name, args, result, role=role, task_id=task_id)
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
+
+            # The V26.6 event is model-visible and bounded.  Rebuild the
+            # current recovery context in the same spirit as the existing
+            # local re-anchor, retaining only the mission anchor and current
+            # deterministic search state.  The Worker identity, authorization,
+            # epoch, and tool schema are preserved.
+            if (
+                recovery_no_mutation_observation is not None
+                and recovery_no_mutation_observation.get("reoriented")
+            ):
+                reorientation_feedback = recovery_no_mutation_observation.get(
+                    "feedback", ""
+                )
+                if reorientation_feedback:
+                    messages = [{
+                        "role": "system",
+                        "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                    }, {
+                        "role": "user",
+                        "content": compact_text(
+                            "RECOVERY MISSION:\n" + recovery_packet_context
+                            + "\n\n" + reorientation_feedback,
+                            RECOVERY_WORKER_PACKET_MAX_CHARS,
+                        ),
+                    }]
+                repeated_failures.clear()
+                mutation_failure_counts.clear()
+                last_verification_signature = ()
+                stagnant_verifications = 0
+                restart_after_recovery_mutation_path_reorientation = True
+                break
 
             # V26.4 observes deterministic tool-contract failures without
             # changing the tool result or the active authority. A repeated
@@ -11660,6 +11899,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             continue
         if restart_after_recovery_epoch_reanchor:
             continue
+        if restart_after_recovery_mutation_path_reorientation:
+            continue
         if stop:
             break
     else:
@@ -11703,6 +11944,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "recovery_tool_contract_events": recovery_tool_contract_events,
         "recovery_epoch_reanchor_events": recovery_epoch_reanchor_events,
         "recovery_completion_events": recovery_completion_events,
+        "recovery_no_mutation_search_events": recovery_no_mutation_search_events,
+        "recovery_mutation_path_reorientation_events": (
+            recovery_mutation_path_reorientation_events
+        ),
     }
 
 
