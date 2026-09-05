@@ -33,6 +33,9 @@ from hivo.requirements import freeze
 
 SCHEMA_VERSION = "V26-RECOVERY-FOUNDATION-1"
 RECOVERY_FAILURE_ENVELOPE = "RecoveryFailureEnvelope"
+RECOVERY_FAILURE_EVIDENCE = "RecoveryFailureEvidence"
+VERIFICATION_FAILURE = "VERIFICATION_FAILURE"
+WORKER_EXECUTION_FAILURE = "WORKER_EXECUTION_FAILURE"
 RECOVERY_AUTHORITY_DELTA = "RecoveryAuthorityDelta"
 AUTHORIZED_EXECUTION_LINEAGE = "AuthorizedExecutionLineage"
 APPROVED_RECOVERY_AUTHORIZATION = "ApprovedRecoveryAuthorization"
@@ -45,6 +48,24 @@ AUTHORITY_CHANGE_REQUIRED = "AUTHORITY_CHANGE_REQUIRED"
 CAPABILITY_FLOOR = "CAPABILITY_FLOOR"
 NON_RECOVERABLE_ARCHITECTURE_FAILURE = "NON_RECOVERABLE_ARCHITECTURE_FAILURE"
 RECOVERY_CLASSIFICATION_UNCERTAIN = "RECOVERY_CLASSIFICATION_UNCERTAIN"
+
+# V26.5 makes the source of a failed execution an explicit tagged union.
+# These blockers are reporting/classification states, not new authority and
+# are intentionally separate from the existing recoverable classes.
+PRE_VERIFICATION_RECOVERY_BLOCKED_PROVIDER = "PRE_VERIFICATION_RECOVERY_BLOCKED_PROVIDER"
+PRE_VERIFICATION_RECOVERY_BLOCKED_HARNESS = "PRE_VERIFICATION_RECOVERY_BLOCKED_HARNESS"
+PRE_VERIFICATION_RECOVERY_BLOCKED_AUTHORITY = "PRE_VERIFICATION_RECOVERY_BLOCKED_AUTHORITY"
+PRE_VERIFICATION_RECOVERY_BLOCKED_DRIFT = "PRE_VERIFICATION_RECOVERY_BLOCKED_DRIFT"
+PRE_VERIFICATION_RECOVERY_BLOCKED_NO_LEGAL_SPACE = "PRE_VERIFICATION_RECOVERY_BLOCKED_NO_LEGAL_SPACE"
+PRE_VERIFICATION_RECOVERY_BLOCKED_BUDGET = "PRE_VERIFICATION_RECOVERY_BLOCKED_BUDGET"
+PRE_VERIFICATION_RECOVERY_BLOCKED_INCOMPLETE = "PRE_VERIFICATION_RECOVERY_BLOCKED_INCOMPLETE"
+PRE_VERIFICATION_RECOVERY_EVIDENCE_INCOMPLETE = "PRE_VERIFICATION_RECOVERY_EVIDENCE_INCOMPLETE"
+RECOVERY_REQUIRED_BUT_NOT_DISPATCHABLE = "RECOVERY_REQUIRED_BUT_NOT_DISPATCHABLE"
+RECOVERY_REQUIRED_CLASSIFICATION_UNCERTAIN = "RECOVERY_REQUIRED_CLASSIFICATION_UNCERTAIN"
+RECOVERY_REQUIRED_CLASSIFIED = "RECOVERY_REQUIRED_CLASSIFIED"
+RECOVERY_REQUIRED_AUTHORITY_CHANGE = "RECOVERY_REQUIRED_AUTHORITY_CHANGE"
+RECOVERY_REQUIRED_DISPATCHED = "RECOVERY_REQUIRED_DISPATCHED"
+RECOVERY_COMPLETED = "RECOVERY_COMPLETED"
 
 RECOVERY_AUTHORIZATION_READY = "RECOVERY_AUTHORIZATION_READY"
 RECOVERY_AUTHORIZATION_BLOCKED = "RECOVERY_AUTHORIZATION_BLOCKED"
@@ -97,6 +118,7 @@ RECOVERY_STRATEGY_STAGNATION_THRESHOLD = 2
 # V26.4 keeps all adaptation local to one recovery Worker lifecycle.  These
 # bounds are deliberately independent from the V26.3 strategy-switch budget.
 RECOVERY_V264_SCHEMA_VERSION = "V26.4-RECOVERY-ADAPTATION-1"
+RECOVERY_V265_SCHEMA_VERSION = "V26.5-RECOVERY-FAILURE-EVIDENCE-1"
 MAX_RECOVERY_TOOL_CONTRACT_GUIDANCE_EVENTS = 1
 MAX_RECOVERY_EPOCH_REANCHORS = 1
 MAX_RECOVERY_COMPLETION_REPAIRS = 1
@@ -118,6 +140,7 @@ RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAUSTED = "RECOVERY_EPOCH_REANCHOR_BUDGET_EXHAU
 COMPLETION_CONTRACT_REPAIR_READY = "COMPLETION_CONTRACT_REPAIR_READY"
 RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED = "RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED"
 WORKER_OUTPUT_INVALID = "WORKER_OUTPUT_INVALID"
+WORKER_NO_APPROVED_MUTATION = "WORKER_NO_APPROVED_MUTATION"
 
 LIVE3_APPROVAL_ID = "APPROVAL-21A7FCFDBFB22CB9"
 LIVE3_APPROVAL_RECEIPT_HASH = "b94af87ad1847cd277a5f671dedcd276827c137219504cd9f3b0361360f194a3"
@@ -181,6 +204,18 @@ class _FrozenRecord(dict):
 
 class RecoveryFailureEnvelope(_FrozenRecord):
     """Immutable deterministic evidence for one failed execution."""
+
+
+class RecoveryFailureEvidence(_FrozenRecord):
+    """Immutable tagged evidence describing the source of a failure."""
+
+
+class VerificationFailureEvidence(RecoveryFailureEvidence):
+    """A failure established by the V25.6 verification authority."""
+
+
+class WorkerExecutionFailureEvidence(RecoveryFailureEvidence):
+    """A Worker lifecycle failure before a verified completion."""
 
 
 class RecoveryAuthorityDelta(_FrozenRecord):
@@ -323,6 +358,692 @@ def _safe_int(value: Any, default: int = -1) -> int:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+# ---------------------------------------------------------------------------
+# V26.5 explicit failure-source contract
+# ---------------------------------------------------------------------------
+
+_FAILURE_EVIDENCE_COMMON_FIELDS = (
+    "schema_version", "artifact_type", "failure_source", "source_variant",
+    "execution_id", "worker_result_status", "subject_before_hash",
+    "subject_after_hash", "current_subject_hash", "commit_count", "commit",
+    "filesystem_changed", "worker_prose_authority",
+)
+
+_WORKER_EXECUTION_EVIDENCE_FIELDS = (
+    "worker_terminal_code", "failure_detail", "actual_worker_lifecycle", "worker_lifecycle_count",
+    "provider_health", "provider_handoff_valid", "execution_related",
+    "verified_successful_completion", "completed", "completion_attempted",
+    "completion_status", "v25_6_executed", "subject_known",
+    "subject_unchanged", "lineage_status", "unknown_manual_drift", "scope_valid",
+    "dnt_valid", "plan_unchanged", "approval_unchanged", "brain_valid",
+    "brain_unchanged", "promoted", "authority_delta_empty",
+    "legal_solution_space_available", "full_verification_universe_available",
+    "recovery_budget_available", "provider_failure", "harness_failure",
+    "v25_5_authority_valid", "approved_mutation_count", "changed_paths",
+    "verification_obligation_ids", "coverage_status", "missing_coverage_ids",
+    "plan_id", "plan_hash", "approval_id", "approval_receipt_hash",
+    "execution_invariant_set_hash", "promotion_status", "lineage_evidence_ref",
+)
+
+_VERIFICATION_EVIDENCE_FIELDS = (
+    "authority_id", "oracle_id", "oracle_hash", "failed_check", "detail",
+    "verification_status", "verification_executed", "v25_6_executed",
+    "verification_receipt_identity", "verification_digest", "coverage_hash",
+    "plan_id", "plan_hash", "approval_id", "approval_receipt_hash",
+    "execution_invariant_set_hash",
+)
+
+_WORKER_EVIDENCE_MIXING_KEYS = frozenset({
+    "authority_id", "oracle_id", "oracle_hash", "failed_check", "detail",
+    "failed_verification", "failed_verification_authority_ids",
+    "verification_receipt", "verification_receipts", "verification_evidence",
+    "verified_child_receipt", "execution_verification_closure",
+    "execution_verification_closure_hash", "failed_verification_closure_hash",
+})
+
+_VERIFICATION_EVIDENCE_MIXING_KEYS = frozenset({
+    "worker_terminal_code", "actual_worker_lifecycle", "provider_health",
+    "provider_handoff_valid", "execution_related", "legal_solution_space_available",
+})
+
+
+def _pick(value: Any, source: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Pick an explicit argument or an alias without treating False as absent."""
+    if value is not None:
+        return value
+    for key in keys:
+        if key in source:
+            return source[key]
+    return default
+
+
+def _failure_evidence_hash(value: dict[str, Any]) -> str:
+    return canonical_hash(_without(value, "canonical_hash", "failure_evidence_hash"))
+
+
+def _failure_evidence_source(value: Any) -> dict[str, Any] | None:
+    """Extract only an explicit V26.5 failure variant from a source object."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("artifact_type") == RECOVERY_FAILURE_EVIDENCE:
+        return _copy(value)
+    nested = value.get("failure_evidence")
+    if isinstance(nested, dict) and (
+        nested.get("artifact_type") == RECOVERY_FAILURE_EVIDENCE
+        or nested.get("failure_source") in {VERIFICATION_FAILURE, WORKER_EXECUTION_FAILURE}
+    ):
+        return _copy(nested)
+    if value.get("failure_source") in {VERIFICATION_FAILURE, WORKER_EXECUTION_FAILURE}:
+        return _copy(value)
+    return None
+
+
+def build_verification_failure_evidence(
+    execution_id: str | dict[str, Any],
+    *,
+    authority_id: str | None = None,
+    oracle_id: str | None = None,
+    oracle_hash: str | None = None,
+    failed_check: str | None = None,
+    detail: str | None = None,
+    verification_status: str = "FAIL",
+    subject_before_hash: str | None = None,
+    subject_after_hash: str | None = None,
+    current_subject_hash: str | None = None,
+    worker_result_status: str = "failed",
+    verification_receipt_identity: str | None = None,
+    verification_digest: str | None = None,
+    coverage_hash: str | None = None,
+    plan_id: str | None = None,
+    plan_hash: str | None = None,
+    approval_id: str | None = None,
+    approval_receipt_hash: str | None = None,
+    execution_invariant_set_hash: str | None = None,
+    **kwargs: Any,
+) -> VerificationFailureEvidence:
+    """Build the verification-backed member of the V26.5 failure union.
+
+    This projection contains only deterministic verification facts.  It is
+    kept separate from the pre-verification Worker-execution member so a
+    missing V25.6 receipt can never be interpreted as a failed receipt.
+    """
+    source = _copy(execution_id) if isinstance(execution_id, dict) else _copy(kwargs)
+    execution = (
+        _text(source.get("execution_id"), 180)
+        if isinstance(execution_id, dict)
+        else _text(execution_id, 180)
+    )
+    authority = _text(_pick(authority_id, source, "verification_id", default="VERIFICATION-004"), 180)
+    oracle = _text(_pick(oracle_id, source, default="ORACLE-PAUSE-INDICATOR"), 180)
+    oracle_digest = _text(
+        _pick(oracle_hash, source, "oracle_digest", default=LIVE3_ORACLE_HASH),
+        128,
+    )
+    before = _text(
+        _pick(subject_before_hash, source, "subject_before", default=LIVE3_BASELINE_SUBJECT_HASH),
+        128,
+    )
+    after = _text(
+        _pick(subject_after_hash, source, "subject_after", "current_subject_hash", default=before),
+        128,
+    )
+    current = _text(
+        _pick(current_subject_hash, source, default=after),
+        128,
+    )
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V265_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_FAILURE_EVIDENCE,
+        "failure_source": VERIFICATION_FAILURE,
+        "source_variant": VERIFICATION_FAILURE,
+        "execution_id": execution,
+        "authority_id": authority,
+        "oracle_id": oracle,
+        "oracle_hash": oracle_digest,
+        "failed_check": _text(_pick(failed_check, source, "check", default="verification_failure"), 180),
+        "detail": _text(_pick(detail, source, "target_symbol", default="deterministic verification failure"), 360),
+        "verification_status": _text(_pick(verification_status, source, default="FAIL"), 80) or "FAIL",
+        "verification_executed": True,
+        "v25_6_executed": True,
+        "verification_receipt_identity": _text(
+            _pick(
+                verification_receipt_identity,
+                source,
+                "receipt_identity", "verification_receipt_id",
+                default="deterministic_failed_verification_receipt",
+            ),
+            220,
+        ) or "deterministic_failed_verification_receipt",
+        "verification_digest": _text(
+            _pick(verification_digest, source, default=LIVE3_VERIFICATION_DIGEST),
+            128,
+        ) or LIVE3_VERIFICATION_DIGEST,
+        "coverage_hash": _text(
+            _pick(coverage_hash, source, default=LIVE3_COVERAGE_HASH),
+            128,
+        ) or LIVE3_COVERAGE_HASH,
+        "plan_id": _text(_pick(plan_id, source, default=LIVE3_PLAN_ID), 160) or LIVE3_PLAN_ID,
+        "plan_hash": _text(_pick(plan_hash, source, default=LIVE3_PLAN_HASH), 128) or LIVE3_PLAN_HASH,
+        "approval_id": _text(_pick(approval_id, source, default=LIVE3_APPROVAL_ID), 160) or LIVE3_APPROVAL_ID,
+        "approval_receipt_hash": _text(
+            _pick(approval_receipt_hash, source, default=LIVE3_APPROVAL_RECEIPT_HASH),
+            128,
+        ) or LIVE3_APPROVAL_RECEIPT_HASH,
+        "execution_invariant_set_hash": _text(
+            _pick(execution_invariant_set_hash, source, "invariant_hash", default=LIVE3_INVARIANT_HASH),
+            128,
+        ) or LIVE3_INVARIANT_HASH,
+        "worker_result_status": _text(_pick(worker_result_status, source, default="failed"), 120) or "failed",
+        "subject_before_hash": before,
+        "subject_after_hash": after,
+        "current_subject_hash": current,
+        "subject_unchanged": before == after,
+        "commit_count": 0,
+        "commit": False,
+        "filesystem_changed": False,
+        "worker_prose_authority": 0,
+        "evidence_basis": "deterministic_failed_verification_receipt",
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = _failure_evidence_hash(value)
+    value["failure_evidence_hash"] = value["canonical_hash"]
+    return _freeze_record(VerificationFailureEvidence, value)  # type: ignore[return-value]
+
+
+def build_worker_execution_failure_evidence(
+    execution_id: str | dict[str, Any],
+    *,
+    terminal_code: str | None = None,
+    terminal_state: str | None = None,
+    failure_type: str | None = None,
+    worker_result_status: str | None = None,
+    subject_before_hash: str | None = None,
+    subject_after_hash: str | None = None,
+    current_subject_hash: str | None = None,
+    worker_lifecycle_started: bool | None = None,
+    provider_health: str | None = None,
+    provider_handoff_valid: bool | None = None,
+    execution_related: bool | None = None,
+    verified_successful_completion: bool | None = None,
+    v25_6_executed: bool | None = None,
+    subject_known: bool | None = None,
+    subject_unchanged: bool | None = None,
+    lineage_status: str | None = None,
+    unknown_manual_drift: bool | None = None,
+    scope_valid: bool | None = None,
+    dnt_valid: bool | None = None,
+    plan_unchanged: bool | None = None,
+    approval_unchanged: bool | None = None,
+    brain_valid: bool | None = None,
+    brain_unchanged: bool | None = None,
+    promoted: bool | None = None,
+    authority_delta_empty: bool | None = None,
+    legal_solution_space_available: bool | None = None,
+    full_verification_universe_available: bool | None = None,
+    recovery_budget_available: bool | None = None,
+    provider_failure: bool | None = None,
+    harness_failure: bool | None = None,
+    v25_5_authority_valid: bool | None = None,
+    verification_obligation_ids: Iterable[str] | None = None,
+    allowed_mutation_paths: Iterable[str] | None = None,
+    authority_delta: dict[str, Any] | None = None,
+    worker_lifecycle_count: int | None = None,
+    commit_count: int | None = None,
+    commit: bool | None = None,
+    filesystem_changed: bool | None = None,
+    failure_detail: str | None = None,
+    completed: bool | None = None,
+    completion_attempted: bool | None = None,
+    completion_status: str | None = None,
+    approved_mutation_count: int | None = None,
+    changed_paths: Iterable[str] | None = None,
+    coverage_status: str | None = None,
+    missing_coverage_ids: Iterable[str] | None = None,
+    plan_id: str | None = None,
+    plan_hash: str | None = None,
+    approval_id: str | None = None,
+    approval_receipt_hash: str | None = None,
+    execution_invariant_set_hash: str | None = None,
+    promotion_status: str | None = None,
+    lineage_evidence_ref: str | None = None,
+    **kwargs: Any,
+) -> WorkerExecutionFailureEvidence:
+    """Build complete pre-verification Worker execution evidence.
+
+    Defaults are deterministic values for constructing provider-free
+    fixtures.  Evidence loaded from an external run should be passed with
+    every required field present; the validator rejects omitted/null fields.
+    Unknown keyword material is deliberately ignored so private model
+    reasoning cannot enter the durable record.
+    """
+    source = _copy(execution_id) if isinstance(execution_id, dict) else _copy(kwargs)
+    execution = (
+        _text(source.get("execution_id"), 180)
+        if isinstance(execution_id, dict)
+        else _text(execution_id, 180)
+    )
+    terminal = _text(
+        _pick(terminal_code, source, "terminal_state", "failure_type", "execution_failure_code",
+              default=WORKER_NO_APPROVED_MUTATION),
+        180,
+    ) or WORKER_NO_APPROVED_MUTATION
+    status = _text(_pick(worker_result_status, source, default="failed"), 120) or "failed"
+    before = _text(
+        _pick(subject_before_hash, source, "subject_before", "pre_subject_hash",
+              default=LIVE3_BASELINE_SUBJECT_HASH),
+        128,
+    )
+    after = _text(
+        _pick(subject_after_hash, source, "subject_after", "post_subject_hash",
+              default=_pick(current_subject_hash, source, default=before)),
+        128,
+    )
+    current = _text(
+        _pick(current_subject_hash, source, default=after),
+        128,
+    )
+    unchanged = _pick(
+        subject_unchanged,
+        source,
+        default=before == after,
+    )
+    lifecycle = _pick(
+        worker_lifecycle_started,
+        source,
+        "actual_worker_lifecycle", "actual_worker_lifecycle_started",
+        default=True,
+    )
+    health = _pick(provider_health, source, default=None)
+    if health is None and "provider_healthy" in source:
+        health = "HEALTHY" if source.get("provider_healthy") is True else "UNHEALTHY"
+    health = _text(health, 80) or "HEALTHY"
+    provider_handoff = _pick(
+        provider_handoff_valid,
+        source,
+        "valid_provider_handoff",
+        default=True,
+    )
+    execution_flag = _pick(execution_related, source, default=True)
+    verified_completion = _pick(
+        verified_successful_completion,
+        source,
+        default=None,
+    )
+    if verified_completion is None:
+        no_verified_alias = _pick(
+            None,
+            source,
+            "no_verified_completion",
+            "no_verified_successful_completion",
+            default=None,
+        )
+        verified_completion = (
+            not bool(no_verified_alias)
+            if no_verified_alias is not None
+            else False
+        )
+    verified_completion = bool(verified_completion)
+    no_verified = not verified_completion
+    v25_6 = _pick(v25_6_executed, source, default=False)
+    known_subject = _pick(subject_known, source, "known_subject", default=True)
+    lineage = _text(
+        _pick(lineage_status, source, "known_lineage", default=AUTHORIZED_EXECUTION_DESCENDANT),
+        120,
+    ) or AUTHORIZED_EXECUTION_DESCENDANT
+    drift = _pick(unknown_manual_drift, source, "unknown_drift", default=False)
+    scope_ok = _pick(scope_valid, source, "scope_pass", default=True)
+    dnt_ok = _pick(dnt_valid, source, "dnt_pass", default=True)
+    plan_ok = _pick(plan_unchanged, source, default=True)
+    approval_ok = _pick(approval_unchanged, source, default=True)
+    brain_ok = _pick(brain_valid, source, default=True)
+    brain_same = _pick(brain_unchanged, source, default=True)
+    promoted_flag = _pick(promoted, source, default=False)
+    raw_delta = _pick(authority_delta, source, default={})
+    delta_empty = _pick(authority_delta_empty, source, default=None)
+    if delta_empty is None:
+        delta_empty = not bool(raw_delta)
+    legal_space = _pick(
+        legal_solution_space_available,
+        source,
+        "legal_solution_space",
+        default=True,
+    )
+    full_universe = _pick(
+        full_verification_universe_available,
+        source,
+        "full_verification_universe",
+        default=True,
+    )
+    budget = _pick(
+        recovery_budget_available,
+        source,
+        default=True,
+    )
+    provider_failed = _pick(provider_failure, source, default=False)
+    harness_failed = _pick(harness_failure, source, default=False)
+    v25_5_ok = _pick(v25_5_authority_valid, source, "v25_5_valid", default=True)
+    obligations = _unique_strings(
+        _pick(verification_obligation_ids, source, "full_verification_authority_ids",
+              "required_verification_authority_ids", default=(
+                  "VERIFICATION-001", "VERIFICATION-002", "VERIFICATION-003", "VERIFICATION-004",
+              )),
+        limit=64,
+        chars=180,
+    )
+    missing_coverage = _unique_strings(
+        _pick(missing_coverage_ids, source, "not_run_obligation_ids", default=obligations),
+        limit=64,
+        chars=180,
+    )
+    mutation_paths = _unique_strings(
+        _pick(allowed_mutation_paths, source, "legal_mutation_paths", default=("src/status_view.js",)),
+        paths=True,
+        limit=32,
+    )
+    delta_projection = _safe_projection(raw_delta)
+    lifecycle_count = _safe_int(
+        _pick(worker_lifecycle_count, source, default=1 if bool(lifecycle) else 0),
+        0,
+    )
+    observed_commit_count = max(0, _safe_int(
+        _pick(commit_count, source, default=0),
+        0,
+    ))
+    observed_commit = bool(_pick(
+        commit,
+        source,
+        default=observed_commit_count > 0,
+    ))
+    observed_filesystem_change = bool(_pick(
+        filesystem_changed,
+        source,
+        default=observed_commit,
+    ))
+    completed_flag = bool(_pick(completed, source, "worker_completed", default=False))
+    completion_attempt_flag = bool(_pick(
+        completion_attempted,
+        source,
+        "completion_attempt",
+        default=False,
+    ))
+    completion_state = _text(
+        _pick(
+            completion_status,
+            source,
+            "completion_state",
+            default="COMPLETED" if completed_flag else "NOT_REACHED",
+        ),
+        120,
+    ) or "NOT_REACHED"
+    approved_mutations = max(0, _safe_int(
+        _pick(approved_mutation_count, source, default=0),
+        0,
+    ))
+    observed_changed_paths = _unique_strings(
+        _pick(changed_paths, source, "changed_files", default=()),
+        paths=True,
+        limit=64,
+    )
+    observed_plan_id = _text(_pick(plan_id, source, default=LIVE3_PLAN_ID), 160) or LIVE3_PLAN_ID
+    observed_plan_hash = _text(_pick(plan_hash, source, default=LIVE3_PLAN_HASH), 128) or LIVE3_PLAN_HASH
+    observed_approval_id = _text(_pick(approval_id, source, default=LIVE3_APPROVAL_ID), 160) or LIVE3_APPROVAL_ID
+    observed_approval_receipt_hash = _text(
+        _pick(approval_receipt_hash, source, default=LIVE3_APPROVAL_RECEIPT_HASH),
+        128,
+    ) or LIVE3_APPROVAL_RECEIPT_HASH
+    observed_invariant_hash = _text(
+        _pick(execution_invariant_set_hash, source, "invariant_hash", default=LIVE3_INVARIANT_HASH),
+        128,
+    ) or LIVE3_INVARIANT_HASH
+    observed_promotion_status = _text(
+        _pick(promotion_status, source, default="NOT_REACHED"),
+        120,
+    ) or "NOT_REACHED"
+    observed_lineage_ref = _text(
+        _pick(
+            lineage_evidence_ref,
+            source,
+            default="lineage:authorized-execution-descendant",
+        ),
+        220,
+    ) or "lineage:authorized-execution-descendant"
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V265_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_FAILURE_EVIDENCE,
+        "failure_source": WORKER_EXECUTION_FAILURE,
+        "source_variant": WORKER_EXECUTION_FAILURE,
+        "execution_id": execution,
+        "worker_terminal_code": terminal,
+        "execution_failure_code": terminal,
+        "failure_type": terminal,
+        "failure_detail": _text(
+            _pick(failure_detail, source, "diagnostic", default=terminal),
+            700,
+        ),
+        "worker_result_status": status,
+        "actual_worker_lifecycle": bool(lifecycle),
+        "worker_lifecycle_started": bool(lifecycle),
+        "worker_lifecycle_count": lifecycle_count,
+        "provider_health": health,
+        "provider_healthy": health == "HEALTHY",
+        "provider_handoff_valid": bool(provider_handoff),
+        "valid_provider_handoff": bool(provider_handoff),
+        "execution_related": bool(execution_flag),
+        "verified_successful_completion": verified_completion,
+        "no_verified_successful_completion": bool(no_verified),
+        "completed": completed_flag,
+        "completion_attempted": completion_attempt_flag,
+        "completion_status": completion_state,
+        "v25_6_executed": bool(v25_6),
+        "no_v25_6_claim": not bool(v25_6),
+        "subject_known": bool(known_subject),
+        "subject_unchanged": bool(unchanged),
+        "lineage_status": lineage,
+        "known_lineage": lineage == AUTHORIZED_EXECUTION_DESCENDANT,
+        "unknown_manual_drift": bool(drift),
+        "scope_valid": bool(scope_ok),
+        "dnt_valid": bool(dnt_ok),
+        "dnt_digest": _text(_pick(None, source, "dnt_digest", default=""), 128),
+        "plan_unchanged": bool(plan_ok),
+        "approval_unchanged": bool(approval_ok),
+        "brain_valid": bool(brain_ok),
+        "brain_unchanged": bool(brain_same),
+        "brain_before_hash": _text(
+            _pick(None, source, "brain_before_hash", default=LIVE3_BRAIN_HASH), 128
+        ) or LIVE3_BRAIN_HASH,
+        "brain_after_hash": _text(
+            _pick(None, source, "brain_after_hash", default=LIVE3_BRAIN_HASH), 128
+        ) or LIVE3_BRAIN_HASH,
+        "promoted": bool(promoted_flag),
+        "authority_delta_empty": bool(delta_empty),
+        "authority_delta": delta_projection,
+        "legal_solution_space_available": bool(legal_space),
+        "legal_solution_space": bool(legal_space),
+        "legal_mutation_paths": mutation_paths,
+        "full_verification_universe_available": bool(full_universe),
+        "full_verification_universe": bool(full_universe),
+        "verification_obligation_ids": obligations,
+        "recovery_budget_available": bool(budget),
+        "provider_failure": bool(provider_failed),
+        "harness_failure": bool(harness_failed),
+        "not_provider_or_harness_failure": not bool(provider_failed or harness_failed),
+        "v25_5_authority_valid": bool(v25_5_ok),
+        "approved_mutation_count": approved_mutations,
+        "changed_paths": observed_changed_paths,
+        "coverage_status": _text(
+            _pick(coverage_status, source, default="AVAILABLE_NOT_EXECUTED"),
+            160,
+        ) or "AVAILABLE_NOT_EXECUTED",
+        "missing_coverage_ids": missing_coverage,
+        "plan_id": observed_plan_id,
+        "plan_hash": observed_plan_hash,
+        "approval_id": observed_approval_id,
+        "approval_receipt_hash": observed_approval_receipt_hash,
+        "execution_invariant_set_hash": observed_invariant_hash,
+        "promotion_status": observed_promotion_status,
+        "lineage_evidence_ref": observed_lineage_ref,
+        "execution_failure_detail": _text(
+            _pick(failure_detail, source, "diagnostic", default=terminal),
+            700,
+        ),
+        "subject_before_hash": before,
+        "subject_after_hash": after,
+        "current_subject_hash": current,
+        "commit_count": observed_commit_count,
+        "commit": observed_commit,
+        "filesystem_changed": observed_filesystem_change,
+        "worker_prose_authority": 0,
+        "verification_obligation_evidence_executed": False,
+        "allowed_mutation_paths": mutation_paths,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = _failure_evidence_hash(value)
+    value["failure_evidence_hash"] = value["canonical_hash"]
+    return _freeze_record(WorkerExecutionFailureEvidence, value)  # type: ignore[return-value]
+
+
+def build_recovery_failure_evidence(
+    source_or_execution_id: str | dict[str, Any] | None = None,
+    *,
+    failure_source: str | None = None,
+    execution_id: str | None = None,
+    **kwargs: Any,
+) -> RecoveryFailureEvidence:
+    """Dispatch to one explicit member of the V26.5 failure-source union."""
+    source = _copy(source_or_execution_id) if isinstance(source_or_execution_id, dict) else _copy(kwargs)
+    if isinstance(source_or_execution_id, str) and source_or_execution_id in {
+        VERIFICATION_FAILURE, WORKER_EXECUTION_FAILURE,
+    }:
+        failure_source = failure_source or source_or_execution_id
+    elif execution_id is None:
+        execution_id = _text(source_or_execution_id, 180)
+    selected = failure_source if failure_source is not None else source.get("failure_source")
+    selected = _text(selected, 120)
+    execution = execution_id or source.get("execution_id") or "EXECUTION-UNKNOWN"
+    source.pop("execution_id", None)
+    if selected == WORKER_EXECUTION_FAILURE:
+        return build_worker_execution_failure_evidence(execution, **source)
+    if selected == VERIFICATION_FAILURE:
+        return build_verification_failure_evidence(execution, **source)
+    # Preserve an invalid explicit tag as an immutable record so the
+    # validator/classifier can fail closed instead of silently changing its
+    # meaning to a different variant.
+    invalid = {
+        "schema_version": RECOVERY_V265_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_FAILURE_EVIDENCE,
+        "failure_source": selected,
+        "source_variant": selected,
+        "execution_id": _text(execution, 180),
+        "canonical_hash": "",
+    }
+    invalid["canonical_hash"] = _failure_evidence_hash(invalid)
+    invalid["failure_evidence_hash"] = invalid["canonical_hash"]
+    return _freeze_record(RecoveryFailureEvidence, invalid)  # type: ignore[return-value]
+
+
+def validate_recovery_failure_evidence(
+    evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate the explicit tagged union with no null/implicit variant."""
+    value = evidence if isinstance(evidence, dict) else {}
+    errors: list[str] = []
+    expected_hash = _failure_evidence_hash(value) if value else None
+    if value.get("schema_version") != RECOVERY_V265_SCHEMA_VERSION:
+        errors.append("failure evidence schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_FAILURE_EVIDENCE:
+        errors.append("failure evidence artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash or value.get("failure_evidence_hash") != expected_hash:
+        errors.append("failure evidence hash is invalid")
+    for key in _FAILURE_EVIDENCE_COMMON_FIELDS:
+        if key not in value or value.get(key) in (None, ""):
+            errors.append(f"failure evidence field is missing: {key}")
+    source = value.get("failure_source")
+    if source not in {VERIFICATION_FAILURE, WORKER_EXECUTION_FAILURE}:
+        errors.append("failure evidence source variant is invalid")
+    if value.get("source_variant") != source:
+        errors.append("failure evidence source variant is inconsistent")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("failure evidence grants Worker prose authority")
+    for key in ("commit_count",):
+        if key in value and _safe_int(value.get(key), -1) < 0:
+            errors.append(f"failure evidence field is invalid: {key}")
+    if source == WORKER_EXECUTION_FAILURE:
+        for key in _WORKER_EXECUTION_EVIDENCE_FIELDS:
+            if key not in value or value.get(key) is None:
+                errors.append(f"Worker execution evidence field is missing: {key}")
+        for key in _WORKER_EVIDENCE_MIXING_KEYS:
+            if key in value and value.get(key) not in (None, "", [], {}, False):
+                errors.append(f"Worker execution evidence mixes verification field: {key}")
+        bool_fields = (
+            "actual_worker_lifecycle", "provider_handoff_valid", "execution_related",
+            "verified_successful_completion", "v25_6_executed", "subject_known",
+            "subject_unchanged", "unknown_manual_drift", "scope_valid", "dnt_valid",
+            "plan_unchanged", "approval_unchanged", "brain_valid", "brain_unchanged",
+            "promoted", "authority_delta_empty", "legal_solution_space_available",
+            "full_verification_universe_available", "recovery_budget_available",
+            "provider_failure", "harness_failure", "v25_5_authority_valid", "commit",
+            "filesystem_changed",
+        )
+        for key in bool_fields:
+            if key in value and not isinstance(value.get(key), bool):
+                errors.append(f"Worker execution evidence boolean field is invalid: {key}")
+        if _safe_int(value.get("worker_lifecycle_count"), -1) < 0:
+            errors.append("Worker execution lifecycle count is invalid")
+        for key in ("approved_mutation_count", "commit_count"):
+            if not isinstance(value.get(key), int) or isinstance(value.get(key), bool) or value.get(key) < 0:
+                errors.append(f"Worker execution evidence count is invalid: {key}")
+        for key in ("changed_paths", "verification_obligation_ids", "missing_coverage_ids"):
+            if not isinstance(value.get(key), list):
+                errors.append(f"Worker execution evidence list is invalid: {key}")
+        for key in (
+            "worker_terminal_code", "failure_detail", "provider_health",
+            "completion_status", "coverage_status", "plan_id", "plan_hash",
+            "approval_id", "approval_receipt_hash", "execution_invariant_set_hash",
+            "promotion_status", "lineage_evidence_ref",
+        ):
+            if not isinstance(value.get(key), str) or not value.get(key).strip():
+                errors.append(f"Worker execution evidence text is invalid: {key}")
+        # Negative policy values (provider failure, lineage drift, an
+        # unsupported terminal, or a commit) are still valid observations.
+        # They must reach the classifier so it can emit an auditable blocker;
+        # only malformed/missing structure is an evidence-validation error.
+    elif source == VERIFICATION_FAILURE:
+        for key in _VERIFICATION_EVIDENCE_FIELDS:
+            if key not in value or value.get(key) in (None, ""):
+                errors.append(f"verification failure evidence field is missing: {key}")
+        for key in _VERIFICATION_EVIDENCE_MIXING_KEYS:
+            if key in value and value.get(key) not in (None, "", [], {}, False):
+                errors.append(f"verification failure evidence mixes execution field: {key}")
+        for key in ("verification_executed", "v25_6_executed"):
+            if value.get(key) is not True:
+                errors.append(f"verification failure evidence field is not true: {key}")
+        for key in (
+            "authority_id", "oracle_id", "oracle_hash", "failed_check", "detail",
+            "verification_status", "verification_receipt_identity", "verification_digest",
+            "coverage_hash", "plan_id", "plan_hash", "approval_id",
+            "approval_receipt_hash", "execution_invariant_set_hash",
+        ):
+            if not isinstance(value.get(key), str) or not value.get(key).strip():
+                errors.append(f"verification failure evidence text is invalid: {key}")
+    if contains_forbidden_recovery_transcript(value):
+        errors.append("failure evidence contains Worker-private transcript")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:60],
+        "failure_source": source,
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+validate_failure_source_evidence = validate_recovery_failure_evidence
+validate_failure_evidence = validate_recovery_failure_evidence
+create_recovery_failure_evidence = build_recovery_failure_evidence
+create_worker_execution_failure_evidence = build_worker_execution_failure_evidence
+create_verification_failure_evidence = build_verification_failure_evidence
 
 
 def classify_edit_exact_match_ambiguity(result: Any) -> dict[str, Any] | None:
@@ -3195,9 +3916,23 @@ def build_recovery_failure_envelope(
     """
     if artifact_root is not None:
         source = artifact_root
-    elif source is None and failure_evidence is None:
-        source = load_live3_recovery_evidence()
-    data = _source_parts(failure_evidence if failure_evidence is not None else source)
+    elif source is None:
+        # A tagged variant is an overlay on deterministic execution evidence;
+        # it is not itself a replacement for the authority/subject source.
+        source = (
+            failure_evidence
+            if isinstance(failure_evidence, dict)
+            and not (
+                failure_evidence.get("artifact_type") == RECOVERY_FAILURE_EVIDENCE
+                or failure_evidence.get("failure_source") in {VERIFICATION_FAILURE, WORKER_EXECUTION_FAILURE}
+            )
+            else load_live3_recovery_evidence()
+        )
+    data = _source_parts(source)
+    explicit_failure_evidence = (
+        _failure_evidence_source(failure_evidence)
+        or _failure_evidence_source(data)
+    )
     artifacts = data.get("artifacts") if isinstance(data.get("artifacts"), dict) else {}
     worker_execution = data.get("worker_execution")
     if not isinstance(worker_execution, dict):
@@ -3243,7 +3978,8 @@ def build_recovery_failure_envelope(
         limit=24,
     )
     execution_id = _text(
-        worker_execution.get("worker_run_id")
+        (explicit_failure_evidence or {}).get("execution_id")
+        or worker_execution.get("worker_run_id")
         or worker_execution.get("execution_id")
         or start_receipt.get("execution_start_id")
         or worker_contract.get("execution_contract_id"),
@@ -3301,6 +4037,108 @@ def build_recovery_failure_envelope(
         or worker_execution.get("current_subject_hash"),
         128,
     ) or LIVE3_FAILED_SUBJECT_HASH
+    if explicit_failure_evidence is None:
+        # Legacy V25.6-backed envelopes are promoted into the explicit
+        # verification member only when the source carries an actual failed
+        # verification identity.  Missing receipts never imply this variant.
+        if failed_ids and failed_verification.get("authority_id"):
+            explicit_failure_evidence = build_verification_failure_evidence(
+                execution_id,
+                authority_id=failed_verification.get("authority_id"),
+                oracle_id=failed_verification.get("oracle_id"),
+                oracle_hash=failed_verification.get("oracle_hash"),
+                failed_check=failed_verification.get("failed_check"),
+                detail=failed_verification.get("detail"),
+                verification_status=failed_verification.get("status") or "FAIL",
+                subject_before_hash=subject_before,
+                subject_after_hash=subject_after,
+                current_subject_hash=subject_after,
+                worker_result_status=worker_result.get("status") or "failed",
+            )
+        else:
+            explicit_failure_evidence = build_recovery_failure_evidence(
+                execution_id,
+                failure_source="",
+            )
+    source_is_worker_execution = (
+        explicit_failure_evidence.get("failure_source") == WORKER_EXECUTION_FAILURE
+    )
+    if source_is_worker_execution:
+        subject_before = _text(
+            explicit_failure_evidence.get("subject_before_hash"),
+            128,
+        ) or subject_before
+        subject_after = _text(
+            explicit_failure_evidence.get("subject_after_hash")
+            or explicit_failure_evidence.get("current_subject_hash"),
+            128,
+        ) or subject_before
+        # A pre-verification Worker terminal is explicitly a no-commit
+        # state.  Never carry a prior verification closure or failed receipt
+        # into this variant.
+        failed_ids = []
+        failed_verification = {}
+        closure = {}
+        aggregation = {}
+        precommit = {
+            "status": "PASS" if explicit_failure_evidence.get("v25_5_authority_valid") is True else "UNKNOWN",
+            "passed": explicit_failure_evidence.get("v25_5_authority_valid") is True,
+            "audit_count": 0,
+            "accepted_count": 1 if explicit_failure_evidence.get("v25_5_authority_valid") is True else 0,
+            "rejected_count": 0,
+            "receipt_hashes": [],
+            "authority_set_hash": LIVE3_INVARIANT_HASH,
+            "model_calls": 0,
+            "worker_calls": 0,
+            "evidence_basis": "V25.5_Approved_Authority_Binding",
+        }
+        coverage = {
+            "coverage_hash": _text(
+                authorization.get("verification_obligation_coverage_hash")
+                or start_receipt.get("verification_obligation_coverage_hash"),
+                128,
+            ) or LIVE3_COVERAGE_HASH,
+            "coverage_status": "AVAILABLE_NOT_EXECUTED",
+            "failed_obligation_ids": [],
+            "not_run_obligation_ids": _unique_strings(
+                explicit_failure_evidence.get("verification_obligation_ids"),
+                limit=32,
+            ),
+            "all_required_passed": False,
+            "verification_ready": explicit_failure_evidence.get("full_verification_universe_available") is True,
+        }
+        before_brain = _text(
+            explicit_failure_evidence.get("brain_before_hash"),
+            128,
+        ) or before_brain
+        after_brain = _text(
+            explicit_failure_evidence.get("brain_after_hash"),
+            128,
+        ) or before_brain
+        brain_unchanged = (
+            explicit_failure_evidence.get("brain_unchanged") is True
+            and before_brain == after_brain
+        )
+        scope = {
+            "status": "PASS" if explicit_failure_evidence.get("scope_valid") is True else "FAIL",
+            "passed": explicit_failure_evidence.get("scope_valid") is True,
+            "changed_paths": [],
+            "out_of_scope_paths": [],
+            "scope_violations": 0,
+            "unauthorized_mutations": 0,
+            "committed_paths": [],
+            "evidence_basis": "deterministic_worker_execution_scope_contract",
+        }
+        dnt = {
+            "status": "PASS" if explicit_failure_evidence.get("dnt_valid") is True else "FAIL",
+            "passed": explicit_failure_evidence.get("dnt_valid") is True,
+            "changed_paths": [],
+            "dnt_violations": 0,
+            "dnt_digest": _text(
+                explicit_failure_evidence.get("dnt_digest"), 128
+            ),
+            "evidence_basis": "deterministic_worker_execution_dnt_contract",
+        }
     mutation_manifest = {
         "changed_paths": scope["changed_paths"],
         "created_paths": _unique_strings(worker_execution.get("created_paths") or [], paths=True),
@@ -3338,6 +4176,9 @@ def build_recovery_failure_envelope(
         "schema_version": SCHEMA_VERSION,
         "artifact_type": RECOVERY_FAILURE_ENVELOPE,
         "source_kind": data.get("source_kind") or "DETERMINISTIC_EXECUTION_EVIDENCE",
+        "failure_source": explicit_failure_evidence.get("failure_source"),
+        "failure_evidence": _safe_projection(explicit_failure_evidence),
+        "failure_evidence_hash": explicit_failure_evidence.get("canonical_hash"),
         "execution_id": execution_id,
         "failed_execution_id": execution_id,
         "execution_start_id": _text(start_receipt.get("execution_start_id"), 180),
@@ -3367,8 +4208,16 @@ def build_recovery_failure_envelope(
         "worker_contract_hash": contract_hash,
         "execution_contract_id": contract_id,
         "execution_contract_hash": contract_hash,
-        "worker_result_status": _text(worker_result.get("status"), 120) or "failed",
-        "worker_terminal_state": _text(worker_result.get("terminal_state"), 160),
+        "worker_result_status": (
+            _text(explicit_failure_evidence.get("worker_result_status"), 120)
+            if source_is_worker_execution
+            else _text(worker_result.get("status"), 120) or "failed"
+        ),
+        "worker_terminal_state": (
+            _text(explicit_failure_evidence.get("worker_terminal_code"), 160)
+            if source_is_worker_execution
+            else _text(worker_result.get("terminal_state"), 160)
+        ),
         "subject_before_hash": subject_before,
         "subject_after_hash": subject_after,
         "current_subject_hash": subject_after,
@@ -3402,7 +4251,9 @@ def build_recovery_failure_envelope(
         "coverage_hash": coverage["coverage_hash"],
         "verification_coverage": coverage,
         "required_execution_verification_set_hash": required_set_hash,
-        "execution_verification_closure_hash": _text(closure.get("closure_hash"), 128),
+        "execution_verification_closure_hash": (
+            "" if source_is_worker_execution else _text(closure.get("closure_hash"), 128)
+        ),
         "execution_verification_closure": _safe_projection({
             "schema_version": closure.get("schema_version"),
             "artifact_type": closure.get("artifact_type"),
@@ -3413,7 +4264,7 @@ def build_recovery_failure_envelope(
             "not_run_authorities": closure.get("not_run_authorities", []),
             "invalid_authorities": closure.get("invalid_authorities", []),
             "closure_hash": closure.get("closure_hash"),
-        }),
+        }) if not source_is_worker_execution else {},
         "failed_verification_authority_ids": failed_ids,
         "failed_authority_ids": failed_ids,
         "failed_verification": failed_verification,
@@ -3432,9 +4283,15 @@ def build_recovery_failure_envelope(
         "execution_time_failed_obligations": coverage["failed_obligation_ids"],
         "execution_time_coverage": coverage,
         "required_authority_ids": _unique_strings(
-            closure.get("required_authority_ids")
-            or required_set.get("required_authority_ids")
-            or [],
+            (
+                explicit_failure_evidence.get("verification_obligation_ids")
+                if source_is_worker_execution
+                else (
+                    closure.get("required_authority_ids")
+                    or required_set.get("required_authority_ids")
+                    or []
+                )
+            ),
             limit=48,
         ),
         "stage5b_status": _text(
@@ -3457,7 +4314,9 @@ def build_recovery_failure_envelope(
             "V25.6_ExecutionVerificationClosure",
             "working_brain_before_after",
         ],
-        "verification_evidence_projection": _deterministic_evidence_records(data),
+        "verification_evidence_projection": (
+            [] if source_is_worker_execution else _deterministic_evidence_records(data)
+        ),
         "canonical_failure_envelope_hash": "",
         "canonical_hash": "",
         "failure_envelope_hash": "",
@@ -3498,7 +4357,56 @@ def validate_recovery_failure_envelope(envelope: dict[str, Any] | None) -> dict[
     ):
         if not value.get(field):
             errors.append(f"recovery failure envelope field is missing: {field}")
-    if not value.get("failed_verification_authority_ids"):
+    failure_evidence = value.get("failure_evidence")
+    variant_check = None
+    if isinstance(failure_evidence, dict):
+        variant_check = validate_recovery_failure_evidence(failure_evidence)
+        if not variant_check.get("valid"):
+            errors.extend(
+                f"failure evidence: {item}"
+                for item in variant_check.get("errors", [])[:24]
+            )
+        if value.get("failure_source") != failure_evidence.get("failure_source"):
+            errors.append("recovery failure envelope source variant is inconsistent")
+        if value.get("failure_evidence_hash") != failure_evidence.get("canonical_hash"):
+            errors.append("recovery failure envelope evidence hash is invalid")
+        # The new execution-failure member is fully bound to the envelope.
+        # Legacy verification-backed envelopes retain their historical flat
+        # projection surface, which callers may re-project when replaying an
+        # older receipt (without changing the explicit receipt itself).
+        if failure_evidence.get("failure_source") == WORKER_EXECUTION_FAILURE:
+            for field in (
+                "execution_id", "worker_result_status", "subject_before_hash",
+                "subject_after_hash", "current_subject_hash",
+            ):
+                if value.get(field) != failure_evidence.get(field):
+                    errors.append(f"recovery failure envelope evidence binding is invalid: {field}")
+            for field in (
+                "plan_id", "plan_hash", "approval_id", "approval_receipt_hash",
+                "execution_invariant_set_hash",
+            ):
+                if value.get(field) != failure_evidence.get(field):
+                    errors.append(f"recovery failure envelope evidence binding is invalid: {field}")
+        if failure_evidence.get("failure_source") == WORKER_EXECUTION_FAILURE:
+            if value.get("failed_verification_authority_ids"):
+                errors.append("Worker execution failure must not contain failed verification authority IDs")
+            if value.get("failed_verification"):
+                errors.append("Worker execution failure must not contain a failed verification projection")
+            if value.get("execution_verification_closure_hash"):
+                errors.append("Worker execution failure must not contain a verification closure hash")
+            if value.get("execution_verification_closure"):
+                errors.append("Worker execution failure must not contain a verification closure")
+            if value.get("worker_terminal_state") != failure_evidence.get("worker_terminal_code"):
+                errors.append("Worker execution terminal does not match failure evidence")
+            if value.get("current_subject_hash") != failure_evidence.get("current_subject_hash"):
+                errors.append("Worker execution subject does not match failure evidence")
+        elif failure_evidence.get("failure_source") == VERIFICATION_FAILURE:
+            if not value.get("failed_verification_authority_ids"):
+                errors.append("failed verification authority identity is missing")
+    elif not value.get("failed_verification_authority_ids"):
+        # Envelopes written before V26.5 retain their original strict
+        # verification-backed contract.  Missing the new tag is not a reason
+        # to infer an execution failure.
         errors.append("failed verification authority identity is missing")
     if value.get("worker_prose_authority") != 0:
         errors.append("Worker prose must have zero recovery authority")
@@ -3511,6 +4419,8 @@ def validate_recovery_failure_envelope(envelope: dict[str, Any] | None) -> dict[
         "errors": list(dict.fromkeys(errors))[:40],
         "worker_prose_authority": 0,
         "worker_prose_excluded": value.get("worker_prose_excluded") is True,
+        "failure_source": value.get("failure_source"),
+        "failure_evidence_validation": variant_check,
         "model_calls": 0,
         "worker_calls": 0,
     }
@@ -3907,6 +4817,152 @@ def _known_worker_failure(envelope: dict[str, Any]) -> bool:
     )
 
 
+def _worker_execution_policy(
+    envelope: dict[str, Any],
+    evidence: dict[str, Any],
+    delta: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate the closed pre-verification eligibility predicate.
+
+    The terminal label is only one input.  Every other predicate is explicit
+    evidence so a generic Worker failure, provider outage, or missing receipt
+    cannot become an autonomous recovery authority by implication.
+    """
+    scope = envelope.get("scope_audit") if isinstance(envelope.get("scope_audit"), dict) else {}
+    dnt = envelope.get("dnt_audit") if isinstance(envelope.get("dnt_audit"), dict) else {}
+    brain_clean = (
+        envelope.get("brain_unchanged") is True
+        and envelope.get("promotion_status") in {
+            None, "", "NOT_REACHED", "INTEGRATION_NOT_READY", "INTEGRATION_FAILED",
+        }
+    )
+    checks: dict[str, bool] = {
+        "actual_worker_lifecycle": evidence.get("actual_worker_lifecycle") is True
+        and _safe_int(evidence.get("worker_lifecycle_count"), 0) == 1,
+        "provider_healthy": evidence.get("provider_health") == "HEALTHY"
+        and evidence.get("provider_failure") is False,
+        "valid_provider_handoff": evidence.get("provider_handoff_valid") is True,
+        "worker_execution_failure": evidence.get("execution_related") is True
+        and evidence.get("worker_terminal_code") == WORKER_NO_APPROVED_MUTATION
+        and evidence.get("worker_result_status") in {"failed", "FAIL", "VERIFICATION_FAILED"},
+        "no_verified_successful_completion": evidence.get("verified_successful_completion") is False,
+        "v25_6_not_executed": evidence.get("v25_6_executed") is False,
+        "subject_known": evidence.get("subject_known") is True,
+        "subject_unchanged": evidence.get("subject_unchanged") is True
+        and evidence.get("subject_before_hash") == evidence.get("subject_after_hash")
+        and evidence.get("current_subject_hash") == evidence.get("subject_after_hash")
+        and envelope.get("subject_before_hash") == envelope.get("current_subject_hash"),
+        "known_lineage": evidence.get("lineage_status") == AUTHORIZED_EXECUTION_DESCENDANT,
+        "no_unknown_manual_drift": evidence.get("unknown_manual_drift") is False,
+        "scope_pass": evidence.get("scope_valid") is True and scope.get("passed") is True,
+        "dnt_pass": evidence.get("dnt_valid") is True and dnt.get("passed") is True,
+        "plan_unchanged": evidence.get("plan_unchanged") is True
+        and bool(envelope.get("plan_id") and envelope.get("plan_hash")),
+        "approval_unchanged": evidence.get("approval_unchanged") is True
+        and bool(envelope.get("approval_id") and envelope.get("approval_receipt_hash")),
+        "plan_binding": evidence.get("plan_id") == envelope.get("plan_id")
+        and evidence.get("plan_hash") == envelope.get("plan_hash"),
+        "approval_binding": evidence.get("approval_id") == envelope.get("approval_id")
+        and evidence.get("approval_receipt_hash") == envelope.get("approval_receipt_hash"),
+        "invariant_binding": evidence.get("execution_invariant_set_hash")
+        == envelope.get("execution_invariant_set_hash"),
+        "brain_valid": evidence.get("brain_valid") is True
+        and evidence.get("brain_unchanged") is True
+        and brain_clean,
+        "not_promoted": evidence.get("promoted") is False and brain_clean
+        and evidence.get("promotion_status") in {
+            None, "", "NOT_REACHED", "INTEGRATION_NOT_READY", "INTEGRATION_FAILED",
+        },
+        "authority_delta_empty": evidence.get("authority_delta_empty") is True
+        and delta.get("empty") is True,
+        "legal_solution_space": evidence.get("legal_solution_space_available") is True
+        and bool(evidence.get("legal_mutation_paths")),
+        "full_verification_universe_available": evidence.get("full_verification_universe_available") is True
+        and bool(evidence.get("verification_obligation_ids")),
+        "recovery_budget_available": evidence.get("recovery_budget_available") is True,
+        "not_harness_failure": evidence.get("harness_failure") is False,
+        "no_approved_mutation": evidence.get("approved_mutation_count") == 0
+        and evidence.get("changed_paths") == [],
+        "commit_free": evidence.get("commit_count") == 0
+        and evidence.get("commit") is False
+        and evidence.get("filesystem_changed") is False,
+        "v25_5_authority_valid": evidence.get("v25_5_authority_valid") is True,
+    }
+    return {
+        "checks": checks,
+        "eligible": all(checks.values()),
+        "complete": all(
+            key in evidence and evidence.get(key) is not None
+            for key in _WORKER_EXECUTION_EVIDENCE_FIELDS
+        ),
+        "failure_source": WORKER_EXECUTION_FAILURE,
+        "worker_terminal_code": evidence.get("worker_terminal_code"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def evaluate_preverification_recovery_eligibility(
+    envelope: dict[str, Any] | None,
+    *,
+    authority_delta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Public deterministic audit of the V26.5 execution-failure predicate."""
+    value = envelope if isinstance(envelope, dict) else {}
+    evidence = value.get("failure_evidence") if isinstance(value.get("failure_evidence"), dict) else {}
+    delta = authority_delta if isinstance(authority_delta, dict) else build_recovery_authority_delta(value, {})
+    variant_check = validate_recovery_failure_evidence(evidence)
+    policy = _worker_execution_policy(value, evidence, delta) if evidence else {
+        "checks": {}, "eligible": False, "complete": False,
+        "failure_source": value.get("failure_source"),
+        "model_calls": 0, "worker_calls": 0,
+    }
+    policy["variant_valid"] = variant_check.get("valid") is True
+    policy["eligible"] = bool(policy.get("eligible")) and policy["variant_valid"]
+    policy["variant_validation"] = variant_check
+    return policy
+
+
+assess_preverification_recovery_eligibility = evaluate_preverification_recovery_eligibility
+
+
+def _worker_execution_blocker(policy: dict[str, Any]) -> tuple[str | None, list[str]]:
+    checks = policy.get("checks") if isinstance(policy.get("checks"), dict) else {}
+    if not policy.get("complete") or not policy.get("variant_valid"):
+        return PRE_VERIFICATION_RECOVERY_EVIDENCE_INCOMPLETE, [
+            "pre-verification Worker execution evidence is incomplete or invalid",
+        ]
+    if not checks.get("provider_healthy") or not checks.get("valid_provider_handoff"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_PROVIDER, [
+            "provider health or the provider handoff is not valid",
+        ]
+    if not checks.get("actual_worker_lifecycle") or not checks.get("not_harness_failure"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_HARNESS, [
+            "the Worker lifecycle is not established independently of harness failure",
+        ]
+    if not checks.get("authority_delta_empty"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_AUTHORITY, [
+            "recovery would require a non-empty authority delta",
+        ]
+    if not checks.get("known_lineage") or not checks.get("no_unknown_manual_drift") or not checks.get("subject_unchanged"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_DRIFT, [
+            "the failed subject or execution lineage is not deterministically bound",
+        ]
+    if not checks.get("legal_solution_space") or not checks.get("full_verification_universe_available"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_NO_LEGAL_SPACE, [
+            "no legal solution space or complete verification universe is available",
+        ]
+    if not checks.get("recovery_budget_available"):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_BUDGET, [
+            "the autonomous recovery attempt budget is exhausted",
+        ]
+    if not all(checks.values()):
+        return PRE_VERIFICATION_RECOVERY_BLOCKED_INCOMPLETE, [
+            "one or more pre-verification eligibility predicates failed",
+        ]
+    return None, []
+
+
 def classify_recovery_failure(
     envelope: dict[str, Any] | None,
     *,
@@ -3921,6 +4977,21 @@ def classify_recovery_failure(
     reasons: list[str] = []
     evidence_basis: list[str] = []
     classification = RECOVERY_CLASSIFICATION_UNCERTAIN
+    worker_policy: dict[str, Any] | None = None
+    failure_evidence = value.get("failure_evidence") if isinstance(value.get("failure_evidence"), dict) else {}
+    failure_source = value.get("failure_source") or failure_evidence.get("failure_source")
+    if (
+        failure_source == WORKER_EXECUTION_FAILURE
+        and failure_evidence.get("authority_delta_empty") is False
+        and delta.get("empty") is True
+    ):
+        # Preserve an explicitly observed authority change even when the
+        # caller did not separately pass a recovery proposal.  The evidence
+        # cannot silently turn a non-empty delta into an empty one.
+        delta = build_recovery_authority_delta(
+            approved_authority or value,
+            {"authority_change": True},
+        )
     if value.get("brain_unchanged") is False or value.get("promotion_status") not in {
         None, "", "NOT_REACHED", "INTEGRATION_NOT_READY", "INTEGRATION_FAILED",
     }:
@@ -3939,54 +5010,81 @@ def classify_recovery_failure(
         )
         evidence_basis.append("recovery_authority_delta")
     else:
-        failure_code = _text(
-            value.get("failure_code")
-            or value.get("harness_failure_code")
-            or value.get("execution_failure_code"),
-            160,
-        )
-        harness_unchanged = (
-            value.get("subject_before_hash") == value.get("subject_after_hash")
-            and value.get("scope_audit", {}).get("passed") is True
-            and value.get("dnt_audit", {}).get("passed") is True
-        )
-        history = [item for item in (recovery_attempt_history or []) if isinstance(item, dict)]
-        floor_evidence = value.get("capability_floor_evidence")
-        if (
-            isinstance(floor_evidence, dict)
-            and floor_evidence.get("legal_solution_space_available") is True
-            and floor_evidence.get("contexts_valid") is True
-            and floor_evidence.get("tools_available") is True
-            and floor_evidence.get("authority_sufficient") is True
-            and int(floor_evidence.get("clean_failed_recovery_count", 0) or 0) >= 2
-        ) or (
-            len(history) >= 2
-            and all(item.get("clean") is True for item in history[-2:])
-        ):
-            classification = CAPABILITY_FLOOR
-            reasons.append("bounded evidence records repeated clean failures with legal authority available")
-            evidence_basis.append("bounded_capability_floor_evidence")
-        elif failure_code in _KNOWN_HARNESS_CODES and harness_unchanged:
-            classification = HARNESS_RECOVERABLE
-            reasons.append("known system-owned execution mechanics failed while approved semantics and subject remained unchanged")
-            evidence_basis.extend(["harness_failure_code", "mutation_scope_audit", "dnt_audit"])
-        elif _known_worker_failure(value):
-            classification = WORKER_RECOVERABLE
-            reasons.extend([
-                "mandatory verification failure identifies an incomplete implementation",
-                "approved mutation scope and DNT audits remain passing",
-                "the failed obligation is already inside the approved verification authority",
-                "no authority-bearing change is present in the recovery delta",
-            ])
-            evidence_basis.extend([
-                "failed_verification_receipt",
-                "mutation_scope_audit",
-                "dnt_audit",
-                "V25.6_ExecutionVerificationClosure",
-            ])
+        if failure_source == WORKER_EXECUTION_FAILURE:
+            worker_policy = evaluate_preverification_recovery_eligibility(
+                value,
+                authority_delta=delta,
+            )
+            blocker, blocker_reasons = _worker_execution_blocker(worker_policy)
+            if worker_policy.get("eligible") is True:
+                classification = WORKER_RECOVERABLE
+                reasons.extend([
+                    "supported WORKER_NO_APPROVED_MUTATION ended the Worker before any verified completion",
+                    "provider handoff was healthy and the failure is execution-related",
+                    "the approved scope, DNT, plan, approval, Brain, and lineage remain unchanged",
+                    "the full V25.6 verification universe remains mandatory for continuation",
+                ])
+                evidence_basis.extend([
+                    "RecoveryFailureEvidence:WORKER_EXECUTION_FAILURE",
+                    "WORKER_NO_APPROVED_MUTATION",
+                    "pre_verification_eligibility_predicate",
+                ])
+            else:
+                classification = blocker or RECOVERY_CLASSIFICATION_UNCERTAIN
+                reasons.extend(blocker_reasons)
+                evidence_basis.extend([
+                    "RecoveryFailureEvidence:WORKER_EXECUTION_FAILURE",
+                    "pre_verification_eligibility_predicate",
+                ])
         else:
-            reasons.append("deterministic evidence does not establish a legal recovery class")
-            evidence_basis.append("insufficient_failure_evidence")
+            failure_code = _text(
+                value.get("failure_code")
+                or value.get("harness_failure_code")
+                or value.get("execution_failure_code"),
+                160,
+            )
+            harness_unchanged = (
+                value.get("subject_before_hash") == value.get("subject_after_hash")
+                and value.get("scope_audit", {}).get("passed") is True
+                and value.get("dnt_audit", {}).get("passed") is True
+            )
+            history = [item for item in (recovery_attempt_history or []) if isinstance(item, dict)]
+            floor_evidence = value.get("capability_floor_evidence")
+            if (
+                isinstance(floor_evidence, dict)
+                and floor_evidence.get("legal_solution_space_available") is True
+                and floor_evidence.get("contexts_valid") is True
+                and floor_evidence.get("tools_available") is True
+                and floor_evidence.get("authority_sufficient") is True
+                and int(floor_evidence.get("clean_failed_recovery_count", 0) or 0) >= 2
+            ) or (
+                len(history) >= 2
+                and all(item.get("clean") is True for item in history[-2:])
+            ):
+                classification = CAPABILITY_FLOOR
+                reasons.append("bounded evidence records repeated clean failures with legal authority available")
+                evidence_basis.append("bounded_capability_floor_evidence")
+            elif failure_code in _KNOWN_HARNESS_CODES and harness_unchanged:
+                classification = HARNESS_RECOVERABLE
+                reasons.append("known system-owned execution mechanics failed while approved semantics and subject remained unchanged")
+                evidence_basis.extend(["harness_failure_code", "mutation_scope_audit", "dnt_audit"])
+            elif _known_worker_failure(value):
+                classification = WORKER_RECOVERABLE
+                reasons.extend([
+                    "mandatory verification failure identifies an incomplete implementation",
+                    "approved mutation scope and DNT audits remain passing",
+                    "the failed obligation is already inside the approved verification authority",
+                    "no authority-bearing change is present in the recovery delta",
+                ])
+                evidence_basis.extend([
+                    "failed_verification_receipt",
+                    "mutation_scope_audit",
+                    "dnt_audit",
+                    "V25.6_ExecutionVerificationClosure",
+                ])
+            else:
+                reasons.append("deterministic evidence does not establish a legal recovery class")
+                evidence_basis.append("insufficient_failure_evidence")
     if classification == RECOVERY_CLASSIFICATION_UNCERTAIN:
         user_reapproval = bool(not delta.get("empty"))
     else:
@@ -4004,6 +5102,18 @@ def classify_recovery_failure(
         "reasons": list(dict.fromkeys(reasons))[:12],
         "evidence_basis": list(dict.fromkeys(evidence_basis))[:12],
         "failure_envelope_valid": envelope_check.get("valid") is True,
+        "failure_source": failure_source,
+        "failure_source_provenance": {
+            "variant": failure_source,
+            "explicit": isinstance(value.get("failure_evidence"), dict),
+            "authority": "deterministic evidence only",
+        },
+        "preverification_eligibility": worker_policy,
+        "blocker": classification if classification not in {
+            RECOVERY_CLASSIFICATION_UNCERTAIN, HARNESS_RECOVERABLE,
+            WORKER_RECOVERABLE, AUTHORITY_CHANGE_REQUIRED, CAPABILITY_FLOOR,
+            NON_RECOVERABLE_ARCHITECTURE_FAILURE,
+        } else None,
         "model_calls": 0,
         "worker_calls": 0,
     }
@@ -4115,6 +5225,19 @@ def build_authorized_execution_lineage(
         "dnt_receipt": dnt,
         "precommit_invariant_receipts": precommit_receipts,
         "execution_start_binding": start_binding,
+        "failure_source": value.get("failure_source")
+        or ((value.get("failure_evidence") or {}).get("failure_source")
+            if isinstance(value.get("failure_evidence"), dict) else None),
+        "failure_evidence_hash": (
+            (value.get("failure_evidence") or {}).get("canonical_hash")
+            if isinstance(value.get("failure_evidence"), dict) else None
+        ),
+        "execution_failure_code": (
+            (value.get("failure_evidence") or {}).get("worker_terminal_code")
+            if isinstance(value.get("failure_evidence"), dict)
+            and (value.get("failure_evidence") or {}).get("failure_source") == WORKER_EXECUTION_FAILURE
+            else None
+        ),
         "failed_verification_closure_hash": value.get("execution_verification_closure_hash"),
         "failed_verification_authority_ids": _copy(value.get("failed_verification_authority_ids", [])),
         "verification_digest": value.get("verification_digest"),
@@ -4206,6 +5329,18 @@ def validate_authorized_execution_lineage(
         for field, expected_value in bindings:
             if expected_value not in (None, "") and value.get(field) != expected_value:
                 errors.append(f"lineage binding is invalid: {field}")
+        envelope_source = envelope.get("failure_source")
+        if envelope_source:
+            if value.get("failure_source") != envelope_source:
+                errors.append("lineage binding is invalid: failure_source")
+            envelope_evidence = envelope.get("failure_evidence")
+            if isinstance(envelope_evidence, dict) and envelope_evidence.get("canonical_hash"):
+                if value.get("failure_evidence_hash") != envelope_evidence.get("canonical_hash"):
+                    errors.append("lineage binding is invalid: failure_evidence_hash")
+            if envelope_source == WORKER_EXECUTION_FAILURE and value.get("execution_failure_code") != (
+                envelope_evidence.get("worker_terminal_code") if isinstance(envelope_evidence, dict) else None
+            ):
+                errors.append("lineage binding is invalid: execution_failure_code")
         if value.get("execution_id") != envelope.get("execution_id"):
             errors.append("lineage execution identity is invalid")
     if errors and subject_drift == AUTHORIZED_EXECUTION_DESCENDANT and current_subject_hash and current_subject_hash != value.get("resulting_subject_hash"):
@@ -4234,6 +5369,8 @@ def decide_recovery_eligibility(
     lineage: dict[str, Any] | None = None,
     current_subject_hash: str | None = None,
     authorization: dict[str, Any] | None = None,
+    attempt_accounting: dict[str, Any] | None = None,
+    recovery_budget_available: bool | None = None,
 ) -> dict[str, Any]:
     value = envelope if isinstance(envelope, dict) else {}
     classified = classification if isinstance(classification, dict) else None
@@ -4260,10 +5397,36 @@ def decide_recovery_eligibility(
         else {"valid": False, "errors": ["authorized execution lineage is missing"], "status": INVALID_AUTHORIZED_EXECUTION_DESCENDANT}
     )
     envelope_check = validate_recovery_failure_envelope(value)
+    failure_evidence = value.get("failure_evidence") if isinstance(value.get("failure_evidence"), dict) else {}
+    explicit_worker_failure = value.get("failure_source") == WORKER_EXECUTION_FAILURE
+    execution_policy = (
+        evaluate_preverification_recovery_eligibility(value, authority_delta=delta)
+        if explicit_worker_failure else None
+    )
+    if recovery_budget_available is None:
+        if isinstance(attempt_accounting, dict):
+            recovery_budget_available = bool(
+                can_start_recovery_attempt(attempt_accounting, attempt_index=1).get("allowed")
+            )
+        else:
+            recovery_budget_available = True
+    if execution_policy is not None:
+        execution_policy["checks"]["recovery_budget_available"] = bool(
+            execution_policy.get("checks", {}).get("recovery_budget_available")
+            and recovery_budget_available
+        )
+        execution_policy["eligible"] = bool(
+            execution_policy.get("eligible") and recovery_budget_available
+        )
     checks = {
         "existing_approval_valid": bool(value.get("approval_id") and value.get("approval_receipt_hash") and value.get("plan_hash")),
         "plan_unchanged": bool(value.get("plan_id") and value.get("plan_hash")),
-        "failure_verified": bool(value.get("failed_verification_authority_ids")) and value.get("worker_terminal_state") == "VERIFICATION_FAILED",
+        "failure_verified": (
+            bool(execution_policy and execution_policy.get("eligible"))
+            if explicit_worker_failure
+            else bool(value.get("failed_verification_authority_ids"))
+            and value.get("worker_terminal_state") == "VERIFICATION_FAILED"
+        ),
         "lineage_valid": lineage_check.get("valid") is True,
         "authority_delta_empty": delta.get("empty") is True and delta_check.get("valid") is True,
         "current_subject_matches_lineage": (
@@ -4285,6 +5448,19 @@ def decide_recovery_eligibility(
         ),
         "failure_envelope_valid": envelope_check.get("valid") is True,
     }
+    if execution_policy is not None:
+        checks.update({
+            f"preverification_{key}": bool(passed)
+            for key, passed in (execution_policy.get("checks") or {}).items()
+        })
+        checks["failure_source_explicit"] = explicit_worker_failure
+        checks["no_fake_verification_receipt"] = not any(
+            value.get(key)
+            for key in (
+                "failed_verification_authority_ids", "execution_verification_closure_hash",
+                "execution_verification_closure",
+            )
+        )
     recoverable_class = class_name in {HARNESS_RECOVERABLE, WORKER_RECOVERABLE}
     eligible = recoverable_class and all(checks.values())
     user_reapproval = bool(not delta.get("empty"))
@@ -4310,6 +5486,9 @@ def decide_recovery_eligibility(
         "checks": checks,
         "lineage_validation": lineage_check,
         "failure_envelope_validation": envelope_check,
+        "failure_source": value.get("failure_source"),
+        "preverification_eligibility": execution_policy,
+        "recovery_budget_available": bool(recovery_budget_available),
         "reasons": list(dict.fromkeys(reasons))[:40],
         "model_calls": 0,
         "worker_calls": 0,
@@ -4319,6 +5498,71 @@ def decide_recovery_eligibility(
 assess_recovery_eligibility = decide_recovery_eligibility
 recovery_eligibility_decision = decide_recovery_eligibility
 build_recovery_eligibility = decide_recovery_eligibility
+
+
+def derive_recovery_reporting_state(
+    *,
+    initial_verification_passed: bool = False,
+    initial_worker_succeeded: bool = False,
+    recovery_required: bool | None = None,
+    classification: dict[str, Any] | str | None = None,
+    eligibility: dict[str, Any] | None = None,
+    recovery_dispatched: bool = False,
+    recovery_completed: bool = False,
+) -> dict[str, Any]:
+    """Project a safe external-finalizer state without granting authority.
+
+    ``RECOVERY_NOT_REQUIRED`` is reserved for a verified initial success.
+    A failed initial Worker with uncertain or blocked recovery remains
+    explicitly recoverable-as-a-reporting-state, never a silent success.
+    """
+    required = (
+        bool(recovery_required)
+        if recovery_required is not None
+        else not bool(initial_verification_passed or initial_worker_succeeded)
+    )
+    class_name = (
+        classification.get("classification")
+        if isinstance(classification, dict)
+        else _text(classification, 180)
+    )
+    eligible = bool(isinstance(eligibility, dict) and eligibility.get("eligible") is True)
+    if not required:
+        state = "RECOVERY_NOT_REQUIRED"
+    elif recovery_completed:
+        state = RECOVERY_COMPLETED
+    elif recovery_dispatched:
+        state = RECOVERY_REQUIRED_DISPATCHED
+    elif class_name == RECOVERY_CLASSIFICATION_UNCERTAIN or not class_name:
+        state = RECOVERY_REQUIRED_CLASSIFICATION_UNCERTAIN
+    elif class_name == AUTHORITY_CHANGE_REQUIRED or (
+        isinstance(eligibility, dict)
+        and eligibility.get("user_reapproval_required") is True
+    ):
+        state = RECOVERY_REQUIRED_AUTHORITY_CHANGE
+    elif not eligible:
+        state = RECOVERY_REQUIRED_BUT_NOT_DISPATCHABLE
+    else:
+        state = RECOVERY_REQUIRED_CLASSIFIED
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "RecoveryReportingState",
+        "state": state,
+        "recovery_required": required,
+        "initial_verification_passed": bool(initial_verification_passed),
+        "initial_worker_succeeded": bool(initial_worker_succeeded),
+        "classification": class_name,
+        "eligibility": "ELIGIBLE" if eligible else "BLOCKED_OR_UNKNOWN",
+        "recovery_dispatched": bool(recovery_dispatched),
+        "recovery_completed": bool(recovery_completed),
+        "worker_prose_authority": 0,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+project_recovery_reporting_state = derive_recovery_reporting_state
+classify_recovery_reporting_state = derive_recovery_reporting_state
 
 
 def build_approved_recovery_authorization(
@@ -4356,7 +5600,17 @@ def build_approved_recovery_authorization(
     approved_dnt = _approved_dnt_paths(auth)
     verification_ids = _approved_verification_ids(auth)
     if not verification_ids:
-        verification_ids = _unique_strings(value.get("failed_verification_authority_ids", []), limit=64)
+        verification_ids = _unique_strings(
+            value.get("failed_verification_authority_ids", [])
+            or value.get("required_authority_ids", [])
+            or (
+                (value.get("failure_evidence") or {}).get("verification_obligation_ids", [])
+                if isinstance(value.get("failure_evidence"), dict) else []
+            ),
+            limit=64,
+        )
+    failure_source = value.get("failure_source")
+    execution_failure = value.get("failure_evidence") if isinstance(value.get("failure_evidence"), dict) else {}
     authorization_value: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "artifact_type": APPROVED_RECOVERY_AUTHORIZATION,
@@ -4381,6 +5635,14 @@ def build_approved_recovery_authorization(
         "failed_worker_contract_id": value.get("worker_contract_id"),
         "failed_worker_contract_hash": value.get("worker_contract_hash"),
         "failure_envelope_hash": value.get("canonical_failure_envelope_hash"),
+        "failure_source": failure_source,
+        "execution_failure_code": (
+            execution_failure.get("worker_terminal_code")
+            if failure_source == WORKER_EXECUTION_FAILURE else None
+        ),
+        "verification_was_executed": failure_source == VERIFICATION_FAILURE,
+        "no_fake_verification_receipt": failure_source != WORKER_EXECUTION_FAILURE
+        or not value.get("failed_verification_authority_ids"),
         "failure_classification": classified.get("classification"),
         "authority_delta_hash": delta.get("canonical_hash") or delta.get("authority_delta_hash"),
         "authority_delta_empty": delta.get("empty") is True,
@@ -4507,23 +5769,42 @@ def build_recovery_mission(
         and class_name in {None, HARNESS_RECOVERABLE, WORKER_RECOVERABLE}
         and 0 < int(attempt_index or 0) <= int(recovery_budget or 0)
     )
+    failure_source = value.get("failure_source")
+    execution_evidence = value.get("failure_evidence") if isinstance(value.get("failure_evidence"), dict) else {}
+    worker_execution_failure = failure_source == WORKER_EXECUTION_FAILURE
     failed = value.get("failed_verification") if isinstance(value.get("failed_verification"), dict) else {}
     failed_authorities = _unique_strings(
-        value.get("failed_verification_authority_ids") or [failed.get("authority_id")],
+        [] if worker_execution_failure else (
+            value.get("failed_verification_authority_ids") or [failed.get("authority_id")]
+        ),
         limit=24,
     )
-    failed_obligations = _unique_strings(value.get("execution_time_failed_obligations") or [], limit=32)
-    recovery_execution_id = f"RECOVERY-{value.get('worker_contract_id') or value.get('execution_id') or 'EXEC'}-R{int(attempt_index or 1)}"
-    objective = (
-        "Satisfy the failed mandatory verification authority "
-        f"{failed.get('authority_id') or 'identified authority'}"
-        f" / {failed.get('oracle_id') or 'identified oracle'}"
-        f" for the failed {failed.get('failed_check') or 'verification condition'}"
-        f" ({failed.get('detail') or 'deterministic failed detail'}), "
-        "while preserving every approved behavior, scope, DNT, interface, "
-        "ownership, invariant, and verification authority. Choose the "
-        "implementation; this mission does not prescribe a code patch."
+    failed_obligations = _unique_strings(
+        [] if worker_execution_failure else value.get("execution_time_failed_obligations") or [],
+        limit=32,
     )
+    recovery_execution_id = f"RECOVERY-{value.get('worker_contract_id') or value.get('execution_id') or 'EXEC'}-R{int(attempt_index or 1)}"
+    if worker_execution_failure:
+        objective = (
+            "Continue the approved task after the Worker ended with the "
+            f"execution terminal {execution_evidence.get('worker_terminal_code') or WORKER_NO_APPROVED_MUTATION} "
+            "before a verified completion or V25.6 execution. Re-establish "
+            "an approved mutation and earn the complete existing verification "
+            "obligations while preserving every approved behavior, scope, DNT, "
+            "interface, ownership, invariant, and authority. Choose the "
+            "implementation; this mission does not prescribe a code patch."
+        )
+    else:
+        objective = (
+            "Satisfy the failed mandatory verification authority "
+            f"{failed.get('authority_id') or 'identified authority'}"
+            f" / {failed.get('oracle_id') or 'identified oracle'}"
+            f" for the failed {failed.get('failed_check') or 'verification condition'}"
+            f" ({failed.get('detail') or 'deterministic failed detail'}), "
+            "while preserving every approved behavior, scope, DNT, interface, "
+            "ownership, invariant, and verification authority. Choose the "
+            "implementation; this mission does not prescribe a code patch."
+        )
     mission: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "artifact_type": RECOVERY_MISSION,
@@ -4542,9 +5823,21 @@ def build_recovery_mission(
         "failed_worker_contract_hash": value.get("worker_contract_hash"),
         "failure_envelope_hash": value.get("canonical_failure_envelope_hash"),
         "failure_classification": class_name,
+        "failure_source": failure_source,
+        "execution_failure_code": (
+            execution_evidence.get("worker_terminal_code") if worker_execution_failure else None
+        ),
+        "worker_execution_failure": _safe_projection(execution_evidence) if worker_execution_failure else {},
+        "no_fake_verification_authority": worker_execution_failure,
+        "verification_required_before_completion": True,
         "failed_verification_authorities": failed_authorities,
-        "failed_verification": _safe_projection(failed),
+        "failed_verification": {} if worker_execution_failure else _safe_projection(failed),
         "failed_obligations": failed_obligations,
+        "required_verification_obligations": _unique_strings(
+            execution_evidence.get("verification_obligation_ids")
+            if worker_execution_failure else value.get("required_authority_ids"),
+            limit=48,
+        ),
         "current_failed_subject_hash": value.get("current_subject_hash"),
         "current_failed_subject": {"subject_hash": value.get("current_subject_hash")},
         "authorized_mutation_scope": _safe_projection(auth.get("approved_mutation_scope") or {
@@ -4572,7 +5865,11 @@ def build_recovery_mission(
         "verification_digest": value.get("verification_digest"),
         "coverage_hash": value.get("coverage_hash"),
         "verification_authority_ids": _unique_strings(
-            auth.get("verification_authority_ids") or failed_authorities,
+            auth.get("verification_authority_ids")
+            or (
+                execution_evidence.get("verification_obligation_ids")
+                if worker_execution_failure else failed_authorities
+            ),
             limit=48,
         ),
         "recovery_objective": _text(objective, 1200),
@@ -4601,6 +5898,23 @@ fresh_recovery_mission = build_recovery_mission
 
 def _packet_body(mission: dict[str, Any], authorization: dict[str, Any]) -> dict[str, Any]:
     failed = mission.get("failed_verification") if isinstance(mission.get("failed_verification"), dict) else {}
+    execution_failure = mission.get("worker_execution_failure") if isinstance(mission.get("worker_execution_failure"), dict) else {}
+    execution_failure_source = mission.get("failure_source") == WORKER_EXECUTION_FAILURE
+    execution_failure_packet = {
+        key: _safe_projection(execution_failure.get(key))
+        for key in (
+            "worker_terminal_code", "provider_health", "provider_handoff_valid",
+            "execution_related", "verified_successful_completion", "v25_6_executed",
+            "subject_known", "subject_unchanged", "lineage_status",
+            "unknown_manual_drift", "scope_valid", "dnt_valid", "plan_unchanged",
+            "approval_unchanged", "brain_valid", "brain_unchanged", "promoted",
+            "authority_delta_empty", "legal_solution_space_available",
+            "full_verification_universe_available", "recovery_budget_available",
+            "provider_failure", "harness_failure", "v25_5_authority_valid",
+            "verification_obligation_ids", "execution_failure_detail",
+        )
+        if key in execution_failure
+    }
     approved_scope = mission.get("authorized_mutation_scope") if isinstance(mission.get("authorized_mutation_scope"), dict) else {}
     dnt = mission.get("dnt") if isinstance(mission.get("dnt"), dict) else {}
     return {
@@ -4617,7 +5931,9 @@ def _packet_body(mission: dict[str, Any], authorization: dict[str, Any]) -> dict
         "recovery_authorization_id": authorization.get("authorization_id"),
         "recovery_authorization_hash": authorization.get("authorization_hash"),
         "current_failed_subject_hash": mission.get("current_failed_subject_hash"),
-        "failed_verification": {
+        "failure_source": mission.get("failure_source"),
+        "execution_failure": execution_failure_packet if execution_failure_source else {},
+        "failed_verification": {} if execution_failure_source else {
             "authority_id": failed.get("authority_id"),
             "oracle_id": failed.get("oracle_id"),
             "oracle_hash": failed.get("oracle_hash"),
@@ -4626,6 +5942,7 @@ def _packet_body(mission: dict[str, Any], authorization: dict[str, Any]) -> dict
         },
         "failed_authority_ids": mission.get("failed_verification_authorities", []),
         "failed_obligation_ids": mission.get("failed_obligations", []),
+        "required_verification_obligations": mission.get("required_verification_obligations", []),
         "authorized_mutation_paths": _unique_strings(approved_scope.get("paths", []), paths=True),
         "do_not_touch_paths": _unique_strings(dnt.get("paths", []), paths=True),
         "preserve": mission.get("preservation_constraints", []),
@@ -4744,9 +6061,16 @@ def validate_recovery_worker_packet(
         errors.append("recovery Worker packet is not context-clean")
     if value.get("worker_prose_authority") != 0:
         errors.append("Worker prose has non-zero packet authority")
-    for key in ("plan_hash", "approval_receipt_hash", "current_failed_subject_hash", "failed_verification"):
+    for key in ("plan_hash", "approval_receipt_hash", "current_failed_subject_hash"):
         if not value.get(key):
             errors.append(f"recovery Worker packet is missing {key}")
+    if value.get("failure_source") == WORKER_EXECUTION_FAILURE:
+        if not value.get("execution_failure"):
+            errors.append("execution-failure Worker packet is missing execution evidence")
+        if value.get("failed_verification") not in ({}, None):
+            errors.append("execution-failure Worker packet contains a verification receipt projection")
+    elif not value.get("failed_verification"):
+        errors.append("recovery Worker packet is missing failed verification evidence")
     return {
         "valid": not errors,
         "errors": list(dict.fromkeys(errors))[:40],
@@ -5344,13 +6668,17 @@ def run_provider_free_recovery_replay(
     outcome: str = "failure",
     succeed: bool | None = None,
     attempt_accounting: dict[str, Any] | None = None,
+    failure_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the bounded V26 architecture replay without a provider or Worker."""
     positive = bool(succeed) if succeed is not None else str(outcome).casefold() in {
         "success", "succeed", "pass", "positive", "recovered",
     }
     data = load_live3_recovery_evidence(artifact_root)
-    envelope = build_recovery_failure_envelope(data)
+    envelope = build_recovery_failure_envelope(
+        data,
+        failure_evidence=failure_evidence,
+    )
     envelope_check = validate_recovery_failure_envelope(envelope)
     authorization_source = data.get("execution_authorization") if isinstance(data.get("execution_authorization"), dict) else {}
     classification = classify_recovery_failure(envelope, approved_authority=authorization_source)
