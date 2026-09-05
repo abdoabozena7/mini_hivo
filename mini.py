@@ -323,6 +323,28 @@ RECOVERY_EPOCH_REANCHOR = stage6d.RECOVERY_EPOCH_REANCHOR
 RECOVERY_EPOCH_REANCHOR_EVENT = stage6d.RECOVERY_EPOCH_REANCHOR_EVENT
 RECOVERY_COMPLETION_CONTRACT_REPAIR = stage6d.RECOVERY_COMPLETION_CONTRACT_REPAIR
 RECOVERY_COMPLETION_REPAIR_EVENT = stage6d.RECOVERY_COMPLETION_REPAIR_EVENT
+RECOVERY_V267_SCHEMA_VERSION = stage6d.RECOVERY_V267_SCHEMA_VERSION
+RECOVERY_COMPLETION_PROGRESS_EPOCH = stage6d.RECOVERY_COMPLETION_PROGRESS_EPOCH
+RECOVERY_COMPLETION_PROGRESS_TRANSITION = stage6d.RECOVERY_COMPLETION_PROGRESS_TRANSITION
+RECOVERY_COMPLETION_PROGRESS_TRANSITION_EVENT = (
+    stage6d.RECOVERY_COMPLETION_PROGRESS_TRANSITION_EVENT
+)
+RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION = (
+    stage6d.RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+)
+RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED = (
+    stage6d.RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED
+)
+MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH = (
+    stage6d.MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH
+)
+MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL = stage6d.MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL
+RECOVERY_COMPLETION_REPAIR_PROGRESS_EPOCH_EXHAUSTED = (
+    stage6d.RECOVERY_COMPLETION_REPAIR_PROGRESS_EPOCH_EXHAUSTED
+)
+RECOVERY_COMPLETION_REPAIR_TOTAL_BUDGET_EXHAUSTED = (
+    stage6d.RECOVERY_COMPLETION_REPAIR_TOTAL_BUDGET_EXHAUSTED
+)
 RECOVERY_V266_SCHEMA_VERSION = stage6d.RECOVERY_V266_SCHEMA_VERSION
 RECOVERY_NO_MUTATION_SEARCH_INTERACTION = stage6d.RECOVERY_NO_MUTATION_SEARCH_INTERACTION
 RECOVERY_NO_MUTATION_SEARCH_PATTERN = stage6d.RECOVERY_NO_MUTATION_SEARCH_PATTERN
@@ -362,6 +384,11 @@ RecoveryEpochReanchor = stage6d.RecoveryEpochReanchor
 RecoveryEpochReanchorEvent = stage6d.RecoveryEpochReanchorEvent
 RecoveryCompletionContractRepair = stage6d.RecoveryCompletionContractRepair
 RecoveryCompletionRepairEvent = stage6d.RecoveryCompletionRepairEvent
+RecoveryCompletionProgressEpoch = stage6d.RecoveryCompletionProgressEpoch
+RecoveryCompletionProgressTransition = stage6d.RecoveryCompletionProgressTransition
+RecoveryCompletionProgressTransitionEvent = (
+    stage6d.RecoveryCompletionProgressTransitionEvent
+)
 RecoveryNoMutationSearchPattern = stage6d.RecoveryNoMutationSearchPattern
 RecoveryNoMutationSearchInteraction = stage6d.RecoveryNoMutationSearchInteraction
 RecoveryMutationPathReorientation = stage6d.RecoveryMutationPathReorientation
@@ -392,6 +419,16 @@ validate_recovery_completion_contract = stage6d.validate_recovery_completion_con
 build_recovery_completion_contract = stage6d.build_recovery_completion_contract
 build_recovery_completion_contract_repair = stage6d.build_recovery_completion_contract_repair
 build_recovery_completion_repair_event = stage6d.build_recovery_completion_repair_event
+build_recovery_completion_progress_epoch = stage6d.build_recovery_completion_progress_epoch
+build_recovery_completion_progress_transition = stage6d.build_recovery_completion_progress_transition
+validate_recovery_completion_progress_epoch = stage6d.validate_recovery_completion_progress_epoch
+validate_recovery_completion_progress_transition = stage6d.validate_recovery_completion_progress_transition
+initialize_recovery_completion_progress_state = stage6d.initialize_recovery_completion_progress_state
+observe_recovery_completion_progress = stage6d.observe_recovery_completion_progress
+observe_recovery_completion_progress_transition = (
+    stage6d.observe_recovery_completion_progress_transition
+)
+record_recovery_completion_progress = stage6d.record_recovery_completion_progress
 build_recovery_completion_repair_feedback = stage6d.build_recovery_completion_repair_feedback
 validate_recovery_completion_repair_event = stage6d.validate_recovery_completion_repair_event
 validate_recovery_completion_contract_repair = stage6d.validate_recovery_completion_contract_repair
@@ -10533,7 +10570,7 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
         return None
     if value.get("artifact_type") == RECOVERY_MUTATION_STRATEGY:
         strategy = copy.deepcopy(value)
-        return {
+        state = {
             "schema_version": stage6d.SCHEMA_VERSION,
             "recovery_execution_id": strategy.get("recovery_execution_id"),
             "recovery_attempt_index": strategy.get("recovery_attempt_index", 1),
@@ -10569,6 +10606,16 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
             "completion_repairs_used": 0,
             "completion_repair_events": [],
             "last_completion_repair": None,
+            "completion_progress_epoch": RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+            "completion_progress_aware": True,
+            "completion_progress_epoch_record": None,
+            "completion_progress_transition_events": [],
+            "last_completion_progress_transition": None,
+            "completion_progress_transition_count": 0,
+            "completion_progress_last_evidence_hash": None,
+            "completion_repairs_total": 0,
+            "completion_repairs_used_in_progress_epoch": 0,
+            "completion_repair_denial_reason": None,
             "recovery_mission_id": strategy.get("recovery_mission_id") or strategy.get("mission_id"),
             "completion_contract": copy.deepcopy(
                 strategy.get("completion_contract") or {}
@@ -10600,6 +10647,10 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
                 sorted({str(item).casefold() for item in strategy.get("allowed_mutation_mechanisms", []) or []})
             ),
             }
+        return stage6d.initialize_recovery_completion_progress_state(
+            state, target_path=state.get("target_path"),
+            subject_identity=state.get("current_subject_hash"),
+        )
     state = copy.deepcopy(value)
     if not state.get("recovery_execution_id") or not isinstance(state.get("current_strategy"), dict):
         return None
@@ -10627,6 +10678,16 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
     state.setdefault("completion_repairs_used", 0)
     state.setdefault("completion_repair_events", [])
     state.setdefault("last_completion_repair", None)
+    state.setdefault("completion_progress_epoch", RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION)
+    state["completion_progress_aware"] = True
+    state.setdefault("completion_progress_epoch_record", None)
+    state.setdefault("completion_progress_transition_events", [])
+    state.setdefault("last_completion_progress_transition", None)
+    state.setdefault("completion_progress_transition_count", 0)
+    state.setdefault("completion_progress_last_evidence_hash", None)
+    state.setdefault("completion_repairs_total", state.get("completion_repairs_used", 0))
+    state.setdefault("completion_repairs_used_in_progress_epoch", 0)
+    state.setdefault("completion_repair_denial_reason", None)
     state.setdefault(
         "recovery_mission_id",
         state.get("mission_id") or state.get("current_strategy", {}).get("recovery_mission_id"),
@@ -10655,6 +10716,10 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
                 transition_reason="initial recovery strategy",
                 recovery_authorization=state.get("recovery_authorization"),
             )
+    state = stage6d.initialize_recovery_completion_progress_state(
+        state, target_path=state.get("target_path"),
+        subject_identity=state.get("current_subject_hash"),
+    )
     return stage6d.initialize_recovery_no_mutation_search_state(state)
 
 
@@ -10750,6 +10815,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     recovery_tool_contract_events = []
     recovery_epoch_reanchor_events = []
     recovery_completion_events = []
+    recovery_completion_progress_events = []
     recovery_no_mutation_search_events = []
     recovery_mutation_path_reorientation_events = []
     recovery_task_text = str(task_text)
@@ -11201,6 +11267,67 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stage6d.RECOVERY_TOOL_INTENT_ACTIVE_MUTATION,
                     stage6d.RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION,
                 }
+                # V26.7 observes the same authoritative tool classification
+                # before any completion repair accounting.  An unavailable
+                # or unknown request therefore cannot manufacture mutation
+                # progress; an active or strategy-suppressed mutation seam
+                # advances the same Worker exactly once.
+                recovery_completion_progress_observation = (
+                    stage6d.observe_recovery_completion_progress(
+                        recovery_state,
+                        tool_name=name,
+                        tool_intent=tool_intent,
+                        active_tool_schema=offered_tools,
+                        suppressed_mutation_mechanisms=suppressed_mutations,
+                        known_mutation_mechanisms=list(active_legal or [])
+                        + list(suppressed_mutations or []),
+                        triggering_tool_event_id=(
+                            f"{task_id}:generation:{int(_step) + 1}:tool:{len(evidence)}"
+                        ),
+                        target_path=recovery_target,
+                        subject_identity=recovery_state.get("current_subject_hash"),
+                        recovery_active=True,
+                        behavior_changing_mission_unresolved=recovery_state.get(
+                            "recovery_mission_unresolved", True
+                        ),
+                        current_target_known=recovery_state.get(
+                            "current_target_known", bool(recovery_target)
+                        ),
+                        provider_healthy=recovery_state.get("provider_healthy", True),
+                        provider_harness_blocked=recovery_state.get(
+                            "provider_harness_blocked", False
+                        ),
+                        authority_unchanged=recovery_state.get(
+                            "authority_unchanged", True
+                        ),
+                        scope_valid=recovery_state.get("scope_valid", True),
+                        dnt_valid=recovery_state.get("dnt_valid", True),
+                        terminal_state=recovery_state.get("terminal_state"),
+                        active_tool_schema_hash=stage6d.canonical_hash(offered_tools),
+                    )
+                )
+                recovery_state = recovery_completion_progress_observation["state"]
+                if recovery_completion_progress_observation.get("event") is not None:
+                    recovery_completion_progress_events.append(
+                        copy.deepcopy(
+                            recovery_completion_progress_observation["event"]
+                        )
+                    )
+                recovery_strategy_events.append({
+                    "kind": "v26_7_completion_progress",
+                    "status": recovery_completion_progress_observation.get("status"),
+                    "intent": recovery_completion_progress_observation.get("intent"),
+                    "progress_epoch": recovery_completion_progress_observation.get(
+                        "progress_epoch"
+                    ),
+                    "transitioned": bool(
+                        recovery_completion_progress_observation.get("transitioned")
+                    ),
+                    "event": copy.deepcopy(
+                        recovery_completion_progress_observation.get("event") or {}
+                    ),
+                    "reason": recovery_completion_progress_observation.get("reason"),
+                })
                 recovery_no_mutation_observation = (
                     stage6d.observe_recovery_no_mutation_search_interaction(
                         recovery_state,
@@ -11697,6 +11824,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "recovery_tool_contract_events": recovery_tool_contract_events,
         "recovery_epoch_reanchor_events": recovery_epoch_reanchor_events,
         "recovery_completion_events": recovery_completion_events,
+        "recovery_completion_progress_events": recovery_completion_progress_events,
         "recovery_no_mutation_search_events": recovery_no_mutation_search_events,
         "recovery_mutation_path_reorientation_events": (
             recovery_mutation_path_reorientation_events

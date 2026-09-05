@@ -130,6 +130,26 @@ RECOVERY_EPOCH_REANCHOR_EVENT = "RecoveryEpochReanchorEvent"
 RECOVERY_COMPLETION_CONTRACT_REPAIR = "RecoveryCompletionContractRepair"
 RECOVERY_COMPLETION_REPAIR_EVENT = "RecoveryCompletionRepairEvent"
 
+# V26.7 scopes the existing completion-contract repair opportunity to the
+# smallest authoritative execution-progress boundary proven by the V26.6.1
+# forensic record: entering the active mutation seam.  The legacy V26.4
+# constant remains the per-progress-epoch compatibility limit; the V26.7
+# total is a separate hard cap.
+RECOVERY_V267_SCHEMA_VERSION = "V26.7-RECOVERY-PROGRESS-AWARE-COMPLETION-1"
+RECOVERY_COMPLETION_PROGRESS_EPOCH = "RecoveryCompletionProgressEpoch"
+RECOVERY_COMPLETION_PROGRESS_TRANSITION = "RecoveryCompletionProgressTransition"
+RECOVERY_COMPLETION_PROGRESS_TRANSITION_EVENT = RECOVERY_COMPLETION_PROGRESS_TRANSITION
+RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION = "PRE_MUTATION"
+RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED = "MUTATION_PATH_ENTERED"
+MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH = 1
+MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL = 2
+RECOVERY_COMPLETION_REPAIR_PROGRESS_EPOCH_EXHAUSTED = (
+    "RECOVERY_COMPLETION_REPAIR_PROGRESS_EPOCH_EXHAUSTED"
+)
+RECOVERY_COMPLETION_REPAIR_TOTAL_BUDGET_EXHAUSTED = (
+    "RECOVERY_COMPLETION_REPAIR_TOTAL_BUDGET_EXHAUSTED"
+)
+
 # V26.6 adds one independent, execution-local response to a different
 # failure predicate: the Worker keeps inspecting the unchanged subject but
 # never invokes any currently legal behavior-changing mutation mechanism.
@@ -304,6 +324,17 @@ class RecoveryCompletionContractRepair(_FrozenRecord):
 
 class RecoveryCompletionRepairEvent(RecoveryCompletionContractRepair):
     """Compatibility spelling for the canonical completion repair event."""
+
+
+class RecoveryCompletionProgressEpoch(_FrozenRecord):
+    """Immutable current completion-repair progress epoch."""
+
+
+class RecoveryCompletionProgressTransition(_FrozenRecord):
+    """Immutable first-entry transition into the recognized mutation seam."""
+
+
+RecoveryCompletionProgressTransitionEvent = RecoveryCompletionProgressTransition
 
 
 class RecoveryNoMutationSearchPattern(_FrozenRecord):
@@ -1998,6 +2029,544 @@ def build_recovery_completion_contract(
     }
 
 
+def _v267_completion_progress_enabled(value: Any) -> bool:
+    """Return whether a state opts into V26.7 progress-aware accounting."""
+    if not isinstance(value, dict):
+        return False
+    if value.get("completion_progress_aware") is True:
+        return True
+    record = value.get("completion_progress_epoch_record")
+    return (
+        isinstance(record, dict)
+        and record.get("schema_version") == RECOVERY_V267_SCHEMA_VERSION
+    )
+
+
+def _v267_completion_progress_epoch(value: Any) -> str:
+    if isinstance(value, dict):
+        epoch = value.get("completion_progress_epoch")
+        if epoch in {
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        }:
+            return str(epoch)
+    return RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+
+
+def build_recovery_completion_progress_epoch(
+    recovery_execution_id: str,
+    *,
+    recovery_attempt_index: int = 1,
+    progress_epoch: str = RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+    epoch_transition_evidence_id: str | None = None,
+    recognized_mutation_mechanism: str | None = None,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    strategy_epoch: int = RECOVERY_STRATEGY_EPOCH_0,
+    strategy_switch_count: int = 0,
+    recovery_mission_id: str | None = None,
+    active_tool_schema_hash: str | None = None,
+) -> RecoveryCompletionProgressEpoch:
+    """Build the immutable two-state V26.7 progress projection."""
+    epoch = (
+        progress_epoch
+        if progress_epoch in {
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        }
+        else RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+    )
+    execution = _text(recovery_execution_id, 160)
+    value: dict[str, Any] = {
+        "schema_version": RECOVERY_V267_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_COMPLETION_PROGRESS_EPOCH,
+        "recovery_execution_id": execution,
+        "recovery_attempt_index": max(1, _safe_int(recovery_attempt_index, 1)),
+        "progress_epoch": epoch,
+        "epoch_transition_evidence_id": _text(
+            epoch_transition_evidence_id,
+            180,
+        ) or f"{execution}:completion-progress:initial",
+        "recognized_mutation_mechanism": _text(
+            recognized_mutation_mechanism, 120
+        ) or None,
+        "target_path": _path(target_path),
+        "subject_identity": _strategy_subject_identity(subject_identity),
+        "strategy_epoch": max(0, _safe_int(strategy_epoch, 0)),
+        "strategy_switch_count": max(0, _safe_int(strategy_switch_count, 0)),
+        "recovery_mission_id": _text(recovery_mission_id, 160) or None,
+        "active_tool_schema_hash": _text(active_tool_schema_hash, 128) or None,
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
+    return _freeze_record(RecoveryCompletionProgressEpoch, value)  # type: ignore[return-value]
+
+
+def validate_recovery_completion_progress_epoch(
+    epoch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = epoch if isinstance(epoch, dict) else {}
+    errors: list[str] = []
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    if value.get("schema_version") != RECOVERY_V267_SCHEMA_VERSION:
+        errors.append("completion progress epoch schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_COMPLETION_PROGRESS_EPOCH:
+        errors.append("completion progress epoch artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("completion progress epoch hash is invalid")
+    for key in (
+        "recovery_execution_id",
+        "progress_epoch",
+        "epoch_transition_evidence_id",
+        "target_path",
+    ):
+        if value.get(key) in (None, ""):
+            errors.append(f"completion progress epoch is missing {key}")
+    if value.get("progress_epoch") not in {
+        RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+        RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+    }:
+        errors.append("completion progress epoch value is invalid")
+    if value.get("progress_epoch") == RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED:
+        if not value.get("recognized_mutation_mechanism"):
+            errors.append("mutation-path progress epoch is missing mechanism")
+        if not value.get("subject_identity"):
+            errors.append("mutation-path progress epoch is missing subject identity")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("completion progress epoch grants Worker prose authority")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def build_recovery_completion_progress_transition(
+    state: dict[str, Any] | None,
+    *,
+    triggering_tool_event_id: str,
+    tool: str,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    active_tool_schema_hash: str | None = None,
+    from_progress_epoch: str = RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+    to_progress_epoch: str = RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+    repairs_used_in_epoch_before: int = 0,
+    total_repairs_before: int = 0,
+) -> RecoveryCompletionProgressTransition:
+    """Build immutable evidence for the single authoritative progress edge."""
+    value = state if isinstance(state, dict) else {}
+    schema_hash = _text(active_tool_schema_hash, 128) or None
+    event: dict[str, Any] = {
+        "schema_version": RECOVERY_V267_SCHEMA_VERSION,
+        "artifact_type": RECOVERY_COMPLETION_PROGRESS_TRANSITION,
+        "recovery_execution_id": _text(
+            value.get("recovery_execution_id"), 160
+        ),
+        "recovery_attempt_index": max(
+            1, _safe_int(value.get("recovery_attempt_index"), 1)
+        ),
+        "from_progress_epoch": from_progress_epoch,
+        "to_progress_epoch": to_progress_epoch,
+        "triggering_tool_event_id": _text(triggering_tool_event_id, 180),
+        "tool": _text(tool, 120),
+        "target_path": _path(target_path or value.get("target_path")),
+        "subject_identity": _strategy_subject_identity(
+            subject_identity if subject_identity is not None
+            else value.get("current_subject_hash")
+        ),
+        "active_tool_schema_hash": schema_hash,
+        "active_tool_schema_identity": schema_hash,
+        "strategy_epoch": max(0, _safe_int(value.get("strategy_epoch"), 0)),
+        "strategy_switch_count": max(
+            0, _safe_int(value.get("strategy_switch_count"), 0)
+        ),
+        "completion_repairs_used_in_epoch_before": max(
+            0, _safe_int(repairs_used_in_epoch_before, 0)
+        ),
+        "completion_repairs_total_before": max(
+            0, _safe_int(total_repairs_before, 0)
+        ),
+        "same_recovery_worker": True,
+        "worker_prose_authority": 0,
+        "canonical_hash": "",
+    }
+    event["canonical_hash"] = canonical_hash(_without(event, "canonical_hash"))
+    return _freeze_record(RecoveryCompletionProgressTransition, event)  # type: ignore[return-value]
+
+
+def validate_recovery_completion_progress_transition(
+    event: dict[str, Any] | None,
+) -> dict[str, Any]:
+    value = event if isinstance(event, dict) else {}
+    errors: list[str] = []
+    expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
+    if value.get("schema_version") != RECOVERY_V267_SCHEMA_VERSION:
+        errors.append("completion progress transition schema version is invalid")
+    if value.get("artifact_type") != RECOVERY_COMPLETION_PROGRESS_TRANSITION:
+        errors.append("completion progress transition artifact type is invalid")
+    if value.get("canonical_hash") != expected_hash:
+        errors.append("completion progress transition hash is invalid")
+    for key in (
+        "recovery_execution_id",
+        "from_progress_epoch",
+        "to_progress_epoch",
+        "triggering_tool_event_id",
+        "tool",
+        "target_path",
+        "subject_identity",
+    ):
+        if value.get(key) in (None, "", []):
+            errors.append(f"completion progress transition is missing {key}")
+    if value.get("from_progress_epoch") != RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION:
+        errors.append("completion progress transition source epoch is invalid")
+    if value.get("to_progress_epoch") != RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED:
+        errors.append("completion progress transition destination epoch is invalid")
+    if value.get("same_recovery_worker") is not True:
+        errors.append("completion progress transition changes Worker identity")
+    if value.get("worker_prose_authority") != 0:
+        errors.append("completion progress transition grants Worker prose authority")
+    if _safe_int(value.get("completion_repairs_used_in_epoch_before"), -1) < 0:
+        errors.append("completion progress transition repair count is invalid")
+    if _safe_int(value.get("completion_repairs_total_before"), -1) < 0:
+        errors.append("completion progress transition total repair count is invalid")
+    return {
+        "valid": not errors,
+        "errors": list(dict.fromkeys(errors))[:32],
+        "canonical_hash": value.get("canonical_hash"),
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+
+
+def initialize_recovery_completion_progress_state(
+    state: dict[str, Any] | None,
+    *,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+) -> dict[str, Any]:
+    """Initialize V26.7 state without leaking it across Worker executions."""
+    current = _copy(state) if isinstance(state, dict) else {}
+    current["completion_progress_aware"] = True
+    execution = _text(current.get("recovery_execution_id"), 160) or "RECOVERY-EXEC-UNKNOWN"
+    target = _path(target_path or current.get("target_path"))
+    subject = _strategy_subject_identity(
+        subject_identity if subject_identity is not None
+        else current.get("current_subject_hash")
+    )
+    epoch = _v267_completion_progress_epoch(current)
+    current["completion_progress_epoch"] = epoch
+    current.setdefault("completion_progress_transition_events", [])
+    current.setdefault("last_completion_progress_transition", None)
+    current.setdefault("completion_progress_transition_count", 0)
+    current.setdefault("completion_progress_last_evidence_hash", None)
+    transitions = current.get("completion_progress_transition_events") or []
+    if epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED:
+        transition = current.get("last_completion_progress_transition")
+        transition_is_valid = (
+            isinstance(transition, dict)
+            and validate_recovery_completion_progress_transition(transition).get(
+                "valid"
+            )
+            and len(transitions) == 1
+        )
+        if not transition_is_valid:
+            # An unbound/partially persisted mutation epoch cannot authorize
+            # the post-mutation repair allowance.  Fail closed by returning
+            # to the only reconstructable state.
+            epoch = RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+            current["completion_progress_epoch"] = epoch
+    current.setdefault("completion_repairs_total", max(
+        0, _safe_int(current.get("completion_repairs_used"), 0)
+    ))
+    current["completion_repairs_total"] = max(
+        0, _safe_int(current.get("completion_repairs_total"), 0)
+    )
+    current["completion_repairs_used"] = current["completion_repairs_total"]
+    # A legacy caller may arrive here after consuming its single V26.4
+    # repair, without carrying an explicit progress record.  Do not silently
+    # turn that old repair into an unused V26.7 PRE_MUTATION allowance.  Only
+    # an authoritative progress transition may open the second epoch.
+    if (
+        epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+        and current["completion_repairs_total"] > 0
+        and not current.get("completion_progress_transition_events")
+        and _safe_int(
+            current.get("completion_repairs_used_in_progress_epoch"), 0
+        ) == 0
+    ):
+        current["completion_repairs_used_in_progress_epoch"] = min(
+            current["completion_repairs_total"],
+            MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH,
+        )
+    current.setdefault("completion_repairs_used_in_progress_epoch", 0)
+    current["completion_repairs_used_in_progress_epoch"] = max(
+        0, _safe_int(current.get("completion_repairs_used_in_progress_epoch"), 0)
+    )
+    current.setdefault("completion_repair_denial_reason", None)
+    record = current.get("completion_progress_epoch_record")
+    record_check = validate_recovery_completion_progress_epoch(record)
+    record_matches = isinstance(record, dict) and record.get("progress_epoch") == epoch
+    if not record_matches or not record_check.get("valid"):
+        current["completion_progress_epoch_record"] = build_recovery_completion_progress_epoch(
+            execution,
+            recovery_attempt_index=_safe_int(
+                current.get("recovery_attempt_index"), 1
+            ),
+            progress_epoch=epoch,
+            epoch_transition_evidence_id=(
+                current.get("last_completion_progress_transition", {}) or {}
+            ).get("canonical_hash")
+            if isinstance(current.get("last_completion_progress_transition"), dict)
+            else None,
+            recognized_mutation_mechanism=(
+                current.get("last_completion_progress_transition", {}) or {}
+            ).get("tool")
+            if epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED
+            and isinstance(current.get("last_completion_progress_transition"), dict)
+            else None,
+            target_path=target,
+            subject_identity=subject,
+            strategy_epoch=_safe_int(current.get("strategy_epoch"), 0),
+            strategy_switch_count=_safe_int(
+                current.get("strategy_switch_count"), 0
+            ),
+            recovery_mission_id=(
+                current.get("recovery_mission_id") or current.get("mission_id")
+            ),
+            active_tool_schema_hash=current.get("active_tool_schema_hash"),
+        )
+    return current
+
+
+def observe_recovery_completion_progress(
+    state: dict[str, Any] | None,
+    *,
+    tool_name: str | None = None,
+    tool: str | None = None,
+    tool_intent: str | None = None,
+    active_tool_schema: Iterable[Any] | None = None,
+    suppressed_mutation_mechanisms: Iterable[Any] | None = None,
+    known_mutation_mechanisms: Iterable[Any] | None = None,
+    triggering_tool_event_id: str | None = None,
+    target_path: str | None = None,
+    subject_identity: Any = None,
+    subject_unchanged: bool = True,
+    recovery_active: bool = True,
+    worker_lifecycle_active: bool | None = None,
+    behavior_changing_mission_unresolved: bool | None = None,
+    current_target_known: bool | None = None,
+    provider_healthy: bool | None = None,
+    provider_harness_blocked: bool | None = None,
+    authority_unchanged: bool | None = None,
+    scope_valid: bool | None = None,
+    dnt_valid: bool | None = None,
+    terminal_state: Any = None,
+    active_tool_schema_hash: str | None = None,
+) -> dict[str, Any]:
+    """Advance completion repair progress only for a recognized mutation seam."""
+    current = initialize_recovery_completion_progress_state(
+        state, target_path=target_path, subject_identity=subject_identity
+    )
+    name = _text(tool_name or tool, 120)
+    if active_tool_schema is None:
+        return {
+            "state": current,
+            "status": "COMPLETION_PROGRESS_BLOCKED",
+            "progress_epoch": _v267_completion_progress_epoch(current),
+            "intent": RECOVERY_TOOL_INTENT_UNAVAILABLE,
+            "recognized_mutation_path": False,
+            "transitioned": False,
+            "event": None,
+            "reason": "active_tool_schema_unknown",
+            "model_calls": 0,
+            "worker_calls": 0,
+        }
+    active = _strategy_schema_list(active_tool_schema)
+    suppressed = suppressed_mutation_mechanisms
+    known = known_mutation_mechanisms
+    # When the caller supplies the current schema, re-run the authoritative
+    # V26.6.2 classifier here instead of trusting a stale/static intent.  This
+    # prevents an unavailable tool from being promoted to mutation progress
+    # merely because an earlier layer classified its name lexically.
+    intent = (
+        classify_recovery_tool_intent(
+            name,
+            active_tool_schema=active,
+            suppressed_mutation_mechanisms=suppressed,
+            known_mutation_mechanisms=known,
+        )
+        if active_tool_schema is not None
+        else tool_intent or classify_recovery_tool_intent(
+            name,
+            active_tool_schema=active,
+            suppressed_mutation_mechanisms=suppressed,
+            known_mutation_mechanisms=known,
+        )
+    )
+    mutation_intent = intent in {
+        RECOVERY_TOOL_INTENT_ACTIVE_MUTATION,
+        RECOVERY_TOOL_INTENT_SUPPRESSED_MUTATION,
+    }
+    current_epoch = _v267_completion_progress_epoch(current)
+    result: dict[str, Any] = {
+        "state": current,
+        "status": "COMPLETION_PROGRESS_NOT_ADVANCED",
+        "progress_epoch": current_epoch,
+        "intent": intent,
+        "recognized_mutation_path": mutation_intent,
+        "transitioned": False,
+        "event": None,
+        "reason": None,
+        "model_calls": 0,
+        "worker_calls": 0,
+    }
+    if not mutation_intent:
+        result["reason"] = (
+            "active_non_mutation_tool" if intent == RECOVERY_TOOL_INTENT_ACTIVE_NON_MUTATION
+            else "unavailable_or_unknown_tool"
+        )
+        return result
+    if current_epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED:
+        result["status"] = "COMPLETION_PROGRESS_ALREADY_MUTATION_PATH_ENTERED"
+        result["reason"] = "progress_boundary_already_crossed"
+        return result
+
+    target = _path(target_path or current.get("target_path"))
+    subject = _strategy_subject_identity(
+        subject_identity if subject_identity is not None
+        else current.get("current_subject_hash")
+    )
+    legal = _v266_legal_mechanisms(current)
+    blockers: list[str] = []
+    if not recovery_active:
+        blockers.append("recovery_inactive")
+    if worker_lifecycle_active is None:
+        worker_lifecycle_active = _v266_state_bool(
+            current, "worker_lifecycle_active", True, "recovery_worker_active"
+        )
+    if not worker_lifecycle_active:
+        blockers.append("worker_lifecycle_inactive")
+    if behavior_changing_mission_unresolved is None:
+        behavior_changing_mission_unresolved = _v266_state_bool(
+            current, "recovery_mission_unresolved", True
+        )
+    if not behavior_changing_mission_unresolved:
+        blockers.append("mission_resolved")
+    if current_target_known is None:
+        current_target_known = bool(target)
+    if not current_target_known or not target:
+        blockers.append("target_unknown")
+    state_target = _path(current.get("target_path"))
+    if state_target and target and state_target.casefold() != target.casefold():
+        blockers.append("target_changed")
+    if not legal:
+        blockers.append("no_legal_mutation_space")
+    if not subject or not subject_unchanged:
+        blockers.append("subject_unknown_or_changed")
+    if provider_healthy is None:
+        provider_healthy = _v266_state_bool(current, "provider_healthy", True)
+    if not provider_healthy:
+        blockers.append("provider_unhealthy")
+    if provider_harness_blocked is None:
+        provider_harness_blocked = _v266_state_bool(
+            current, "provider_harness_blocked", False
+        )
+    if provider_harness_blocked:
+        blockers.append("provider_or_harness_blocked")
+    if authority_unchanged is None:
+        authority_unchanged = _v266_state_bool(current, "authority_unchanged", True)
+    if not authority_unchanged or _v266_authority_explicitly_blocks(current):
+        blockers.append("authority_changed_or_blocked")
+    if scope_valid is None:
+        scope_valid = _v266_state_bool(current, "scope_valid", True)
+    if not scope_valid:
+        blockers.append("scope_invalid")
+    if dnt_valid is None:
+        dnt_valid = _v266_state_bool(current, "dnt_valid", True)
+    if not dnt_valid:
+        blockers.append("dnt_invalid")
+    if terminal_state not in (None, "") or current.get("terminal_state") not in (None, ""):
+        blockers.append("terminal_state")
+    if blockers:
+        result["status"] = "COMPLETION_PROGRESS_BLOCKED"
+        result["reason"] = blockers[0]
+        result["blockers"] = blockers[:16]
+        return result
+
+    schema_hash = _text(active_tool_schema_hash, 128) or (
+        canonical_hash(active) if active_tool_schema is not None else None
+    )
+    event_id = _text(triggering_tool_event_id, 180) or (
+        f"{current.get('recovery_execution_id')}:completion-progress:transition"
+    )
+    repairs_in_epoch = max(
+        0,
+        _safe_int(current.get("completion_repairs_used_in_progress_epoch"), 0),
+    )
+    total_repairs = max(
+        0,
+        _safe_int(
+            current.get("completion_repairs_total"),
+            _safe_int(current.get("completion_repairs_used"), 0),
+        ),
+    )
+    event = build_recovery_completion_progress_transition(
+        current,
+        triggering_tool_event_id=event_id,
+        tool=name,
+        target_path=target,
+        subject_identity=subject,
+        active_tool_schema_hash=schema_hash,
+        repairs_used_in_epoch_before=repairs_in_epoch,
+        total_repairs_before=total_repairs,
+    )
+    transition_record = build_recovery_completion_progress_epoch(
+        current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN",
+        recovery_attempt_index=_safe_int(current.get("recovery_attempt_index"), 1),
+        progress_epoch=RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        epoch_transition_evidence_id=event.get("canonical_hash"),
+        recognized_mutation_mechanism=name,
+        target_path=target,
+        subject_identity=subject,
+        strategy_epoch=_safe_int(current.get("strategy_epoch"), 0),
+        strategy_switch_count=_safe_int(current.get("strategy_switch_count"), 0),
+        recovery_mission_id=(
+            current.get("recovery_mission_id") or current.get("mission_id")
+        ),
+        active_tool_schema_hash=schema_hash,
+    )
+    current["completion_progress_epoch"] = RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED
+    current["completion_progress_epoch_record"] = transition_record
+    current["completion_progress_transition_count"] = 1
+    current["completion_progress_last_evidence_hash"] = event.get("canonical_hash")
+    current["completion_progress_transition_events"] = (
+        list(current.get("completion_progress_transition_events", [])) + [event]
+    )[:1]
+    current["last_completion_progress_transition"] = event
+    current["completion_repairs_used_in_progress_epoch"] = 0
+    result.update({
+        "state": current,
+        "status": "COMPLETION_PROGRESS_MUTATION_PATH_ENTERED",
+        "progress_epoch": RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        "transitioned": True,
+        "event": event,
+        "progress_epoch_record": transition_record,
+    })
+    return result
+
+
+observe_recovery_completion_progress_transition = observe_recovery_completion_progress
+record_recovery_completion_progress = observe_recovery_completion_progress
+build_completion_progress_epoch = build_recovery_completion_progress_epoch
+build_completion_progress_transition = build_recovery_completion_progress_transition
+validate_completion_progress_epoch = validate_recovery_completion_progress_epoch
+validate_completion_progress_transition = validate_recovery_completion_progress_transition
+
+
 def build_recovery_completion_contract_repair(
     recovery_execution_id: str,
     *,
@@ -2015,10 +2584,18 @@ def build_recovery_completion_contract_repair(
     completed: bool = False,
     failure_type: Any = WORKER_OUTPUT_INVALID,
     model_visible_feedback: Any = "",
+    schema_version: str = RECOVERY_V264_SCHEMA_VERSION,
+    progress_epoch: str | None = None,
+    repairs_used_in_progress_epoch_before: int | None = None,
+    repairs_used_in_progress_epoch_after: int | None = None,
+    total_repairs_before: int | None = None,
+    total_repairs_after: int | None = None,
+    progress_evidence_hash: str | None = None,
+    completion_attempt_hash: str | None = None,
 ) -> RecoveryCompletionContractRepair:
     feedback = _text(model_visible_feedback, 1600)
     value: dict[str, Any] = {
-        "schema_version": RECOVERY_V264_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "artifact_type": RECOVERY_COMPLETION_REPAIR_EVENT,
         "repair_type": RECOVERY_COMPLETION_CONTRACT_REPAIR,
         "recovery_execution_id": _text(recovery_execution_id, 160),
@@ -2045,6 +2622,20 @@ def build_recovery_completion_contract_repair(
         "worker_prose_authority": 0,
         "canonical_hash": "",
     }
+    if progress_epoch is not None:
+        value.update({
+            "progress_epoch": progress_epoch,
+            "repairs_used_in_progress_epoch_before": max(
+                0, _safe_int(repairs_used_in_progress_epoch_before, 0)
+            ),
+            "repairs_used_in_progress_epoch_after": max(
+                0, _safe_int(repairs_used_in_progress_epoch_after, 0)
+            ),
+            "total_repairs_before": max(0, _safe_int(total_repairs_before, 0)),
+            "total_repairs_after": max(0, _safe_int(total_repairs_after, 0)),
+            "progress_evidence_hash": _text(progress_evidence_hash, 128) or None,
+            "completion_attempt_hash": _text(completion_attempt_hash, 128) or None,
+        })
     value["canonical_hash"] = canonical_hash(_without(value, "canonical_hash"))
     return _freeze_record(RecoveryCompletionRepairEvent, value)  # type: ignore[return-value]
 
@@ -2054,6 +2645,7 @@ def build_recovery_completion_repair_feedback(
     *,
     remaining_tool_steps: int,
     current_subject_identity: Any = None,
+    progress_epoch: str | None = None,
     max_chars: int = 1500,
 ) -> str:
     value = validation if isinstance(validation, dict) else {}
@@ -2062,6 +2654,11 @@ def build_recovery_completion_repair_feedback(
     )
     missing_coverage = _unique_strings(
         value.get("missing_coverage_ids", []), limit=24, chars=160
+    )
+    progress_line = (
+        f"Authoritative completion progress epoch: {progress_epoch}\n"
+        if progress_epoch
+        else ""
     )
     return _text(
         "COMPLETION CONTRACT REPAIR\n"
@@ -2072,6 +2669,7 @@ def build_recovery_completion_repair_feedback(
         f"Verification handoff ready: {bool(value.get('verification_handoff_ready'))}\n"
         f"Current project subject identity: "
         f"{_strategy_subject_identity(current_subject_identity) or 'unchanged/unknown'}\n"
+        f"{progress_line}"
         f"Remaining normal tool steps: {max(0, int(remaining_tool_steps))}\n"
         "Continue the SAME RecoveryMission and earn the missing deterministic "
         "evidence. Do not self-certify verification or promotion.",
@@ -2085,7 +2683,11 @@ def validate_recovery_completion_repair_event(
     value = event if isinstance(event, dict) else {}
     expected_hash = canonical_hash(_without(value, "canonical_hash")) if value else None
     errors: list[str] = []
-    if value.get("schema_version") != RECOVERY_V264_SCHEMA_VERSION:
+    schema_version = value.get("schema_version")
+    if schema_version not in {
+        RECOVERY_V264_SCHEMA_VERSION,
+        RECOVERY_V267_SCHEMA_VERSION,
+    }:
         errors.append("completion repair schema version is invalid")
     if value.get("artifact_type") not in {
         RECOVERY_COMPLETION_CONTRACT_REPAIR,
@@ -2109,6 +2711,55 @@ def validate_recovery_completion_repair_event(
         "recovery_authorization_hash"
     ):
         errors.append("completion repair authorization hash is missing")
+    if schema_version == RECOVERY_V267_SCHEMA_VERSION:
+        if value.get("progress_epoch") not in {
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        }:
+            errors.append("completion repair progress epoch is invalid")
+        for key in (
+            "repairs_used_in_progress_epoch_before",
+            "repairs_used_in_progress_epoch_after",
+            "total_repairs_before",
+            "total_repairs_after",
+            "progress_evidence_hash",
+            "completion_attempt_hash",
+        ):
+            if value.get(key) in (None, ""):
+                errors.append(f"completion repair is missing {key}")
+        epoch_repairs_before = _safe_int(
+            value.get("repairs_used_in_progress_epoch_before"), -1
+        )
+        epoch_repairs_after = _safe_int(
+            value.get("repairs_used_in_progress_epoch_after"), -1
+        )
+        total_repairs_before = _safe_int(value.get("total_repairs_before"), -1)
+        total_repairs_after = _safe_int(value.get("total_repairs_after"), -1)
+        if epoch_repairs_before < 0 or epoch_repairs_before > MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH:
+            errors.append("completion repair per-epoch count before is invalid")
+        if epoch_repairs_after < 0 or epoch_repairs_after > MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH:
+            errors.append("completion repair per-epoch count after is invalid")
+        if total_repairs_before < 0 or total_repairs_before > MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL:
+            errors.append("completion repair total count before is invalid")
+        if total_repairs_after < 0 or total_repairs_after > MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL:
+            errors.append("completion repair total count after is invalid")
+        if (
+            epoch_repairs_before >= 0
+            and epoch_repairs_after >= 0
+            and epoch_repairs_after != epoch_repairs_before + 1
+        ):
+            errors.append("completion repair per-epoch transition is invalid")
+        if (
+            total_repairs_before >= 0
+            and total_repairs_after >= 0
+            and total_repairs_after != total_repairs_before + 1
+        ):
+            errors.append("completion repair total transition is invalid")
+        if (
+            total_repairs_after >= 0
+            and _safe_int(value.get("repair_ordinal"), -1) != total_repairs_after
+        ):
+            errors.append("completion repair ordinal does not match total count")
     return {
         "valid": not errors,
         "errors": list(dict.fromkeys(errors))[:32],
@@ -2130,11 +2781,20 @@ def observe_recovery_completion_attempt(
     completed: bool = False,
     failure_type: Any = WORKER_OUTPUT_INVALID,
 ) -> dict[str, Any]:
-    """Offer exactly one same-Worker contract repair while budget remains."""
+    """Offer a bounded same-Worker repair using V26.7 progress epochs.
+
+    States created by V26.7 carry the explicit two-state accounting.  A
+    caller that supplies only the historical V26.4 fields retains the legacy
+    one-repair behavior; this keeps older integrations from silently gaining
+    a second repair without authoritative progress evidence.
+    """
     current = _copy(state) if isinstance(state, dict) else {}
     current.setdefault("completion_repairs_used", 0)
     current.setdefault("completion_repair_events", [])
     current.setdefault("last_completion_repair", None)
+    v267_enabled = _v267_completion_progress_enabled(current)
+    if v267_enabled:
+        current = initialize_recovery_completion_progress_state(current)
     validation = validate_recovery_completion_contract(
         completion_payload,
         required_completion_fields=required_completion_fields,
@@ -2150,16 +2810,37 @@ def observe_recovery_completion_attempt(
             "validation": validation,
             "event": None,
             "feedback": "",
+            "progress_epoch": _v267_completion_progress_epoch(current)
+            if v267_enabled else None,
+            "repair_denial_reason": None,
         }
     remaining = max(0, _safe_int(remaining_tool_steps, 0))
     used = _safe_int(current.get("completion_repairs_used"), 0)
-    if remaining <= 0 or used >= MAX_RECOVERY_COMPLETION_REPAIRS:
-        terminal = (
-            RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED
-            if used >= MAX_RECOVERY_COMPLETION_REPAIRS
-            else WORKER_OUTPUT_INVALID
-        )
+    progress_epoch = _v267_completion_progress_epoch(current)
+    epoch_used = _safe_int(
+        current.get("completion_repairs_used_in_progress_epoch"), 0
+    ) if v267_enabled else used
+    total_used = _safe_int(
+        current.get("completion_repairs_total"), used
+    ) if v267_enabled else used
+    denial_reason = None
+    if remaining <= 0:
+        terminal = WORKER_OUTPUT_INVALID
+        denial_reason = "insufficient_remaining_tool_steps"
+    elif v267_enabled and total_used >= MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL:
+        terminal = RECOVERY_COMPLETION_REPAIR_TOTAL_BUDGET_EXHAUSTED
+        denial_reason = "global_completion_repair_budget_exhausted"
+    elif v267_enabled and epoch_used >= MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH:
+        terminal = RECOVERY_COMPLETION_REPAIR_PROGRESS_EPOCH_EXHAUSTED
+        denial_reason = "progress_epoch_completion_repair_budget_exhausted"
+    elif not v267_enabled and used >= MAX_RECOVERY_COMPLETION_REPAIRS:
+        terminal = RECOVERY_COMPLETION_REPAIR_BUDGET_EXHAUSTED
+        denial_reason = "legacy_completion_repair_budget_exhausted"
+    else:
+        terminal = None
+    if terminal is not None:
         current["terminal_state"] = terminal
+        current["completion_repair_denial_reason"] = denial_reason
         return {
             "state": current,
             "status": terminal,
@@ -2168,14 +2849,37 @@ def observe_recovery_completion_attempt(
             "validation": validation,
             "event": None,
             "feedback": "",
+            "progress_epoch": progress_epoch if v267_enabled else None,
+            "repair_denial_reason": denial_reason,
         }
     feedback = build_recovery_completion_repair_feedback(
         validation,
         remaining_tool_steps=remaining,
         current_subject_identity=current.get("current_subject_hash"),
+        progress_epoch=progress_epoch if v267_enabled else None,
     )
     execution = current.get("recovery_execution_id") or "RECOVERY-EXEC-UNKNOWN"
     epoch = _safe_int(current.get("strategy_epoch"), 0)
+    completion_attempt_hash = canonical_hash({
+        "required_completion_fields": validation.get("required_completion_fields", []),
+        "required_coverage_ids": validation.get("required_coverage_ids", []),
+        "missing_completion_fields": validation.get("missing_completion_fields", []),
+        "missing_coverage_ids": validation.get("missing_coverage_ids", []),
+        "invalid_completion_fields": validation.get("invalid_completion_fields", []),
+        "verification_handoff_ready": validation.get("verification_handoff_ready", False),
+        "progress_epoch": progress_epoch,
+        "total_repairs_before": total_used,
+    })
+    progress_evidence_hash = None
+    if v267_enabled:
+        progress_record = current.get("completion_progress_epoch_record")
+        if isinstance(progress_record, dict):
+            progress_evidence_hash = progress_record.get("canonical_hash")
+        progress_evidence_hash = (
+            progress_evidence_hash
+            or current.get("completion_progress_last_evidence_hash")
+            or canonical_hash({"progress_epoch": progress_epoch})
+        )
     event = build_recovery_completion_contract_repair(
         execution,
         strategy_epoch=epoch,
@@ -2195,16 +2899,35 @@ def observe_recovery_completion_attempt(
         missing_coverage_ids=validation.get("missing_coverage_ids"),
         verification_handoff_ready=validation.get("verification_handoff_ready", False),
         remaining_tool_steps=remaining,
-        repair_ordinal=used + 1,
+        repair_ordinal=total_used + 1,
         child_status=child_status,
         completed=completed,
         failure_type=failure_type,
         model_visible_feedback=feedback,
+        schema_version=(
+            RECOVERY_V267_SCHEMA_VERSION
+            if v267_enabled else RECOVERY_V264_SCHEMA_VERSION
+        ),
+        progress_epoch=progress_epoch if v267_enabled else None,
+        repairs_used_in_progress_epoch_before=epoch_used if v267_enabled else None,
+        repairs_used_in_progress_epoch_after=(epoch_used + 1) if v267_enabled else None,
+        total_repairs_before=total_used if v267_enabled else None,
+        total_repairs_after=(total_used + 1) if v267_enabled else None,
+        progress_evidence_hash=progress_evidence_hash,
+        completion_attempt_hash=completion_attempt_hash if v267_enabled else None,
     )
-    current["completion_repairs_used"] = used + 1
-    current["completion_repair_events"] = (
-        list(current.get("completion_repair_events", [])) + [event]
-    )[-MAX_RECOVERY_COMPLETION_REPAIRS:]
+    current["completion_repairs_used"] = total_used + 1
+    if v267_enabled:
+        current["completion_repairs_total"] = total_used + 1
+        current["completion_repairs_used_in_progress_epoch"] = epoch_used + 1
+        current["completion_repair_denial_reason"] = None
+        current["completion_repair_events"] = (
+            list(current.get("completion_repair_events", [])) + [event]
+        )[-MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL:]
+    else:
+        current["completion_repair_events"] = (
+            list(current.get("completion_repair_events", [])) + [event]
+        )[-MAX_RECOVERY_COMPLETION_REPAIRS:]
     current["last_completion_repair"] = event
     return {
         "state": current,
@@ -2214,6 +2937,12 @@ def observe_recovery_completion_attempt(
         "validation": validation,
         "event": event,
         "feedback": feedback,
+        "progress_epoch": progress_epoch if v267_enabled else None,
+        "repairs_used_in_progress_epoch": (
+            epoch_used + 1 if v267_enabled else None
+        ),
+        "total_repairs_used": total_used + 1,
+        "repair_denial_reason": None,
     }
 
 
@@ -4075,6 +4804,7 @@ def create_recovery_strategy_state(
     max_strategy_switches: int = MAX_RECOVERY_STRATEGY_SWITCHES,
     recovery_mission_id: str | None = None,
     completion_contract: dict[str, Any] | None = None,
+    progress_aware_completion: bool = False,
 ) -> dict[str, Any]:
     """Initialize mutable orchestration state for one recovery Worker."""
     legal = (
@@ -4101,7 +4831,7 @@ def create_recovery_strategy_state(
         source_subject_identity=current_subject_hash,
         recovery_authorization=auth,
     )
-    return {
+    state = {
         "schema_version": SCHEMA_VERSION,
         "recovery_execution_id": _text(recovery_execution_id, 160),
         "recovery_attempt_index": 1,
@@ -4163,6 +4893,19 @@ def create_recovery_strategy_state(
         "completion_repairs_used": 0,
         "completion_repair_events": [],
         "last_completion_repair": None,
+        # V26.7 completion repair is scoped to two authoritative execution
+        # states. The legacy completion_repairs_used field remains a
+        # compatibility alias for the V26.7 total.
+        "completion_progress_epoch": RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+        "completion_progress_aware": bool(progress_aware_completion),
+        "completion_progress_epoch_record": None,
+        "completion_progress_transition_events": [],
+        "last_completion_progress_transition": None,
+        "completion_progress_transition_count": 0,
+        "completion_progress_last_evidence_hash": None,
+        "completion_repairs_total": 0,
+        "completion_repairs_used_in_progress_epoch": 0,
+        "completion_repair_denial_reason": None,
         "completion_contract": _copy(completion_contract or {}),
         # V26.6 execution-local no-mutation search control.  These fields are
         # independent of the V26.3 strategy and V26.4 adaptation budgets.
@@ -4191,6 +4934,11 @@ def create_recovery_strategy_state(
         "current_target_known": bool(target_path),
         "legal_mutation_space_identity": _v266_legal_space_identity(legal),
     }
+    if progress_aware_completion:
+        return initialize_recovery_completion_progress_state(
+            state, target_path=target_path, subject_identity=current_subject_hash
+        )
+    return state
 
 
 initialize_recovery_strategy_state = create_recovery_strategy_state
@@ -4483,8 +5231,30 @@ def recovery_strategy_state_projection(state: dict[str, Any] | None) -> dict[str
             value.get("last_epoch_reanchor_context"), 1800
         ),
         "completion_repairs_used": value.get("completion_repairs_used", 0),
+        "completion_progress_aware": bool(
+            value.get("completion_progress_aware", False)
+        ),
         "completion_repair_events": _safe_projection(
-            (value.get("completion_repair_events") or [])[-1:]
+            (value.get("completion_repair_events") or [])[-2:]
+        ),
+        "completion_progress_epoch": _v267_completion_progress_epoch(value),
+        "completion_progress_epoch_record": _safe_projection(
+            value.get("completion_progress_epoch_record") or {}
+        ),
+        "completion_progress_transition_events": _safe_projection(
+            (value.get("completion_progress_transition_events") or [])[-1:]
+        ),
+        "completion_progress_transition_count": value.get(
+            "completion_progress_transition_count", 0
+        ),
+        "completion_repairs_total": value.get(
+            "completion_repairs_total", value.get("completion_repairs_used", 0)
+        ),
+        "completion_repairs_used_in_progress_epoch": value.get(
+            "completion_repairs_used_in_progress_epoch", 0
+        ),
+        "completion_repair_denial_reason": value.get(
+            "completion_repair_denial_reason"
         ),
         "completion_contract": _safe_projection(
             value.get("completion_contract") or {}
@@ -4559,11 +5329,6 @@ def validate_recovery_strategy_state(state: dict[str, Any] | None) -> dict[str, 
         ),
         ("epoch_reanchors_used", MAX_RECOVERY_EPOCH_REANCHORS, "epoch re-anchor"),
         (
-            "completion_repairs_used",
-            MAX_RECOVERY_COMPLETION_REPAIRS,
-            "completion repair",
-        ),
-        (
             "mutation_path_reorientations_used",
             MAX_RECOVERY_MUTATION_PATH_REORIENTATIONS,
             "mutation-path reorientation",
@@ -4596,6 +5361,73 @@ def validate_recovery_strategy_state(state: dict[str, Any] | None) -> dict[str, 
         event_check = validate_recovery_mutation_path_reorientation_event(event)
         if not event_check.get("valid"):
             errors.append("last mutation-path reorientation is invalid")
+    if _v267_completion_progress_enabled(value):
+        progress_epoch = value.get("completion_progress_epoch")
+        if progress_epoch not in {
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION,
+            RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED,
+        }:
+            errors.append("completion progress epoch is invalid")
+        total_repairs = _safe_int(
+            value.get("completion_repairs_total"),
+            _safe_int(value.get("completion_repairs_used"), -1),
+        )
+        epoch_repairs = _safe_int(
+            value.get("completion_repairs_used_in_progress_epoch"), -1
+        )
+        compatibility_repairs = _safe_int(
+            value.get("completion_repairs_used"), -1
+        )
+        if total_repairs < 0 or total_repairs > MAX_RECOVERY_COMPLETION_REPAIRS_TOTAL:
+            errors.append("completion repair total budget is invalid")
+        if epoch_repairs < 0 or epoch_repairs > MAX_RECOVERY_COMPLETION_REPAIRS_PER_PROGRESS_EPOCH:
+            errors.append("completion repair progress-epoch budget is invalid")
+        if compatibility_repairs != total_repairs:
+            errors.append("legacy completion repair alias does not match total")
+        record = value.get("completion_progress_epoch_record")
+        if not isinstance(record, dict):
+            errors.append("completion progress epoch record is missing")
+        else:
+            record_check = validate_recovery_completion_progress_epoch(record)
+            if not record_check.get("valid"):
+                errors.append("completion progress epoch record is invalid")
+            elif record.get("progress_epoch") != progress_epoch:
+                errors.append("completion progress epoch record does not match state")
+        transition_count = _safe_int(
+            value.get("completion_progress_transition_count"), -1
+        )
+        if transition_count < 0 or transition_count > 1:
+            errors.append("completion progress transition count is invalid")
+        transitions = value.get("completion_progress_transition_events") or []
+        if len(transitions) > 1:
+            errors.append("completion progress transition budget is invalid")
+        if (
+            progress_epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_MUTATION_PATH_ENTERED
+            and transition_count != 1
+        ):
+            errors.append("mutation-path progress epoch lacks its transition evidence")
+        if (
+            progress_epoch == RECOVERY_COMPLETION_PROGRESS_EPOCH_PRE_MUTATION
+            and transition_count != 0
+        ):
+            errors.append("pre-mutation progress epoch has transition evidence")
+        for transition in transitions:
+            transition_check = validate_recovery_completion_progress_transition(
+                transition
+            )
+            if not transition_check.get("valid"):
+                errors.append("completion progress transition is invalid")
+        last_transition = value.get("last_completion_progress_transition")
+        if isinstance(last_transition, dict):
+            transition_check = validate_recovery_completion_progress_transition(
+                last_transition
+            )
+            if not transition_check.get("valid"):
+                errors.append("last completion progress transition is invalid")
+    else:
+        completion_repairs = _safe_int(value.get("completion_repairs_used", 0), -1)
+        if completion_repairs < 0 or completion_repairs > MAX_RECOVERY_COMPLETION_REPAIRS:
+            errors.append("completion repair budget is invalid")
     strategy = value.get("current_strategy")
     strategy_check = validate_recovery_mutation_strategy(strategy)
     if not strategy_check.get("valid"):
@@ -4633,6 +5465,10 @@ def validate_recovery_strategy(value: dict[str, Any] | None) -> dict[str, Any]:
             return validate_recovery_completion_repair_event(value)
         if artifact_type == RECOVERY_COMPLETION_REPAIR_EVENT:
             return validate_recovery_completion_repair_event(value)
+        if artifact_type == RECOVERY_COMPLETION_PROGRESS_EPOCH:
+            return validate_recovery_completion_progress_epoch(value)
+        if artifact_type == RECOVERY_COMPLETION_PROGRESS_TRANSITION:
+            return validate_recovery_completion_progress_transition(value)
         if artifact_type == RECOVERY_NO_MUTATION_SEARCH_PATTERN:
             return validate_recovery_no_mutation_search_pattern(value)
         if artifact_type == RECOVERY_NO_MUTATION_SEARCH_INTERACTION:
