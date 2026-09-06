@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from hivo.core_execution import (
     BUILD, COMPLETE, CoreBudget, CoreExecutionState, INITIALIZING,
-    PATCH_SEARCHING, PROMOTABLE, REPAIR, STALE_CONTEXT,
+    NEXT_BUDGET_REACHED, PATCH_SEARCHING, PROMOTABLE, REPAIR, STALE_CONTEXT,
 )
 from hivo.core_orchestrator import (
     CORE_COMPLETE, CORE_BLOCKED, CoreIntelligenceCoordinator,
@@ -21,7 +22,7 @@ from hivo.patch_candidates import (
 from hivo.project_blueprint import ModuleContract, ProjectBlueprint, ProjectRequirement
 from hivo.project_brain_refs import canonical_hash
 from hivo.project_builder import DeterministicFakeProvider
-from hivo.repair_problem import RepairProblem, RepairTargetSet
+from hivo.repair_problem import PatchSearchBudget, RepairProblem, RepairTargetSet
 
 
 class CoreIntegrationTests(unittest.TestCase):
@@ -272,6 +273,48 @@ class CoreIntegrationTests(unittest.TestCase):
         self.assertEqual("PROPOSAL_RECEIVED", proposal["status"])
         self.assertFalse(proposal["applied"])
         self.assertEqual(before, coordinator.subject_identity)
+
+    def test_provider_failure_blocks_with_budget_action_without_name_error_or_mutation(self):
+        self._write("src/m00.py", "def m00(value=1):\n    return value\n")
+
+        class FailingPatchProvider:
+            def generate(self, problem, context, **kwargs):
+                raise RuntimeError("MODEL_RESPONSE_INVALID: malformed JSON: Expecting value")
+
+        provider = FailingPatchProvider()
+        coordinator = CoreIntelligenceCoordinator(
+            self.root,
+            authority={"approved_mutation_scope": ("src/m00.py",)},
+            patch_provider=provider,
+        )
+        problem = replace(
+            self._repair_problem(coordinator),
+            suspect_candidates=(),
+            target_set=RepairTargetSet(candidate_files=("src/m00.py",)),
+            candidate_budget=PatchSearchBudget(
+                max_deterministic_candidates=0,
+                max_model_candidates=1,
+                max_candidates=1,
+            ),
+        )
+        before_source = (self.root / "src/m00.py").read_text(encoding="utf-8")
+        before_subject = coordinator.subject_identity
+
+        result = coordinator.maintain(
+            "repair m00",
+            repair_problem=problem,
+            patch_provider=provider,
+            apply_candidate=True,
+        )
+
+        self.assertEqual(CORE_BLOCKED, result.status)
+        self.assertEqual("BLOCKED", result.state.current_phase)
+        self.assertEqual(NEXT_BUDGET_REACHED, result.recommended_next_action)
+        self.assertTrue(any(item["category"] == "BUDGET_REACHED" for item in result.failure_evidence))
+        self.assertIn("MODEL_RESPONSE_INVALID", result.reason)
+        self.assertEqual(before_source, (self.root / "src/m00.py").read_text(encoding="utf-8"))
+        self.assertEqual(before_subject, coordinator.subject_identity)
+        self.assertTrue(result.source_unchanged)
 
 
 if __name__ == "__main__":
