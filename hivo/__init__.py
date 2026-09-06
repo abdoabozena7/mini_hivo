@@ -143,6 +143,26 @@ from .project_builder import (
     PROJECT_PROMOTABLE, PROJECT_REQUIRES_FINAL_VERIFICATION,
     benchmark_generation_scenarios,
 )
+from .core_execution import (
+    CORE_INTEGRATION_SCHEMA_VERSION, BUILD, MAINTAIN, DIAGNOSE, REPAIR,
+    EXECUTION_MODES, WORKING_SET_FIRST, INITIALIZING, CONTEXT_BUILDING,
+    PLANNING, GENERATING, LOCALIZING, EXPERIMENTING, PATCH_SEARCHING,
+    CANDIDATE_SELECTED, CANONICAL_APPLYING, VERIFYING, INDEX_UPDATING,
+    PROMOTABLE, COMPLETE, BLOCKED, CONTEXT_INSUFFICIENT,
+    LOCALIZATION_INSUFFICIENT, DIAGNOSTIC_INCONCLUSIVE, NO_VIABLE_PATCH,
+    PATCH_VERIFICATION_FAILED, GENERATION_UNIT_FAILED, AUTHORITY_BLOCKED,
+    DNT_BLOCKED, BUDGET_REACHED, FINAL_VERIFICATION_FAILED, PROVIDER_FAILURE,
+    STALE_CONTEXT, CoreExecutionBudget, CoreBudget, CoreExecutionState,
+    CoreProviderRequest, CoreExecutionResult, new_core_metrics, core_autonomy_lift,
+)
+from .core_orchestrator import (
+    CORE_INTEGRATION_VERSION, GENERATION_PROVIDER, PATCH_PROVIDER,
+    SEMANTIC_PROVIDER, PROVIDER_ROLES, CORE_COMPLETE, CORE_PARTIAL, CORE_BLOCKED,
+    classify_core_task, ModelPatchCandidateProviderAdapter,
+    adapt_candidate_failure_evidence, CoreIntelligenceCoordinator,
+    HivoCoreOrchestrator, CoreOrchestrator, execute_core_task,
+    inspect_task_context,
+)
 
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
@@ -238,4 +258,19 @@ __all__ = [
     "project_generation_metrics", "PROJECT_PLANNED", "PROJECT_GENERATING", "PROJECT_VERIFIED",
     "PROJECT_PROMOTABLE", "PROJECT_REQUIRES_FINAL_VERIFICATION", "ProjectGenerationBudget",
     "benchmark_generation_scenarios",
+    "CORE_INTEGRATION_SCHEMA_VERSION", "CORE_INTEGRATION_VERSION", "BUILD", "MAINTAIN",
+    "DIAGNOSE", "REPAIR", "EXECUTION_MODES", "WORKING_SET_FIRST", "INITIALIZING",
+    "CONTEXT_BUILDING", "PLANNING", "GENERATING", "LOCALIZING", "EXPERIMENTING",
+    "PATCH_SEARCHING", "CANDIDATE_SELECTED", "CANONICAL_APPLYING", "VERIFYING",
+    "INDEX_UPDATING", "PROMOTABLE", "COMPLETE", "BLOCKED", "CONTEXT_INSUFFICIENT",
+    "LOCALIZATION_INSUFFICIENT", "DIAGNOSTIC_INCONCLUSIVE", "NO_VIABLE_PATCH",
+    "PATCH_VERIFICATION_FAILED", "GENERATION_UNIT_FAILED", "AUTHORITY_BLOCKED",
+    "DNT_BLOCKED", "BUDGET_REACHED", "FINAL_VERIFICATION_FAILED", "PROVIDER_FAILURE",
+    "STALE_CONTEXT", "CoreExecutionBudget", "CoreBudget", "CoreExecutionState",
+    "CoreProviderRequest", "CoreExecutionResult", "new_core_metrics", "core_autonomy_lift",
+    "GENERATION_PROVIDER", "PATCH_PROVIDER", "SEMANTIC_PROVIDER", "PROVIDER_ROLES",
+    "CORE_COMPLETE", "CORE_PARTIAL", "CORE_BLOCKED", "classify_core_task",
+    "ModelPatchCandidateProviderAdapter", "adapt_candidate_failure_evidence",
+    "CoreIntelligenceCoordinator", "HivoCoreOrchestrator", "CoreOrchestrator",
+    "execute_core_task", "inspect_task_context",
 ]

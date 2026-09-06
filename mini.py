@@ -48,6 +48,7 @@ from hivo import patch_candidates as core5_patch_candidates
 from hivo import patch_search as core5_patch_search
 from hivo import project_builder as core6_project_builder
 from hivo import change_impact as core6_change_impact
+from hivo import core_orchestrator as core_integration
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5354,6 +5355,21 @@ def analyze_project_change_impact(repository_map, changed_paths, *, blueprint=No
     return core6_change_impact.analyze_change_impact(
         repository_map, changed_paths, blueprint=blueprint, **kwargs,
     )
+
+
+def execute_core_intelligence(project_root, task, **kwargs):
+    """Run one bounded provider-free CORE-1..CORE-6 orchestration execution."""
+    return core_integration.execute_core_task(project_root, task, **kwargs)
+
+
+def inspect_core_task_context(project_root, task, **kwargs):
+    """Build the normal WORKING_SET_FIRST maintenance context."""
+    return core_integration.inspect_task_context(project_root, task, **kwargs)
+
+
+def submit_core_patch_candidate(coordinator, candidate, **kwargs):
+    """Submit a bounded CORE-5 proposal through the coordinator gates."""
+    return coordinator.submit_patch_candidate(candidate, **kwargs)
 
 
 def create_diagnostic_session(
