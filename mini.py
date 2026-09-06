@@ -37,6 +37,8 @@ from hivo import project_understanding as stage2
 from hivo import project_brain_refs as core1_brain_refs
 from hivo import repository_map as core1_repository_map
 from hivo import reference_resolution as core1_reference_resolution
+from hivo import repo_intelligence as core2_repo_intelligence
+from hivo import task_working_set as core2_task_working_set
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5000,6 +5002,64 @@ def request_project_evidence(
     return core1_reference_resolution.request_project_evidence(
         reference, current_map, current_root, request=request, level=level,
         brain_entity=brain_entity, metrics=metrics,
+    )
+
+
+def search_repository(
+    query, repository_map=None, project_root=None, *, brain_entities=None,
+    lexical_index=None, semantic_retriever=None, authority=None, budget=None,
+    metrics=None, changed_paths=(), deleted_paths=(),
+):
+    """Run deterministic CORE-2 cheap-first repository intelligence."""
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    current_map = repository_map
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root)
+    if current_map is None or current_root is None:
+        raise ValueError("repository_map and project_root are required for repository intelligence")
+    return core2_repo_intelligence.search_repository(
+        query, current_map, current_root, brain_entities=brain_entities or (),
+        lexical_index=lexical_index, semantic_retriever=semantic_retriever,
+        authority=authority, budget=budget, metrics=metrics,
+        changed_paths=changed_paths, deleted_paths=deleted_paths,
+    )
+
+
+def build_task_working_set(
+    query, candidates=(), *, repository_map=None, project_root=None,
+    brain_entities=None, authority=None, budget=None, unresolved_evidence=(),
+):
+    """Build a bounded transient Planner/Worker context from retrieval evidence."""
+    current_map = repository_map
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root)
+    return core2_task_working_set.build_task_working_set(
+        query, candidates, repository_map=current_map, brain_entities=brain_entities or (),
+        authority=authority, budget=budget, unresolved_evidence=unresolved_evidence,
+    )
+
+
+def expand_task_working_set(
+    working_set, repository_map=None, project_root=None, *, requested_level=3,
+    metrics=None, brain_entities=None,
+):
+    """Load only the requested evidence level for selected working-set items."""
+    current_map = repository_map
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root)
+    if current_map is None or current_root is None:
+        raise ValueError("repository_map and project_root are required for working-set expansion")
+    return core2_task_working_set.expand_working_set(
+        working_set, current_map, current_root, requested_level=requested_level,
+        metrics=metrics, brain_entities=brain_entities or (),
     )
 
 
