@@ -46,6 +46,8 @@ from hivo import repair_problem as core5_repair_problem
 from hivo import mutation_strategy as core5_mutation_strategy
 from hivo import patch_candidates as core5_patch_candidates
 from hivo import patch_search as core5_patch_search
+from hivo import project_builder as core6_project_builder
+from hivo import change_impact as core6_change_impact
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5325,6 +5327,32 @@ def expand_task_working_set(
     return core2_task_working_set.expand_working_set(
         working_set, current_map, current_root, requested_level=requested_level,
         metrics=metrics, brain_entities=brain_entities or (),
+    )
+
+
+def build_project_generation_plan(blueprint, units=None, *, budget=None):
+    """Build a deterministic CORE-6 contract/DAG plan without provider calls."""
+    return core6_project_builder.build_generation_plan(blueprint, units, budget=budget)
+
+
+def generate_project_units(
+    project_root, blueprint, units=None, *, provider=None, authority=None,
+    dnt_paths=(), budget=None, repository_map=None, lexical_index=None,
+    brain_entities=None, apply_verified=False, **validators,
+):
+    """Run bounded CORE-6 generation; canonical application is explicit."""
+    builder = core6_project_builder.ProjectBuilder(
+        project_root, blueprint, units, provider=provider, authority=authority,
+        dnt_paths=dnt_paths, budget=budget, repository_map=repository_map,
+        lexical_index=lexical_index, brain_entities=brain_entities or (),
+    )
+    return builder.generate(apply_verified=apply_verified, **validators)
+
+
+def analyze_project_change_impact(repository_map, changed_paths, *, blueprint=None, **kwargs):
+    """Expose bounded CORE-6 maintenance impact analysis through mini.py."""
+    return core6_change_impact.analyze_change_impact(
+        repository_map, changed_paths, blueprint=blueprint, **kwargs,
     )
 
 
