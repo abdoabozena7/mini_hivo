@@ -35,6 +35,9 @@ from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
+from hivo import project_brain_refs as core1_brain_refs
+from hivo import repository_map as core1_repository_map
+from hivo import reference_resolution as core1_reference_resolution
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5188,6 +5191,75 @@ def compact_project_brain(brain=None, max_chars=MAX_PROJECT_BRAIN_CHARS):
 
 def project_brain_planning_packet(max_chars=MAX_PROJECT_BRAIN_CHARS):
     return compact_project_brain(RUN.get("project_brain"), max_chars=max_chars)
+
+
+# ---------------------------------------------------------------------------
+# CORE-1 reference Brain / Repository Map APIs
+# ---------------------------------------------------------------------------
+
+def query_project_brain(
+    query="", *, entities=None, store=None, project_id="default", max_items=8,
+    include_stale=False, metrics=None,
+):
+    """Return bounded Brain V2 summaries; references are resolved lazily."""
+    if entities is None and store is not None and hasattr(store, "reference_brain_snapshot"):
+        snapshot = store.reference_brain_snapshot(project_id, include_stale=include_stale)
+        entities = snapshot.get("entities", []) if isinstance(snapshot, dict) else []
+    if entities is None:
+        entities = RUN.get("reference_brain_entities", []) if isinstance(RUN, dict) else []
+    return core1_brain_refs.query_project_brain(
+        entities, query, max_items=max_items, include_stale=include_stale, metrics=metrics,
+    )
+
+
+def query_repository_map(
+    query="", *, repository_map=None, project_root=None, max_items=24,
+):
+    """Query current structural metadata without loading source bodies."""
+    current = repository_map
+    if current is None and isinstance(RUN, dict):
+        current = RUN.get("repository_map")
+    if current is None and project_root is not None:
+        current = core1_repository_map.build_repository_map(project_root)
+    if current is None:
+        return []
+    return core1_repository_map.query_repository_map(current, query, max_items=max_items)
+
+
+def resolve_project_reference(
+    reference, repository_map=None, project_root=None, *, request=None,
+    brain_entity=None, brain_entities=None, metrics=None,
+):
+    """Resolve one typed reference against an explicit current map on demand."""
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    current_map = repository_map
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root, metrics=metrics)
+    if current_map is None or current_root is None:
+        raise ValueError("repository_map and project_root are required for reference resolution")
+    return core1_reference_resolution.resolve_project_reference(
+        reference, current_map, current_root, request=request,
+        brain_entity=brain_entity, brain_entities=brain_entities, metrics=metrics,
+    )
+
+
+def request_project_evidence(
+    reference, repository_map=None, project_root=None, *, request=None, level=None,
+    brain_entity=None, metrics=None,
+):
+    """Request one explicit progressive evidence level for a typed reference."""
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    current_map = repository_map
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root, metrics=metrics)
+    return core1_reference_resolution.request_project_evidence(
+        reference, current_map, current_root, request=request, level=level,
+        brain_entity=brain_entity, metrics=metrics,
+    )
 
 
 def project_brain_task_planning_packet(task, dependency_summaries=None, repo_snapshot=None,

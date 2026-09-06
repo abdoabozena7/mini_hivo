@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .project_brain_refs import ProjectBrainEntity, validate_project_brain_entity
+
 
 MEMORY_DIRECTORY = ".hivo"
 MEMORY_DATABASE = "memory.sqlite3"
@@ -214,6 +216,23 @@ class MemoryStore:
                     ON project_brain_facts(project_id, semantic_hash, status);
                 CREATE INDEX IF NOT EXISTS project_brain_facts_conflict
                     ON project_brain_facts(project_id, conflict_key, status);
+                CREATE TABLE IF NOT EXISTS project_brain_entities (
+                    entity_id TEXT NOT NULL,
+                    project_id TEXT NOT NULL,
+                    entity_hash TEXT NOT NULL,
+                    entity_json TEXT NOT NULL,
+                    staleness_state TEXT NOT NULL DEFAULT 'CURRENT',
+                    verified_subject_identity TEXT NOT NULL,
+                    verified_revision_identity TEXT NOT NULL,
+                    created_from_verified_evidence INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(project_id, entity_id),
+                    UNIQUE(project_id, entity_hash)
+                );
+                CREATE INDEX IF NOT EXISTS project_brain_entities_project_status
+                    ON project_brain_entities(project_id, status, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS promotions (
                     promotion_id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -672,6 +691,148 @@ class MemoryStore:
         return self._canonical_hash(self.project_brain_snapshot(
             project_id, include_inactive=include_inactive,
         ))
+
+    # ------------------------------------------------------------------
+    # CORE-1 reference-based Project Brain entities.  This is deliberately a
+    # separate table/API: legacy verified facts and their promotion receipts
+    # remain readable and authoritative for the existing V22/V26 paths.
+    # ------------------------------------------------------------------
+
+    def _reference_entities_from_connection(
+        self, connection: sqlite3.Connection, project_id: str, *, include_stale: bool = True,
+    ) -> list[dict]:
+        project = self._project_id(project_id)
+        if include_stale:
+            rows = connection.execute(
+                """SELECT * FROM project_brain_entities
+                   WHERE project_id = ? ORDER BY entity_id""", (project,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """SELECT * FROM project_brain_entities
+                   WHERE project_id = ? AND status = 'ACTIVE'
+                   ORDER BY entity_id""", (project,),
+            ).fetchall()
+        entities: list[dict] = []
+        for row in rows:
+            entity = self._decode_json(row["entity_json"], {})
+            if not isinstance(entity, dict):
+                entity = {}
+            entity["entity_hash"] = str(row["entity_hash"])
+            entity["status"] = str(row["status"])
+            entity["staleness_state"] = str(row["staleness_state"])
+            entities.append(entity)
+        return entities
+
+    def reference_brain_snapshot(
+        self, project_id: str = "default", *, include_stale: bool = True,
+    ) -> dict:
+        project = self._project_id(project_id)
+        with self._connection() as connection:
+            entities = self._reference_entities_from_connection(
+                connection, project, include_stale=include_stale,
+            )
+        return {"project_id": project, "entities": entities}
+
+    def reference_brain_hash(
+        self, project_id: str = "default", *, include_stale: bool = True,
+    ) -> str:
+        return self._canonical_hash(self.reference_brain_snapshot(
+            project_id, include_stale=include_stale,
+        ))
+
+    def commit_verified_project_brain_entity(
+        self,
+        entity: ProjectBrainEntity | dict,
+        *,
+        project_id: str = "default",
+        provenance: dict | None = None,
+    ) -> dict:
+        """Persist only an explicitly verified CORE-1 entity.
+
+        This API never accepts Worker hypotheses as durable Brain truth and
+        does not provide any source-writing or authority-changing capability.
+        """
+        try:
+            normalized = entity if isinstance(entity, ProjectBrainEntity) else ProjectBrainEntity.from_dict(entity)
+            validation = validate_project_brain_entity(normalized)
+        except (TypeError, ValueError) as exc:
+            return {"status": "INVALID_BRAIN_ENTITY", "no_op": True, "error": str(exc), "model_calls": 0}
+        if not validation.get("valid"):
+            return {
+                "status": validation.get("status", "UNVERIFIED_BRAIN_ENTITY"),
+                "no_op": True, "entity": normalized.to_dict(), "model_calls": 0,
+            }
+        if _contains_promotion_private(normalized.to_dict()):
+            return {
+                "status": "BRAIN_PRIVATE_PROVENANCE_REJECTED", "no_op": True,
+                "entity": normalized.to_dict(), "model_calls": 0,
+            }
+        if not normalized.verified_subject_identity or not normalized.verified_revision_identity:
+            return {
+                "status": "VERIFIED_IDENTITY_REQUIRED", "no_op": True,
+                "entity": normalized.to_dict(), "model_calls": 0,
+            }
+        project = self._project_id(project_id)
+        entity_hash = normalized.canonical_hash
+        before_hash = self.reference_brain_hash(project)
+        now = _now()
+        with self._connection() as connection:
+            existing = connection.execute(
+                """SELECT entity_hash FROM project_brain_entities
+                   WHERE project_id = ? AND entity_id = ?""", (project, normalized.entity_id),
+            ).fetchone()
+            if existing:
+                if str(existing["entity_hash"]) == entity_hash:
+                    return {
+                        "status": "ALREADY_PRESENT", "no_op": True, "entity": normalized.to_dict(),
+                        "entity_hash": entity_hash, "project_brain_before_hash": before_hash,
+                        "project_brain_after_hash": before_hash, "model_calls": 0,
+                    }
+                return {
+                    "status": "REFERENCE_ENTITY_CONFLICT", "no_op": True,
+                    "entity": normalized.to_dict(), "entity_hash": entity_hash,
+                    "project_brain_before_hash": before_hash,
+                    "project_brain_after_hash": before_hash, "model_calls": 0,
+                }
+            connection.execute(
+                """INSERT INTO project_brain_entities(
+                       entity_id, project_id, entity_hash, entity_json, staleness_state,
+                       verified_subject_identity, verified_revision_identity,
+                       created_from_verified_evidence, status, created_at, updated_at
+                   ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)""",
+                (
+                    normalized.entity_id, project, entity_hash, _json(normalized.to_dict()),
+                    normalized.staleness_state, normalized.verified_subject_identity,
+                    normalized.verified_revision_identity,
+                    1 if normalized.created_from_verified_evidence else 0, now, now,
+                ),
+            )
+        after_hash = self.reference_brain_hash(project)
+        return {
+            "status": "PROMOTED", "no_op": False, "entity": normalized.to_dict(),
+            "entity_hash": entity_hash, "project_brain_before_hash": before_hash,
+            "project_brain_after_hash": after_hash, "provenance": copy.deepcopy(provenance or {}),
+            "model_calls": 0,
+        }
+
+    def retrieve_reference_brain_entities(
+        self, query: str = "", *, project_id: str = "default", max_items: int = 8,
+        include_stale: bool = False, metrics: dict[str, int] | None = None,
+    ) -> list[dict]:
+        from .project_brain_refs import query_project_brain
+
+        snapshot = self.reference_brain_snapshot(project_id, include_stale=include_stale)
+        return query_project_brain(
+            snapshot["entities"], query, max_items=max_items,
+            include_stale=include_stale, metrics=metrics,
+        )
+
+    # Discoverable compatibility spellings for callers that treat the V2
+    # records as reference entities rather than a second Brain database.
+    commit_reference_brain_entity = commit_verified_project_brain_entity
+    reference_entities_snapshot = reference_brain_snapshot
+    reference_entities_hash = reference_brain_hash
 
     # Read aliases make the durable boundary discoverable without exposing
     # the older free-form notes API as Project Brain state.
