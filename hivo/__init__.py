@@ -65,6 +65,34 @@ from .fault_localization import (
     LEXICAL_SIGNAL, BRAIN_CONTRACT_SIGNAL, EXPERIMENTAL_EVIDENCE_SIGNAL,
     LOW, MEDIUM, HIGH, VERY_HIGH, DNT_PROTECTED,
 )
+from .repair_problem import (
+    CORE5_SCHEMA_VERSION, DIAGNOSTIC_SUSPECT, FINAL_MUTATION_AUTHORIZED,
+    READ_ONLY_SUPPORT as CORE5_READ_ONLY_SUPPORT, DNT_PROTECTED as CORE5_DNT_PROTECTED,
+    PatchSearchBudget, CandidateSearchBudget, RepairTargetSet, RepairEvidencePacket,
+    RepairProblem,
+)
+from .mutation_strategy import (
+    EXACT_VALUE_CHANGE, CONDITION_CHANGE, EXPORT_IMPORT_REPAIR,
+    FUNCTION_LOCAL_REWRITE, SMALL_INSERTION, SMALL_DELETION, CALLSITE_ADJUSTMENT,
+    DEPENDENCY_CONFIGURATION_CHANGE, MULTI_LOCATION_SINGLE_FILE_CHANGE,
+    MULTI_FILE_BOUNDED_CHANGE, UNKNOWN_STRUCTURAL_CHANGE, STRATEGY_CLASSES,
+    StrategyDecision, MutationStrategyRouter, route_mutation_strategies,
+)
+from .patch_candidates import (
+    DETERMINISTIC_OPERATOR, REPAIR_TEMPLATE, EXPERIMENT_DERIVED, MODEL_PROPOSED,
+    USER_PROPOSED, PROPOSED, STALE_BASE, AUTHORITY_BLOCKED, SYNTAX_INVALID,
+    TARGET_FAILED, GUARD_REGRESSION, REGRESSION_RISK, CONTRACT_CONFLICT, V25_5_REJECTED,
+    V25_6_FAILED, VIABLE, VERIFIED, PatchOperation, PatchRepresentation,
+    STALE_PATCH_BASE, SYNTAX_INVALID_CANDIDATE, PatchCandidate, PatchCandidateReceipt, CandidateFailureEvidence,
+    ModelPatchCandidateProvider, generate_deterministic_candidates,
+    generate_experiment_derived_candidate, normalize_model_candidates, generate_patch_candidates,
+)
+from .patch_search import (
+    PatchSearchResult, PatchSearchEngine, search_patch_candidates,
+    apply_selected_patch_candidate, update_repository_indexes_after_application,
+    benchmark_patch_search_scenarios, VERIFIED_CANDIDATE, BEST_VIABLE_CANDIDATE,
+    APPLY_SELECTED_CANDIDATE, NO_VIABLE_PATCH_CANDIDATE, PATCH_SEARCH_BUDGET_REACHED,
+)
 
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
@@ -104,4 +132,23 @@ __all__ = [
     "GRAPH_PROXIMITY_SIGNAL", "CHANGE_PROXIMITY_SIGNAL", "LEXICAL_SIGNAL",
     "BRAIN_CONTRACT_SIGNAL", "EXPERIMENTAL_EVIDENCE_SIGNAL", "LOW", "MEDIUM",
     "HIGH", "VERY_HIGH", "DNT_PROTECTED",
+    "CORE5_SCHEMA_VERSION", "DIAGNOSTIC_SUSPECT", "FINAL_MUTATION_AUTHORIZED",
+    "CORE5_READ_ONLY_SUPPORT", "CORE5_DNT_PROTECTED", "PatchSearchBudget",
+    "CandidateSearchBudget", "RepairTargetSet", "RepairEvidencePacket", "RepairProblem",
+    "EXACT_VALUE_CHANGE", "CONDITION_CHANGE", "EXPORT_IMPORT_REPAIR",
+    "FUNCTION_LOCAL_REWRITE", "SMALL_INSERTION", "SMALL_DELETION", "CALLSITE_ADJUSTMENT",
+    "DEPENDENCY_CONFIGURATION_CHANGE", "MULTI_LOCATION_SINGLE_FILE_CHANGE",
+    "MULTI_FILE_BOUNDED_CHANGE", "UNKNOWN_STRUCTURAL_CHANGE", "STRATEGY_CLASSES",
+    "StrategyDecision", "MutationStrategyRouter", "route_mutation_strategies",
+    "DETERMINISTIC_OPERATOR", "REPAIR_TEMPLATE", "EXPERIMENT_DERIVED", "MODEL_PROPOSED",
+    "USER_PROPOSED", "PROPOSED", "STALE_BASE", "AUTHORITY_BLOCKED", "SYNTAX_INVALID",
+    "TARGET_FAILED", "GUARD_REGRESSION", "CONTRACT_CONFLICT", "V25_5_REJECTED",
+    "V25_6_FAILED", "VIABLE", "VERIFIED", "STALE_PATCH_BASE", "REGRESSION_RISK", "SYNTAX_INVALID_CANDIDATE", "PatchOperation", "PatchRepresentation",
+    "PatchCandidate", "PatchCandidateReceipt", "CandidateFailureEvidence",
+    "ModelPatchCandidateProvider", "generate_deterministic_candidates",
+    "generate_experiment_derived_candidate", "normalize_model_candidates", "generate_patch_candidates",
+    "PatchSearchResult", "PatchSearchEngine", "search_patch_candidates",
+    "apply_selected_patch_candidate", "update_repository_indexes_after_application",
+    "benchmark_patch_search_scenarios", "VERIFIED_CANDIDATE", "BEST_VIABLE_CANDIDATE",
+    "APPLY_SELECTED_CANDIDATE", "NO_VIABLE_PATCH_CANDIDATE", "PATCH_SEARCH_BUDGET_REACHED",
 ]
