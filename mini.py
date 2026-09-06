@@ -40,6 +40,7 @@ from hivo import reference_resolution as core1_reference_resolution
 from hivo import repo_intelligence as core2_repo_intelligence
 from hivo import task_working_set as core2_task_working_set
 from hivo import experimental_evidence as core3_experimental_evidence
+from hivo import fault_localization as core4_fault_localization
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5092,6 +5093,37 @@ def run_diagnostic_session(
         session, experiments, baseline_check=baseline_check,
         expected_baseline_outcome=expected_baseline_outcome,
         runner=runner, confirmation_runner=confirmation_runner,
+    )
+
+
+def localize_fault(
+    request, repository_map=None, project_root=None, *, working_set=None,
+    lexical_index=None, brain_entities=None, coverage_provider=None,
+    experimental_evidence=None, hypotheses=(), change_evidence=None,
+    authority=None, dnt_paths=(), budget=None, metrics=None,
+):
+    """Run deterministic CORE-4 localization without entering Worker execution."""
+    current_root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    current_map = repository_map
+    if current_map is None and isinstance(RUN, dict):
+        current_map = RUN.get("repository_map")
+    if current_map is None and current_root is not None:
+        current_map = core1_repository_map.build_repository_map(current_root)
+    if current_map is None or current_root is None:
+        raise ValueError("repository_map and project_root are required for fault localization")
+    return core4_fault_localization.localize_fault(
+        request, current_map, current_root, working_set=working_set,
+        lexical_index=lexical_index, brain_entities=brain_entities or (),
+        coverage_provider=coverage_provider, experimental_evidence=experimental_evidence,
+        hypotheses=hypotheses, change_evidence=change_evidence, authority=authority,
+        dnt_paths=dnt_paths, budget=budget, metrics=metrics,
+    )
+
+
+def rerank_fault_localization(result, evidence, *, hypotheses=()):
+    """Apply one explicit CORE-3 evidence rerank to a CORE-4 result."""
+    return core4_fault_localization.rerank_with_experimental_evidence(
+        result, evidence, hypotheses=hypotheses,
     )
 
 

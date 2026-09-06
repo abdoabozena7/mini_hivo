@@ -45,6 +45,26 @@ from .experimental_evidence import (
     generate_dependency_stub_experiment, generate_input_perturbation_experiment,
     session_from_recovery_failure, benchmark_diagnostic_scenarios,
 )
+from .coverage_evidence import (
+    CoverageEvidence, CoverageEvidenceProvider, COVERAGE_AVAILABLE,
+    COVERAGE_NOT_AVAILABLE, COVERAGE_STALE, collect_coverage_evidence,
+    ochiai_suspiciousness,
+)
+from .fault_localization import (
+    FaultFailureEvidence, FailureEvidence, LocalizationBudget,
+    FaultLocalizationBudget, FaultLocalizationRequest, StackFrame, StackTraceParser,
+    FaultCandidate, FaultLocalizationResult, FaultLocalizationEngine,
+    parse_stack_trace, parse_stack_frames, build_fault_localization_request,
+    localize_fault, seed_hypotheses_from_localization,
+    rerank_with_experimental_evidence, benchmark_fault_localization_scenarios,
+    benchmark_fault_localization, TEST_FAILURE, ASSERTION_FAILURE,
+    RUNTIME_EXCEPTION, SYNTAX_FAILURE, VERIFICATION_FAILURE, ORACLE_FAILURE,
+    WORKER_EXECUTION_FAILURE, INTEGRATION_FAILURE, ERROR_LOCATION_SIGNAL,
+    STACK_TRACE_SIGNAL, FAILING_TEST_SIGNAL, TEST_DEPENDENCY_SIGNAL,
+    COVERAGE_SIGNAL, GRAPH_PROXIMITY_SIGNAL, CHANGE_PROXIMITY_SIGNAL,
+    LEXICAL_SIGNAL, BRAIN_CONTRACT_SIGNAL, EXPERIMENTAL_EVIDENCE_SIGNAL,
+    LOW, MEDIUM, HIGH, VERY_HIGH, DNT_PROTECTED,
+)
 
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
@@ -68,4 +88,20 @@ __all__ = [
     "generate_test_failure_experiments", "generate_error_location_experiments",
     "generate_dependency_stub_experiment", "generate_input_perturbation_experiment",
     "session_from_recovery_failure", "benchmark_diagnostic_scenarios",
+    "CoverageEvidence", "CoverageEvidenceProvider", "COVERAGE_AVAILABLE",
+    "COVERAGE_NOT_AVAILABLE", "COVERAGE_STALE", "collect_coverage_evidence",
+    "ochiai_suspiciousness", "FaultFailureEvidence", "FailureEvidence",
+    "LocalizationBudget", "FaultLocalizationBudget", "FaultLocalizationRequest",
+    "StackFrame", "StackTraceParser", "FaultCandidate", "FaultLocalizationResult",
+    "FaultLocalizationEngine", "parse_stack_trace", "parse_stack_frames",
+    "build_fault_localization_request", "localize_fault",
+    "seed_hypotheses_from_localization", "rerank_with_experimental_evidence",
+    "benchmark_fault_localization_scenarios", "benchmark_fault_localization",
+    "TEST_FAILURE", "ASSERTION_FAILURE", "RUNTIME_EXCEPTION", "SYNTAX_FAILURE",
+    "VERIFICATION_FAILURE", "ORACLE_FAILURE", "WORKER_EXECUTION_FAILURE",
+    "INTEGRATION_FAILURE", "ERROR_LOCATION_SIGNAL", "STACK_TRACE_SIGNAL",
+    "FAILING_TEST_SIGNAL", "TEST_DEPENDENCY_SIGNAL", "COVERAGE_SIGNAL",
+    "GRAPH_PROXIMITY_SIGNAL", "CHANGE_PROXIMITY_SIGNAL", "LEXICAL_SIGNAL",
+    "BRAIN_CONTRACT_SIGNAL", "EXPERIMENTAL_EVIDENCE_SIGNAL", "LOW", "MEDIUM",
+    "HIGH", "VERY_HIGH", "DNT_PROTECTED",
 ]
