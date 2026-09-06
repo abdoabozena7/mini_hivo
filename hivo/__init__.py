@@ -17,6 +17,18 @@ from .repository_map import RepositoryMap, build_repository_map, incremental_rei
 from .reference_resolution import (
     EvidenceResolutionRequest, ProjectReferenceResolver, ResolvedEvidence,
 )
+from .lexical_index import (
+    LexicalIndex, build_lexical_index, incremental_lexical_update,
+)
+from .task_working_set import (
+    TaskWorkingSet, WorkingSetBudget, WorkingSetItem, build_task_working_set,
+    expand_working_set,
+)
+from .repo_intelligence import (
+    RepoIntelligenceQuery, SearchCandidate, RepoIntelligenceResult,
+    RepoIntelligenceBudget, search_repository, benchmark_repository_navigation,
+    SearchIntent, classify_search_intents, extract_query_signals,
+)
 
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
@@ -24,5 +36,10 @@ __all__ = [
     "ProjectBrainEntity", "TypedReference", "RepositoryMap", "build_repository_map",
     "incremental_reindex", "EvidenceResolutionRequest", "ProjectReferenceResolver",
     "ResolvedEvidence", "create_project_brain_entity", "mark_reference_stale",
-    "normalize_legacy_brain_record",
+    "normalize_legacy_brain_record", "LexicalIndex", "build_lexical_index",
+    "incremental_lexical_update", "TaskWorkingSet", "WorkingSetBudget",
+    "WorkingSetItem", "build_task_working_set", "expand_working_set",
+    "RepoIntelligenceQuery", "SearchCandidate", "RepoIntelligenceResult",
+    "RepoIntelligenceBudget", "search_repository", "benchmark_repository_navigation",
+    "SearchIntent", "classify_search_intents", "extract_query_signals",
 ]
