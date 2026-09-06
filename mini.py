@@ -41,6 +41,10 @@ from hivo import repo_intelligence as core2_repo_intelligence
 from hivo import task_working_set as core2_task_working_set
 from hivo import experimental_evidence as core3_experimental_evidence
 from hivo import fault_localization as core4_fault_localization
+from hivo import repair_problem as core5_repair_problem
+from hivo import mutation_strategy as core5_mutation_strategy
+from hivo import patch_candidates as core5_patch_candidates
+from hivo import patch_search as core5_patch_search
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5118,6 +5122,31 @@ def localize_fault(
         hypotheses=hypotheses, change_evidence=change_evidence, authority=authority,
         dnt_paths=dnt_paths, budget=budget, metrics=metrics,
     )
+
+
+def build_repair_problem(localization, *, task_identity="", repair_id="", working_set=None,
+                         contracts=(), invariants=(), authority_context=None, dnt_context=(),
+                         candidate_budget=None, verification_obligations=(), project_root=None):
+    """Project CORE-4 evidence into a bounded CORE-5 repair problem."""
+    return core5_repair_problem.RepairProblem.from_localization(
+        localization, task_identity=task_identity, repair_id=repair_id,
+        working_set=working_set, contracts=contracts, invariants=invariants,
+        authority_context=authority_context, dnt_context=dnt_context,
+        candidate_budget=candidate_budget, verification_obligations=verification_obligations,
+        project_root=project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE or "",
+    )
+
+
+def search_patch_candidates(problem, project_root=None, **kwargs):
+    """Run bounded provider-free CORE-5 candidate search in sandboxes."""
+    root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    return core5_patch_search.search_patch_candidates(problem, root, **kwargs)
+
+
+def apply_selected_patch_candidate(candidate, project_root=None, **kwargs):
+    """Explicitly apply one already-evaluated candidate through the CORE-5 seam."""
+    root = project_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    return core5_patch_search.apply_selected_patch_candidate(candidate, root, **kwargs)
 
 
 def rerank_fault_localization(result, evidence, *, hypotheses=()):
