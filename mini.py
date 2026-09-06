@@ -2876,8 +2876,15 @@ def record_ollama_failure(text):
     return signals
 
 
+def _emit_provider_capture(callback, event, **payload):
+    """Emit lossless provider-boundary evidence when an integration opts in."""
+    if callable(callback):
+        callback(str(event), dict(payload))
+
+
 def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, think=False,
-               provider_retries=None, model_override=None, role="Builder"):
+               provider_retries=None, model_override=None, role="Builder",
+               provider_capture=None, capture_context=None):
     global FORCE_CPU_FOR_RUN
     requested_model = model_override or MODEL
     try:
@@ -2948,6 +2955,15 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     last_error = "unknown provider error"
     for attempt in range(retry_limit + 1):
         RUN["model_calls"] += 1
+        _emit_provider_capture(
+            provider_capture,
+            "PROVIDER_REQUEST_INTENT",
+            capture_context=dict(capture_context or {}),
+            provider_boundary="mini.ask_ollama",
+            provider_attempt=attempt + 1,
+            role=role,
+            request_payload=copy.deepcopy(payload),
+        )
         record_run_event("model_request", role=role, attempt=attempt + 1,
                          structured=bool(response_format), context_tokens=estimate,
                          num_ctx=context_window, stream=False, think=bool(think))
@@ -2958,7 +2974,26 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
             last_error = f"could not reach Ollama at {OLLAMA_URL}: {exc}"
             RUN["ollama_transport_failures"] = RUN.get("ollama_transport_failures", 0) + 1
             signals = record_ollama_failure(last_error)
+            _emit_provider_capture(
+                provider_capture,
+                "PROVIDER_TRANSPORT_ERROR",
+                capture_context=dict(capture_context or {}),
+                provider_boundary="mini.ask_ollama",
+                provider_attempt=attempt + 1,
+                role=role,
+                error=last_error,
+            )
         if response is not None and response.status_code == 200:
+            _emit_provider_capture(
+                provider_capture,
+                "RAW_RESPONSE_CAPTURED",
+                capture_context=dict(capture_context or {}),
+                provider_boundary="mini.ask_ollama",
+                provider_attempt=attempt + 1,
+                role=role,
+                status_code=int(response.status_code),
+                response_text=str(getattr(response, "text", "")),
+            )
             try:
                 body = response.json()
             except (ValueError, TypeError) as exc:
@@ -3011,6 +3046,16 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                     record_run_event("model_response_incomplete", role=role,
                                      response_shape=ollama_response_summary(diagnostics), retrying=attempt < retry_limit)
         elif response is not None:
+            _emit_provider_capture(
+                provider_capture,
+                "RAW_RESPONSE_CAPTURED",
+                capture_context=dict(capture_context or {}),
+                provider_boundary="mini.ask_ollama",
+                provider_attempt=attempt + 1,
+                role=role,
+                status_code=int(response.status_code),
+                response_text=str(getattr(response, "text", "")),
+            )
             last_error = f"Ollama error {response.status_code}: {response.text[:1200]}"
             signals = record_ollama_failure(last_error)
         if attempt < retry_limit:
@@ -3055,8 +3100,15 @@ def _parse_json_content(content):
         raise
 
 
+def _structured_capture_hash(value):
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
 def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STRUCTURED_RETRIES,
-                         role="Coordinator", role_packet=None):
+                         role="Coordinator", role_packet=None, provider_capture=None,
+                         capture_context=None):
     schema_text = json.dumps(schema, ensure_ascii=False)
     if isinstance(role_packet, dict):
         exact_model_input = role_packet.get("exact_model_input") or role_packet.get("rendered_packet")
@@ -3100,10 +3152,14 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
     last_error = "invalid structured response"
     last_content = ""
     for attempt in range(max(1, int(retries))):
+        attempt_context = dict(capture_context or {})
+        attempt_context["structured_attempt"] = attempt + 1
         try:
             message = ask_ollama(messages, tools=None, response_format=schema, temperature=0,
                                  think=False, provider_retries=0,
-                                 role=("Quality" if label == "quality-review" else role))
+                                 role=("Quality" if label == "quality-review" else role),
+                                 provider_capture=provider_capture,
+                                 capture_context=attempt_context)
             last_content = message.get("content", "")
             data = _parse_json_content(last_content)
             validation = validator(data)
@@ -3112,6 +3168,15 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
                 else bool(validation)
             )
             if validation_valid:
+                _emit_provider_capture(
+                    provider_capture,
+                    "STRUCTURED_PARSE_ATTEMPTED",
+                    capture_context=attempt_context,
+                    label=label,
+                    status="COMPLETED",
+                    structured_result_hash=_structured_capture_hash(data),
+                    structured_content_chars=len(str(last_content)),
+                )
                 return data
             if isinstance(validation, dict) and validation.get("errors"):
                 last_error = "semantic validation failed: " + "; ".join(
@@ -3123,6 +3188,17 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
             raise
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             last_error = str(exc)
+        _emit_provider_capture(
+            provider_capture,
+            "STRUCTURED_PARSE_ATTEMPTED",
+            capture_context=attempt_context,
+            label=label,
+            status="INVALID",
+            parse_error=last_error,
+            structured_content_hash=_structured_capture_hash(last_content),
+            structured_content_chars=len(str(last_content)),
+            retrying=attempt + 1 < max(1, int(retries)),
+        )
         RUN["planner_structured_retries"] += 1
         print(f"[STRUCTURED RETRY] {label} {attempt + 1}/{retries} | {last_error}")
         record_run_event("structured_invalid", label=label, attempt=attempt + 1, error=last_error,
@@ -11071,7 +11147,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        tool_policy=None, max_steps=None, worker_callback=None,
                        worker_context=None, execution_contract=None,
                        execution_authorization_check=None, recovery_strategy=None,
-                       recovery_strategy_state=None, recovery_completion_contract=None):
+                       recovery_strategy_state=None, recovery_completion_contract=None,
+                       structured_response_schema=None, structured_response_validator=None,
+                       structured_response_label=None, structured_response_retries=None,
+                       structured_response_capture=None, structured_response_context=None):
     # V26.3 is an opt-in local policy for one recovery Worker.  Keeping this
     # state outside the ordinary path prevents initial Workers and Stage 3/4
     # decomposition from inheriting strategy suppression.
@@ -11259,6 +11338,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     last_verification_signature = ()
     stagnant_verifications = 0
     provider_error = None
+    structured_response = None
+    structured_response_error = None
     summary = ""
     status = "unknown"
     execution_budget_exhausted = False
@@ -11286,14 +11367,61 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "Falsifier": MAX_FALSIFIER_STEPS,
     }.get(role, MAX_TOOL_STEPS)
     for _step in range(max(1, int(step_budget))):
-        try:
-            assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False)
-        except ProviderError as exc:
-            provider_error = str(exc)
-            status = "provider_failure"
-            summary = provider_error
-            break
+        if structured_response_schema is not None:
+            structured_context = dict(structured_response_context or {})
+            structured_context.update({
+                "worker_lifecycle_entry": "mini.execute_agent_task",
+                "worker_task_id": str(task_id),
+                "structured_contract_active": True,
+            })
+            record_run_event(
+                "structured_worker_contract",
+                role=role,
+                task_id=task_id,
+                schema_hash=_structured_capture_hash(structured_response_schema),
+                retry_limit=(MAX_STRUCTURED_RETRIES if structured_response_retries is None else int(structured_response_retries)),
+            )
+            try:
+                structured_response = structured_model_call(
+                    task_text,
+                    structured_response_validator or (lambda value: {"valid": isinstance(value, dict)}),
+                    structured_response_label or f"{str(role).casefold()}-worker-response",
+                    structured_response_schema,
+                    retries=(MAX_STRUCTURED_RETRIES if structured_response_retries is None else int(structured_response_retries)),
+                    role=role,
+                    provider_capture=structured_response_capture,
+                    capture_context=structured_context,
+                )
+            except StructuredOutputError as exc:
+                provider_error = str(exc)
+                structured_response_error = provider_error
+                status = "structured_response_failure"
+                summary = provider_error
+                break
+            assistant_message = {
+                "role": "assistant",
+                "content": json.dumps(structured_response, ensure_ascii=False, sort_keys=True),
+                "tool_calls": [],
+                "structured_response": structured_response,
+            }
+        else:
+            try:
+                assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False)
+            except ProviderError as exc:
+                provider_error = str(exc)
+                status = "provider_failure"
+                summary = provider_error
+                break
         messages.append(assistant_message)
+        if structured_response_schema is not None:
+            evidence.append({
+                "tool": "structured_response",
+                "target": str(task_id),
+                "result": "STRUCTURED_RESPONSE_ACCEPTED",
+            })
+            summary = "structured response accepted by existing structured_model_call"
+            status = "done"
+            break
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
             content = assistant_message.get("content", "") or ""
@@ -12076,6 +12204,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     return {
         "status": status, "summary": compact_text(summary, MAX_NODE_SUMMARY_CHARS), "messages": messages,
         "memory": memory, "tool_evidence": evidence, "provider_error": provider_error,
+        "structured_response": structured_response,
+        "structured_response_error": structured_response_error,
+        "structured_response_active": structured_response_schema is not None,
+        "worker_lifecycle_entry": "mini.execute_agent_task",
         "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
         "step_budget": int(step_budget), "tool_steps_used": len(evidence),
         "syntax_validation_failures": list(verification_cycle["syntax_failures"].values()),
@@ -12084,6 +12216,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             recovery_terminal_state if recovery_terminal_state else
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
+            "STRUCTURED_OUTPUT_INVALID" if status == "structured_response_failure" else
             ("ENVIRONMENT_ERROR" if status == "provider_failure" else None)
         ),
         "recovery_strategy": stage6d.recovery_strategy_state_projection(recovery_state)
