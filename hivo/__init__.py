@@ -29,6 +29,22 @@ from .repo_intelligence import (
     RepoIntelligenceBudget, search_repository, benchmark_repository_navigation,
     SearchIntent, classify_search_intents, extract_query_signals,
 )
+from .diagnostic_hypotheses import (
+    DiagnosticBudget, DiagnosticFailureEvidence, DiagnosticHypothesis,
+    DiagnosticSession, seed_hypotheses,
+)
+from .experiment_selector import DiagnosticExperiment, ExperimentSelector, SelectionDecision
+from .experiment_sandbox import (
+    CounterfactualMutationSpec, ExperimentalSandbox, ProbePermission,
+    classify_probe_permission, canonical_subject_hash, subject_tree_snapshot,
+)
+from .experimental_evidence import (
+    BaselineReceipt, DiagnosticResult, EvidenceItem, ExperimentReceipt,
+    ExperimentalEvidenceEngine, ExperimentalEvidenceLedger, VerificationResult,
+    generate_test_failure_experiments, generate_error_location_experiments,
+    generate_dependency_stub_experiment, generate_input_perturbation_experiment,
+    session_from_recovery_failure, benchmark_diagnostic_scenarios,
+)
 
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
@@ -42,4 +58,14 @@ __all__ = [
     "RepoIntelligenceQuery", "SearchCandidate", "RepoIntelligenceResult",
     "RepoIntelligenceBudget", "search_repository", "benchmark_repository_navigation",
     "SearchIntent", "classify_search_intents", "extract_query_signals",
+    "DiagnosticBudget", "DiagnosticFailureEvidence", "DiagnosticHypothesis",
+    "DiagnosticSession", "seed_hypotheses", "DiagnosticExperiment",
+    "ExperimentSelector", "SelectionDecision", "CounterfactualMutationSpec",
+    "ExperimentalSandbox", "ProbePermission", "classify_probe_permission",
+    "canonical_subject_hash", "subject_tree_snapshot", "BaselineReceipt",
+    "DiagnosticResult", "EvidenceItem", "ExperimentReceipt",
+    "ExperimentalEvidenceEngine", "ExperimentalEvidenceLedger", "VerificationResult",
+    "generate_test_failure_experiments", "generate_error_location_experiments",
+    "generate_dependency_stub_experiment", "generate_input_perturbation_experiment",
+    "session_from_recovery_failure", "benchmark_diagnostic_scenarios",
 ]
