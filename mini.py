@@ -39,6 +39,7 @@ from hivo import repository_map as core1_repository_map
 from hivo import reference_resolution as core1_reference_resolution
 from hivo import repo_intelligence as core2_repo_intelligence
 from hivo import task_working_set as core2_task_working_set
+from hivo import experimental_evidence as core3_experimental_evidence
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import execution_invariants as stage6c_invariants
@@ -5060,6 +5061,37 @@ def expand_task_working_set(
     return core2_task_working_set.expand_working_set(
         working_set, current_map, current_root, requested_level=requested_level,
         metrics=metrics, brain_entities=brain_entities or (),
+    )
+
+
+def create_diagnostic_session(
+    task_query_identity, failure_evidence, *, canonical_root=None,
+    repository_map=None, working_set=None, authority=None, dnt_paths=(),
+    budget=None, session_id="",
+):
+    """Create an independent provider-free CORE-3 diagnostic session."""
+    root = canonical_root or (RUN.get("workspace") if isinstance(RUN, dict) else None) or WORKSPACE
+    if root is None:
+        raise ValueError("canonical_root is required for diagnostic sessions")
+    engine = core3_experimental_evidence.ExperimentalEvidenceEngine(
+        root, repository_map=repository_map, working_set=working_set,
+        authority=authority, dnt_paths=dnt_paths, budget=budget,
+    )
+    session = engine.create_session(
+        task_query_identity, failure_evidence, session_id=session_id,
+    )
+    return engine, session
+
+
+def run_diagnostic_session(
+    engine, session, experiments, *, baseline_check="target",
+    expected_baseline_outcome=None, runner=None, confirmation_runner=None,
+):
+    """Run bounded CORE-3 diagnostics without entering Worker/recovery execution."""
+    return engine.run(
+        session, experiments, baseline_check=baseline_check,
+        expected_baseline_outcome=expected_baseline_outcome,
+        runner=runner, confirmation_runner=confirmation_runner,
     )
 
 
