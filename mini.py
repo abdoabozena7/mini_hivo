@@ -55,6 +55,7 @@ from hivo import context_sufficiency as stage7_context
 from hivo import semantic_evidence as stage7_semantic
 from hivo import project_world_model as stage8_world
 from hivo import semantic_coupling as stage9_coupling
+from hivo import pre_mutation_impact as stage10_impact
 from hivo import execution_invariants as stage6c_invariants
 from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
@@ -690,6 +691,11 @@ ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
 # and run.  The object is intentionally kept out of RUN so JSON run artifacts
 # contain counters/identifiers, never a serialized graph or source cache.
 ACTIVE_PROJECT_WORLD_MODEL = None
+# Controller-owned pre-mutation authorization for the synchronous Worker
+# attempt.  Worker/model output can request or describe impact, but cannot set
+# this marker; it is installed only after deterministic contract validation.
+ACTIVE_IMPACT_CONTRACT = None
+ACTIVE_IMPACT_REQUIRED = False
 MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
 PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
@@ -1855,7 +1861,429 @@ def _context_tool_projection(tools, gate):
         )
         if completion_tool is not None:
             projected.insert(0, completion_tool)
+    # The impact contract is a second controller gate.  Apply it after the
+    # existing context projection so context completion can restore only the
+    # tools that both gates currently authorize.
+    if ACTIVE_IMPACT_REQUIRED or RUN.get("impact_contract_required"):
+        projected = _impact_tool_projection(projected, required=True)
     return projected
+
+
+# ---------------------------------------------------------------------------
+# V30 bounded pre-mutation impact contract
+# ---------------------------------------------------------------------------
+
+def _impact_required_for_worker(role, *, context_gate=None, explicit=None,
+                                execution_contract=None):
+    """Decide whether this synchronous Worker attempt needs the second gate.
+
+    Legacy direct tool callers do not enter this path.  Production Builder /
+    Repairer attempts, and explicit tests/approval paths, do.
+    """
+    if role not in {"Builder", "Repairer"}:
+        return False
+    if explicit is True:
+        return True
+    if ACTIVE_IMPACT_REQUIRED or RUN.get("impact_contract_required"):
+        return True
+    if context_gate is not None:
+        return True
+    if explicit is False:
+        return False
+    return bool(isinstance(execution_contract, dict) and execution_contract.get("worker_required"))
+
+
+def _impact_effective_contract(value):
+    if not isinstance(value, dict):
+        return {}
+    nested = value.get("execution_contract")
+    return nested if isinstance(nested, dict) else value
+
+
+def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
+                                 context_anchor=None, execution_contract=None,
+                                 mutation_required=True):
+    if isinstance(candidate, dict):
+        return copy.deepcopy(candidate)
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    effective = _impact_effective_contract(execution_contract)
+    anchor = context_anchor if isinstance(context_anchor, dict) else {}
+    task = {
+        "id": task_id,
+        "goal": str(task_text or ""),
+        "parent_goal": anchor.get("parent_goal"),
+        "root_goal": anchor.get("root_goal"),
+        "semantic_group_goal": anchor.get("group_goal"),
+        "semantic_group_invariant": anchor.get("group_invariant"),
+        "done_when": anchor.get("requirements") or active.get("requirements") or effective.get("requirements", []),
+        "scope_hint": effective.get("allowed_mutation_paths", []),
+        "allowed_mutation_paths": effective.get("allowed_mutation_paths", []),
+        "local_preservation_constraints": anchor.get("constraints") or effective.get("local_preservation_constraints", []),
+        "execution_contract": effective,
+        "verification_obligations": effective.get("verification_obligations"),
+        "test_contract": effective.get("test_contract"),
+        "global_do_not_touch": effective.get("global_do_not_touch", []),
+    }
+    return stage10_impact.build_pre_mutation_impact_contract(
+        task,
+        task_id=task_id,
+        root_goal=anchor.get("root_goal"),
+        parent_goal=anchor.get("parent_goal"),
+        local_task=anchor.get("local_task") or task_text,
+        group_goal=anchor.get("group_goal"),
+        group_invariant=anchor.get("group_invariant"),
+        execution_contract=effective,
+        world_model=_world_model_for_workspace(),
+        mutation_required=mutation_required,
+        strict=True,
+    )
+
+
+def _impact_validation_context(context_anchor=None, execution_contract=None):
+    anchor = context_anchor if isinstance(context_anchor, dict) else {}
+    effective = _impact_effective_contract(execution_contract)
+    allowed = effective.get("allowed_mutation_paths") or (
+        (ACTIVE_TOOL_CONTRACT or {}).get("allowed_mutation_paths", [])
+        if isinstance(ACTIVE_TOOL_CONTRACT, dict) else []
+    )
+    return {
+        "world_model": _world_model_for_workspace(),
+        "root_goal": anchor.get("root_goal"),
+        "parent_goal": anchor.get("parent_goal"),
+        "local_task": anchor.get("local_task"),
+        "group_goal": anchor.get("group_goal"),
+        "allowed_mutation_paths": allowed,
+        "forbidden_paths": effective.get("global_do_not_touch", []),
+    }
+
+
+def _impact_record_metrics(validation=None, comparison=None, *, created=False,
+                           authorized=False, blocked=False, revised=False):
+    if not isinstance(RUN, dict):
+        return
+    validation = validation if isinstance(validation, dict) else {}
+    comparison = comparison if isinstance(comparison, dict) else {}
+    if created:
+        RUN["impact_contracts_created"] = RUN.get("impact_contracts_created", 0) + 1
+    if validation:
+        if validation.get("valid"):
+            RUN["impact_contracts_validated"] = RUN.get("impact_contracts_validated", 0) + 1
+        else:
+            RUN["impact_contracts_rejected"] = RUN.get("impact_contracts_rejected", 0) + 1
+    if authorized:
+        RUN["impact_contract_authorizations"] = RUN.get("impact_contract_authorizations", 0) + 1
+    if blocked:
+        RUN["impact_contract_mutation_blocks"] = RUN.get("impact_contract_mutation_blocks", 0) + 1
+    if revised:
+        RUN["impact_contract_revisions"] = RUN.get("impact_contract_revisions", 0) + 1
+    if comparison:
+        RUN["impact_contract_comparisons"] = RUN.get("impact_contract_comparisons", 0) + 1
+        RUN["impact_expected_targets"] = RUN.get("impact_expected_targets", 0) + len(
+            comparison.get("comparisons", []) or []
+        )
+        RUN["impact_missing_targets"] = RUN.get("impact_missing_targets", 0) + len(
+            comparison.get("missing", []) or []
+        )
+        RUN["impact_unexpected_related"] = RUN.get("impact_unexpected_related", 0) + len(
+            comparison.get("unexpected_related", []) or []
+        )
+        RUN["impact_out_of_scope_changes"] = RUN.get("impact_out_of_scope_changes", 0) + len(
+            comparison.get("out_of_scope", []) or []
+        )
+        RUN["impact_preservation_violations"] = RUN.get("impact_preservation_violations", 0) + len(
+            comparison.get("preservation_violations", []) or []
+        )
+        RUN["impact_unresolved_obligations"] = RUN.get("impact_unresolved_obligations", 0) + len(
+            comparison.get("unresolved_obligations", []) or []
+        )
+        if comparison.get("status") == stage10_impact.IMPACT_CONFLICT:
+            RUN["impact_conflicts"] = RUN.get("impact_conflicts", 0) + 1
+
+
+def _activate_impact_contract(candidate, *, context_anchor=None,
+                              execution_contract=None, task_id="ROOT"):
+    """Validate and install the controller-only mutation authorization."""
+    global ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
+    if not isinstance(candidate, dict):
+        return {"accepted": False, "status": stage10_impact.IMPACT_REQUIRED,
+                "errors": [{"reason": "no impact contract candidate"}], "contract": {}}
+    validation = stage10_impact.validate_pre_mutation_impact_contract(
+        candidate, **_impact_validation_context(context_anchor, execution_contract),
+    )
+    _impact_record_metrics(validation)
+    if not validation.get("valid"):
+        record_run_event(
+            "impact_contract_rejected",
+            task_id=task_id,
+            status=validation.get("status"),
+            errors=[compact_text(item.get("reason", ""), 260) for item in validation.get("errors", [])[:6]],
+        )
+        return validation
+    validation_context = _impact_validation_context(context_anchor, execution_contract)
+    accepted = stage10_impact.accept_pre_mutation_impact_contract(
+        candidate, validation=validation,
+        **validation_context,
+    )
+    if not accepted.get("accepted"):
+        _impact_record_metrics({"valid": False, "errors": accepted.get("errors", [])})
+        return accepted
+    ACTIVE_IMPACT_CONTRACT = copy.deepcopy(accepted["contract"])
+    ACTIVE_IMPACT_REQUIRED = True
+    RUN["impact_contract_required"] = True
+    _impact_record_metrics(authorized=True)
+    record_run_event(
+        "impact_contract_authorized",
+        task_id=task_id,
+        contract_id=ACTIVE_IMPACT_CONTRACT.get("contract_id"),
+        contract_hash=ACTIVE_IMPACT_CONTRACT.get("contract_hash"),
+        revision=ACTIVE_IMPACT_CONTRACT.get("revision", 0),
+        mutation_authorized=True,
+    )
+    return {
+        "accepted": True,
+        "status": stage10_impact.IMPACT_ACCEPTED,
+        "contract": copy.deepcopy(ACTIVE_IMPACT_CONTRACT),
+        "validation": validation,
+    }
+
+
+def _clear_impact_attempt():
+    global ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
+    ACTIVE_IMPACT_CONTRACT = None
+    ACTIVE_IMPACT_REQUIRED = False
+    if isinstance(RUN, dict):
+        RUN.pop("impact_contract_required", None)
+
+
+def _impact_gate_mutation_guard(name, role="System", target=None):
+    """Fail closed unless a validated controller contract is active."""
+    if name not in _CONTEXT_MUTATION_TOOLS or role not in {"Builder", "Repairer"}:
+        return None
+    required = bool(ACTIVE_IMPACT_REQUIRED or RUN.get("impact_contract_required"))
+    if not required:
+        return None
+    # The impact marker never substitutes for the earlier context gate.  This
+    # check also covers explicit Worker callers that forgot to install a gate;
+    # legacy direct file helpers do not pass through this Worker seam.
+    active_context_gate = _active_context_gate(role)
+    # ``context_sufficiency.mutation_block_reason(None)`` is intentionally
+    # permissive for legacy non-Worker callers.  Once the Impact Contract
+    # policy is active, however, this seam is a Worker mutation boundary and
+    # must fail closed when the earlier context gate was never installed.
+    context_issue = (
+        "error: CONTEXT_SUFFICIENCY_REQUIRED; Worker mutation is blocked because "
+        "the Context Sufficiency Gate is not active"
+        if active_context_gate is None
+        else stage7_context.mutation_block_reason(active_context_gate)
+    )
+    if context_issue:
+        RUN["context_sufficiency_blocks"] = RUN.get("context_sufficiency_blocks", 0) + 1
+        return context_issue
+    issue = stage10_impact.impact_mutation_block_reason(
+        ACTIVE_IMPACT_CONTRACT, required=True,
+        world_model=_world_model_for_workspace(),
+    )
+    if issue:
+        _impact_record_metrics(blocked=True)
+        record_run_event(
+            "impact_contract_mutation_blocked",
+            role=role,
+            task_id=(ACTIVE_TOOL_CONTRACT or {}).get("task_id") if isinstance(ACTIVE_TOOL_CONTRACT, dict) else None,
+            tool=name,
+            target=compact_text(target if target is not None else "-", 180),
+            reason=compact_text(issue, 420),
+        )
+    return issue
+
+
+def _accepted_impact_contract_for_result(task, result):
+    """Return only a controller-accepted artifact for post-mutation audit.
+
+    Some long-standing architecture tests replace ``execute_agent_task`` with
+    a deterministic leaf stub.  Those stubs predate the Impact Contract and
+    intentionally return only the historical worker result shape.  The real
+    Worker executor always emits ``impact_authorized`` and the accepted
+    artifact; this helper keeps those test doubles from being mistaken for a
+    forged authorization while preserving fail-closed behavior for the real
+    seam.
+    """
+
+    for owner in (task, result):
+        if not isinstance(owner, dict):
+            continue
+        candidate = owner.get("impact_contract")
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("controller_accepted") is True
+            and candidate.get("status") == stage10_impact.IMPACT_ACCEPTED
+        ):
+            return candidate
+    return None
+
+
+def _impact_result_requires_artifact(result):
+    """Identify a real Worker result that promised Impact Contract state."""
+
+    return isinstance(result, dict) and (
+        result.get("impact_required") is True
+        or "impact_authorized" in result
+        or "mutation_authorized" in result and "impact_contract" in result
+    )
+
+
+def _impact_tool_projection(tools, *, required=False):
+    if not required:
+        return list(tools or [])
+    if stage10_impact.impact_mutation_block_reason(
+        ACTIVE_IMPACT_CONTRACT, required=True,
+        world_model=_world_model_for_workspace(),
+    ):
+        return [
+            item for item in list(tools or [])
+            if item.get("function", {}).get("name") not in _CONTEXT_MUTATION_TOOLS
+        ]
+    return list(tools or [])
+
+
+def _impact_contract_projection_text(task):
+    candidate = None
+    if isinstance(task, dict):
+        candidate = task.get("impact_contract") or task.get("impact_contract_candidate")
+    if not isinstance(candidate, dict):
+        return ""
+    try:
+        projection = stage10_impact.project_impact_contract(
+            candidate, max_chars=stage10_impact.MAX_IMPACT_PROJECTION_CHARS,
+        )
+        rendered = projection.get("rendered", "")
+        return compact_text(rendered, stage10_impact.MAX_IMPACT_PROJECTION_CHARS)
+    except Exception:
+        return ""
+
+
+def _impact_post_mutation_check(contract, *, verification_result=None,
+                                verification_evidence=None, changed_paths=None,
+                                task_id="ROOT", task=None):
+    """Compare the current transaction to the accepted impact contract."""
+    if not isinstance(contract, dict):
+        return {"status": stage10_impact.IMPACT_REQUIRED, "passed": False,
+                "failure_type": stage10_impact.IMPACT_REQUIRED}
+    transaction = ACTIVE_TRANSACTION or LAST_COMMITTED_TRANSACTION
+    revalidation_paths = list(changed_paths or [])
+    if not revalidation_paths and isinstance(transaction, dict):
+        revalidation_paths = list((transaction.get("files") or {}).keys())
+    model = _world_model_for_workspace()
+    # Impact comparison runs before commit so an unsafe change can still be
+    # rolled back.  Revalidate the bounded changed surface first; otherwise a
+    # relationship delta would be compared against the pre-mutation World
+    # Model and a valid post-state could never satisfy the contract.
+    if model is not None and revalidation_paths:
+        _world_model_revalidate_after_files(
+            revalidation_paths[:stage10_impact.MAX_IMPACT_CHANGED_PATHS],
+            phase="impact_precommit",
+        )
+        model = _world_model_for_workspace()
+    actual = stage10_impact.capture_actual_mutation_impact(
+        transaction=transaction,
+        workspace=WORKSPACE,
+        world_model=model,
+        changed_paths=changed_paths,
+        verification_evidence=verification_evidence,
+    )
+    comparison = stage10_impact.compare_pre_mutation_impact(
+        contract, actual,
+        world_model=model,
+        verification_result=verification_result,
+    )
+    # One bounded related-surface revision is allowed for a genuinely related
+    # file.  A new unrelated file remains an immediate out-of-scope failure.
+    if comparison.get("unexpected_related"):
+        discovered = [
+            {"target": item.get("path"), "path": item.get("path"), "kind": "path",
+             "provenance": [{"path": item.get("path"), "location": "post-mutation", "evidence_kind": "mutation_audit"}]}
+            for item in comparison.get("unexpected_related", [])[:stage10_impact.MAX_IMPACT_CHANGED_PATHS]
+        ]
+        revised = stage10_impact.revise_pre_mutation_impact_contract(
+            contract, discovered, world_model=model,
+            reason="bounded related mutation surface observed by the controller",
+        )
+        if revised.get("revised"):
+            accepted = stage10_impact.accept_pre_mutation_impact_contract(
+                revised.get("contract"), world_model=model,
+            )
+            if accepted.get("accepted"):
+                contract = accepted["contract"]
+                if isinstance(task, dict):
+                    task["impact_contract"] = copy.deepcopy(contract)
+                    task["impact_contract_revision"] = contract.get("revision", 0)
+                comparison = stage10_impact.compare_pre_mutation_impact(
+                    contract, actual, world_model=model,
+                    verification_result=verification_result,
+                )
+                _impact_record_metrics(revised=True)
+                record_run_event(
+                    "impact_contract_revised",
+                    task_id=task_id,
+                    revision=contract.get("revision", 0),
+                    added_targets=[item.get("target") for item in revised.get("added_targets", [])],
+                )
+    _impact_record_metrics(comparison=comparison)
+    record_run_event(
+        "impact_contract_compared",
+        task_id=task_id,
+        status=comparison.get("status"),
+        changed_paths=list(comparison.get("actual_changed_paths", []) or [])[:stage10_impact.MAX_IMPACT_CHANGED_PATHS],
+        missing=len(comparison.get("missing", []) or []),
+        unexpected_related=len(comparison.get("unexpected_related", []) or []),
+        out_of_scope=len(comparison.get("out_of_scope", []) or []),
+        preservation_violations=len(comparison.get("preservation_violations", []) or []),
+        mutation_authorized=bool(comparison.get("passed")),
+    )
+    return comparison
+
+
+def _prepare_task_impact_contract(task, contract=None):
+    """Build the bounded candidate before the Worker context is compiled."""
+    if not isinstance(task, dict):
+        return None
+    effective = _impact_effective_contract(contract)
+    explicit = task.get("impact_contract_candidate")
+    mutation_required = not bool(task.get("verification_only"))
+    if isinstance(effective, dict) and "worker_required" in effective:
+        mutation_required = bool(effective.get("worker_required"))
+    candidate = _impact_candidate_for_worker(
+        task.get("goal", ""), task.get("id", "ROOT"),
+        candidate=explicit,
+        context_anchor={
+            "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                          if isinstance(RUN.get("source_contract"), dict) else None)
+            or task.get("root_goal") or task.get("goal"),
+            "parent_goal": task.get("parent_goal") or RUN.get("parent_goal"),
+            "local_task": task.get("goal"),
+            "group_goal": task.get("semantic_group_goal"),
+            "group_invariant": task.get("semantic_group_invariant"),
+            "requirements": task.get("done_when", []),
+            "constraints": (contract or {}).get("constraints", []) if isinstance(contract, dict) else [],
+        },
+        execution_contract=effective,
+        mutation_required=mutation_required,
+    )
+    task["impact_contract_candidate"] = copy.deepcopy(candidate)
+    task["impact_contract_status"] = stage10_impact.IMPACT_INCOMPLETE
+    task["impact_contract_hash"] = candidate.get("contract_hash")
+    task["impact_contract_revision"] = candidate.get("revision", 0)
+    task["impact_contract_required"] = mutation_required
+    _impact_record_metrics(created=True)
+    record_run_event(
+        "impact_contract_created",
+        task_id=task.get("id"),
+        contract_id=candidate.get("contract_id"),
+        contract_hash=candidate.get("contract_hash"),
+        target_count=len(candidate.get("expected_targets", []) or []),
+        obligation_count=len(candidate.get("verification_obligations", []) or []),
+        mutation_required=mutation_required,
+    )
+    return candidate
 
 
 def _context_anchor_for_worker(task_text, task_id, context_anchor=None, execution_contract=None):
@@ -2535,6 +2963,11 @@ def run_tool(name, args, role="System"):
     )
     if context_mutation_issue:
         return context_mutation_issue
+    impact_mutation_issue = _impact_gate_mutation_guard(
+        name, role=role, target=(args or {}).get("path") if isinstance(args, dict) else None,
+    )
+    if impact_mutation_issue:
+        return impact_mutation_issue
     if name == _CONTEXT_COMPLETION_TOOL:
         return _context_sufficiency_tool(args, role=role, task_id=(ACTIVE_TOOL_CONTRACT or {}).get("task_id", "ROOT"))
     stage4_inspection_issue = _stage4_inspection_guard(name, args)
@@ -3150,6 +3583,25 @@ def new_metrics(mode):
         "semantic_group_verification_passes": 0,
         "semantic_group_verification_failures": 0,
         "semantic_group_recovery_required": 0,
+        # V30 bounded pre-mutation impact contracts.  These counters describe
+        # controller validation/auditing only; no source excerpts are stored in
+        # run metrics.
+        "impact_contracts_created": 0,
+        "impact_contracts_validated": 0,
+        "impact_contracts_rejected": 0,
+        "impact_contract_mutation_blocks": 0,
+        "impact_contract_authorizations": 0,
+        "impact_contract_comparisons": 0,
+        "impact_expected_targets": 0,
+        "impact_missing_targets": 0,
+        "impact_unexpected_related": 0,
+        "impact_out_of_scope_changes": 0,
+        "impact_preservation_violations": 0,
+        "impact_unresolved_obligations": 0,
+        "impact_conflicts": 0,
+        "impact_contract_revisions": 0,
+        "impact_group_verification_attempts": 0,
+        "impact_group_verification_failures": 0,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
@@ -3366,7 +3818,7 @@ def new_metrics(mode):
 
 def reset_run(mode):
     global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, RUN_ID
-    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_PROJECT_WORLD_MODEL, FORCE_CPU_FOR_RUN
+    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_PROJECT_WORLD_MODEL, ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED, FORCE_CPU_FOR_RUN
     global VISION_ENABLED_FOR_RUN, VISION_ERROR, PREFLIGHT_CONFLICT_STATE
     RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     ACTIVE_TRANSACTION = None
@@ -3375,6 +3827,8 @@ def reset_run(mode):
     ACTIVE_TOOL_CONTRACT = None
     ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
     ACTIVE_PROJECT_WORLD_MODEL = None
+    ACTIVE_IMPACT_CONTRACT = None
+    ACTIVE_IMPACT_REQUIRED = False
     FORCE_CPU_FOR_RUN = False
     RUN = new_metrics(mode)
     TASKS = {}
@@ -10476,6 +10930,16 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "semantic_group_status": "NONE",
         "semantic_group_required": False,
         "semantic_group_verification": None,
+        # The impact contract is a bounded controller artifact.  It is kept on
+        # the task for lifecycle/recovery bookkeeping, but worker projections
+        # receive only ``project_impact_contract``.
+        "impact_contract": None,
+        "impact_contract_candidate": None,
+        "impact_contract_status": "NOT_CREATED",
+        "impact_contract_hash": None,
+        "impact_contract_revision": 0,
+        "impact_contract_comparison": None,
+        "impact_contract_required": False,
         "status": "pending", "children": [], "summary": "", "verification_status": "unknown",
         "changed_files": [], "failure_evidence": [],
         # The first failed execution is retained independently from the final
@@ -11231,6 +11695,218 @@ def _attach_semantic_group_to_task(task, group):
     return task
 
 
+def _semantic_group_impact_verification(group, completed, parent_task, *,
+                                        parent_contract=None, semantic_result=None):
+    """Verify a group's accepted impact surface after all members finish.
+
+    This is intentionally a small aggregation layer around the existing
+    pre-mutation contract comparator.  It does not introduce another worker
+    or verifier: member impact receipts are combined, then the already-run
+    semantic-group verification result is used as the group verification
+    obligation.  Groups created by legacy tests without impact artifacts stay
+    on their existing path.
+    """
+
+    group = group if isinstance(group, dict) else {}
+    member_ids = {str(item) for item in (group.get("member_ids", []) or [])}
+    entries = [
+        item for item in (completed or [])
+        if isinstance(item, dict)
+        and str((item.get("task") or {}).get("id", "")) in member_ids
+    ]
+    if not any(
+        isinstance(item.get("result"), dict)
+        and (
+            isinstance(item["result"].get("impact_contract"), dict)
+            or isinstance(item["result"].get("impact_comparison"), dict)
+            or isinstance((item.get("task") or {}).get("impact_contract"), dict)
+        )
+        for item in entries
+    ):
+        return None
+
+    RUN["impact_group_verification_attempts"] = RUN.get(
+        "impact_group_verification_attempts", 0,
+    ) + 1
+    group_id = str(group.get("group_id") or "GROUP")
+    group_goal = group.get("goal") or group.get("group_goal") or parent_task.get("goal", "")
+    group_invariant = group.get("invariant") or group.get("group_invariant") or ""
+    target_rows = []
+    relation_rows = []
+    preservation_rows = []
+    allowed_paths = []
+    member_observations = []
+    for entry in entries:
+        child = entry.get("task") if isinstance(entry.get("task"), dict) else {}
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        contract = result.get("impact_contract") or child.get("impact_contract")
+        if isinstance(contract, dict):
+            target_rows.extend(list(contract.get("expected_targets", []) or []))
+            relation_rows.extend(list(contract.get("expected_relationship_changes", []) or []))
+            preservation_rows.extend(list(contract.get("required_preservations", []) or []))
+            allowed_paths.extend(list(contract.get("authorized_mutation_paths", []) or []))
+        comparison = result.get("impact_comparison")
+        if isinstance(comparison, dict):
+            member_observations.append(comparison)
+
+    def unique_rows(rows, keys):
+        selected = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = tuple(str(row.get(name, "")).casefold() for name in keys)
+            if not any(key) or key in seen:
+                continue
+            seen.add(key)
+            selected.append(copy.deepcopy(row))
+            if len(selected) >= stage10_impact.MAX_IMPACT_TARGETS:
+                break
+        return selected
+
+    target_rows = unique_rows(target_rows, ("target", "path"))
+    relation_rows = unique_rows(
+        relation_rows, ("subject", "relation", "object", "after"),
+    )[:stage10_impact.MAX_EXPECTED_RELATION_DELTAS]
+    preservation_rows = unique_rows(
+        preservation_rows, ("id", "meaning"),
+    )[:stage10_impact.MAX_IMPACT_PRESERVATIONS]
+    allowed_paths = list(dict.fromkeys(str(path) for path in allowed_paths if str(path)))[:stage10_impact.MAX_IMPACT_CHANGED_PATHS]
+
+    member_failure = next(
+        (
+            item for item in member_observations
+            if item.get("passed") is False
+            or item.get("status") in {
+                stage10_impact.IMPACT_CONFLICT,
+                stage10_impact.IMPACT_FAILED,
+                stage10_impact.IMPACT_VERIFICATION_FAILED,
+            }
+        ),
+        None,
+    )
+    if member_failure is not None:
+        result = {
+            "status": stage10_impact.IMPACT_VERIFICATION_FAILED,
+            "passed": False,
+            "failure_type": stage10_impact.IMPACT_VERIFICATION_FAILED,
+            "reason": "a semantic group member passed locally but its impact contract did not",
+            "member_failure": copy.deepcopy(member_failure),
+            "group_id": group_id,
+            "bounded": True,
+        }
+        RUN["impact_group_verification_failures"] = RUN.get(
+            "impact_group_verification_failures", 0,
+        ) + 1
+        return {"contract": None, "comparison": result, "passed": False}
+
+    group_candidate = stage10_impact.build_pre_mutation_impact_contract(
+        {
+            "id": group_id,
+            "goal": group_goal,
+            "root_goal": parent_task.get("root_goal") or parent_task.get("goal", ""),
+            "parent_goal": parent_task.get("parent_goal") or parent_task.get("goal", ""),
+            "done_when": [group_invariant] if group_invariant else [],
+            "allowed_mutation_paths": allowed_paths,
+        },
+        task_id=group_id,
+        change_intent=group_goal,
+        root_goal=parent_task.get("root_goal") or parent_task.get("goal", ""),
+        parent_goal=parent_task.get("parent_goal") or parent_task.get("goal", ""),
+        local_task=group_goal,
+        group_goal=group_goal,
+        group_invariant=group_invariant,
+        execution_contract=parent_contract if isinstance(parent_contract, dict) else None,
+        world_model=_world_model_for_workspace(),
+        expected_targets=target_rows,
+        expected_relationship_changes=relation_rows,
+        required_preservations=preservation_rows,
+        # The existing semantic-group verifier is the group-level behavioral
+        # oracle.  A controller obligation lets its passed result satisfy this
+        # bounded comparison without manufacturing a second test contract.
+        verification_obligations=[{
+            "id": "semantic-group-verification",
+            "category": "GROUP_VERIFICATION",
+            "meaning": group_invariant or "the semantic group verification result passes",
+            "required": True,
+            "mode": "controller",
+        }],
+        mutation_required=True,
+        strict=True,
+    )
+    model = _world_model_for_workspace()
+    validation = stage10_impact.validate_pre_mutation_impact_contract(
+        group_candidate, world_model=model,
+    )
+    if not validation.get("valid"):
+        comparison = {
+            "status": validation.get("status") or stage10_impact.IMPACT_INVALID,
+            "passed": False,
+            "failure_type": validation.get("status") or stage10_impact.IMPACT_INVALID,
+            "reason": "group impact contract could not be validated",
+            "validation": validation,
+            "group_id": group_id,
+            "bounded": True,
+        }
+        RUN["impact_group_verification_failures"] = RUN.get(
+            "impact_group_verification_failures", 0,
+        ) + 1
+        return {"contract": group_candidate, "comparison": comparison, "passed": False}
+    accepted = stage10_impact.accept_pre_mutation_impact_contract(
+        group_candidate, validation=validation, world_model=model,
+    )
+    if not accepted.get("accepted"):
+        comparison = {
+            "status": accepted.get("status") or stage10_impact.IMPACT_INVALID,
+            "passed": False,
+            "failure_type": accepted.get("status") or stage10_impact.IMPACT_INVALID,
+            "reason": "group impact contract acceptance failed",
+            "validation": accepted,
+            "group_id": group_id,
+            "bounded": True,
+        }
+        RUN["impact_group_verification_failures"] = RUN.get(
+            "impact_group_verification_failures", 0,
+        ) + 1
+        return {"contract": group_candidate, "comparison": comparison, "passed": False}
+
+    accepted_contract = accepted.get("contract")
+    changed_paths = []
+    verification_evidence = []
+    for entry in entries:
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        changed_paths.extend(list(result.get("changed_files", []) or []))
+        changed_paths.extend(list(result.get("committed_paths", []) or []))
+        for field in ("verification_evidence", "tool_evidence", "execution_obligation_evidence"):
+            verification_evidence.extend(
+                item for item in (result.get(field, []) or []) if isinstance(item, dict)
+            )
+    actual = stage10_impact.capture_actual_mutation_impact(
+        workspace=WORKSPACE,
+        world_model=model,
+        changed_paths=list(dict.fromkeys(changed_paths))[:stage10_impact.MAX_IMPACT_CHANGED_PATHS],
+        verification_evidence=verification_evidence,
+    )
+    comparison = stage10_impact.compare_pre_mutation_impact(
+        accepted_contract,
+        actual,
+        world_model=model,
+        verification_result={"passed": bool((semantic_result or {}).get("passed"))},
+    )
+    comparison["group_id"] = group_id
+    comparison["member_count"] = len(entries)
+    comparison["bounded"] = True
+    if not comparison.get("passed"):
+        RUN["impact_group_verification_failures"] = RUN.get(
+            "impact_group_verification_failures", 0,
+        ) + 1
+    return {
+        "contract": accepted_contract,
+        "comparison": comparison,
+        "passed": bool(comparison.get("passed")),
+    }
+
+
 def _analyze_approved_contract_coupling(root_goal, approved_contracts, contract=None):
     """Analyze a frozen Stage 4 graph without rewriting its authority."""
     candidates = []
@@ -11300,6 +11976,20 @@ def _verify_semantic_groups(task, completed, *, contract=None):
             group, child_results=results, world_model=model,
             verification_runner=runner if callable(runner) else None,
         )
+        impact_result = _semantic_group_impact_verification(
+            group, completed, task,
+            parent_contract=contract,
+            semantic_result=result,
+        )
+        if impact_result is not None:
+            result = copy.deepcopy(result)
+            result["impact_contract"] = copy.deepcopy(impact_result.get("contract"))
+            result["impact_comparison"] = copy.deepcopy(impact_result.get("comparison"))
+            result["impact_verification_required"] = True
+            result["passed"] = bool(result.get("passed")) and bool(
+                impact_result.get("passed")
+            )
+            result["status"] = "COMPLETE" if result["passed"] else "FAILED"
         records.append(result)
         is_passed = bool(result.get("passed"))
         passed = passed and is_passed
@@ -12140,6 +12830,17 @@ def _append_semantic_group_projection(packet, task):
     return packet + section
 
 
+def _append_impact_contract_projection(packet, task):
+    """Add only the compact controller contract to a Worker packet."""
+    projection = _impact_contract_projection_text(task)
+    if not projection:
+        return packet
+    section = "\n\nPRE-MUTATION IMPACT CONTRACT (bounded controller projection):\n" + projection
+    if len(packet) + len(section) > min(MAX_NODE_PACKET_CHARS, MAX_WORKER_MISSION_CHARS):
+        return packet
+    return packet + section
+
+
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
                        dependency_summaries=None, failure_evidence=None, strategy_context=None,
                        brain_projection=None, worker_mission=None, execution_contract=None):
@@ -12162,6 +12863,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         projected_context = _append_semantic_group_projection(
             worker_context["rendered_worker_context"], task,
         )
+        projected_context = _append_impact_contract_projection(projected_context, task)
         return _append_world_model_projection(
             projected_context, task.get("goal", ""), allowed_paths=allowed_paths,
         )
@@ -12183,10 +12885,11 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
             RUN["project_brain"], task, dependency_summaries, repo_snapshot, record=False,
         )
     if task.get("kind") == "integration":
-        return _append_semantic_group_projection(build_integration_node_packet(
+        packet = _append_semantic_group_projection(build_integration_node_packet(
             task, root_contract, repo_snapshot, parent_summary,
             dependency_summaries, failure_evidence, brain_projection=brain_projection,
         ), task)
+        return _append_impact_contract_projection(packet, task)
     try:
         project_invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
     except Exception:
@@ -12290,6 +12993,12 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"{semantic_group_projection}\n\n"
         if semantic_group_projection else ""
     )
+    impact_contract_projection = _impact_contract_projection_text(task)
+    impact_contract_section = (
+        "PRE-MUTATION IMPACT CONTRACT (bounded controller projection):\n"
+        f"{impact_contract_projection}\n\n"
+        if impact_contract_projection else ""
+    )
     packet = (
         f"{root_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
@@ -12306,6 +13015,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"FAILED DECOMPOSITIONS (do not paraphrase these boundaries):\n"
         f"{json.dumps(failed_decompositions, ensure_ascii=False)[:2600] if failed_decompositions else '(none)'}\n\n"
         f"{semantic_group_section}"
+        f"{impact_contract_section}"
         f"{world_model_section}"
         f"{repository_section}"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
@@ -12614,8 +13324,16 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        structured_response_capture=None, structured_response_context=None,
                        context_sufficiency_enabled=False, context_sufficiency_gate=None,
                        context_evidence_provider=None, context_anchor=None,
-                       initial_context_evidence=None):
-    global ACTIVE_CONTEXT_SUFFICIENCY_GATE
+                       initial_context_evidence=None, impact_contract=None,
+                       impact_contract_required=None):
+    global ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
+    # A previous synchronous attempt must never lend its authorization to the
+    # next Worker.  The caller's task/transaction retains the artifact for
+    # audit, while this active marker is per-attempt only.
+    ACTIVE_IMPACT_CONTRACT = None
+    ACTIVE_IMPACT_REQUIRED = False
+    if isinstance(RUN, dict):
+        RUN.pop("impact_contract_required", None)
     # V26.3 is an opt-in local policy for one recovery Worker.  Keeping this
     # state outside the ordinary path prevents initial Workers and Stage 3/4
     # decomposition from inheriting strategy suppression.
@@ -12673,6 +13391,74 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             "contradictions": initial_snapshot.get("contradictions", []),
             "final": False,
         }, initial=True)
+    impact_required = _impact_required_for_worker(
+        role,
+        context_gate=context_gate,
+        explicit=impact_contract_required,
+        execution_contract=execution_contract,
+    )
+    impact_candidate = None
+    impact_validation = None
+    impact_authorization = None
+    if impact_required:
+        impact_candidate = _impact_candidate_for_worker(
+            task_text,
+            task_id,
+            candidate=impact_contract,
+            context_anchor=context_anchor,
+            execution_contract=execution_contract,
+            mutation_required=True,
+        )
+        _impact_record_metrics(created=impact_contract is None)
+        ACTIVE_IMPACT_REQUIRED = True
+        RUN["impact_contract_required"] = True
+        if context_gate is None:
+            # A Worker mutation requires both gates.  Requiring an impact
+            # contract must never silently opt the caller out of the existing
+            # context gate merely because this entrypoint was misconfigured.
+            _clear_impact_attempt()
+            return {
+                "status": "failed",
+                "failure_type": "CONTEXT_SUFFICIENCY_REQUIRED",
+                "summary": (
+                    "CONTEXT_SUFFICIENCY_REQUIRED: the pre-mutation impact "
+                    "contract cannot authorize a Worker without the context gate"
+                ),
+                "memory": memory,
+                "impact_contract": impact_candidate,
+                "impact_authorized": False,
+                "mutation_authorized": False,
+                "worker_calls": 0,
+                "builder_calls": 0,
+            }
+        # Context understanding remains the first gate.  The impact contract
+        # is validated/accepted only once that gate has passed; it cannot turn
+        # a context-incomplete Worker into an authorized one.
+        if context_gate.mutation_allowed:
+            impact_authorization = _activate_impact_contract(
+                impact_candidate,
+                context_anchor=context_anchor,
+                execution_contract=execution_contract,
+                task_id=task_id,
+            )
+            impact_validation = impact_authorization
+            if not impact_authorization.get("accepted"):
+                # There is no useful model work to perform when no context gate
+                # exists.  Fail closed before any provider/tool seam.
+                if context_gate is None:
+                    _clear_impact_attempt()
+                    return {
+                        "status": "failed",
+                        "failure_type": impact_authorization.get("status") or stage10_impact.IMPACT_INVALID,
+                        "summary": "pre-mutation impact contract was not accepted",
+                        "memory": memory,
+                        "impact_contract": impact_candidate,
+                        "impact_validation": impact_authorization,
+                        "impact_authorized": False,
+                        "mutation_authorized": False,
+                        "worker_calls": 0,
+                        "builder_calls": 0,
+                    }
     if RUN.get("stage6c_enabled") and role in {"Builder", "Worker"}:
         authority_gate = stage6c.worker_authorization_gate(
             RUN.get("execution_authorization"),
@@ -12686,6 +13472,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             _record_verification_obligation_coverage_gate(coverage)
             RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
             ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+            _clear_impact_attempt()
             return {
                 "status": "blocked",
                 "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
@@ -12703,6 +13490,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         # Stage 6C-B lifecycle is allowed to enter the existing execution loop.
         if not RUN.get("approval_bound_lifecycle"):
             ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+            _clear_impact_attempt()
             return {
                 "status": "blocked",
                 "terminal_state": EXECUTION_AUTHORIZATION_READY,
@@ -12719,6 +13507,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         if not callable(execution_authorization_check):
             RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
             ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+            _clear_impact_attempt()
             return {
                 "status": "blocked",
                 "terminal_state": WORKER_AUTHORIZATION_INVALID,
@@ -12745,6 +13534,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 if isinstance(current_gate, dict) and current_gate.get("status") == REAPPROVAL_REQUIRED:
                     RUN["reapproval_required"] = RUN.get("reapproval_required", 0) + 1
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                _clear_impact_attempt()
                 return {
                     "status": "blocked",
                     "terminal_state": (current_gate or {}).get("terminal_state", WORKER_AUTHORIZATION_INVALID),
@@ -12763,6 +13553,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         if callable(worker_callback):
             if not isinstance(execution_contract, dict):
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                _clear_impact_attempt()
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -12781,6 +13572,30 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "reason": "The validated Stage 4 execution contract supplies the bounded callback context.",
                 })
                 _record_context_sufficiency_result(task_id, "Builder", callback_context_result)
+            if impact_required and ACTIVE_IMPACT_CONTRACT is None:
+                impact_authorization = _activate_impact_contract(
+                    impact_candidate,
+                    context_anchor=context_anchor,
+                    execution_contract=execution_contract,
+                    task_id=task_id,
+                )
+                impact_validation = impact_authorization
+                if not impact_authorization.get("accepted"):
+                    _clear_impact_attempt()
+                    return {
+                        "status": "failed",
+                        "failure_type": impact_authorization.get("status") or stage10_impact.IMPACT_INVALID,
+                        "terminal_state": impact_authorization.get("status") or stage10_impact.IMPACT_INVALID,
+                        "orchestration_failure": impact_authorization.get("status") or stage10_impact.IMPACT_INVALID,
+                        "summary": "approval-bound Worker is blocked by the pre-mutation impact contract",
+                        "worker_calls": 1 if approval_bound_worker else 0,
+                        "builder_calls": 0,
+                        "memory": memory,
+                        "impact_contract": impact_candidate,
+                        "impact_validation": impact_authorization,
+                        "impact_authorized": False,
+                        "mutation_authorized": False,
+                    }
             bounded_context = worker_context if isinstance(worker_context, str) else str(extra_context or "")
             def callback_tool(name, args):
                 return run_tool(name, args, role="Builder")
@@ -12809,6 +13624,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 )
             except Exception as exc:
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                _clear_impact_attempt()
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -12819,6 +13635,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 }
             if not isinstance(callback_result, dict):
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                _clear_impact_attempt()
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -12830,6 +13647,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             if context_gate is not None and not context_gate.mutation_allowed:
                 context_snapshot = context_gate.snapshot()
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                _clear_impact_attempt()
                 return {
                     "status": "failed",
                     "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
@@ -12847,6 +13665,28 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "context_sufficiency": context_snapshot,
                     "mutation_authorized": False,
                 }
+            if impact_required and not approval_bound_worker:
+                callback_impact = _impact_post_mutation_check(
+                    ACTIVE_IMPACT_CONTRACT,
+                    verification_result=callback_result,
+                    verification_evidence=callback_result.get("tool_evidence", []),
+                    task_id=task_id,
+                )
+                if not callback_impact.get("passed"):
+                    result = copy.deepcopy(callback_result)
+                    result.update({
+                        "status": "failed",
+                        "failure_type": callback_impact.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                        "summary": "pre-mutation impact contract did not match the callback mutation",
+                        "impact_comparison": callback_impact,
+                        "impact_authorized": True,
+                        "mutation_authorized": False,
+                        "worker_calls": 1 if approval_bound_worker else 0,
+                        "builder_calls": 0,
+                        "memory": memory,
+                    })
+                    _clear_impact_attempt()
+                    return result
             result = copy.deepcopy(callback_result)
             result.setdefault("status", "done")
             result.setdefault("summary", "approval-bound Worker callback completed")
@@ -12857,9 +13697,24 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             result["model_calls"] = 0
             result["callback_invoked"] = True
             result["context_sufficiency"] = context_gate.snapshot() if context_gate is not None else None
-            result["mutation_authorized"] = bool(context_gate is not None and context_gate.mutation_allowed)
+            current_impact_authorized = bool(
+                impact_required
+                and ACTIVE_IMPACT_CONTRACT is not None
+                and not stage10_impact.impact_mutation_block_reason(
+                    ACTIVE_IMPACT_CONTRACT,
+                    required=True,
+                    world_model=_world_model_for_workspace(),
+                )
+            ) if impact_required else True
+            result["mutation_authorized"] = bool(
+                context_gate is not None and context_gate.mutation_allowed
+            ) and current_impact_authorized
+            result["impact_contract"] = copy.deepcopy(ACTIVE_IMPACT_CONTRACT) if impact_required else None
+            result["impact_validation"] = copy.deepcopy(impact_validation) if impact_required else None
+            result["impact_authorized"] = current_impact_authorized
             if context_gate is not None:
                 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+            _clear_impact_attempt()
             result["raw_worker_result_ref"] = "worker-result:" + stage6c.canonical_hash(
                 {key: value for key, value in result.items() if key != "raw_worker_result_ref"}
             )[:24]
@@ -12874,6 +13729,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             "return context_status='insufficient' with no more than three narrow requests, each naming one target "
             "and why it is needed. Never request broad repository or module context. Mutation tools are blocked "
             "by the runtime until the gate returns mutation_allowed=true."
+        )
+    if impact_required:
+        system_prompt += (
+            " PRE-MUTATION IMPACT CONTRACT (runtime-enforced): the controller has a bounded expected change surface, "
+            "preservation set, and verification obligations. Do not broaden the mutation surface or treat a worker "
+            "claim as authorization. The runtime will compare actual changed paths and verification evidence after "
+            "the existing verification gate."
         )
     if messages is None:
         messages = [{"role": "system", "content": system_prompt}]
@@ -12991,6 +13853,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     f"{CONTEXT_INSUFFICIENT_FAILURE}: structured Worker output cannot bypass "
                     "the context sufficiency gate"
                 )
+                break
+            if impact_required and ACTIVE_IMPACT_CONTRACT is None:
+                status = "failed"
+                summary = "pre-mutation impact contract was not accepted; structured output cannot authorize mutation"
                 break
             evidence.append({
                 "tool": "structured_response",
@@ -13180,33 +14046,42 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 name, role=role, target=target,
             )
             context_mutation_blocked = bool(context_mutation_issue)
+            impact_mutation_blocked = False
             if context_mutation_issue:
                 result = context_mutation_issue
-            elif name not in offered_names:
-                RUN["invalid_tool_calls"] = RUN.get("invalid_tool_calls", 0) + 1
-                if tool_policy == "coherent_rewrite":
-                    result = f"error: tool {name!r} is unavailable under the active coherent rewrite policy"
-                else:
-                    result = f"error: tool {name!r} is unavailable for role {role}"
             else:
-                issue = tool_argument_error(name, args)
-                if issue:
-                    result = issue
-                elif _browser_tool_request(name, args):
-                    current_syntax_failures = _cycle_syntax_failures_for_target(
-                        verification_cycle, args.get("path")
-                    )
-                    if current_syntax_failures:
-                        result = json.dumps(
-                            _verification_cycle_syntax_failure(
-                                args.get("path"), task_id, current_syntax_failures,
-                            ),
-                            ensure_ascii=False,
+                impact_mutation_issue = _impact_gate_mutation_guard(
+                    name, role=role, target=target,
+                )
+                impact_mutation_blocked = bool(impact_mutation_issue)
+                if impact_mutation_issue:
+                    result = impact_mutation_issue
+                elif name not in offered_names:
+                    impact_mutation_blocked = False
+                    RUN["invalid_tool_calls"] = RUN.get("invalid_tool_calls", 0) + 1
+                    if tool_policy == "coherent_rewrite":
+                        result = f"error: tool {name!r} is unavailable under the active coherent rewrite policy"
+                    else:
+                        result = f"error: tool {name!r} is unavailable for role {role}"
+                else:
+                    issue = tool_argument_error(name, args)
+                    if issue:
+                        result = issue
+                    elif _browser_tool_request(name, args):
+                        current_syntax_failures = _cycle_syntax_failures_for_target(
+                            verification_cycle, args.get("path")
                         )
+                        if current_syntax_failures:
+                            result = json.dumps(
+                                _verification_cycle_syntax_failure(
+                                    args.get("path"), task_id, current_syntax_failures,
+                                ),
+                                ensure_ascii=False,
+                            )
+                        else:
+                            result = run_tool(name, args, role=role)
                     else:
                         result = run_tool(name, args, role=role)
-                else:
-                    result = run_tool(name, args, role=role)
             context_tool_call = name == _CONTEXT_COMPLETION_TOOL and context_gate is not None
             context_tool_result = None
             if context_tool_call:
@@ -13223,11 +14098,19 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 # The first response that asks/checks for context cannot also
                 # spend the newly returned authorization in the same batch.
                 # A fresh Worker response must re-evaluate the stable anchor.
+                if context_gate.mutation_allowed and impact_required and impact_candidate is not None and ACTIVE_IMPACT_CONTRACT is None:
+                    impact_authorization = _activate_impact_contract(
+                        impact_candidate,
+                        context_anchor=context_anchor,
+                        execution_contract=execution_contract,
+                        task_id=task_id,
+                    )
+                    impact_validation = impact_authorization
                 unlocked_offered_tools = list(unlocked_offered_tools)
                 offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
                 offered_names = {item["function"]["name"] for item in offered_tools}
             _update_verification_cycle(verification_cycle, name, args, result)
-            mutation_record = None if context_mutation_blocked else mutation_failure_record(name, target, result, role=role)
+            mutation_record = None if (context_mutation_blocked or impact_mutation_blocked) else mutation_failure_record(name, target, result, role=role)
             if mutation_record is not None:
                 RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
                 record_run_event(
@@ -13856,6 +14739,19 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             )
         execution_budget_exhausted = False
         context_sufficiency_snapshot = context_gate.snapshot()
+    if impact_required and ACTIVE_IMPACT_CONTRACT is None and status not in {"provider_failure", "structured_response_failure"}:
+        status = "failed"
+        summary = "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+    impact_contract_snapshot = copy.deepcopy(ACTIVE_IMPACT_CONTRACT) if impact_required else None
+    impact_authorized = bool(
+        impact_required
+        and ACTIVE_IMPACT_CONTRACT is not None
+        and not stage10_impact.impact_mutation_block_reason(
+            ACTIVE_IMPACT_CONTRACT,
+            required=True,
+            world_model=_world_model_for_workspace(),
+        )
+    )
     if context_gate is not None:
         ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
@@ -13863,15 +14759,23 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                      context_status=(context_sufficiency_snapshot or {}).get("context_status"),
                      context_lifecycle_state=(context_sufficiency_snapshot or {}).get("state"),
                      context_round=(context_sufficiency_snapshot or {}).get("round"),
-                     mutation_authorized=bool((context_sufficiency_snapshot or {}).get("mutation_allowed")))
-    return {
+                     mutation_authorized=bool((context_sufficiency_snapshot or {}).get("mutation_allowed")) and impact_authorized,
+                     impact_authorized=impact_authorized,
+                     impact_contract_id=(impact_contract_snapshot or {}).get("contract_id"),
+                     impact_contract_status=(impact_contract_snapshot or {}).get("status"),
+                     impact_contract_revision=(impact_contract_snapshot or {}).get("revision"))
+    result = {
         "status": status, "summary": compact_text(summary, MAX_NODE_SUMMARY_CHARS), "messages": messages,
         "memory": memory, "tool_evidence": evidence, "provider_error": provider_error,
         "structured_response": structured_response,
         "structured_response_error": structured_response_error,
         "structured_response_active": structured_response_schema is not None,
         "context_sufficiency": context_sufficiency_snapshot,
-        "mutation_authorized": bool((context_sufficiency_snapshot or {}).get("mutation_allowed")),
+        "mutation_authorized": bool((context_sufficiency_snapshot or {}).get("mutation_allowed")) and impact_authorized,
+        "impact_contract": impact_contract_snapshot,
+        "impact_validation": copy.deepcopy(impact_validation) if impact_validation is not None else None,
+        "impact_authorized": impact_authorized,
+        "impact_required": impact_required,
         "worker_lifecycle_entry": "mini.execute_agent_task",
         "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
         "step_budget": int(step_budget), "tool_steps_used": len(evidence),
@@ -13879,6 +14783,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "mutation_failures": mutation_failure_records,
         "failure_type": (
             recovery_terminal_state if recovery_terminal_state else
+            (impact_validation or {}).get("status", stage10_impact.IMPACT_REQUIRED)
+            if impact_required and status == "failed" and not impact_authorized and not provider_error and not structured_response_error and (context_sufficiency_snapshot or {}).get("mutation_allowed", True)
+            else
             CONTEXT_INSUFFICIENT_FAILURE if context_gate is not None and status == "failed" and not provider_error and not structured_response_error and not (context_sufficiency_snapshot or {}).get("mutation_allowed") else
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
@@ -13898,6 +14805,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             recovery_mutation_path_reorientation_events
         ),
     }
+    _clear_impact_attempt()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -17522,8 +18431,12 @@ def repair_task(task, contract, failure_evidence, memory, node_context, parent_g
                 "allowed_inspection_paths",
                 (contract or {}).get("allowed_inspection_paths", []) if isinstance(contract, dict) else [],
             ),
+            "group_goal": task.get("semantic_group_goal"),
+            "group_invariant": task.get("semantic_group_invariant"),
         },
         initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
+        impact_contract=task.get("impact_contract") or task.get("impact_contract_candidate"),
+        impact_contract_required=bool(task.get("impact_contract_required")),
     )
 
 
@@ -17680,6 +18593,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                 "evidence": compact_text(str(exc), 700),
             }],
         }
+    impact_candidate = _prepare_task_impact_contract(task, contract)
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
                                       parent_summary, dependency_summaries, task.get("failure_evidence"),
                                       strategy_context=strategy_context,
@@ -17720,8 +18634,15 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             ),
         },
         initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
+        impact_contract=impact_candidate,
+        impact_contract_required=bool(task.get("impact_contract_required")),
     )
     memory = builder["memory"]
+    if isinstance(builder.get("impact_contract"), dict):
+        task["impact_contract"] = copy.deepcopy(builder.get("impact_contract"))
+        task["impact_contract_status"] = builder.get("impact_contract", {}).get("status", task.get("impact_contract_status"))
+        task["impact_contract_hash"] = builder.get("impact_contract", {}).get("contract_hash", task.get("impact_contract_hash"))
+        task["impact_contract_revision"] = builder.get("impact_contract", {}).get("revision", task.get("impact_contract_revision", 0))
     if _is_execution_budget_exhausted(builder):
         rollback_transaction()
         return _neutral_budget_result(
@@ -17767,12 +18688,39 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}", role="Quality Review",
           task=task["id"], action="deterministic evidence gate")
     if gate["passed"]:
+        impact_contract = _accepted_impact_contract_for_result(task, builder)
+        if task.get("impact_contract_required") and (
+            impact_contract is not None or _impact_result_requires_artifact(builder)
+        ):
+            impact_comparison = _impact_post_mutation_check(
+                impact_contract,
+                verification_result=gate,
+                verification_evidence=merged_verification_evidence(builder, falsifier),
+                task_id=task.get("id", "ROOT"),
+                task=task,
+            )
+            task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+            if not impact_comparison.get("passed"):
+                rollback_transaction()
+                task["impact_contract_status"] = impact_comparison.get("status")
+                return {
+                    "status": "failed",
+                    "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                    "summary": "pre-mutation impact contract did not match the verified mutation",
+                    "memory": memory, "builder": builder, "falsifier": falsifier,
+                    "browser": browser, "gate": gate,
+                    "impact_contract": impact_contract,
+                    "impact_comparison": impact_comparison,
+                    "recovery_required": True,
+                }
         changed = commit_transaction()
         task["changed_files"] = [str(Path(path).relative_to(WORKSPACE)) if Path(path).is_relative_to(WORKSPACE) else str(path)
                                  for path in changed]
         remember_verified_outcome(task, contract, builder["summary"], changed)
         result = {"status": "done", "summary": builder["summary"], "memory": memory, "builder": builder,
-                  "falsifier": falsifier, "browser": browser, "gate": gate, "changed_files": changed}
+                  "falsifier": falsifier, "browser": browser, "gate": gate, "changed_files": changed,
+                  "impact_contract": task.get("impact_contract") or impact_contract,
+                  "impact_comparison": task.get("impact_contract_comparison")}
         attach_verified_manifest(task, result)
         return result
 
@@ -17848,11 +18796,39 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         event(f"[{verify_label}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
               role="Quality Review", task=task["id"], action="fresh post-repair verification")
         if current_gate["passed"]:
+            impact_contract = _accepted_impact_contract_for_result(task, repaired)
+            if task.get("impact_contract_required") and (
+                impact_contract is not None or _impact_result_requires_artifact(repaired)
+            ):
+                impact_comparison = _impact_post_mutation_check(
+                    impact_contract,
+                    verification_result=current_gate,
+                    verification_evidence=merged_verification_evidence(repaired),
+                    task_id=task.get("id", "ROOT"),
+                    task=task,
+                )
+                task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+                if not impact_comparison.get("passed"):
+                    rollback_transaction()
+                    task["impact_contract_status"] = impact_comparison.get("status")
+                    return {
+                        "status": "failed",
+                        "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                        "summary": "pre-mutation impact contract did not match the repaired mutation",
+                        "memory": memory, "builder": repaired, "repairer": repaired,
+                        "browser": current_browser, "gate": current_gate,
+                        "impact_contract": impact_contract,
+                        "impact_comparison": impact_comparison,
+                        "repair_history": repair_history,
+                        "recovery_required": True,
+                    }
             changed = commit_transaction()
             remember_verified_outcome(task, contract, repaired["summary"], changed)
             result = {"status": "done", "summary": repaired["summary"], "memory": memory, "builder": repaired,
                       "falsifier": falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed,
-                      "repair_history": repair_history, "mutation_failures": repair_mutation_failures}
+                      "repair_history": repair_history, "mutation_failures": repair_mutation_failures,
+                      "impact_contract": task.get("impact_contract") or impact_contract,
+                      "impact_comparison": task.get("impact_contract_comparison")}
             attach_verified_manifest(task, result)
             return result
         failure_type = classify_failure(repaired, current_gate, current_browser, None)
@@ -17979,6 +18955,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
                 "evidence": compact_text(str(exc), 700),
             }],
         }
+    impact_candidate = _prepare_task_impact_contract(task, contract)
     node_context = build_node_context(
         task, contract, get_memory_store(), repo_snapshot,
         parent_summary, dependency_summaries, task.get("failure_evidence"),
@@ -18019,8 +18996,15 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             ),
         },
         initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
+        impact_contract=impact_candidate,
+        impact_contract_required=bool(task.get("impact_contract_required")),
     )
     memory = builder.get("memory", memory)
+    if isinstance(builder.get("impact_contract"), dict):
+        task["impact_contract"] = copy.deepcopy(builder.get("impact_contract"))
+        task["impact_contract_status"] = builder.get("impact_contract", {}).get("status", task.get("impact_contract_status"))
+        task["impact_contract_hash"] = builder.get("impact_contract", {}).get("contract_hash", task.get("impact_contract_hash"))
+        task["impact_contract_revision"] = builder.get("impact_contract", {}).get("revision", task.get("impact_contract_revision", 0))
     if _is_execution_budget_exhausted(builder):
         rollback_transaction()
         return _neutral_budget_result(
@@ -18084,6 +19068,31 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     event(f"[VERIFY {task['id']}] {'PASS' if gate['passed'] else 'FAIL'}",
           role="Quality Review", task=task["id"], action="integration task evidence gate")
     if gate["passed"]:
+        impact_contract = _accepted_impact_contract_for_result(task, builder)
+        if task.get("impact_contract_required") and (
+            impact_contract is not None or _impact_result_requires_artifact(builder)
+        ):
+            impact_comparison = _impact_post_mutation_check(
+                impact_contract,
+                verification_result=gate,
+                verification_evidence=merged_verification_evidence(builder, falsifier),
+                task_id=task.get("id", "ROOT"),
+                task=task,
+            )
+            task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+            if not impact_comparison.get("passed"):
+                rollback_transaction()
+                task["impact_contract_status"] = impact_comparison.get("status")
+                return {
+                    "status": "failed",
+                    "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                    "summary": "pre-mutation impact contract did not match the verified integration mutation",
+                    "memory": memory, "builder": builder, "falsifier": falsifier,
+                    "browser": browser, "gate": gate,
+                    "impact_contract": impact_contract,
+                    "impact_comparison": impact_comparison,
+                    "recovery_required": True,
+                }
         return _commit_verified_integration_leaf(
             task, contract, builder, builder.get("summary", "integration concern verified"), memory,
             gate, falsifier, browser, preflight,
@@ -18165,6 +19174,32 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         event(f"[VERIFY {task['id']}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
               role="Quality Review", task=task["id"], action="fresh integration task verification")
         if current_gate["passed"]:
+            impact_contract = _accepted_impact_contract_for_result(task, repaired)
+            if task.get("impact_contract_required") and (
+                impact_contract is not None or _impact_result_requires_artifact(repaired)
+            ):
+                impact_comparison = _impact_post_mutation_check(
+                    impact_contract,
+                    verification_result=current_gate,
+                    verification_evidence=merged_verification_evidence(repaired),
+                    task_id=task.get("id", "ROOT"),
+                    task=task,
+                )
+                task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+                if not impact_comparison.get("passed"):
+                    rollback_transaction()
+                    task["impact_contract_status"] = impact_comparison.get("status")
+                    return {
+                        "status": "failed",
+                        "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                        "summary": "pre-mutation impact contract did not match the repaired integration mutation",
+                        "memory": memory, "builder": repaired, "repairer": repaired,
+                        "browser": current_browser, "gate": current_gate,
+                        "impact_contract": impact_contract,
+                        "impact_comparison": impact_comparison,
+                        "repair_history": repair_history,
+                        "recovery_required": True,
+                    }
             return _commit_verified_integration_leaf(
                 task, contract, repaired, repaired.get("summary", "integration concern verified"), memory,
                 current_gate, None, current_browser, current_preflight,
@@ -19652,6 +20687,9 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
     # There is no second integration orchestrator: after bounded integration
     # children, the existing parent Builder/evidence path verifies the result.
     parent_execution_contract = _current_execution_contract(task)
+    parent_impact_candidate = _prepare_task_impact_contract(
+        task, parent_execution_contract or contract,
+    )
     builder = execute_agent_task(
         task["goal"], memory, role="Builder", task_id=label, extra_context=context,
         worker_context=context,
@@ -19673,9 +20711,22 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         initial_context_evidence=(parent_execution_contract or {}).get(
             "relevant_repository_facts", []
         ),
+        impact_contract=parent_impact_candidate,
+        impact_contract_required=bool(task.get("impact_contract_required")),
     )
     memory = builder.get("memory", memory)
     builder["integration_contract"] = integration_contract
+    if isinstance(builder.get("impact_contract"), dict):
+        task["impact_contract"] = copy.deepcopy(builder["impact_contract"])
+        task["impact_contract_status"] = builder["impact_contract"].get(
+            "status", task.get("impact_contract_status")
+        )
+        task["impact_contract_hash"] = builder["impact_contract"].get(
+            "contract_hash", task.get("impact_contract_hash")
+        )
+        task["impact_contract_revision"] = builder["impact_contract"].get(
+            "revision", task.get("impact_contract_revision", 0)
+        )
     if builder["status"] != "done":
         preflight_after = run_integration_preflight(task, child_info, contract)
         task["integration_preflight"]["after"] = preflight_after
@@ -19721,6 +20772,31 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
     verify_label = "ROOT VERIFIED" if root and gate["passed"] else ("ROOT VERIFY" if root else "VERIFY " + label)
     event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}",
           role="Quality Review", task=label, action="parent evidence gate")
+    if gate["passed"] and task.get("impact_contract_required"):
+        impact_contract = _accepted_impact_contract_for_result(task, builder)
+        if impact_contract is not None or _impact_result_requires_artifact(builder):
+            impact_comparison = _impact_post_mutation_check(
+                impact_contract,
+                verification_result=gate,
+                verification_evidence=merged_verification_evidence(builder, falsifier),
+                task_id=label,
+                task=task,
+            )
+            task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+            if not impact_comparison.get("passed"):
+                _finish_parent_integration(task, passed=False, preflight=preflight_after)
+                rollback_transaction(); RUN["integration_failures"] += 1
+                return {
+                    "status": "failed",
+                    "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                    "summary": "pre-mutation impact contract did not match the parent integration mutation",
+                    "memory": memory, "builder": builder, "falsifier": falsifier,
+                    "browser": browser, "gate": gate, "children": child_info,
+                    "impact_contract": impact_contract,
+                    "impact_comparison": impact_comparison,
+                    "integration_preflight": task["integration_preflight"],
+                    "recovery_required": True,
+                }
     if not gate["passed"]:
         failure_type = "INTEGRATION_FAILURE" if not preflight_after.get("passed") else classify_failure(
             builder, gate, browser, falsifier,
@@ -19799,6 +20875,33 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                   f"{'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
                   role="Quality Review", task=label, action="fresh parent verification")
             if current_gate["passed"]:
+                impact_contract = _accepted_impact_contract_for_result(task, repaired)
+                if task.get("impact_contract_required") and (
+                    impact_contract is not None or _impact_result_requires_artifact(repaired)
+                ):
+                    impact_comparison = _impact_post_mutation_check(
+                        impact_contract,
+                        verification_result=current_gate,
+                        verification_evidence=merged_verification_evidence(repaired),
+                        task_id=label,
+                        task=task,
+                    )
+                    task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+                    if not impact_comparison.get("passed"):
+                        _finish_parent_integration(task, passed=False, preflight=current_preflight)
+                        rollback_transaction(); RUN["integration_failures"] += 1
+                        return {
+                            "status": "failed",
+                            "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                            "summary": "pre-mutation impact contract did not match the repaired parent integration mutation",
+                            "memory": memory, "builder": repaired, "repairer": repaired,
+                            "browser": current_browser, "gate": current_gate,
+                            "children": child_info, "impact_contract": impact_contract,
+                            "impact_comparison": impact_comparison,
+                            "integration_preflight": task["integration_preflight"],
+                            "repair_history": repair_history,
+                            "recovery_required": True,
+                        }
                 _finish_parent_integration(
                     task, passed=True, recovered=integration_recovery_needed, preflight=current_preflight,
                 )
@@ -19808,7 +20911,9 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                         "changed_files": changed, "gate": current_gate, "children": child_info,
                         "integration_preflight": task["integration_preflight"],
                         "integration_milestones": task["integration_preflight"].get("milestones", []),
-                        "integration_outcome": task.get("integration_outcome")}
+                        "integration_outcome": task.get("integration_outcome"),
+                        "impact_contract": task.get("impact_contract") or repaired.get("impact_contract"),
+                        "impact_comparison": task.get("impact_contract_comparison")}
             failure_type = "INTEGRATION_FAILURE" if not current_preflight.get("passed") else classify_failure(
                 repaired, current_gate, current_browser, None,
             )
@@ -19841,7 +20946,9 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
             "gate": gate, "falsifier": falsifier, "browser": browser, "children": child_info,
             "integration_preflight": task["integration_preflight"],
             "integration_milestones": builder.get("integration_milestones", []),
-            "integration_outcome": task.get("integration_outcome")}
+            "integration_outcome": task.get("integration_outcome"),
+            "impact_contract": task.get("impact_contract") or builder.get("impact_contract"),
+            "impact_comparison": task.get("impact_contract_comparison")}
 
 
 def aggregate_execution_contract_children(task, contract, child_results, memory,
@@ -21024,6 +22131,11 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
     task["execution_contract"] = copy.deepcopy(effective)
     task["execution_contract_id"] = effective.get("execution_contract_id")
     task["execution_contract_hash"] = effective.get("contract_hash")
+    # Build the bounded impact contract before the Worker is dispatched.  The
+    # approval-bound executor will accept it inside execute_agent_task, after
+    # the existing context gate has passed, and its pre-commit hook below will
+    # validate the actual mutation before Stage 6C commits the transaction.
+    impact_candidate = _prepare_task_impact_contract(task, effective)
     try:
         _mission, projection = _approval_bound_worker_context(
             task, effective, dependency_summaries,
@@ -21071,7 +22183,7 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
     def dispatch(worker_context=None, execution_contract=None,
                  authorization_check=None, **_ignored):
         selected_contract = execution_contract if isinstance(execution_contract, dict) else effective
-        return execute_agent_task(
+        worker_result = execute_agent_task(
             selected_contract.get("goal") or task.get("goal", "approved responsibility"),
             memory,
             messages=None,
@@ -21098,7 +22210,22 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
                 "allowed_inspection_paths": selected_contract.get("allowed_inspection_paths", []),
             },
             initial_context_evidence=selected_contract.get("relevant_repository_facts", []),
+            impact_contract=task.get("impact_contract_candidate") or impact_candidate,
+            impact_contract_required=bool(task.get("impact_contract_required", True)),
         )
+        if isinstance(worker_result, dict):
+            if isinstance(worker_result.get("impact_contract"), dict):
+                task["impact_contract"] = copy.deepcopy(worker_result["impact_contract"])
+                task["impact_contract_status"] = worker_result["impact_contract"].get(
+                    "status", task.get("impact_contract_status")
+                )
+                task["impact_contract_hash"] = worker_result["impact_contract"].get(
+                    "contract_hash", task.get("impact_contract_hash")
+                )
+                task["impact_contract_revision"] = worker_result["impact_contract"].get(
+                    "revision", task.get("impact_contract_revision", 0)
+                )
+        return worker_result
 
     def on_start(start_receipt):
         RUN["execution_start_receipt"] = copy.deepcopy(start_receipt)
@@ -21121,6 +22248,21 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
         ) + 1
         RUN["approval_bound_last_authorization_audit"] = copy.deepcopy(audit)
 
+    def impact_pre_commit_validator(mutation_audit, verification):
+        impact_contract = task.get("impact_contract") or task.get("impact_contract_candidate")
+        verification = verification if isinstance(verification, dict) else {}
+        evidence = list(verification.get("verification_evidence", []) or [])
+        evidence.extend(list(verification.get("tool_evidence", []) or []))
+        return _impact_post_mutation_check(
+            impact_contract,
+            verification_result=verification,
+            verification_evidence=evidence,
+            changed_paths=(mutation_audit or {}).get("changed_paths", [])
+            if isinstance(mutation_audit, dict) else [],
+            task_id=task.get("id", "ROOT"),
+            task=task,
+        )
+
     result = stage6cb.execute_approval_bound_worker(
         task=task,
         contract=effective,
@@ -21142,6 +22284,7 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
         project_id=str(RUN.get("project_id") or "default"),
         transaction_commit=commit_transaction,
         transaction_close=_close_approval_bound_transaction,
+        pre_commit_validator=impact_pre_commit_validator,
         on_start_receipt=on_start,
         on_authorization_block=on_authorization_block,
     )
@@ -21612,6 +22755,12 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
                 ),
                 "mutation_audit": copy.deepcopy(
                     item.get("result", {}).get("mutation_audit")
+                ),
+                "impact_contract": copy.deepcopy(
+                    item.get("result", {}).get("impact_contract")
+                ),
+                "impact_comparison": copy.deepcopy(
+                    item.get("result", {}).get("impact_comparison")
                 ),
                 "approved_verification_contracts": copy.deepcopy(
                     item.get("result", {}).get("approved_verification_contracts", [])

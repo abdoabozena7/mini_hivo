@@ -1327,6 +1327,7 @@ def execute_approval_bound_worker(
     project_id: str | None = None,
     transaction_commit: Callable[[], Any] | None = None,
     transaction_close: Callable[[], Any] | None = None,
+    pre_commit_validator: Callable[[dict[str, Any], dict[str, Any]], Any] | None = None,
     on_start_receipt: Callable[[dict[str, Any]], Any] | None = None,
     on_authorization_block: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
@@ -1583,6 +1584,46 @@ def execute_approval_bound_worker(
             "worker_calls": 1, "model_calls": 0,
             "unauthorized_mutations": 0, "scope_violations": 0, "dnt_violations": 0,
         }
+    if callable(pre_commit_validator):
+        try:
+            impact_check = pre_commit_validator(mutation_audit, verification)
+        except Exception as exc:
+            impact_check = {
+                "passed": False,
+                "status": "PRE_COMMIT_IMPACT_VALIDATOR_ERROR",
+                "failure_type": "PRE_COMMIT_IMPACT_VALIDATOR_ERROR",
+                "reason": str(exc),
+            }
+        if not isinstance(impact_check, dict):
+            impact_check = {
+                "passed": False,
+                "status": "PRE_COMMIT_IMPACT_VALIDATOR_INVALID_RESULT",
+                "failure_type": "PRE_COMMIT_IMPACT_VALIDATOR_INVALID_RESULT",
+                "reason": "pre-commit impact validator must return a structured result",
+            }
+        if not impact_check.get("passed"):
+            if callable(transaction_close):
+                transaction_close()
+            return {
+                "status": "failed",
+                "terminal_state": impact_check.get("failure_type") or impact_check.get("status") or VERIFICATION_FAILED,
+                "failure_type": impact_check.get("failure_type") or impact_check.get("status") or VERIFICATION_FAILED,
+                "orchestration_failure": impact_check.get("failure_type") or impact_check.get("status") or VERIFICATION_FAILED,
+                "summary": "pre-mutation impact contract did not match the approved mutation",
+                "execution_start_receipt": start_receipt,
+                "worker_result": worker_result,
+                "execution_result": execution_result,
+                "worker_execution": execution_result,
+                "mutation_audit": mutation_audit,
+                "verification": verification,
+                "verification_applicability": verification.get("verification_applicability"),
+                "verification_input": verification.get("verification_input"),
+                "verification_aggregation": verification.get("verification_aggregation"),
+                "verification_evidence": verification.get("verification_evidence", []),
+                "impact_comparison": _copy(impact_check),
+                "changed_files": list(mutation_audit.get("changed_paths", []) or []),
+                "worker_calls": 1, "model_calls": 0,
+            }
     if callable(transaction_commit):
         committed = transaction_commit()
     else:
@@ -1638,6 +1679,7 @@ def execute_approval_bound_worker(
         "execution_obligation_evidence": verification.get("execution_obligation_evidence", []),
         "verification_evidence": verification.get("verification_evidence", []),
         "tool_evidence": verification.get("tool_evidence", []),
+        "impact_comparison": _copy(impact_check) if callable(pre_commit_validator) else None,
         # The mutation audit is the stable public path representation.  The
         # existing transaction helper may return absolute capture paths; keep
         # those implementation details out of Stage 5 provenance.
