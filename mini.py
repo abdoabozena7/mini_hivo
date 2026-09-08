@@ -52,6 +52,7 @@ from hivo import core_orchestrator as core_integration
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import context_sufficiency as stage7_context
+from hivo import semantic_evidence as stage7_semantic
 from hivo import execution_invariants as stage6c_invariants
 from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
@@ -293,6 +294,11 @@ MAX_CONTEXT_COMPLETION_ROUNDS = stage7_context.MAX_CONTEXT_COMPLETION_ROUNDS
 MAX_EVIDENCE_REQUESTS_PER_ROUND = stage7_context.MAX_EVIDENCE_REQUESTS_PER_ROUND
 MAX_CONTEXT_EVIDENCE_ITEMS = stage7_context.MAX_CONTEXT_EVIDENCE_ITEMS
 MAX_CONTEXT_EVIDENCE_CHARS = stage7_context.MAX_CONTEXT_EVIDENCE_CHARS
+SemanticEvidenceResolver = stage7_semantic.SemanticEvidenceResolver
+resolve_targeted_semantic_evidence = stage7_semantic.resolve_targeted_evidence
+MAX_RELATIONSHIP_HOPS = stage7_semantic.MAX_RELATIONSHIP_HOPS
+MAX_SEMANTIC_EVIDENCE_CANDIDATES = stage7_semantic.MAX_CANDIDATES_PER_REQUEST
+MAX_SEMANTIC_EVIDENCE_ITEMS = stage7_semantic.MAX_RESOLVED_EVIDENCE_ITEMS
 RecoveryFailureEnvelope = stage6d.RecoveryFailureEnvelope
 RECOVERY_FAILURE_EVIDENCE = stage6d.RECOVERY_FAILURE_EVIDENCE
 VERIFICATION_FAILURE = stage6d.VERIFICATION_FAILURE
@@ -1863,11 +1869,34 @@ def _record_context_sufficiency_result(task_id, role, result, *, initial=False):
             setattr(gate, "_mini_last_logged_round", round_number)
     requests = result.get("needed_evidence", []) if isinstance(result.get("needed_evidence"), list) else []
     returned = result.get("evidence", []) if isinstance(result.get("evidence"), list) else []
+    semantic_resolutions = [
+        item for item in result.get("semantic_resolutions", []) or []
+        if isinstance(item, dict)
+    ]
     RUN["context_evidence_requests"] = RUN.get("context_evidence_requests", 0) + len(requests)
     RUN["context_evidence_items"] = RUN.get("context_evidence_items", 0) + len(returned)
+    RUN["semantic_evidence_items"] = RUN.get("semantic_evidence_items", 0) + len(returned)
     RUN["context_contradictions"] = max(
         RUN.get("context_contradictions", 0),
         len(result.get("contradictions", []) or []),
+    )
+    for resolution in semantic_resolutions:
+        status = str(resolution.get("resolution_status") or "")
+        if status in {"resolved", "partial", "unresolved", "conflicting"}:
+            counter_key = (
+                "semantic_evidence_conflicts"
+                if status == "conflicting"
+                else "semantic_evidence_" + status
+            )
+            RUN[counter_key] = RUN.get(counter_key, 0) + 1
+        RUN["semantic_evidence_candidates"] = RUN.get("semantic_evidence_candidates", 0) + int(
+            resolution.get("candidates_considered", 0) or 0
+        )
+        RUN["semantic_evidence_hops"] = RUN.get("semantic_evidence_hops", 0) + int(
+            resolution.get("relationship_hops", 0) or 0
+        )
+    RUN["semantic_evidence_requests"] = RUN.get("semantic_evidence_requests", 0) + len(
+        semantic_resolutions
     )
     if result.get("mutation_allowed") and gate is not None and not getattr(gate, "_mini_authorization_logged", False):
         RUN["context_mutation_authorizations"] = RUN.get("context_mutation_authorizations", 0) + 1
@@ -1889,6 +1918,17 @@ def _record_context_sufficiency_result(task_id, role, result, *, initial=False):
         initial_context_chars=result.get("initial_context_chars"),
         anchor_hash=result.get("anchor_hash"),
         contradictions=len(result.get("contradictions", []) or []),
+        semantic_resolution_statuses=sorted({
+            str(item.get("resolution_status"))
+            for item in semantic_resolutions
+            if item.get("resolution_status")
+        }),
+        semantic_request_kinds=sorted({
+            str(item.get("request_kind"))
+            for item in semantic_resolutions
+            if item.get("request_kind")
+        }),
+        semantic_resolution_count=len(semantic_resolutions),
         mutation_authorized=bool(result.get("mutation_allowed")),
         final=bool(result.get("final")),
         failure_code=result.get("failure_code"),
@@ -1900,6 +1940,19 @@ def _context_evidence_feedback(result):
     """Return a small re-evaluation packet containing only new evidence."""
     value = result if isinstance(result, dict) else {}
     lines = [stage7_context.feedback_for_result(value)]
+    for resolution in list(value.get("semantic_resolutions", []) or [])[:stage7_context.MAX_CONTEXT_SEMANTIC_RESOLUTIONS]:
+        if not isinstance(resolution, dict):
+            continue
+        facts = "; ".join(
+            compact_text(item, stage7_context.MAX_CONTEXT_EVIDENCE_FACT_CHARS)
+            for item in list(resolution.get("facts_established", []) or [])[:2]
+        )
+        lines.append(
+            f"SEMANTIC RESOLUTION [{resolution.get('request_kind', 'unknown')}] "
+            f"{resolution.get('target', 'unknown')}: "
+            f"{resolution.get('resolution_status', 'unknown')}"
+            + (f" | facts: {facts}" if facts else "")
+        )
     for item in list(value.get("evidence", []) or [])[:MAX_EVIDENCE_REQUESTS_PER_ROUND * 2]:
         if not isinstance(item, dict):
             continue
@@ -2007,55 +2060,42 @@ def _context_candidate_files(request, context):
 
 
 def _provide_targeted_context_evidence(request, context):
-    """Read narrow excerpts for one validated semantic request."""
+    """Resolve one validated request into a bounded semantic evidence bundle."""
     request = request if isinstance(request, dict) else {}
     checked = stage7_context.validate_evidence_request(request)
     if not checked.get("valid") or not checked.get("request"):
-        return []
-    request = checked["request"]
-    target = str(request.get("target", ""))
-    tokens = [item for item in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{2,}", target) if len(item) >= 3]
-    candidates = _context_candidate_files(request, context)
-    results = []
-    for path in candidates:
-        try:
-            source = path.read_text(encoding="utf-8", errors="replace")[:_CONTEXT_PROVIDER_FILE_CHARS]
-        except OSError:
-            continue
-        lines = source.splitlines()
-        matching = []
-        for number, line in enumerate(lines, 1):
-            if target and target.casefold() in line.casefold():
-                matching.append(number)
-            elif tokens and any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", line) for token in tokens):
-                matching.append(number)
-        if not matching and path.name.casefold() in target.casefold():
-            matching = [1]
-        for line_number in matching[:_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST]:
-            start = max(1, line_number - 2)
-            end = min(len(lines), line_number + 2)
-            excerpt = "\n".join(f"{idx}: {lines[idx - 1]}" for idx in range(start, end + 1))
-            excerpt = compact_text(excerpt, _CONTEXT_PROVIDER_EXCERPT_CHARS)
-            try:
-                identity = path.relative_to(Path(WORKSPACE).resolve()).as_posix() + f":{line_number}"
-            except (OSError, RuntimeError, ValueError):
-                identity = str(path)
-            kind = request.get("kind")
-            authoritative = kind in {"contract", "authoritative_contract", "interface", "schema", "tests"}
-            results.append({
-                "kind": kind,
-                "target": target,
-                "source_identity": identity,
-                "symbol": target,
-                "excerpt": excerpt,
-                "purpose": request.get("why"),
-                "provenance": "TARGETED_INSPECTION_SURFACE",
-                "authoritative": authoritative,
-                "resolves_conflict": kind == "authoritative_contract",
-            })
-        if len(results) >= _CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST:
-            break
-    return results[:_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST]
+        return {
+            "request_kind": str(request.get("kind", "")),
+            "target": str(request.get("target", "")),
+            "resolution_status": "unresolved",
+            "facts_established": [],
+            "evidence": [],
+            "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
+        }
+    if WORKSPACE is None:
+        return {
+            "request_kind": checked["request"].get("kind", ""),
+            "target": checked["request"].get("target", ""),
+            "resolution_status": "unresolved",
+            "facts_established": [],
+            "evidence": [],
+            "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
+        }
+    repository_map = RUN.get("repository_map") if isinstance(RUN, dict) else None
+    return stage7_semantic.resolve_targeted_evidence(
+        checked["request"],
+        workspace=WORKSPACE,
+        allowed_inspection_paths=(context or {}).get("allowed_inspection_paths", []),
+        repository_map=repository_map,
+        context=context,
+        max_relationship_hops=stage7_semantic.MAX_RELATIONSHIP_HOPS,
+        max_candidates=stage7_semantic.MAX_CANDIDATES_PER_REQUEST,
+        # Retain the previous inspection-surface file bound and the previous
+        # two-excerpt provider slot; semantic selection decides which two are
+        # authoritative instead of lexical order deciding it.
+        max_files_scanned=_CONTEXT_PROVIDER_MAX_FILES,
+        max_evidence_items=_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST,
+    )
 
 
 def _normalized_workspace_relative_path(raw_path):
@@ -2790,6 +2830,14 @@ def new_metrics(mode):
         "context_sufficiency_blocks": 0,
         "context_mutation_authorizations": 0,
         "context_contradictions": 0,
+        "semantic_evidence_requests": 0,
+        "semantic_evidence_resolved": 0,
+        "semantic_evidence_partial": 0,
+        "semantic_evidence_unresolved": 0,
+        "semantic_evidence_conflicts": 0,
+        "semantic_evidence_candidates": 0,
+        "semantic_evidence_items": 0,
+        "semantic_evidence_hops": 0,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
