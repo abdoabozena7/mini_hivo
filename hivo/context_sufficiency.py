@@ -41,6 +41,12 @@ MAX_CONTEXT_EVIDENCE_CHARS = 4200
 MAX_CONTEXT_EVIDENCE_ITEM_CHARS = 700
 MAX_CONTEXT_EVIDENCE_SOURCE_CHARS = 240
 MAX_CONTEXT_EVIDENCE_PURPOSE_CHARS = 320
+MAX_CONTEXT_EVIDENCE_FACTS = 8
+MAX_CONTEXT_EVIDENCE_FACT_CHARS = 320
+# There can be at most three requests per round across three rounds; keep one
+# compact coverage record for every possible request without exceeding the
+# existing twelve-item working-evidence ceiling.
+MAX_CONTEXT_SEMANTIC_RESOLUTIONS = 12
 MAX_CONTEXT_REASON_CHARS = 420
 MAX_CONTEXT_ANCHOR_LIST_ITEMS = 8
 MAX_CONTEXT_ANCHOR_ITEM_CHARS = 360
@@ -59,6 +65,14 @@ EVIDENCE_REQUEST_KINDS = frozenset({
     "sibling_implementation",
     "downstream_impact",
     "return_expectation",
+    "caller_expectation",
+    "callee_dependency",
+    "test_expectation",
+    "type_or_schema",
+    "state_invariant",
+    "symbol_definition",
+    "export_or_public_surface",
+    "configuration_dependency",
 })
 _VAGUE_WORDS = frozenset({
     "more_context",
@@ -94,6 +108,17 @@ _AUTHORITATIVE_KINDS = frozenset({
     "contract", "authoritative_contract", "interface", "definition", "schema", "tests",
     "callers", "consumers", "return_expectation",
 })
+_SEMANTIC_REQUEST_KEY_ALIASES = {
+    "authoritative_contract": "contract",
+    "interface": "contract",
+    "consumers": "caller_expectation",
+    "callers": "caller_expectation",
+    "return_expectation": "caller_expectation",
+    "tests": "test_expectation",
+    "schema": "type_or_schema",
+    "invariant": "state_invariant",
+    "definition": "symbol_definition",
+}
 
 
 class ContextSufficiencyError(ValueError):
@@ -135,6 +160,39 @@ def _unique(values: Iterable[Any], *, limit: int, text_limit: int) -> list[str]:
     return result
 
 
+def _bounded_facts(value: Any) -> list[str]:
+    return _unique(
+        value,
+        limit=MAX_CONTEXT_EVIDENCE_FACTS,
+        text_limit=MAX_CONTEXT_EVIDENCE_FACT_CHARS,
+    )
+
+
+def _resolution_status(value: Any) -> str:
+    status = str(value or "").strip().casefold()
+    return status if status in {"resolved", "partial", "unresolved", "conflicting"} else ""
+
+
+def _merge_resolution_status(current: Any, incoming: Any) -> str:
+    """Merge coverage conservatively; any unresolved input stays pending."""
+    statuses = {_resolution_status(current), _resolution_status(incoming)}
+    statuses.discard("")
+    if "conflicting" in statuses:
+        return "conflicting"
+    if "unresolved" in statuses:
+        return "unresolved"
+    if "partial" in statuses:
+        return "partial"
+    return "resolved" if statuses else ""
+
+
+def _integer(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def canonical_hash(value: Any) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -142,6 +200,11 @@ def canonical_hash(value: Any) -> str:
 
 def _normalize_kind(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().casefold()).strip("_")
+
+
+def _semantic_request_key_kind(value: Any) -> str:
+    kind = _normalize_kind(value)
+    return _SEMANTIC_REQUEST_KEY_ALIASES.get(kind, kind)
 
 
 def _normalize_anchor(anchor: Mapping[str, Any] | None, *, local_task: Any = None) -> dict[str, Any]:
@@ -296,6 +359,14 @@ def _normalize_initial_evidence(item: Any, index: int) -> dict[str, Any] | None:
         "claim_value": _text(item.get("claim_value"), MAX_CONTEXT_EVIDENCE_ITEM_CHARS),
         "authoritative": bool(item.get("authoritative")),
         "resolves_conflict": bool(item.get("resolves_conflict")),
+        "semantic_request_kind": _text(item.get("semantic_request_kind"), 80),
+        "resolution_status": _resolution_status(item.get("resolution_status")),
+        "facts_established": _bounded_facts(item.get("facts_established")),
+        "authority_tier": _text(item.get("authority_tier"), 40),
+        "authority_score": _integer(item.get("authority_score", 0)),
+        "relationship": _text(item.get("relationship"), 120),
+        "source_kind": _text(item.get("source_kind"), 120),
+        "role": _text(item.get("role"), 120),
         "_request_key": "initial:" + evidence_id,
         "_origin": "initial",
     }
@@ -328,8 +399,13 @@ def _normalize_provider_evidence(item: Any, request: Mapping[str, str], index: i
         "claim_value": _text(value.get("claim_value"), MAX_CONTEXT_EVIDENCE_ITEM_CHARS),
     }
     evidence_id = evidence_id or "COMPLETION-" + canonical_hash(identity)[:16].upper()
+    slot_kind = _normalize_kind(
+        value.get("semantic_request_kind") or value.get("kind") or request.get("kind")
+    )
+    if slot_kind == "authoritative_contract":
+        slot_kind = "contract"
     request_key = (
-        f"{request.get('kind', '')}:{request.get('target', '')}:{source}:{symbol}:"
+        f"{slot_kind}:{target}:{source}:{symbol}:"
         f"{_text(value.get('claim_key'), 180)}"
     )
     if not source and not symbol and not value.get("claim_key"):
@@ -348,6 +424,14 @@ def _normalize_provider_evidence(item: Any, request: Mapping[str, str], index: i
         "authoritative": bool(value.get("authoritative")),
         "resolves_conflict": bool(value.get("resolves_conflict")),
         "contradiction": _text(value.get("contradiction") or value.get("conflict"), MAX_CONTEXT_EVIDENCE_PURPOSE_CHARS),
+        "semantic_request_kind": _text(value.get("semantic_request_kind"), 80),
+        "resolution_status": _resolution_status(value.get("resolution_status")),
+        "facts_established": _bounded_facts(value.get("facts_established")),
+        "authority_tier": _text(value.get("authority_tier"), 40),
+        "authority_score": _integer(value.get("authority_score", 0)),
+        "relationship": _text(value.get("relationship"), 120),
+        "source_kind": _text(value.get("source_kind"), 120),
+        "role": _text(value.get("role"), 120),
         "_request_key": request_key,
         "_origin": "completion",
     }
@@ -359,7 +443,9 @@ def _public_evidence(item: Mapping[str, Any]) -> dict[str, Any]:
         for key in (
             "evidence_id", "kind", "target", "source_identity", "symbol", "excerpt",
             "purpose", "provenance", "claim_key", "claim_value", "authoritative",
-            "resolves_conflict", "contradiction",
+            "resolves_conflict", "contradiction", "semantic_request_kind",
+            "resolution_status", "facts_established", "authority_tier",
+            "authority_score", "relationship", "source_kind", "role",
         )
         if item.get(key) not in (None, "", False)
     }
@@ -378,6 +464,33 @@ def _provider_items(result: Any) -> list[Any]:
     if isinstance(result, list):
         return result
     return []
+
+
+def _provider_resolution(result: Any, request: Mapping[str, str], evidence: list[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """Project resolver coverage metadata without copying source bodies."""
+    if not isinstance(result, Mapping):
+        return None
+    source = result.get("semantic_resolution") if isinstance(result.get("semantic_resolution"), Mapping) else result
+    status = _resolution_status(source.get("resolution_status"))
+    if not status:
+        return None
+    facts = _bounded_facts(source.get("facts_established"))
+    return {
+        "request_kind": _text(source.get("request_kind") or request.get("kind"), 80),
+        "gate_request_kind": _text(source.get("gate_request_kind") or request.get("kind"), 80),
+        "target": _text(source.get("target") or request.get("target"), 180),
+        "resolution_status": status,
+        "facts_established": facts,
+        "conflicts": _copy(source.get("conflicts", []))[:4] if isinstance(source.get("conflicts"), list) else [],
+        "evidence_ids": [
+            _text(item.get("evidence_id"), 120)
+            for item in evidence
+            if isinstance(item, Mapping) and item.get("evidence_id")
+        ][:MAX_CONTEXT_EVIDENCE_ITEMS],
+        "candidates_considered": _integer(source.get("candidates_considered", 0)),
+        "candidate_files_considered": _integer(source.get("candidate_files_considered", 0)),
+        "relationship_hops": _integer(source.get("relationship_hops", 0)),
+    }
 
 
 def _invoke_provider(provider: Callable[..., Any] | None, request: Mapping[str, str], context: Mapping[str, Any]) -> Any:
@@ -431,10 +544,63 @@ class ContextSufficiencyGate:
         self._anchor = _normalize_anchor(anchor)
         self._anchor_hash = _anchor_identity(self._anchor)
         self._evidence: list[dict[str, Any]] = []
+        # The provider may establish semantic coverage independently of the
+        # Worker wording. Keep one bounded record per request so a partial or
+        # conflicting resolver result cannot be promoted by a later
+        # context_status=sufficient claim.
+        self._semantic_resolutions: dict[str, dict[str, Any]] = {}
         for index, item in enumerate(list(initial_evidence or []), 1):
             normalized = _normalize_initial_evidence(item, index)
             if normalized is not None:
                 self._evidence.append(normalized)
+                initial_status = normalized.get("resolution_status")
+                if initial_status:
+                    semantic_kind = _semantic_request_key_kind(
+                        normalized.get("semantic_request_kind")
+                        or normalized.get("kind")
+                        or "initial"
+                    )
+                    initial_key = f"{semantic_kind}:{normalized.get('target', '')}".casefold()
+                    existing = self._semantic_resolutions.get(initial_key)
+                    if existing is None:
+                        self._semantic_resolutions[initial_key] = {
+                            "request_key": initial_key,
+                            "request_kind": normalized.get("semantic_request_kind") or normalized.get("kind"),
+                            "gate_request_kind": normalized.get("kind"),
+                            "target": normalized.get("target"),
+                            "resolution_status": initial_status,
+                            "facts_established": list(normalized.get("facts_established", []) or []),
+                            "conflicts": [],
+                            "evidence_ids": [normalized.get("evidence_id")],
+                            "candidates_considered": 0,
+                            "candidate_files_considered": 0,
+                            "relationship_hops": 0,
+                        }
+                    else:
+                        # Multiple initial excerpts for one semantic slot must
+                        # not let a later optimistic status erase an earlier
+                        # unresolved or conflicting status.
+                        existing["resolution_status"] = _merge_resolution_status(
+                            existing.get("resolution_status"), initial_status,
+                        )
+                        existing["facts_established"] = _unique(
+                            [
+                                *(existing.get("facts_established", []) or []),
+                                *(normalized.get("facts_established", []) or []),
+                            ],
+                            limit=MAX_CONTEXT_EVIDENCE_FACTS,
+                            text_limit=MAX_CONTEXT_EVIDENCE_FACT_CHARS,
+                        )
+                        existing["evidence_ids"] = _unique(
+                            [
+                                *(existing.get("evidence_ids", []) or []),
+                                normalized.get("evidence_id"),
+                            ],
+                            limit=MAX_CONTEXT_EVIDENCE_ITEMS,
+                            text_limit=120,
+                        )
+        while len(self._semantic_resolutions) > MAX_CONTEXT_SEMANTIC_RESOLUTIONS:
+            self._semantic_resolutions.pop(next(iter(self._semantic_resolutions)))
         self._dropped_evidence = 0
         self._round = 0
         self._request_count = 0
@@ -571,13 +737,75 @@ class ContextSufficiencyGate:
                 "max_requests_per_round": self.max_requests_per_round,
                 "max_evidence_items": self.max_evidence_items,
                 "max_evidence_chars": self.max_evidence_chars,
+                "max_semantic_resolutions": MAX_CONTEXT_SEMANTIC_RESOLUTIONS,
             },
         }
+
+    def _public_semantic_resolutions(self) -> list[dict[str, Any]]:
+        return [_copy(item) for item in list(self._semantic_resolutions.values())[-MAX_CONTEXT_SEMANTIC_RESOLUTIONS:]]
+
+    def _pending_semantic_resolutions(self) -> list[dict[str, Any]]:
+        return [
+            item for item in self._semantic_resolutions.values()
+            if item.get("resolution_status") in {"partial", "unresolved", "conflicting"}
+        ]
+
+    def _semantic_followup_requests(self) -> list[dict[str, str]]:
+        requests: list[dict[str, str]] = []
+        for resolution in self._pending_semantic_resolutions()[: self.max_requests_per_round]:
+            status = str(resolution.get("resolution_status") or "unresolved")
+            original = _normalize_kind(
+                resolution.get("gate_request_kind") or resolution.get("request_kind")
+            )
+            if status == "conflicting" or original in {
+                "contract", "authoritative_contract", "interface", "definition",
+                "schema", "type_or_schema",
+            }:
+                kind = "authoritative_contract"
+            elif original in {"tests", "test_expectation"}:
+                kind = "tests"
+            elif original in {"callers", "consumers", "caller_expectation", "return_expectation"}:
+                kind = "callers"
+            elif original:
+                kind = original
+            else:
+                kind = "authoritative_contract"
+            semantic_kind = _text(
+                resolution.get("request_kind") or resolution.get("gate_request_kind") or kind,
+                80,
+            )
+            target = _text(resolution.get("target"), 180)
+            requests.append({
+                "kind": kind,
+                "target": target,
+                "why": _text(
+                    f"Need authoritative {semantic_kind} evidence for {target}; "
+                    f"the semantic resolver marked the prior bundle {status}. "
+                    "Do not infer or reconcile the missing fact before mutation.",
+                    MAX_CONTEXT_EVIDENCE_PURPOSE_CHARS,
+                ),
+            })
+        return requests
 
     def _authoritative_conflict_requests(self) -> list[dict[str, str]]:
         requests = []
         for conflict in self._contradictions[: self.max_requests_per_round]:
-            target = _text(conflict.get("claim_key"), 180) or "the conflicting semantic claim"
+            target = ""
+            evidence_ids = set(conflict.get("evidence_ids", []) or [])
+            if evidence_ids:
+                target = next(
+                    (
+                        _text(item.get("symbol") or item.get("target"), 180)
+                        for item in self._evidence
+                        if item.get("evidence_id") in evidence_ids
+                        and (item.get("symbol") or item.get("target"))
+                    ),
+                    "",
+                )
+            if not target:
+                claim_key = _text(conflict.get("claim_key"), 180)
+                target = re.sub(r"\.(?:return_expectation|return_shape)$", "", claim_key)
+            target = target or "the conflicting semantic claim"
             requests.append({
                 "kind": "authoritative_contract",
                 "target": target,
@@ -633,6 +861,7 @@ class ContextSufficiencyGate:
             "working_evidence_limit": self.max_evidence_chars,
             "evidence_items_dropped": self._dropped_evidence,
             "contradictions": _copy(self._contradictions),
+            "semantic_resolutions": self._public_semantic_resolutions(),
             "errors": [_text(item, MAX_CONTEXT_REASON_CHARS) for item in errors][:12],
             "failure_code": self._failure_code,
             "final": bool(final),
@@ -666,6 +895,36 @@ class ContextSufficiencyGate:
                 normalized = _normalize_provider_evidence(item, request, index)
                 if normalized is not None:
                     items.append(normalized)
+            resolution = _provider_resolution(raw, request, items)
+            if resolution is None and raw is None:
+                # A provider failure/empty null response is not evidence of
+                # sufficiency. Keep the same bounded semantic record used by
+                # the resolver so a Worker cannot promote an unavailable
+                # completion by claiming it is sufficient.
+                resolution = {
+                    "request_kind": request.get("kind", ""),
+                    "gate_request_kind": request.get("kind", ""),
+                    "target": request.get("target", ""),
+                    "resolution_status": "unresolved",
+                    "facts_established": [],
+                    "conflicts": [],
+                    "evidence_ids": [],
+                    "candidates_considered": 0,
+                    "candidate_files_considered": 0,
+                    "relationship_hops": 0,
+                }
+            if resolution is not None:
+                resolution_kind = _semantic_request_key_kind(
+                    resolution.get("request_kind")
+                    or resolution.get("gate_request_kind")
+                    or request.get("kind")
+                )
+                request_key = f"{resolution_kind}:{resolution.get('target', '')}".casefold()
+                resolution["request_key"] = request_key
+                self._semantic_resolutions.pop(request_key, None)
+                self._semantic_resolutions[request_key] = resolution
+                while len(self._semantic_resolutions) > MAX_CONTEXT_SEMANTIC_RESOLUTIONS:
+                    self._semantic_resolutions.pop(next(iter(self._semantic_resolutions)))
             if not items and raw is None and not callable(self.provider):
                 provider_errors.append(
                     f"{request['kind']}:{request['target']}: {CONTEXT_EVIDENCE_PROVIDER_UNAVAILABLE}"
@@ -679,6 +938,8 @@ class ContextSufficiencyGate:
                 "why": request["why"],
                 "evidence_ids": [item.get("evidence_id") for item in items],
                 "evidence_count": len(items),
+                "resolution_status": resolution.get("resolution_status") if resolution else None,
+                "resolution_facts_count": len(resolution.get("facts_established", [])) if resolution else 0,
             })
         self._trim_evidence()
         self._refresh_contradictions()
@@ -731,6 +992,23 @@ class ContextSufficiencyGate:
                     "requesting authoritative evidence."
                 )
                 return result
+            pending_semantic = self._pending_semantic_resolutions()
+            if pending_semantic:
+                requests = self._semantic_followup_requests()
+                if not requests:
+                    return self._failure(
+                        reason=(
+                            "semantic evidence remains partial or conflicting and no "
+                            "bounded authoritative follow-up can resolve it"
+                        ),
+                    )
+                result = self._complete_round(requests)
+                result["reason"] = (
+                    "Context cannot be marked sufficient while semantic evidence is "
+                    "partial, unresolved, or conflicting; requesting a targeted "
+                    "authoritative completion."
+                )
+                return result
             self._context_status = CONTEXT_STATUS_SUFFICIENT
             self._state = MUTATION_ALLOWED
             self._mutation_allowed = True
@@ -774,6 +1052,7 @@ class ContextSufficiencyGate:
             "working_evidence_limit": self.max_evidence_chars,
             "evidence_items_dropped": self._dropped_evidence,
             "contradictions": _copy(self._contradictions),
+            "semantic_resolutions": self._public_semantic_resolutions(),
             "history": _copy(self._history[-self.max_rounds - 1:]),
             "failure_code": self._failure_code,
         }
@@ -808,10 +1087,21 @@ def feedback_for_result(result: Mapping[str, Any] | None) -> str:
     if status == CONTEXT_STATUS_INSUFFICIENT:
         requests = value.get("needed_evidence", []) or []
         evidence = value.get("evidence", []) or []
+        semantic = value.get("semantic_resolutions", []) or []
+        pending = [
+            item for item in semantic
+            if isinstance(item, Mapping)
+            and item.get("resolution_status") in {"partial", "unresolved", "conflicting"}
+        ]
+        semantic_note = (
+            f" semantic_pending={len(pending)}."
+            if semantic else ""
+        )
         return _text(
             "CONTEXT_INSUFFICIENT: targeted evidence was requested. Re-evaluate sufficiency now; "
             "do not mutate until CONTEXT_SUFFICIENT is returned. "
-            f"round={value.get('round')}; requests={len(requests)}; returned_evidence={len(evidence)}.",
+            f"round={value.get('round')}; requests={len(requests)}; returned_evidence={len(evidence)}."
+            + semantic_note,
             900,
         )
     return "CONTEXT_SUFFICIENCY_REQUIRED: submit the structured context_sufficiency_check before mutation."
