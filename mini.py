@@ -51,6 +51,7 @@ from hivo import change_impact as core6_change_impact
 from hivo import core_orchestrator as core_integration
 from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
+from hivo import context_sufficiency as stage7_context
 from hivo import execution_invariants as stage6c_invariants
 from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
@@ -280,6 +281,18 @@ EXTERNAL_UNAUTHORIZED_DRIFT = stage6d.EXTERNAL_UNAUTHORIZED_DRIFT
 USER_REAPPROVAL_REQUIRED = stage6d.USER_REAPPROVAL_REQUIRED
 MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS = stage6d.MAX_AUTONOMOUS_WORKER_RECOVERY_ATTEMPTS
 RECOVERY_WORKER_PACKET_MAX_CHARS = stage6d.RECOVERY_WORKER_PACKET_MAX_CHARS
+# V27 bounded Worker context completion. This local gate sits on top of the
+# existing Stage 4 packet and does not replace the task lifecycle.
+PREPARING_CONTEXT = stage7_context.PREPARING_CONTEXT
+CONTEXT_SUFFICIENT = stage7_context.CONTEXT_SUFFICIENT
+CONTEXT_INSUFFICIENT = stage7_context.CONTEXT_INSUFFICIENT
+REQUEST_EVIDENCE = stage7_context.REQUEST_EVIDENCE
+MUTATION_ALLOWED = stage7_context.MUTATION_ALLOWED
+CONTEXT_INSUFFICIENT_FAILURE = stage7_context.CONTEXT_INSUFFICIENT_FAILURE
+MAX_CONTEXT_COMPLETION_ROUNDS = stage7_context.MAX_CONTEXT_COMPLETION_ROUNDS
+MAX_EVIDENCE_REQUESTS_PER_ROUND = stage7_context.MAX_EVIDENCE_REQUESTS_PER_ROUND
+MAX_CONTEXT_EVIDENCE_ITEMS = stage7_context.MAX_CONTEXT_EVIDENCE_ITEMS
+MAX_CONTEXT_EVIDENCE_CHARS = stage7_context.MAX_CONTEXT_EVIDENCE_CHARS
 RecoveryFailureEnvelope = stage6d.RecoveryFailureEnvelope
 RECOVERY_FAILURE_EVIDENCE = stage6d.RECOVERY_FAILURE_EVIDENCE
 VERIFICATION_FAILURE = stage6d.VERIFICATION_FAILURE
@@ -607,6 +620,9 @@ ACTIVE_TRANSACTION = None
 LAST_COMMITTED_TRANSACTION = None
 ACTIVE_CONTRACT = None
 ACTIVE_TOOL_CONTRACT = None
+# Set only for the synchronous Worker attempt currently using run_tool.  The
+# runtime checks this gate at the mutation seam; it is never a model claim.
+ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
 MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
 PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
@@ -840,6 +856,15 @@ def select_local_ollama_model(explicit=None):
 # ---------------------------------------------------------------------------
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "context_sufficiency_check",
+        "description": (
+            "Classify whether the current bounded task evidence is sufficient before mutation. "
+            "If insufficient, request up to three narrow semantic evidence items, each with a concrete target and why. "
+            "Do not request broad repository or module context."
+        ),
+        "parameters": stage7_context.context_sufficiency_schema(),
+    }},
     {"type": "function", "function": {
         "name": "write_file",
         "description": "Create a new file. Existing user/verified files are protected; use focused edits.",
@@ -1685,7 +1710,7 @@ def tools_for_role(role, tool_policy=None, recovery_strategy=None):
         allowed = {"write_file", "read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
         base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     else:
-        base = TOOLS
+        base = [tool for tool in TOOLS if tool["function"]["name"] != _CONTEXT_COMPLETION_TOOL]
     if isinstance(recovery_strategy, dict):
         strategy = recovery_strategy.get("current_strategy")
         if not isinstance(strategy, dict) and recovery_strategy.get("artifact_type") == RECOVERY_MUTATION_STRATEGY:
@@ -1698,6 +1723,339 @@ def tools_for_role(role, tool_policy=None, recovery_strategy=None):
 def recovery_tools_for_epoch(role="Builder", recovery_strategy=None, tool_policy=None):
     """Explicit public spelling for the local recovery tool projection."""
     return tools_for_role(role, tool_policy=tool_policy, recovery_strategy=recovery_strategy)
+
+
+_CONTEXT_MUTATION_TOOLS = MUTATION_TOOLS
+_CONTEXT_COMPLETION_TOOL = "context_sufficiency_check"
+_CONTEXT_PROVIDER_MAX_FILES = 8
+_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST = 2
+_CONTEXT_PROVIDER_EXCERPT_CHARS = 650
+_CONTEXT_PROVIDER_FILE_CHARS = 120000
+_CONTEXT_SOURCE_EXTENSIONS = frozenset({
+    ".py", ".pyi", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".html", ".htm",
+    ".css", ".scss", ".json", ".toml", ".yaml", ".yml", ".go", ".rs", ".java", ".c",
+    ".cpp", ".h", ".md", ".txt",
+})
+
+
+def _active_context_gate(role=None):
+    gate = ACTIVE_CONTEXT_SUFFICIENCY_GATE
+    if role is not None and role not in {"Builder", "Repairer"}:
+        return None
+    return gate if isinstance(gate, stage7_context.ContextSufficiencyGate) else None
+
+
+def _context_gate_mutation_guard(name, role="System", target=None):
+    """Fail closed at the runtime mutation seam while context is incomplete."""
+    if name not in _CONTEXT_MUTATION_TOOLS or role not in {"Builder", "Repairer"}:
+        return None
+    issue = stage7_context.mutation_block_reason(_active_context_gate(role))
+    if issue:
+        RUN["context_sufficiency_blocks"] = RUN.get("context_sufficiency_blocks", 0) + 1
+        record_run_event(
+            "context_sufficiency_mutation_blocked",
+            role=role,
+            task_id=(ACTIVE_TOOL_CONTRACT or {}).get("task_id") if isinstance(ACTIVE_TOOL_CONTRACT, dict) else None,
+            tool=name,
+            target=compact_text(target if target is not None else "-", 180),
+            reason=compact_text(issue, 420),
+        )
+    return issue
+
+
+def _context_tool_projection(tools, gate):
+    """Project tools without weakening the existing role/recovery policy."""
+    if gate is None:
+        return tools
+    projected = list(tools or [])
+    if not gate.mutation_allowed:
+        projected = [
+            item for item in projected
+            if item.get("function", {}).get("name") not in _CONTEXT_MUTATION_TOOLS
+        ]
+    if not any(item.get("function", {}).get("name") == _CONTEXT_COMPLETION_TOOL for item in projected):
+        completion_tool = next(
+            (item for item in TOOLS if item.get("function", {}).get("name") == _CONTEXT_COMPLETION_TOOL),
+            None,
+        )
+        if completion_tool is not None:
+            projected.insert(0, completion_tool)
+    return projected
+
+
+def _context_anchor_for_worker(task_text, task_id, context_anchor=None, execution_contract=None):
+    """Construct the stable goal hierarchy from existing authority fields."""
+    supplied = copy.deepcopy(context_anchor) if isinstance(context_anchor, dict) else {}
+    active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
+    contract = execution_contract if isinstance(execution_contract, dict) else {}
+    nested = contract.get("execution_contract") if isinstance(contract.get("execution_contract"), dict) else {}
+    effective = nested or contract
+    source = RUN.get("source_contract") if isinstance(RUN.get("source_contract"), dict) else {}
+    supplied.setdefault("root_goal", source.get("goal") or supplied.get("goal") or effective.get("goal"))
+    supplied.setdefault("parent_goal", active.get("parent_goal") or RUN.get("parent_goal"))
+    supplied.setdefault("local_task", task_text)
+    supplied.setdefault(
+        "requirements",
+        active.get("requirements") or effective.get("requirements") or effective.get("done_when"),
+    )
+    supplied.setdefault(
+        "constraints",
+        active.get("constraints") or effective.get("constraints") or effective.get("local_preservation_constraints"),
+    )
+    supplied.setdefault(
+        "allowed_inspection_paths",
+        active.get("allowed_inspection_paths") or effective.get("allowed_inspection_paths"),
+    )
+    supplied["task_id"] = str(task_id)
+    return supplied
+
+
+def _context_initial_evidence(execution_contract=None, initial_context_evidence=None):
+    if initial_context_evidence is not None:
+        if isinstance(initial_context_evidence, dict):
+            return [initial_context_evidence]
+        return list(initial_context_evidence or [])
+    contract = execution_contract if isinstance(execution_contract, dict) else {}
+    nested = contract.get("execution_contract") if isinstance(contract.get("execution_contract"), dict) else {}
+    effective = nested or contract
+    facts = effective.get("relevant_repository_facts")
+    if isinstance(facts, list):
+        return facts
+    return []
+
+
+def _context_gate_for_execution(
+    task_text,
+    task_id,
+    *,
+    enabled=False,
+    gate=None,
+    provider=None,
+    anchor=None,
+    execution_contract=None,
+    initial_context_evidence=None,
+):
+    if not enabled and gate is None:
+        return None
+    if isinstance(gate, stage7_context.ContextSufficiencyGate):
+        return gate
+    return stage7_context.ContextSufficiencyGate(
+        _context_anchor_for_worker(task_text, task_id, anchor, execution_contract),
+        initial_evidence=_context_initial_evidence(execution_contract, initial_context_evidence),
+        evidence_provider=provider or _provide_targeted_context_evidence,
+    )
+
+
+def _record_context_sufficiency_result(task_id, role, result, *, initial=False):
+    """Record gate identifiers and decisions, never source blobs."""
+    if not isinstance(result, dict):
+        return
+    if initial:
+        RUN["context_sufficiency_initial_packets"] = RUN.get("context_sufficiency_initial_packets", 0) + 1
+    else:
+        RUN["context_sufficiency_checks"] = RUN.get("context_sufficiency_checks", 0) + 1
+    round_number = int(result.get("round", 0) or 0)
+    gate = _active_context_gate(role)
+    last_logged = getattr(gate, "_mini_last_logged_round", 0) if gate is not None else 0
+    if round_number > last_logged:
+        RUN["context_completion_rounds"] = RUN.get("context_completion_rounds", 0) + (round_number - last_logged)
+        if gate is not None:
+            setattr(gate, "_mini_last_logged_round", round_number)
+    requests = result.get("needed_evidence", []) if isinstance(result.get("needed_evidence"), list) else []
+    returned = result.get("evidence", []) if isinstance(result.get("evidence"), list) else []
+    RUN["context_evidence_requests"] = RUN.get("context_evidence_requests", 0) + len(requests)
+    RUN["context_evidence_items"] = RUN.get("context_evidence_items", 0) + len(returned)
+    RUN["context_contradictions"] = max(
+        RUN.get("context_contradictions", 0),
+        len(result.get("contradictions", []) or []),
+    )
+    if result.get("mutation_allowed") and gate is not None and not getattr(gate, "_mini_authorization_logged", False):
+        RUN["context_mutation_authorizations"] = RUN.get("context_mutation_authorizations", 0) + 1
+        setattr(gate, "_mini_authorization_logged", True)
+    record_run_event(
+        "context_sufficiency_initial_context" if initial else "context_sufficiency_decision",
+        role=role,
+        task_id=str(task_id),
+        lifecycle_state=result.get("lifecycle_state") or result.get("state"),
+        context_status=result.get("context_status"),
+        round=round_number,
+        max_rounds=result.get("max_rounds"),
+        request_count=result.get("request_count"),
+        request_kinds=sorted({str(item.get("kind")) for item in requests if isinstance(item, dict)}),
+        request_targets=[compact_text(item.get("target"), 180) for item in requests if isinstance(item, dict)][:MAX_EVIDENCE_REQUESTS_PER_ROUND],
+        returned_evidence_count=len(returned),
+        working_evidence_count=result.get("working_evidence_count"),
+        working_evidence_chars=result.get("working_evidence_chars"),
+        initial_context_chars=result.get("initial_context_chars"),
+        anchor_hash=result.get("anchor_hash"),
+        contradictions=len(result.get("contradictions", []) or []),
+        mutation_authorized=bool(result.get("mutation_allowed")),
+        final=bool(result.get("final")),
+        failure_code=result.get("failure_code"),
+        reason=compact_text(result.get("reason"), 420),
+    )
+
+
+def _context_evidence_feedback(result):
+    """Return a small re-evaluation packet containing only new evidence."""
+    value = result if isinstance(result, dict) else {}
+    lines = [stage7_context.feedback_for_result(value)]
+    for item in list(value.get("evidence", []) or [])[:MAX_EVIDENCE_REQUESTS_PER_ROUND * 2]:
+        if not isinstance(item, dict):
+            continue
+        identity = item.get("source_identity") or item.get("evidence_id") or "unknown-source"
+        purpose = compact_text(item.get("purpose", ""), 260)
+        excerpt = compact_text(item.get("excerpt", ""), stage7_context.MAX_CONTEXT_EVIDENCE_ITEM_CHARS)
+        lines.append(
+            f"TARGETED EVIDENCE [{item.get('kind', 'evidence')}] {identity}"
+            + (f" ({purpose})" if purpose else "")
+            + (f":\n{excerpt}" if excerpt else "")
+        )
+    return "\n".join(lines)
+
+
+def _context_result_json(result):
+    """Keep the structured tool result compact and valid JSON."""
+    value = dict(result or {})
+    value["evidence"] = list(value.get("evidence", []) or [])[:MAX_EVIDENCE_REQUESTS_PER_ROUND * 2]
+    value["history"] = None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _context_sufficiency_failed(result):
+    """Identify a bounded context stop before verification/recovery routing."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("failure_type") == CONTEXT_INSUFFICIENT_FAILURE:
+        return True
+    snapshot = result.get("context_sufficiency")
+    return isinstance(snapshot, dict) and snapshot.get("failure_code") == CONTEXT_INSUFFICIENT_FAILURE
+
+
+def _context_sufficiency_tool(args, role="System", task_id="ROOT"):
+    gate = _active_context_gate(role)
+    if gate is None:
+        return "error: context_sufficiency_check is available only during a gated Worker attempt"
+    checked = stage7_context.validate_sufficiency_decision(args if isinstance(args, dict) else {})
+    if not checked.get("valid"):
+        result = {
+            "context_status": stage7_context.CONTEXT_STATUS_INSUFFICIENT,
+            "lifecycle_state": stage7_context.PREPARING_CONTEXT,
+            "mutation_allowed": False,
+            "reason": "Invalid structured sufficiency decision; submit the bounded schema again.",
+            "errors": checked.get("errors", [])[:12],
+            "failure_code": None,
+            "final": False,
+        }
+    else:
+        result = gate.evaluate(args)
+    _record_context_sufficiency_result(task_id, role, result)
+    return _context_result_json(result)
+
+
+def _context_candidate_files(request, context):
+    """Resolve only files named by the current bounded inspection surface."""
+    if WORKSPACE is None:
+        return []
+    allowed = list((context or {}).get("allowed_inspection_paths", []) or [])
+    candidates = []
+    seen = set()
+    for raw in allowed:
+        target = safe_path(raw)
+        if target is None or not target.exists():
+            continue
+        if target.is_file():
+            files = [target]
+        elif target.is_dir():
+            try:
+                files = [
+                    item for item in target.rglob("*")
+                    if item.is_file()
+                    and item.suffix.casefold() in _CONTEXT_SOURCE_EXTENSIONS
+                    and not any(part in {".git", ".venv", "node_modules", "__pycache__"} for part in item.parts)
+                ]
+            except OSError:
+                files = []
+        else:
+            files = []
+        for item in files:
+            resolved = item.resolve()
+            if not resolved.is_relative_to(Path(WORKSPACE).resolve()):
+                continue
+            key = str(resolved).casefold()
+            if key not in seen:
+                seen.add(key)
+                candidates.append(resolved)
+    target_text = str((request or {}).get("target", "")).casefold()
+    kind = str((request or {}).get("kind", "")).casefold()
+    def score(path):
+        name = path.name.casefold()
+        text = str(path).casefold()
+        score_value = 0
+        if target_text and target_text in text:
+            score_value += 8
+        if kind == "tests" or kind in {"callers", "consumers", "return_expectation"}:
+            if "test" in name or "spec" in name:
+                score_value += 6
+        if kind in {"contract", "authoritative_contract", "interface", "schema", "definition"}:
+            if any(word in name for word in ("contract", "interface", "schema", "type", "api")):
+                score_value += 5
+        if kind == "sibling_implementation" and "test" not in name:
+            score_value += 2
+        return (-score_value, len(str(path)), str(path).casefold())
+    return sorted(candidates, key=score)[:_CONTEXT_PROVIDER_MAX_FILES]
+
+
+def _provide_targeted_context_evidence(request, context):
+    """Read narrow excerpts for one validated semantic request."""
+    request = request if isinstance(request, dict) else {}
+    checked = stage7_context.validate_evidence_request(request)
+    if not checked.get("valid") or not checked.get("request"):
+        return []
+    request = checked["request"]
+    target = str(request.get("target", ""))
+    tokens = [item for item in re.findall(r"[A-Za-z_][A-Za-z0-9_.:-]{2,}", target) if len(item) >= 3]
+    candidates = _context_candidate_files(request, context)
+    results = []
+    for path in candidates:
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")[:_CONTEXT_PROVIDER_FILE_CHARS]
+        except OSError:
+            continue
+        lines = source.splitlines()
+        matching = []
+        for number, line in enumerate(lines, 1):
+            if target and target.casefold() in line.casefold():
+                matching.append(number)
+            elif tokens and any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", line) for token in tokens):
+                matching.append(number)
+        if not matching and path.name.casefold() in target.casefold():
+            matching = [1]
+        for line_number in matching[:_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST]:
+            start = max(1, line_number - 2)
+            end = min(len(lines), line_number + 2)
+            excerpt = "\n".join(f"{idx}: {lines[idx - 1]}" for idx in range(start, end + 1))
+            excerpt = compact_text(excerpt, _CONTEXT_PROVIDER_EXCERPT_CHARS)
+            try:
+                identity = path.relative_to(Path(WORKSPACE).resolve()).as_posix() + f":{line_number}"
+            except (OSError, RuntimeError, ValueError):
+                identity = str(path)
+            kind = request.get("kind")
+            authoritative = kind in {"contract", "authoritative_contract", "interface", "schema", "tests"}
+            results.append({
+                "kind": kind,
+                "target": target,
+                "source_identity": identity,
+                "symbol": target,
+                "excerpt": excerpt,
+                "purpose": request.get("why"),
+                "provenance": "TARGETED_INSPECTION_SURFACE",
+                "authoritative": authoritative,
+                "resolves_conflict": kind == "authoritative_contract",
+            })
+        if len(results) >= _CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST:
+            break
+    return results[:_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST]
 
 
 def _normalized_workspace_relative_path(raw_path):
@@ -1846,6 +2204,13 @@ def run_tool(name, args, role="System"):
     issue = tool_argument_error(name, args)
     if issue:
         return issue
+    context_mutation_issue = _context_gate_mutation_guard(
+        name, role=role, target=(args or {}).get("path") if isinstance(args, dict) else None,
+    )
+    if context_mutation_issue:
+        return context_mutation_issue
+    if name == _CONTEXT_COMPLETION_TOOL:
+        return _context_sufficiency_tool(args, role=role, task_id=(ACTIVE_TOOL_CONTRACT or {}).get("task_id", "ROOT"))
     stage4_inspection_issue = _stage4_inspection_guard(name, args)
     if stage4_inspection_issue:
         return stage4_inspection_issue
@@ -2415,6 +2780,16 @@ def new_metrics(mode):
         "worker_context_optional_items_dropped": 0,
         "worker_context_authority_items_dropped": 0,
         "worker_context_authority_overflows": 0,
+        # V27 bounded Worker context completion.  Counts are intentionally
+        # aggregate; source excerpts remain in the bounded Worker result.
+        "context_sufficiency_initial_packets": 0,
+        "context_sufficiency_checks": 0,
+        "context_completion_rounds": 0,
+        "context_evidence_requests": 0,
+        "context_evidence_items": 0,
+        "context_sufficiency_blocks": 0,
+        "context_mutation_authorizations": 0,
+        "context_contradictions": 0,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
@@ -2631,13 +3006,14 @@ def new_metrics(mode):
 
 def reset_run(mode):
     global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, RUN_ID
-    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, FORCE_CPU_FOR_RUN
+    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE, FORCE_CPU_FOR_RUN
     global VISION_ENABLED_FOR_RUN, VISION_ERROR, PREFLIGHT_CONFLICT_STATE
     RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     ACTIVE_TRANSACTION = None
     LAST_COMMITTED_TRANSACTION = None
     ACTIVE_CONTRACT = None
     ACTIVE_TOOL_CONTRACT = None
+    ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
     FORCE_CPU_FOR_RUN = False
     RUN = new_metrics(mode)
     TASKS = {}
@@ -11409,7 +11785,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        recovery_strategy_state=None, recovery_completion_contract=None,
                        structured_response_schema=None, structured_response_validator=None,
                        structured_response_label=None, structured_response_retries=None,
-                       structured_response_capture=None, structured_response_context=None):
+                       structured_response_capture=None, structured_response_context=None,
+                       context_sufficiency_enabled=False, context_sufficiency_gate=None,
+                       context_evidence_provider=None, context_anchor=None,
+                       initial_context_evidence=None):
+    global ACTIVE_CONTEXT_SUFFICIENCY_GATE
     # V26.3 is an opt-in local policy for one recovery Worker.  Keeping this
     # state outside the ordinary path prevents initial Workers and Stage 3/4
     # decomposition from inheriting strategy suppression.
@@ -11437,6 +11817,36 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         else (extra_context or recovery_task_text),
         RECOVERY_WORKER_PACKET_MAX_CHARS,
     )
+    context_gate = _context_gate_for_execution(
+        task_text,
+        task_id,
+        enabled=(
+            bool(context_sufficiency_enabled)
+            and role in {"Builder", "Repairer"}
+        ),
+        gate=context_sufficiency_gate,
+        provider=context_evidence_provider,
+        anchor=context_anchor,
+        execution_contract=execution_contract,
+        initial_context_evidence=initial_context_evidence,
+    )
+    if context_gate is not None:
+        ACTIVE_CONTEXT_SUFFICIENCY_GATE = context_gate
+        initial_snapshot = context_gate.snapshot()
+        _record_context_sufficiency_result(task_id, role, {
+            "lifecycle_state": initial_snapshot.get("state"),
+            "context_status": initial_snapshot.get("context_status"),
+            "mutation_allowed": initial_snapshot.get("mutation_allowed"),
+            "round": initial_snapshot.get("round", 0),
+            "max_rounds": initial_snapshot.get("max_rounds"),
+            "request_count": initial_snapshot.get("request_count", 0),
+            "working_evidence_count": initial_snapshot.get("working_evidence_count", 0),
+            "working_evidence_chars": initial_snapshot.get("working_evidence_chars", 0),
+            "initial_context_chars": len(str(worker_context or extra_context or task_text)),
+            "anchor_hash": initial_snapshot.get("anchor_hash"),
+            "contradictions": initial_snapshot.get("contradictions", []),
+            "final": False,
+        }, initial=True)
     if RUN.get("stage6c_enabled") and role in {"Builder", "Worker"}:
         authority_gate = stage6c.worker_authorization_gate(
             RUN.get("execution_authorization"),
@@ -11449,6 +11859,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             coverage = RUN.get("verification_obligation_coverage")
             _record_verification_obligation_coverage_gate(coverage)
             RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+            ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
             return {
                 "status": "blocked",
                 "terminal_state": authority_gate.get("terminal_state", EXECUTION_AUTHORIZATION_BLOCKED),
@@ -11465,6 +11876,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         # Stage 6C-A remains a readiness-only boundary.  Only the explicit
         # Stage 6C-B lifecycle is allowed to enter the existing execution loop.
         if not RUN.get("approval_bound_lifecycle"):
+            ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
             return {
                 "status": "blocked",
                 "terminal_state": EXECUTION_AUTHORIZATION_READY,
@@ -11480,6 +11892,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         # not a substitute for this last-moment check.
         if not callable(execution_authorization_check):
             RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
+            ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
             return {
                 "status": "blocked",
                 "terminal_state": WORKER_AUTHORIZATION_INVALID,
@@ -11505,6 +11918,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 RUN["approval_validation_failures"] = RUN.get("approval_validation_failures", 0) + 1
                 if isinstance(current_gate, dict) and current_gate.get("status") == REAPPROVAL_REQUIRED:
                     RUN["reapproval_required"] = RUN.get("reapproval_required", 0) + 1
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
                 return {
                     "status": "blocked",
                     "terminal_state": (current_gate or {}).get("terminal_state", WORKER_AUTHORIZATION_INVALID),
@@ -11522,6 +11936,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             RUN["approved_worker_calls"] = RUN.get("approved_worker_calls", 0) + 1
         if callable(worker_callback):
             if not isinstance(execution_contract, dict):
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -11530,7 +11945,20 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "worker_calls": 1 if approval_bound_worker else 0,
                     "builder_calls": 0, "memory": memory, "model_calls": 0,
                 }
+            if context_gate is not None and not context_gate.mutation_allowed:
+                # Stage 6C's injected callback is a deterministic Worker seam,
+                # not a model conversation. Its exact validated Stage 4
+                # contract is therefore the initial structured sufficiency
+                # decision; callback_tool still enforces the resulting gate.
+                callback_context_result = context_gate.evaluate({
+                    "context_status": "sufficient",
+                    "reason": "The validated Stage 4 execution contract supplies the bounded callback context.",
+                })
+                _record_context_sufficiency_result(task_id, "Builder", callback_context_result)
             bounded_context = worker_context if isinstance(worker_context, str) else str(extra_context or "")
+            def callback_tool(name, args):
+                return run_tool(name, args, role="Builder")
+
             try:
                 callback_result = stage6cb.invoke_callback(
                     worker_callback,
@@ -11544,10 +11972,17 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     receipt=RUN.get("approval_receipt"),
                     start_receipt=RUN.get("execution_start_receipt"),
                     worker_start_receipt=RUN.get("execution_start_receipt"),
-                    execute_tool=lambda name, args: run_tool(name, args, role="Builder"),
-                    run_tool=lambda name, args: run_tool(name, args, role="Builder"),
+                    execute_tool=callback_tool,
+                    run_tool=callback_tool,
+                    context_gate=context_gate,
+                    context_sufficiency_check=(
+                        lambda decision: _context_sufficiency_tool(
+                            decision, role="Builder", task_id=task_id,
+                        )
+                    ) if context_gate is not None else None,
                 )
             except Exception as exc:
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -11557,6 +11992,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "builder_calls": 0, "memory": memory, "model_calls": 0,
                 }
             if not isinstance(callback_result, dict):
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
                 return {
                     "status": "failed", "failure_type": WORKER_OUTPUT_INVALID,
                     "terminal_state": WORKER_OUTPUT_INVALID,
@@ -11564,6 +12000,26 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "summary": "approval-bound Worker callback returned a non-object result",
                     "worker_calls": 1 if approval_bound_worker else 0,
                     "builder_calls": 0, "memory": memory, "model_calls": 0,
+                }
+            if context_gate is not None and not context_gate.mutation_allowed:
+                context_snapshot = context_gate.snapshot()
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+                return {
+                    "status": "failed",
+                    "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+                    "terminal_state": CONTEXT_INSUFFICIENT_FAILURE,
+                    "orchestration_failure": CONTEXT_INSUFFICIENT_FAILURE,
+                    "summary": (
+                        f"{CONTEXT_INSUFFICIENT_FAILURE}: approval-bound Worker callback "
+                        "did not pass the context sufficiency gate before mutation"
+                    ),
+                    "worker_calls": 1 if approval_bound_worker else 0,
+                    "builder_calls": 0,
+                    "memory": memory,
+                    "model_calls": 0,
+                    "tool_evidence": callback_result.get("tool_evidence", []),
+                    "context_sufficiency": context_snapshot,
+                    "mutation_authorized": False,
                 }
             result = copy.deepcopy(callback_result)
             result.setdefault("status", "done")
@@ -11574,16 +12030,40 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             result["memory"] = memory
             result["model_calls"] = 0
             result["callback_invoked"] = True
+            result["context_sufficiency"] = context_gate.snapshot() if context_gate is not None else None
+            result["mutation_authorized"] = bool(context_gate is not None and context_gate.mutation_allowed)
+            if context_gate is not None:
+                ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
             result["raw_worker_result_ref"] = "worker-result:" + stage6c.canonical_hash(
                 {key: value for key, value in result.items() if key != "raw_worker_result_ref"}
             )[:24]
             return result
+    system_prompt = ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)
+    if context_gate is not None:
+        system_prompt += (
+            " CONTEXT SUFFICIENCY GATE (runtime-enforced): before any write/edit mutation, "
+            "call context_sufficiency_check with context_status='sufficient' only when the current "
+            "bounded evidence establishes the contract, dependencies, invariants, caller/test expectations, "
+            "and downstream impact needed for this local task. If anything semantic is missing or contradictory, "
+            "return context_status='insufficient' with no more than three narrow requests, each naming one target "
+            "and why it is needed. Never request broad repository or module context. Mutation tools are blocked "
+            "by the runtime until the gate returns mutation_allowed=true."
+        )
     if messages is None:
-        messages = [{"role": "system", "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)}]
+        messages = [{"role": "system", "content": system_prompt}]
+    elif context_gate is not None:
+        # Keep an injected message list compatible with existing callers while
+        # making the gate instruction part of the stable system anchor.
+        if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+            messages[0] = dict(messages[0])
+            messages[0]["content"] = str(messages[0].get("content", "")) + " " + system_prompt
+        else:
+            messages.insert(0, {"role": "system", "content": system_prompt})
     durable = relevant_memory_context(f"{role} {task_text}", role=role, memory=memory, max_chars=1200)
     context = "\n\n".join(item for item in (extra_context, durable) if item)
     if context:
         task_text = f"{context}\n\nCURRENT TASK:\n{task_text}"
+    base_worker_prompt = task_text
     messages.append({"role": "user", "content": task_text})
     evidence = []
     # Keep syntax-validation outcomes local to this focused execution.  A
@@ -11617,6 +12097,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             offered_tools = tools_for_role(
                 role, tool_policy=tool_policy, recovery_strategy=recovery_state,
             )
+    # Preserve the role/recovery projection separately so a completed context
+    # round can restore only the mutation tools already authorized by the
+    # existing policy.
+    unlocked_offered_tools = list(offered_tools)
+    offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
     offered_names = {item["function"]["name"] for item in offered_tools}
     if role == "Builder":
         RUN["builder_calls"] = RUN.get("builder_calls", 0) + 1
@@ -11626,6 +12111,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "Falsifier": MAX_FALSIFIER_STEPS,
     }.get(role, MAX_TOOL_STEPS)
     for _step in range(max(1, int(step_budget))):
+        context_reanchor_after_tool = False
         if structured_response_schema is not None:
             structured_context = dict(structured_response_context or {})
             structured_context.update({
@@ -11673,6 +12159,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 break
         messages.append(assistant_message)
         if structured_response_schema is not None:
+            if context_gate is not None and not context_gate.mutation_allowed:
+                status = "failed"
+                summary = (
+                    f"{CONTEXT_INSUFFICIENT_FAILURE}: structured Worker output cannot bypass "
+                    "the context sufficiency gate"
+                )
+                break
             evidence.append({
                 "tool": "structured_response",
                 "target": str(task_id),
@@ -11683,6 +12176,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             break
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
+            if context_gate is not None and not context_gate.mutation_allowed:
+                status = "failed"
+                summary = (
+                    "CONTEXT_SUFFICIENCY_REQUIRED: Worker must submit the structured "
+                    "context_sufficiency_check before stopping or mutating"
+                )
+                break
             content = assistant_message.get("content", "") or ""
             completion_contract = (
                 recovery_completion_contract
@@ -11850,7 +12350,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 args = {}
             target = args.get("path") or args.get("command") or "-"
             RUN["tool_calls"] += 1
-            if name not in offered_names:
+            context_mutation_issue = _context_gate_mutation_guard(
+                name, role=role, target=target,
+            )
+            context_mutation_blocked = bool(context_mutation_issue)
+            if context_mutation_issue:
+                result = context_mutation_issue
+            elif name not in offered_names:
                 RUN["invalid_tool_calls"] = RUN.get("invalid_tool_calls", 0) + 1
                 if tool_policy == "coherent_rewrite":
                     result = f"error: tool {name!r} is unavailable under the active coherent rewrite policy"
@@ -11875,8 +12381,27 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         result = run_tool(name, args, role=role)
                 else:
                     result = run_tool(name, args, role=role)
+            context_tool_call = name == _CONTEXT_COMPLETION_TOOL and context_gate is not None
+            context_tool_result = None
+            if context_tool_call:
+                try:
+                    context_tool_result = json.loads(str(result))
+                except (TypeError, ValueError):
+                    context_tool_result = {
+                        "context_status": stage7_context.CONTEXT_STATUS_INSUFFICIENT,
+                        "mutation_allowed": False,
+                        "failure_code": CONTEXT_INSUFFICIENT_FAILURE,
+                        "reason": "context_sufficiency_check did not return valid structured JSON",
+                        "final": True,
+                    }
+                # The first response that asks/checks for context cannot also
+                # spend the newly returned authorization in the same batch.
+                # A fresh Worker response must re-evaluate the stable anchor.
+                unlocked_offered_tools = list(unlocked_offered_tools)
+                offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
+                offered_names = {item["function"]["name"] for item in offered_tools}
             _update_verification_cycle(verification_cycle, name, args, result)
-            mutation_record = mutation_failure_record(name, target, result, role=role)
+            mutation_record = None if context_mutation_blocked else mutation_failure_record(name, target, result, role=role)
             if mutation_record is not None:
                 RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
                 record_run_event(
@@ -12145,9 +12670,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                             current_source_identity=recovery_state.get("current_subject_hash"),
                         )
                         recovery_state["last_transition_feedback"] = feedback
-                        offered_tools = tools_for_role(
+                        unlocked_offered_tools = tools_for_role(
                             role, tool_policy=tool_policy, recovery_strategy=recovery_state,
                         )
+                        offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
                         offered_names = {item["function"]["name"] for item in offered_tools}
                         # Start a clean bounded model context for epoch 1.
                         # The Worker identity, mission text, authority, and
@@ -12155,7 +12681,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         # transcript and rejected candidate text do not.
                         messages = [{
                             "role": "system",
-                            "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                            "content": system_prompt,
                         }, {
                             "role": "user",
                             "content": compact_text(
@@ -12190,6 +12716,20 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
 
+            if context_tool_call:
+                context_feedback = _context_evidence_feedback(context_tool_result)
+                messages = [{
+                    "role": "system", "content": system_prompt,
+                }, {
+                    "role": "user",
+                    "content": compact_text(
+                        base_worker_prompt + "\n\nCONTEXT GATE UPDATE:\n" + context_feedback,
+                        MAX_WORKER_MISSION_CHARS,
+                    ),
+                }]
+                context_reanchor_after_tool = True
+                break
+
             # The V26.6 event is model-visible and bounded.  Rebuild the
             # current recovery context in the same spirit as the existing
             # local re-anchor, retaining only the mission anchor and current
@@ -12205,7 +12745,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 if reorientation_feedback:
                     messages = [{
                         "role": "system",
-                        "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                        "content": system_prompt,
                     }, {
                         "role": "user",
                         "content": compact_text(
@@ -12371,16 +12911,17 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 if recovery_suppressed_observation is not None and (
                     recovery_suppressed_observation.get("reanchored")
                 ):
-                    offered_tools = tools_for_role(
+                    unlocked_offered_tools = tools_for_role(
                         role, tool_policy=tool_policy,
                         recovery_strategy=recovery_state,
                     )
+                    offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
                     offered_names = {
                         item["function"]["name"] for item in offered_tools
                     }
                     messages = [{
                         "role": "system",
-                        "content": ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT),
+                        "content": system_prompt,
                     }, {
                         "role": "user",
                         "content": compact_text(
@@ -12410,7 +12951,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             if hint:
                 messages.append({"role": "user", "content": hint})
 
-            if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result):
+            if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result) and not context_mutation_blocked:
                 mutation_failure_counts[str(target)] = mutation_failure_counts.get(str(target), 0) + 1
                 if recovery_state is not None and recovery_observation is not None and (
                     recovery_observation.get("switched") or recovery_observation.get("terminal_state")
@@ -12443,6 +12984,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 summary = "Deterministic browser verification passed; stop-on-proof completed this focused execution."
                 stop = True
                 break
+        if context_reanchor_after_tool:
+            continue
         if restart_after_recovery_strategy_switch:
             continue
         if restart_after_recovery_epoch_reanchor:
@@ -12470,14 +13013,39 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             status = "too_broad"
             summary = "TASK_TOO_BROAD: maximum focused tool-step budget reached"
 
+    context_sufficiency_snapshot = context_gate.snapshot() if context_gate is not None else None
+    if context_gate is not None and not context_gate.mutation_allowed:
+        # A Worker cannot turn an incomplete gate into a normal budget or
+        # completion outcome. Preserve the explicit bounded failure model.
+        status = "failed"
+        if context_gate.snapshot().get("failure_code") == CONTEXT_INSUFFICIENT_FAILURE:
+            summary = (
+                f"{CONTEXT_INSUFFICIENT_FAILURE}: bounded context completion ended "
+                "without sufficient semantic evidence"
+            )
+        else:
+            summary = (
+                "CONTEXT_SUFFICIENCY_REQUIRED: Worker stopped before the runtime "
+                "context gate passed"
+            )
+        execution_budget_exhausted = False
+        context_sufficiency_snapshot = context_gate.snapshot()
+    if context_gate is not None:
+        ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
-                     summary=compact_text(summary, MAX_NODE_SUMMARY_CHARS), evidence_count=len(evidence))
+                     summary=compact_text(summary, MAX_NODE_SUMMARY_CHARS), evidence_count=len(evidence),
+                     context_status=(context_sufficiency_snapshot or {}).get("context_status"),
+                     context_lifecycle_state=(context_sufficiency_snapshot or {}).get("state"),
+                     context_round=(context_sufficiency_snapshot or {}).get("round"),
+                     mutation_authorized=bool((context_sufficiency_snapshot or {}).get("mutation_allowed")))
     return {
         "status": status, "summary": compact_text(summary, MAX_NODE_SUMMARY_CHARS), "messages": messages,
         "memory": memory, "tool_evidence": evidence, "provider_error": provider_error,
         "structured_response": structured_response,
         "structured_response_error": structured_response_error,
         "structured_response_active": structured_response_schema is not None,
+        "context_sufficiency": context_sufficiency_snapshot,
+        "mutation_authorized": bool((context_sufficiency_snapshot or {}).get("mutation_allowed")),
         "worker_lifecycle_entry": "mini.execute_agent_task",
         "execution_outcome": EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else None,
         "step_budget": int(step_budget), "tool_steps_used": len(evidence),
@@ -12485,6 +13053,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "mutation_failures": mutation_failure_records,
         "failure_type": (
             recovery_terminal_state if recovery_terminal_state else
+            CONTEXT_INSUFFICIENT_FAILURE if context_gate is not None and status == "failed" and not provider_error and not structured_response_error and not (context_sufficiency_snapshot or {}).get("mutation_allowed") else
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
             "STRUCTURED_OUTPUT_INVALID" if status == "structured_response_failure" else
@@ -16101,7 +16670,7 @@ def print_node_diagnosis():
             print(f"  integration preflight: {labels or 'FAIL'}")
 
 
-def repair_task(task, contract, failure_evidence, memory, node_context):
+def repair_task(task, contract, failure_evidence, memory, node_context, parent_goal=None):
     RUN["repairer_calls"] += 1
     event(f"[REPAIR {task['id']}]", role="Repairer", task=task["id"], action="focused repair")
     context = (
@@ -16109,7 +16678,27 @@ def repair_task(task, contract, failure_evidence, memory, node_context):
         f"{json.dumps(failure_evidence, ensure_ascii=False)[:5000]}\n"
         "Repair only demonstrated implementation defects. Run fresh executable verification after the edit."
     )
-    return execute_agent_task(task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context)
+    worker_execution_contract = _current_execution_contract(task)
+    return execute_agent_task(
+        task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context,
+        worker_context=context,
+        execution_contract=worker_execution_contract,
+        context_sufficiency_enabled=True,
+        context_anchor={
+            "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                          if isinstance(RUN.get("source_contract"), dict) else None)
+            or task.get("goal"),
+            "parent_goal": task.get("parent_goal") or RUN.get("parent_goal") or parent_goal,
+            "local_task": task.get("goal"),
+            "requirements": task.get("done_when", []),
+            "constraints": (contract or {}).get("constraints", []) if isinstance(contract, dict) else [],
+            "allowed_inspection_paths": (worker_execution_contract or {}).get(
+                "allowed_inspection_paths",
+                (contract or {}).get("allowed_inspection_paths", []) if isinstance(contract, dict) else [],
+            ),
+        },
+        initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
+    )
 
 
 def _neutral_budget_result(task, worker_result, memory, dependency_summaries=None,
@@ -16283,7 +16872,27 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         "execution_contract_child": task.get("execution_contract_child"),
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
-    builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context)
+    worker_execution_contract = _current_execution_contract(task)
+    builder = execute_agent_task(
+        task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
+        worker_context=node_context,
+        execution_contract=worker_execution_contract,
+        context_sufficiency_enabled=True,
+        context_anchor={
+            "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                          if isinstance(RUN.get("source_contract"), dict) else None)
+            or task.get("goal"),
+            "parent_goal": task.get("parent_goal") or RUN.get("parent_goal"),
+            "local_task": task.get("goal"),
+            "requirements": task.get("done_when", []),
+            "constraints": contract.get("constraints", []),
+            "allowed_inspection_paths": (worker_execution_contract or {}).get(
+                "allowed_inspection_paths",
+                (ACTIVE_TOOL_CONTRACT or {}).get("allowed_inspection_paths", []),
+            ),
+        },
+        initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
+    )
     memory = builder["memory"]
     if _is_execution_budget_exhausted(builder):
         rollback_transaction()
@@ -16306,6 +16915,13 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": builder["summary"],
                 "memory": memory, "builder": builder}
+    if _context_sufficiency_failed(builder):
+        rollback_transaction()
+        return {"status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+                "summary": builder.get("summary", CONTEXT_INSUFFICIENT_FAILURE),
+                "memory": memory, "builder": builder,
+                "context_sufficiency": builder.get("context_sufficiency"),
+                "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder))}
 
     falsifier = falsify_task(task, ACTIVE_TOOL_CONTRACT, memory, builder, repo_snapshot, node_context)
     memory = falsifier.get("memory", memory)
@@ -16343,7 +16959,10 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     repair_history = []
     repair_mutation_failures = _mutation_failure_records(builder)
     for _ in range(MAX_REPAIRS_PER_LEAF):
-        repaired = repair_task(task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context)
+        repaired = repair_task(
+            task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context,
+            parent_goal=parent_summary,
+        )
         memory = repaired["memory"]
         repair_mutation_failures = _merge_mutation_failure_records(
             repair_mutation_failures, _mutation_failure_records(repaired),
@@ -16360,6 +16979,14 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                     "memory": memory, "repair_history": repair_history,
                     "repairer": repaired, "mutation_failures": repair_mutation_failures,
                     "failure_evidence": _compact_failure_evidence(repair_mutation_failures)}
+        if _context_sufficiency_failed(repaired):
+            rollback_transaction()
+            return {"status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+                    "summary": repaired.get("summary", CONTEXT_INSUFFICIENT_FAILURE),
+                    "memory": memory, "repair_history": repair_history,
+                    "repairer": repaired, "context_sufficiency": repaired.get("context_sufficiency"),
+                    "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(repaired))}
         if _is_execution_budget_exhausted(repaired):
             rollback_transaction()
             return _neutral_budget_result(
@@ -16542,8 +17169,26 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         "execution_contract_child": task.get("execution_contract_child"),
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
+    worker_execution_contract = _current_execution_contract(task)
     builder = execute_agent_task(
         task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
+        worker_context=node_context,
+        execution_contract=worker_execution_contract,
+        context_sufficiency_enabled=True,
+        context_anchor={
+            "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                          if isinstance(RUN.get("source_contract"), dict) else None)
+            or task.get("goal"),
+            "parent_goal": task.get("parent_goal") or RUN.get("parent_goal") or parent_summary,
+            "local_task": task.get("goal"),
+            "requirements": task.get("done_when", []),
+            "constraints": contract.get("constraints", []),
+            "allowed_inspection_paths": (worker_execution_contract or {}).get(
+                "allowed_inspection_paths",
+                (ACTIVE_TOOL_CONTRACT or {}).get("allowed_inspection_paths", []),
+            ),
+        },
+        initial_context_evidence=(worker_execution_contract or {}).get("relevant_repository_facts", []),
     )
     memory = builder.get("memory", memory)
     if _is_execution_budget_exhausted(builder):
@@ -16569,6 +17214,15 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             "status": "failed", "failure_type": "ENVIRONMENT_ERROR",
             "summary": builder.get("summary", "integration provider failure"),
             "memory": memory, "builder": builder,
+        }
+    if _context_sufficiency_failed(builder):
+        rollback_transaction()
+        return {
+            "status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+            "summary": builder.get("summary", CONTEXT_INSUFFICIENT_FAILURE),
+            "memory": memory, "builder": builder,
+            "context_sufficiency": builder.get("context_sufficiency"),
+            "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
         }
 
     preflight = run_integration_preflight(
@@ -16611,7 +17265,10 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
     repair_history = []
     repair_mutation_failures = []
     for _ in range(MAX_REPAIRS_PER_LEAF):
-        repaired = repair_task(task, contract, current_gate["deterministic_failures"], memory, node_context)
+        repaired = repair_task(
+            task, contract, current_gate["deterministic_failures"], memory, node_context,
+            parent_goal=parent_summary,
+        )
         memory = repaired.get("memory", memory)
         repair_mutation_failures = _merge_mutation_failure_records(
             repair_mutation_failures, _mutation_failure_records(repaired),
@@ -16629,6 +17286,14 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
                     "repair_history": repair_history, "repairer": repaired,
                     "mutation_failures": repair_mutation_failures,
                     "failure_evidence": _compact_failure_evidence(repair_mutation_failures)}
+        if _context_sufficiency_failed(repaired):
+            rollback_transaction()
+            return {"status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+                    "summary": repaired.get("summary", CONTEXT_INSUFFICIENT_FAILURE), "memory": memory,
+                    "repair_history": repair_history, "repairer": repaired,
+                    "context_sufficiency": repaired.get("context_sufficiency"),
+                    "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(repaired))}
         if _is_execution_budget_exhausted(repaired):
             rollback_transaction()
             return _neutral_budget_result(
@@ -17764,8 +18429,29 @@ def run_integration_milestones(task, contract, child_info, memory, repo_snapshot
             "Make only the smallest concrete changes needed for this milestone. Preserve project invariants. "
             "Inspect the shared workspace and run an executable verification before stopping."
         )
-        result = execute_agent_task(goal, memory, role="Builder", task_id=f"{label}:integration:{milestone_id}",
-                                    extra_context=context)
+        milestone_execution_contract = _current_execution_contract(task)
+        result = execute_agent_task(
+            goal, memory, role="Builder", task_id=f"{label}:integration:{milestone_id}",
+            extra_context=context, worker_context=context,
+            execution_contract=milestone_execution_contract,
+            context_sufficiency_enabled=True,
+            context_anchor={
+                "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                              if isinstance(RUN.get("source_contract"), dict) else None)
+                or task.get("goal"),
+                "parent_goal": task.get("goal"),
+                "local_task": goal,
+                "requirements": task.get("done_when", []),
+                "constraints": contract.get("constraints", []),
+                "allowed_inspection_paths": (milestone_execution_contract or {}).get(
+                    "allowed_inspection_paths",
+                    (ACTIVE_TOOL_CONTRACT or {}).get("allowed_inspection_paths", []),
+                ),
+            },
+            initial_context_evidence=(milestone_execution_contract or {}).get(
+                "relevant_repository_facts", []
+            ),
+        )
         memory = result.get("memory", memory)
         milestone_evidence = _worker_failure_evidence(result)
         evidence.extend(milestone_evidence)
@@ -17773,8 +18459,10 @@ def run_integration_milestones(task, contract, child_info, memory, repo_snapshot
                         "summary": compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
                         "evidence": _compact_failure_evidence(milestone_evidence, max_items=4)})
         if result.get("status") != "done":
-            failure_type = "ENVIRONMENT_ERROR" if result.get("status") == "provider_failure" else (
+            failure_type = CONTEXT_INSUFFICIENT_FAILURE if _context_sufficiency_failed(result) else (
+                "ENVIRONMENT_ERROR" if result.get("status") == "provider_failure" else (
                 "INTEGRATION_TOO_BROAD" if result.get("status") == "too_broad" else "INTEGRATION_FAILURE"
+                )
             )
             return {"status": "failed", "failure_type": failure_type,
                     "summary": f"integration milestone {milestone_id} failed: {result.get('summary', '')}",
@@ -18130,7 +18818,29 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
 
     # There is no second integration orchestrator: after bounded integration
     # children, the existing parent Builder/evidence path verifies the result.
-    builder = execute_agent_task(task["goal"], memory, role="Builder", task_id=label, extra_context=context)
+    parent_execution_contract = _current_execution_contract(task)
+    builder = execute_agent_task(
+        task["goal"], memory, role="Builder", task_id=label, extra_context=context,
+        worker_context=context,
+        execution_contract=parent_execution_contract,
+        context_sufficiency_enabled=True,
+        context_anchor={
+            "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                          if isinstance(RUN.get("source_contract"), dict) else None)
+            or task.get("goal"),
+            "parent_goal": task.get("parent_goal") or RUN.get("parent_goal"),
+            "local_task": task.get("goal"),
+            "requirements": task.get("done_when", []),
+            "constraints": contract.get("constraints", []),
+            "allowed_inspection_paths": (parent_execution_contract or {}).get(
+                "allowed_inspection_paths",
+                (ACTIVE_TOOL_CONTRACT or {}).get("allowed_inspection_paths", []),
+            ),
+        },
+        initial_context_evidence=(parent_execution_contract or {}).get(
+            "relevant_repository_facts", []
+        ),
+    )
     memory = builder.get("memory", memory)
     builder["integration_contract"] = integration_contract
     if builder["status"] != "done":
@@ -18138,8 +18848,10 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         task["integration_preflight"]["after"] = preflight_after
         _finish_parent_integration(task, passed=False, preflight=preflight_after)
         rollback_transaction(); RUN["integration_failures"] += 1
-        failure_type = "ENVIRONMENT_ERROR" if builder["status"] == "provider_failure" else (
+        failure_type = CONTEXT_INSUFFICIENT_FAILURE if _context_sufficiency_failed(builder) else (
+            "ENVIRONMENT_ERROR" if builder["status"] == "provider_failure" else (
             "INTEGRATION_TOO_BROAD" if builder["status"] == "too_broad" else "INTEGRATION_FAILURE"
+            )
         )
         parent_failure_evidence = _integration_failure_evidence(preflight_after) + _worker_failure_evidence(builder)
         return {"status": "failed",
@@ -18219,6 +18931,15 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
                         "summary": repaired["summary"], "memory": memory, "children": child_info,
                         "repairer": repaired, "mutation_failures": integration_repair_mutation_failures,
                         "failure_evidence": _compact_failure_evidence(integration_repair_mutation_failures)}
+            if _context_sufficiency_failed(repaired):
+                _finish_parent_integration(task, passed=False, preflight=current_preflight)
+                rollback_transaction(); RUN["integration_failures"] += 1
+                return {"status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
+                        "summary": repaired.get("summary", CONTEXT_INSUFFICIENT_FAILURE), "memory": memory,
+                        "children": child_info, "repairer": repaired,
+                        "context_sufficiency": repaired.get("context_sufficiency"),
+                        "mutation_failures": integration_repair_mutation_failures,
+                        "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(repaired))}
             if repaired["status"] == "too_broad":
                 _finish_parent_integration(task, passed=False, preflight=current_preflight)
                 rollback_transaction(); RUN["integration_failures"] += 1
@@ -19449,6 +20170,18 @@ def _approval_bound_leaf_executor(task, contract, memory, repo_snapshot,
             execution_contract=selected_contract,
             execution_authorization_check=authorization_check,
             recovery_strategy=RUN.get("_recovery_strategy_state"),
+            context_sufficiency_enabled=True,
+            context_anchor={
+                "root_goal": ((RUN.get("source_contract") or {}).get("goal")
+                              if isinstance(RUN.get("source_contract"), dict) else None)
+                or task.get("goal") or selected_contract.get("goal"),
+                "parent_goal": task.get("parent_goal") or RUN.get("parent_goal"),
+                "local_task": task.get("goal") or selected_contract.get("goal"),
+                "requirements": task.get("done_when", []) or selected_contract.get("requirements", []),
+                "constraints": selected_contract.get("constraints", []),
+                "allowed_inspection_paths": selected_contract.get("allowed_inspection_paths", []),
+            },
+            initial_context_evidence=selected_contract.get("relevant_repository_facts", []),
         )
 
     def on_start(start_receipt):
