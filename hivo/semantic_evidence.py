@@ -230,6 +230,7 @@ class SemanticEvidenceResolver:
         allowed_inspection_paths: Iterable[str | Path] | None = None,
         *,
         repository_map: Any = None,
+        world_model: Any = None,
         max_relationship_hops: int = MAX_RELATIONSHIP_HOPS,
         max_candidates: int = MAX_CANDIDATES_PER_REQUEST,
         max_files_scanned: int = MAX_FILES_SCANNED_PER_REQUEST,
@@ -237,6 +238,10 @@ class SemanticEvidenceResolver:
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
         self.repository_map = repository_map
+        # Optional shared semantic memory.  It is deliberately duck-typed so
+        # this resolver remains usable without importing or constructing the
+        # project model in legacy callers.
+        self.world_model = world_model
         self.max_relationship_hops = max(0, min(MAX_RELATIONSHIP_HOPS, int(max_relationship_hops)))
         self.max_candidates = max(1, min(MAX_CANDIDATES_PER_REQUEST, int(max_candidates)))
         self.max_files_scanned = max(1, min(MAX_FILES_SCANNED_PER_REQUEST, int(max_files_scanned)))
@@ -249,7 +254,14 @@ class SemanticEvidenceResolver:
         self._path_set: set[str] = set()
         self._authority_paths: set[str] = set()
         self._relationship_hops = 0
-        self._files = self._enumerate_allowed_files()
+        # File enumeration is lazy: a warm World Model request can return
+        # without rediscovering the repository inspection surface.
+        self._files: list[str] | None = None
+
+    def _ensure_files(self) -> list[str]:
+        if self._files is None:
+            self._files = self._enumerate_allowed_files()
+        return self._files
 
     # ---------- bounded source and map access ----------
 
@@ -366,7 +378,7 @@ class SemanticEvidenceResolver:
                 score_value += 8
             return (-score_value, len(path), path.casefold())
 
-        return sorted(self._files, key=score)[: self.max_files_scanned]
+        return sorted(self._ensure_files(), key=score)[: self.max_files_scanned]
 
     def _resolve_relative_import(self, source: str, specifier: str) -> str | None:
         if not str(specifier).startswith("."):
@@ -465,6 +477,7 @@ class SemanticEvidenceResolver:
         relationship: str = "direct_source",
         authoritative: bool | None = None,
         source_kind: str = "source_excerpt",
+        consumer_symbol: str = "",
     ) -> dict[str, Any]:
         identity = f"{path}:{max(1, int(line_number or 1))}"
         fact_values = []
@@ -485,6 +498,7 @@ class SemanticEvidenceResolver:
             "target": _text(request.get("target"), 180),
             "source_identity": identity,
             "symbol": _text(_primary_symbol(str(request.get("target", "")), request_kind), 180),
+            "consumer_symbol": _text(consumer_symbol, 180),
             "excerpt": self._line_excerpt(lines, line_number),
             "purpose": _text(request.get("why"), 320),
             "provenance": "SEMANTIC_EVIDENCE_RESOLVER",
@@ -580,8 +594,11 @@ class SemanticEvidenceResolver:
         symbols: list[str],
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        exact = self._definition_lines(path, lines, symbols)
         target_symbol = _primary_symbol(str(request.get("target", "")), request_kind)
+        lookup_symbols = list(symbols)
+        if target_symbol and target_symbol.casefold() not in {item.casefold() for item in lookup_symbols}:
+            lookup_symbols.append(target_symbol)
+        exact = self._definition_lines(path, lines, lookup_symbols)
         all_definitions = self._all_definition_lines(lines)
         for item in exact:
             line_number = int(item["line"])
@@ -713,6 +730,7 @@ class SemanticEvidenceResolver:
             return []
         records: list[dict[str, Any]] = []
         call_pattern = re.compile(rf"(?<![A-Za-z0-9_$]){re.escape(target)}\s*\(")
+        enclosing_definitions = self._all_definition_lines(lines)
         for number, line in enumerate(lines, 1):
             if _is_comment(line) or not call_pattern.search(line):
                 continue
@@ -784,6 +802,12 @@ class SemanticEvidenceResolver:
                 score = 96
             else:
                 score = 92
+            consumer_symbol = ""
+            for definition_line, definition_name in enclosing_definitions:
+                if definition_line <= number:
+                    consumer_symbol = definition_name
+                else:
+                    break
             records.append(self._record(
                 request=request, request_kind=request_kind, path=path, line_number=number,
                 lines=lines, role="test_direct" if is_test else "caller_expectation",
@@ -792,6 +816,7 @@ class SemanticEvidenceResolver:
                 claim_value=claim,
                 relationship="direct_call_site",
                 source_kind="behavioral_assertion" if assertions else "consumer_call_site",
+                consumer_symbol=consumer_symbol,
             ))
         return records
 
@@ -811,7 +836,7 @@ class SemanticEvidenceResolver:
         for number, line in enumerate(lines, 1):
             if _is_comment(line):
                 continue
-            equality = re.search(rf"\b(?:state|status)\b\s*(?:==|is)\s*({state_pattern})", line)
+            equality = re.search(rf"\b(?:state|status)\b\s*(?:===?|is)\s*({state_pattern})", line)
             assignment = re.search(rf"\b(?:state|status)\b\s*=\s*({state_pattern})", line)
             setter = re.search(
                 rf'''\b(?:setState|transition|set_status)\s*\(\s*['"]?({state_pattern})['"]?\s*(?:,|['"]?\s*\)|,\s*['"]?({state_pattern}))''',
@@ -1161,8 +1186,31 @@ class SemanticEvidenceResolver:
                 "relationship_hops": 0,
                 "provenance": [],
             }
+        # A current, complete, non-conflicting model neighborhood is the
+        # cheapest authoritative answer.  Partial model knowledge is not
+        # allowed to suppress fresh discovery; a current conflict is returned
+        # directly so the safety gate can remain fail-closed.
+        if self.world_model is not None and callable(getattr(self.world_model, "resolve_request", None)):
+            try:
+                # A cached answer must obey the same inspection boundary as a
+                # cold source scan.  In particular, direct resolver callers
+                # may supply an allowed path list without a gate context.
+                allowed_paths = self.allowed_inspection_paths
+                if isinstance(context, Mapping) and "allowed_inspection_paths" in context:
+                    allowed_paths = context.get("allowed_inspection_paths")
+                cached = self.world_model.resolve_request(value, allowed_paths=allowed_paths)
+            except Exception:
+                cached = None
+            if isinstance(cached, Mapping) and cached.get("resolution_status") in {"resolved", "conflicting"}:
+                result = dict(cached)
+                result.setdefault("request_kind", request_kind)
+                result.setdefault("gate_request_kind", gate_request_kind(request_kind))
+                result["world_model_reused"] = True
+                result["source_scan_performed"] = False
+                result["resolver"] = "PROJECT_WORLD_MODEL"
+                return result
         self._context_authority(context)
-        self._path_set = set(self._files)
+        self._path_set = set(self._ensure_files())
         ordered_paths = self._source_order(request_kind, str(value.get("target", "")))
         relationship_paths, relationship_hops = self._bounded_relationship_paths(ordered_paths[: self.max_candidates])
         self._relationship_hops = relationship_hops
@@ -1226,7 +1274,7 @@ class SemanticEvidenceResolver:
             for item in selected
         ]
         highest = max((int(item.get("authority_score", 0) or 0) for item in selected), default=0)
-        return {
+        result = {
             "request_kind": request_kind,
             "gate_request_kind": gate_request_kind(request_kind),
             "target": _text(value.get("target"), 180),
@@ -1248,7 +1296,17 @@ class SemanticEvidenceResolver:
             "structural_search": bool(had_structural),
             "fallback_used": fallback_used,
             "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
+            "world_model_reused": False,
+            "source_scan_performed": True,
         }
+        if self.world_model is not None and callable(getattr(self.world_model, "update_from_resolution", None)):
+            try:
+                result["world_model_update"] = self.world_model.update_from_resolution(result)
+            except Exception:
+                # World-model enrichment is advisory to retrieval.  A model
+                # write failure must not weaken the existing resolver result.
+                result["world_model_update"] = {"status": "rejected"}
+        return result
 
 
 def resolve_targeted_evidence(
@@ -1257,6 +1315,7 @@ def resolve_targeted_evidence(
     workspace: str | Path,
     allowed_inspection_paths: Iterable[str | Path] | None = None,
     repository_map: Any = None,
+    world_model: Any = None,
     context: Mapping[str, Any] | None = None,
     max_relationship_hops: int = MAX_RELATIONSHIP_HOPS,
     max_candidates: int = MAX_CANDIDATES_PER_REQUEST,
@@ -1267,6 +1326,7 @@ def resolve_targeted_evidence(
         workspace,
         allowed_inspection_paths,
         repository_map=repository_map,
+        world_model=world_model,
         max_relationship_hops=max_relationship_hops,
         max_candidates=max_candidates,
         max_files_scanned=max_files_scanned,
