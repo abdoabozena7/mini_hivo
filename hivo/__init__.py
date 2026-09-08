@@ -14,6 +14,7 @@ from .project_brain_refs import (
     mark_reference_stale, normalize_legacy_brain_record,
 )
 from .repository_map import RepositoryMap, build_repository_map, incremental_reindex
+from .project_world_model import ProjectWorldFact, ProjectWorldModel
 from .reference_resolution import (
     EvidenceResolutionRequest, ProjectReferenceResolver, ResolvedEvidence,
 )
@@ -167,7 +168,8 @@ from .core_orchestrator import (
 __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
     "build_execution_stages", "classify_project",
-    "ProjectBrainEntity", "TypedReference", "RepositoryMap", "build_repository_map",
+    "ProjectBrainEntity", "TypedReference", "RepositoryMap", "ProjectWorldFact", "ProjectWorldModel",
+    "build_repository_map",
     "incremental_reindex", "EvidenceResolutionRequest", "ProjectReferenceResolver",
     "ResolvedEvidence", "create_project_brain_entity", "mark_reference_stale",
     "normalize_legacy_brain_record", "LexicalIndex", "build_lexical_index",

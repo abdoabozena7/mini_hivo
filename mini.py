@@ -53,6 +53,7 @@ from hivo import impact_planning as stage3
 from hivo import execution_contracts as stage4
 from hivo import context_sufficiency as stage7_context
 from hivo import semantic_evidence as stage7_semantic
+from hivo import project_world_model as stage8_world
 from hivo import execution_invariants as stage6c_invariants
 from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
@@ -295,7 +296,19 @@ MAX_EVIDENCE_REQUESTS_PER_ROUND = stage7_context.MAX_EVIDENCE_REQUESTS_PER_ROUND
 MAX_CONTEXT_EVIDENCE_ITEMS = stage7_context.MAX_CONTEXT_EVIDENCE_ITEMS
 MAX_CONTEXT_EVIDENCE_CHARS = stage7_context.MAX_CONTEXT_EVIDENCE_CHARS
 SemanticEvidenceResolver = stage7_semantic.SemanticEvidenceResolver
-resolve_targeted_semantic_evidence = stage7_semantic.resolve_targeted_evidence
+ProjectWorldModel = stage8_world.ProjectWorldModel
+ProjectWorldFact = stage8_world.ProjectWorldFact
+
+
+def resolve_targeted_semantic_evidence(request, *args, **kwargs):
+    """Compatibility wrapper that uses the active project model by default."""
+    if kwargs.get("world_model") is None:
+        workspace = kwargs.get("workspace")
+        if workspace is not None:
+            kwargs["world_model"] = _world_model_for_workspace(workspace)
+    return stage7_semantic.resolve_targeted_evidence(request, *args, **kwargs)
+
+
 MAX_RELATIONSHIP_HOPS = stage7_semantic.MAX_RELATIONSHIP_HOPS
 MAX_SEMANTIC_EVIDENCE_CANDIDATES = stage7_semantic.MAX_CANDIDATES_PER_REQUEST
 MAX_SEMANTIC_EVIDENCE_ITEMS = stage7_semantic.MAX_RESOLVED_EVIDENCE_ITEMS
@@ -627,6 +640,10 @@ ACTIVE_TOOL_CONTRACT = None
 # Set only for the synchronous Worker attempt currently using run_tool.  The
 # runtime checks this gate at the mutation seam; it is never a model claim.
 ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+# One bounded semantic model is shared by Workers for the current workspace
+# and run.  The object is intentionally kept out of RUN so JSON run artifacts
+# contain counters/identifiers, never a serialized graph or source cache.
+ACTIVE_PROJECT_WORLD_MODEL = None
 MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
 PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
@@ -986,6 +1003,7 @@ def commit_transaction():
     ACTIVE_TRANSACTION = None
     LAST_COMMITTED_TRANSACTION = transaction
     changed = sorted(transaction["files"])
+    _world_model_revalidate_after_files(changed, phase="commit")
     record_run_event("transaction_commit", task_id=transaction.get("task_id"), changed=changed)
     return changed
 
@@ -1011,6 +1029,7 @@ def rollback_transaction():
                 store.reconcile_rolled_back_artifact(raw_path, existed=bool(snapshot["existed"]))
         except OSError as exc:
             print(f"[ROLLBACK_ERROR] {target}: {exc}")
+    _world_model_revalidate_after_files(restored, phase="rollback")
     record_run_event("transaction_rollback", task_id=transaction.get("task_id"), restored=restored)
     return restored
 
@@ -1173,6 +1192,10 @@ def write_file(path, content, role="System"):
         _transaction_capture(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+        # The source changed before verification can run.  Any semantic fact
+        # sourced from it is immediately stale and cannot serve a later
+        # resolver/gate request during this transaction.
+        _world_model_invalidate_paths([target], phase="mutation")
         if target.exists() and created_here:
             return f"wrote file: {target}{note}"
         if resumable:
@@ -1218,6 +1241,7 @@ def edit_file(path, old, new, expected_replacements=1):
     try:
         _transaction_capture(target)
         target.write_text(candidate, encoding="utf-8")
+        _world_model_invalidate_paths([target], phase="mutation")
         return f"edited file: {target} ({expected} replacement(s)){note}"
     except OSError as exc:
         return f"error writing file: {exc}"
@@ -1284,6 +1308,7 @@ def edit_file_range(path, start_line, end_line, new, role="System"):
     try:
         _transaction_capture(target)
         target.write_text(candidate, encoding="utf-8")
+        _world_model_invalidate_paths([target], phase="mutation")
         return f"edited lines {start}-{end} in file: {target}{note}"
     except OSError as exc:
         return f"error writing file: {exc}"
@@ -1558,18 +1583,51 @@ def _context_anchor_for_worker(task_text, task_id, context_anchor=None, executio
     return supplied
 
 
-def _context_initial_evidence(execution_contract=None, initial_context_evidence=None):
+def _context_initial_evidence(execution_contract=None, initial_context_evidence=None, task_text=None):
     if initial_context_evidence is not None:
         if isinstance(initial_context_evidence, dict):
-            return [initial_context_evidence]
-        return list(initial_context_evidence or [])
-    contract = execution_contract if isinstance(execution_contract, dict) else {}
-    nested = contract.get("execution_contract") if isinstance(contract.get("execution_contract"), dict) else {}
-    effective = nested or contract
-    facts = effective.get("relevant_repository_facts")
-    if isinstance(facts, list):
-        return facts
-    return []
+            evidence = [initial_context_evidence]
+        else:
+            evidence = list(initial_context_evidence or [])
+    else:
+        contract = execution_contract if isinstance(execution_contract, dict) else {}
+        nested = contract.get("execution_contract") if isinstance(contract.get("execution_contract"), dict) else {}
+        effective = nested or contract
+        facts = effective.get("relevant_repository_facts")
+        evidence = list(facts) if isinstance(facts, list) else []
+    # Supplement the existing Stage 4 evidence packet only when a compact,
+    # complete, current semantic slot is already known.  This is not a global
+    # model dump and it never replaces the goal/task anchor.
+    model = _world_model_for_workspace()
+    if model is not None and task_text:
+        try:
+            available_items = max(0, MAX_CONTEXT_EVIDENCE_ITEMS - len(evidence))
+            if not available_items:
+                return evidence
+            contract = execution_contract if isinstance(execution_contract, dict) else {}
+            nested = contract.get("execution_contract") if isinstance(contract.get("execution_contract"), dict) else {}
+            allowed_paths = nested.get("allowed_inspection_paths")
+            if allowed_paths is None:
+                allowed_paths = contract.get("allowed_inspection_paths")
+            if allowed_paths is None:
+                allowed_paths = (ACTIVE_TOOL_CONTRACT or {}).get("allowed_inspection_paths")
+            model_evidence = model.evidence_for_task(
+                task_text,
+                max_facts=min(available_items, stage8_world.MAX_WORLD_MODEL_PROJECTION_FACTS),
+                allowed_paths=allowed_paths,
+            )
+            # Keep the initial packet authoritative and within the gate's
+            # existing serialized evidence budget.  The model is a small
+            # supplement; it never evicts Stage 4 items to make room.
+            for item in model_evidence:
+                candidate = evidence + [item]
+                if len(json.dumps(candidate, ensure_ascii=False, default=str)) > MAX_CONTEXT_EVIDENCE_CHARS:
+                    break
+                evidence.append(item)
+            _sync_world_model_metrics(model)
+        except Exception:
+            pass
+    return evidence
 
 
 def _context_gate_for_execution(
@@ -1589,7 +1647,9 @@ def _context_gate_for_execution(
         return gate
     return stage7_context.ContextSufficiencyGate(
         _context_anchor_for_worker(task_text, task_id, anchor, execution_contract),
-        initial_evidence=_context_initial_evidence(execution_contract, initial_context_evidence),
+        initial_evidence=_context_initial_evidence(
+            execution_contract, initial_context_evidence, task_text=task_text,
+        ),
         evidence_provider=provider or _provide_targeted_context_evidence,
     )
 
@@ -1801,6 +1861,170 @@ def _context_candidate_files(request, context):
     return sorted(candidates, key=score)[:_CONTEXT_PROVIDER_MAX_FILES]
 
 
+def _world_model_for_workspace(workspace=None, repository_map=None):
+    """Return the one bounded semantic model for the current project/run."""
+    global ACTIVE_PROJECT_WORLD_MODEL
+    root_value = workspace if workspace is not None else WORKSPACE
+    if root_value is None:
+        return None
+    try:
+        root = Path(root_value).expanduser().resolve()
+        if not root.is_dir():
+            return None
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    project_id = None
+    if isinstance(RUN, dict):
+        project_id = RUN.get("project_id") or RUN.get("workspace_id") or RUN.get("repository_id")
+    if not isinstance(ACTIVE_PROJECT_WORLD_MODEL, stage8_world.ProjectWorldModel):
+        ACTIVE_PROJECT_WORLD_MODEL = stage8_world.ProjectWorldModel(
+            root, project_id=project_id, repository_map=repository_map,
+        )
+        if isinstance(RUN, dict):
+            RUN["world_model_project_identity"] = ACTIVE_PROJECT_WORLD_MODEL.project_identity
+        record_run_event(
+            "world_model_initialized",
+            project_identity=ACTIVE_PROJECT_WORLD_MODEL.project_identity,
+            fact_count=0,
+        )
+    elif not ACTIVE_PROJECT_WORLD_MODEL.matches_project(root, project_id):
+        previous = ACTIVE_PROJECT_WORLD_MODEL.project_identity
+        ACTIVE_PROJECT_WORLD_MODEL = stage8_world.ProjectWorldModel(
+            root, project_id=project_id, repository_map=repository_map,
+        )
+        if isinstance(RUN, dict):
+            RUN["world_model_project_identity"] = ACTIVE_PROJECT_WORLD_MODEL.project_identity
+        record_run_event(
+            "world_model_project_switched",
+            previous_project_identity=previous,
+            project_identity=ACTIVE_PROJECT_WORLD_MODEL.project_identity,
+        )
+    else:
+        ACTIVE_PROJECT_WORLD_MODEL.attach_repository_map(repository_map)
+    return ACTIVE_PROJECT_WORLD_MODEL
+
+
+def _sync_world_model_metrics(model):
+    if not isinstance(model, stage8_world.ProjectWorldModel) or not isinstance(RUN, dict):
+        return
+    stats = model.stats
+    RUN["world_model_facts_stored"] = int(stats.get("facts_stored", 0))
+    RUN["world_model_facts_reused"] = int(stats.get("facts_reused", 0))
+    RUN["world_model_fact_invalidations"] = int(stats.get("facts_invalidated", 0))
+    RUN["world_model_facts_stale"] = int(stats.get("facts_stale", 0))
+    RUN["world_model_revalidations"] = int(stats.get("facts_revalidated", 0))
+    RUN["world_model_rejected_facts"] = int(stats.get("facts_rejected", 0))
+    RUN["world_model_conflicts"] = int(stats.get("conflicts", 0))
+    RUN["world_model_projections"] = int(stats.get("projections", 0))
+    RUN["world_model_projection_facts"] = int(stats.get("projection_facts", 0))
+    RUN["world_model_project_identity"] = model.project_identity
+
+
+def _world_model_invalidate_paths(paths, *, phase="mutation"):
+    model = _world_model_for_workspace()
+    if model is None:
+        return []
+    invalidated = model.invalidate_paths(paths)
+    _sync_world_model_metrics(model)
+    if invalidated:
+        record_run_event(
+            "world_model_facts_invalidated",
+            phase=phase,
+            project_identity=model.project_identity,
+            fact_count=len(invalidated),
+            fact_ids=invalidated[:stage8_world.MAX_WORLD_MODEL_FACTS_PER_PROJECTION],
+            paths=[str(path) for path in list(paths or [])[:8]],
+        )
+    return invalidated
+
+
+def _world_model_revalidate_after_files(changed_paths, *, phase="commit"):
+    """Revalidate only stale facts touching the bounded mutation surface."""
+    model = _world_model_for_workspace()
+    if model is None:
+        return {"revalidated": [], "targets": []}
+    paths = list(changed_paths or [])
+    if phase == "rollback":
+        # A Worker may have resolved the post-mutation source before
+        # verification failed.  Stale every current fact on the restored
+        # path first, then restore only facts whose original fingerprint is
+        # back; post-mutation facts therefore cannot become ghost VERIFIED
+        # facts after rollback.
+        model.invalidate_paths(paths)
+        revalidated = model.restore_paths(paths)
+        _sync_world_model_metrics(model)
+        if revalidated:
+            record_run_event(
+                "world_model_rollback_revalidated",
+                project_identity=model.project_identity,
+                fact_count=len(revalidated),
+                fact_ids=revalidated[:stage8_world.MAX_WORLD_MODEL_FACTS_PER_PROJECTION],
+            )
+        return {"revalidated": revalidated, "targets": []}
+
+    if model.repository_map is not None:
+        try:
+            updated_map = core1_repository_map.incremental_reindex(
+                model.repository_map,
+                model.project_root,
+                changed_paths=paths,
+                metrics=None,
+            )
+            model.attach_repository_map(updated_map)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+    # A fact may have been re-added while the transaction was open.  Force
+    # every source-dependent fact on the committed path through the bounded
+    # revalidation list so success is based on post-mutation evidence.
+    model.invalidate_paths(paths)
+    targets = model.revalidation_targets(paths)[:stage8_world.MAX_WORLD_MODEL_REVALIDATION_TARGETS]
+    results = []
+    for target in targets:
+        kind = target.get("semantic_kind") or "SYMBOL_DEFINITION"
+        request = {
+            "kind": kind,
+            "target": target.get("target", ""),
+            "why": "Revalidate the affected semantic fact against the post-mutation source before reuse.",
+        }
+        try:
+            resolver = stage7_semantic.SemanticEvidenceResolver(
+                model.project_root,
+                [model.project_root],
+                repository_map=model.repository_map,
+                world_model=model,
+                max_relationship_hops=stage7_semantic.MAX_RELATIONSHIP_HOPS,
+                max_candidates=stage7_semantic.MAX_CANDIDATES_PER_REQUEST,
+                max_files_scanned=_CONTEXT_PROVIDER_MAX_FILES,
+                max_evidence_items=_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST,
+            )
+            result = resolver.resolve(request)
+            results.append({
+                "target": compact_text(target.get("target"), 180),
+                "relation": target.get("relation"),
+                "resolution_status": result.get("resolution_status"),
+                "source_scan_performed": bool(result.get("source_scan_performed")),
+            })
+            if isinstance(RUN, dict) and result.get("source_scan_performed"):
+                RUN["world_model_source_scans"] = RUN.get("world_model_source_scans", 0) + 1
+        except Exception as exc:
+            results.append({
+                "target": compact_text(target.get("target"), 180),
+                "relation": target.get("relation"),
+                "resolution_status": "revalidation_error",
+                "error": compact_text(str(exc), 180),
+            })
+    model.refresh_currentness()
+    _sync_world_model_metrics(model)
+    record_run_event(
+        "world_model_revalidation",
+        phase=phase,
+        project_identity=model.project_identity,
+        target_count=len(targets),
+        results=results[:stage8_world.MAX_WORLD_MODEL_REVALIDATION_TARGETS],
+    )
+    return {"revalidated": [item for item in results if item.get("resolution_status") == "resolved"], "targets": results}
+
+
 def _provide_targeted_context_evidence(request, context):
     """Resolve one validated request into a bounded semantic evidence bundle."""
     request = request if isinstance(request, dict) else {}
@@ -1824,7 +2048,8 @@ def _provide_targeted_context_evidence(request, context):
             "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
         }
     repository_map = RUN.get("repository_map") if isinstance(RUN, dict) else None
-    return stage7_semantic.resolve_targeted_evidence(
+    world_model = _world_model_for_workspace(WORKSPACE, repository_map=repository_map)
+    result = stage7_semantic.resolve_targeted_evidence(
         checked["request"],
         workspace=WORKSPACE,
         allowed_inspection_paths=(context or {}).get("allowed_inspection_paths", []),
@@ -1837,7 +2062,24 @@ def _provide_targeted_context_evidence(request, context):
         # authoritative instead of lexical order deciding it.
         max_files_scanned=_CONTEXT_PROVIDER_MAX_FILES,
         max_evidence_items=_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST,
+        world_model=world_model,
     )
+    if isinstance(RUN, dict):
+        RUN["world_model_source_scans"] = RUN.get("world_model_source_scans", 0) + int(
+            bool(result.get("source_scan_performed"))
+        )
+    _sync_world_model_metrics(world_model)
+    record_run_event(
+        "world_model_evidence_resolution",
+        project_identity=(world_model.project_identity if world_model is not None else None),
+        request_kind=result.get("request_kind"),
+        target=compact_text(result.get("target"), 180),
+        resolution_status=result.get("resolution_status"),
+        reused=bool(result.get("world_model_reused")),
+        source_scan_performed=bool(result.get("source_scan_performed")),
+        evidence_count=len(result.get("evidence", []) or []),
+    )
+    return result
 
 
 def _normalized_workspace_relative_path(raw_path):
@@ -2580,6 +2822,19 @@ def new_metrics(mode):
         "semantic_evidence_candidates": 0,
         "semantic_evidence_items": 0,
         "semantic_evidence_hops": 0,
+        # V28 bounded shared Project World Model accounting.  Only counts and
+        # identifiers are persisted; the model itself remains process-local.
+        "world_model_facts_stored": 0,
+        "world_model_facts_reused": 0,
+        "world_model_fact_invalidations": 0,
+        "world_model_facts_stale": 0,
+        "world_model_revalidations": 0,
+        "world_model_rejected_facts": 0,
+        "world_model_conflicts": 0,
+        "world_model_projections": 0,
+        "world_model_projection_facts": 0,
+        "world_model_source_scans": 0,
+        "world_model_project_identity": None,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
@@ -2796,7 +3051,7 @@ def new_metrics(mode):
 
 def reset_run(mode):
     global RUN, TASKS, ROLE_STATUS, DASHBOARD, RUN_STARTED, RUN_ID
-    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE, FORCE_CPU_FOR_RUN
+    global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION, ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_PROJECT_WORLD_MODEL, FORCE_CPU_FOR_RUN
     global VISION_ENABLED_FOR_RUN, VISION_ERROR, PREFLIGHT_CONFLICT_STATE
     RUN_ID = datetime.now().strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     ACTIVE_TRANSACTION = None
@@ -2804,6 +3059,7 @@ def reset_run(mode):
     ACTIVE_CONTRACT = None
     ACTIVE_TOOL_CONTRACT = None
     ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+    ACTIVE_PROJECT_WORLD_MODEL = None
     FORCE_CPU_FOR_RUN = False
     RUN = new_metrics(mode)
     TASKS = {}
@@ -11132,6 +11388,47 @@ def route_recovery_from_diagnosis(task, contract, leaf_result, diagnosis, memory
     return result
 
 
+def _world_model_projection_text(
+    task_text, *, max_facts=stage8_world.MAX_WORLD_MODEL_PROJECTION_FACTS,
+    allowed_paths=None,
+):
+    model = _world_model_for_workspace()
+    if model is None:
+        return ""
+    try:
+        view = model.projection_for_task(
+            task_text, max_facts=max_facts, allowed_paths=allowed_paths,
+        )
+        facts = []
+        for item in list(view.get("facts", []) or [])[:max_facts]:
+            if not isinstance(item, dict):
+                continue
+            provenance = (item.get("provenance") or [{}])[0]
+            source = provenance.get("source_identity") or provenance.get("path") or "source"
+            facts.append(
+                f"- {compact_text(item.get('subject'), 100)} "
+                f"{compact_text(item.get('relation'), 50)} "
+                f"{compact_text(item.get('object'), 120)} "
+                f"({compact_text(item.get('state'), 24)}) [{compact_text(source, 140)}]"
+            )
+        _sync_world_model_metrics(model)
+        return compact_text("\n".join(facts), 900) if facts else ""
+    except Exception:
+        return ""
+
+
+def _append_world_model_projection(packet, task_text, *, allowed_paths=None):
+    projection = _world_model_projection_text(task_text, allowed_paths=allowed_paths)
+    if not projection:
+        return packet
+    section = "\n\nPROJECT WORLD MODEL VIEW (bounded, task-local typed facts):\n" + projection
+    # Preserve the existing bounded packet exactly when it is already full;
+    # the model remains available through the resolver/gate seam.
+    if len(packet) + len(section) > min(MAX_NODE_PACKET_CHARS, MAX_WORKER_MISSION_CHARS):
+        return packet
+    return packet + section
+
+
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
                        dependency_summaries=None, failure_evidence=None, strategy_context=None,
                        brain_projection=None, worker_mission=None, execution_contract=None):
@@ -11150,7 +11447,11 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
             dependency_summaries if dependency_summaries else None,
             task_id=task.get("id"),
         )
-        return worker_context["rendered_worker_context"]
+        allowed_paths = execution_contract.get("allowed_inspection_paths")
+        return _append_world_model_projection(
+            worker_context["rendered_worker_context"], task.get("goal", ""),
+            allowed_paths=allowed_paths,
+        )
     if isinstance(execution_contract, dict):
         # A direct caller may provide the old broad projection. The Stage 4A
         # packet is still fresh and contract-scoped at this boundary.
@@ -11256,6 +11557,20 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         if isinstance(execution_contract, dict) else
         f"REPOSITORY HINTS:\n{repository_hints(repo_snapshot, task.get('scope_hint'), max_chars=1900)}\n\n"
     )
+    world_model_section = ""
+    allowed_paths = None
+    if isinstance(execution_contract, dict):
+        allowed_paths = execution_contract.get("allowed_inspection_paths")
+    elif isinstance(task, dict):
+        allowed_paths = task.get("allowed_inspection_paths")
+    world_model_projection = _world_model_projection_text(
+        task.get("goal", ""), allowed_paths=allowed_paths,
+    )
+    if world_model_projection:
+        world_model_section = (
+            "PROJECT WORLD MODEL VIEW (bounded, task-local typed facts):\n"
+            f"{world_model_projection}\n\n"
+        )
     packet = (
         f"{root_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
@@ -11271,6 +11586,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"FAILURE EVIDENCE:\n{json.dumps(failure_projection, ensure_ascii=False)[:1500] if failure_projection else '(none)'}\n\n"
         f"FAILED DECOMPOSITIONS (do not paraphrase these boundaries):\n"
         f"{json.dumps(failed_decompositions, ensure_ascii=False)[:2600] if failed_decompositions else '(none)'}\n\n"
+        f"{world_model_section}"
         f"{repository_section}"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
     )
@@ -19744,6 +20060,12 @@ def begin_durable_run(contract):
             contract.get("project_id") or nested_contract.get("project_id")
             or RUN.get("project_id") or "default"
         )
+    # Establish the shared model at the existing run boundary.  RepositoryMap
+    # remains optional here; semantic enrichment is still lazy.
+    _world_model_for_workspace(
+        WORKSPACE,
+        repository_map=RUN.get("repository_map") if isinstance(RUN, dict) else None,
+    )
     store = get_memory_store()
     if store and RUN_ID:
         try:
