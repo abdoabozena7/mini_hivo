@@ -15,6 +15,18 @@ from .project_brain_refs import (
 )
 from .repository_map import RepositoryMap, build_repository_map, incremental_reindex
 from .project_world_model import ProjectWorldFact, ProjectWorldModel
+from .semantic_coupling import (
+    SEMANTIC_COUPLING_SCHEMA_VERSION,
+    SHARED_CONTRACT, SHARED_STATE_TRANSITION, SHARED_INVARIANT,
+    PRODUCER_CONSUMER, TYPE_SCHEMA_COUPLING, PUBLIC_SURFACE_COUPLING,
+    ORDER_DEPENDENT, VERIFICATION_COUPLING, CONFIGURATION_COUPLING,
+    INDEPENDENT, GROUP, MERGE_REQUIRED, BLOCKED,
+    ANALYSIS_VALIDATED, ANALYSIS_PARTIAL, ANALYSIS_CONFLICTING,
+    AUTHORITY_RANKING,
+    SemanticCoupling, SemanticWorkGroup, SemanticCouplingAnalyzer,
+    analyze_semantic_coupling, refine_semantic_decomposition,
+    verify_semantic_group, benchmark_semantic_coupling_scenarios,
+)
 from .reference_resolution import (
     EvidenceResolutionRequest, ProjectReferenceResolver, ResolvedEvidence,
 )
@@ -169,6 +181,14 @@ __all__ = [
     "GEMMA_MODEL", "MemoryStore", "ProjectStore", "SingleModelPolicy",
     "build_execution_stages", "classify_project",
     "ProjectBrainEntity", "TypedReference", "RepositoryMap", "ProjectWorldFact", "ProjectWorldModel",
+    "SEMANTIC_COUPLING_SCHEMA_VERSION", "SHARED_CONTRACT", "SHARED_STATE_TRANSITION",
+    "SHARED_INVARIANT", "PRODUCER_CONSUMER", "TYPE_SCHEMA_COUPLING",
+    "PUBLIC_SURFACE_COUPLING", "ORDER_DEPENDENT", "VERIFICATION_COUPLING",
+    "CONFIGURATION_COUPLING", "INDEPENDENT", "GROUP", "MERGE_REQUIRED", "BLOCKED",
+    "ANALYSIS_VALIDATED", "ANALYSIS_PARTIAL", "ANALYSIS_CONFLICTING", "AUTHORITY_RANKING",
+    "SemanticCoupling", "SemanticWorkGroup", "SemanticCouplingAnalyzer",
+    "analyze_semantic_coupling", "refine_semantic_decomposition",
+    "verify_semantic_group", "benchmark_semantic_coupling_scenarios",
     "build_repository_map",
     "incremental_reindex", "EvidenceResolutionRequest", "ProjectReferenceResolver",
     "ResolvedEvidence", "create_project_brain_entity", "mark_reference_stale",

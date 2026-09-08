@@ -54,6 +54,7 @@ from hivo import execution_contracts as stage4
 from hivo import context_sufficiency as stage7_context
 from hivo import semantic_evidence as stage7_semantic
 from hivo import project_world_model as stage8_world
+from hivo import semantic_coupling as stage9_coupling
 from hivo import execution_invariants as stage6c_invariants
 from hivo import precommit_invariant_gate as stage6c_precommit
 from hivo import verification_obligation_coverage as stage6c_coverage
@@ -298,6 +299,25 @@ MAX_CONTEXT_EVIDENCE_CHARS = stage7_context.MAX_CONTEXT_EVIDENCE_CHARS
 SemanticEvidenceResolver = stage7_semantic.SemanticEvidenceResolver
 ProjectWorldModel = stage8_world.ProjectWorldModel
 ProjectWorldFact = stage8_world.ProjectWorldFact
+# V29 bounded semantic coupling validation.  This layer refines candidate
+# decompositions; it does not replace Stage 3/4 decomposition or scheduling.
+SemanticCouplingAnalyzer = stage9_coupling.SemanticCouplingAnalyzer
+SemanticCoupling = stage9_coupling.SemanticCoupling
+SemanticWorkGroup = stage9_coupling.SemanticWorkGroup
+SHARED_CONTRACT = stage9_coupling.SHARED_CONTRACT
+SHARED_STATE_TRANSITION = stage9_coupling.SHARED_STATE_TRANSITION
+SHARED_INVARIANT = stage9_coupling.SHARED_INVARIANT
+PRODUCER_CONSUMER = stage9_coupling.PRODUCER_CONSUMER
+TYPE_SCHEMA_COUPLING = stage9_coupling.TYPE_SCHEMA_COUPLING
+PUBLIC_SURFACE_COUPLING = stage9_coupling.PUBLIC_SURFACE_COUPLING
+ORDER_DEPENDENT = stage9_coupling.ORDER_DEPENDENT
+VERIFICATION_COUPLING = stage9_coupling.VERIFICATION_COUPLING
+CONFIGURATION_COUPLING = stage9_coupling.CONFIGURATION_COUPLING
+INDEPENDENT = stage9_coupling.INDEPENDENT
+SEMANTIC_GROUP = stage9_coupling.GROUP
+SEMANTIC_MERGE_REQUIRED = stage9_coupling.MERGE_REQUIRED
+SEMANTIC_COUPLING_BLOCKED = stage9_coupling.BLOCKED
+MAX_SEMANTIC_REPLAN_ATTEMPTS = stage9_coupling.MAX_SEMANTIC_REPLAN_ATTEMPTS
 
 
 def resolve_targeted_semantic_evidence(request, *args, **kwargs):
@@ -312,6 +332,30 @@ def resolve_targeted_semantic_evidence(request, *args, **kwargs):
 MAX_RELATIONSHIP_HOPS = stage7_semantic.MAX_RELATIONSHIP_HOPS
 MAX_SEMANTIC_EVIDENCE_CANDIDATES = stage7_semantic.MAX_CANDIDATES_PER_REQUEST
 MAX_SEMANTIC_EVIDENCE_ITEMS = stage7_semantic.MAX_RESOLVED_EVIDENCE_ITEMS
+MAX_SEMANTIC_COUPLING_HOPS = stage9_coupling.MAX_SEMANTIC_COUPLING_HOPS
+MAX_SEMANTIC_COUPLING_FACTS_PER_CHILD = stage9_coupling.MAX_SEMANTIC_COUPLING_FACTS_PER_CHILD
+MAX_SEMANTIC_COUPLING_GROUPS = stage9_coupling.MAX_SEMANTIC_COUPLING_GROUPS
+MAX_SEMANTIC_GROUP_FACTS = stage9_coupling.MAX_SEMANTIC_GROUP_FACTS
+
+
+def analyze_semantic_coupling(parent_goal, candidate_children, **kwargs):
+    """Use the active bounded Project World Model for decomposition analysis."""
+    if kwargs.get("world_model") is None and kwargs.get("project_world_model") is None:
+        kwargs["world_model"] = _world_model_for_workspace()
+    return stage9_coupling.analyze_semantic_coupling(
+        parent_goal, candidate_children, **kwargs,
+    )
+
+
+def refine_semantic_decomposition(parent_goal, candidate_children, **kwargs):
+    if kwargs.get("world_model") is None and kwargs.get("project_world_model") is None:
+        kwargs["world_model"] = _world_model_for_workspace()
+    return stage9_coupling.refine_semantic_decomposition(
+        parent_goal, candidate_children, **kwargs,
+    )
+
+
+verify_semantic_group = stage9_coupling.verify_semantic_group
 RecoveryFailureEnvelope = stage6d.RecoveryFailureEnvelope
 RECOVERY_FAILURE_EVIDENCE = stage6d.RECOVERY_FAILURE_EVIDENCE
 VERIFICATION_FAILURE = stage6d.VERIFICATION_FAILURE
@@ -2835,6 +2879,19 @@ def new_metrics(mode):
         "world_model_projection_facts": 0,
         "world_model_source_scans": 0,
         "world_model_project_identity": None,
+        # V29 semantic coupling analysis is a bounded refinement layer around
+        # the existing decomposer.  It records decisions, not source blobs.
+        "semantic_coupling_analyses": 0,
+        "semantic_coupling_independent": 0,
+        "semantic_coupling_groups": 0,
+        "semantic_coupling_merge_required": 0,
+        "semantic_coupling_conflicts": 0,
+        "semantic_coupling_partial": 0,
+        "semantic_coupling_replans": 0,
+        "semantic_group_verification_attempts": 0,
+        "semantic_group_verification_passes": 0,
+        "semantic_group_verification_failures": 0,
+        "semantic_group_recovery_required": 0,
         "mission_contract_failures": 0,
         "mission_contract_validation_failures": 0,
         "mission_advice_received": 0,
@@ -3090,6 +3147,16 @@ def compact_task_tree():
             "children": list(task.get("children", [])),
             "changed_files": bounded_list(task.get("changed_files", []), 12, 140),
         }
+        if task.get("semantic_group_id"):
+            entry["semantic_group"] = {
+                "group_id": task.get("semantic_group_id"),
+                "status": task.get("semantic_group_status", "unknown"),
+                "members": list(task.get("semantic_group_members", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_MEMBERS],
+                "coupling_types": list(task.get("semantic_group_coupling_types", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_FACTS],
+            }
+        if task.get("semantic_coupling_status"):
+            entry["semantic_coupling_status"] = task.get("semantic_coupling_status")
+            entry["semantic_coupling_classification"] = task.get("semantic_coupling_classification")
         if task.get("child_scheduler") is not None:
             entry["child_scheduler"] = copy.deepcopy(task.get("child_scheduler"))
         if task.get("execution_contract_id"):
@@ -10139,6 +10206,18 @@ def make_task(task_id, goal, depth=0, parent=None, done_when=None, scope_hint=No
         "integration_split_boundary": False,
         "integration_resplit_attempts": 0,
         "integration_too_broad": False,
+        # Semantic coupling is metadata around ordinary child execution.  The
+        # existing task/dependency lifecycle remains the source of execution
+        # order; these fields carry only the bounded shared goal/invariant.
+        "semantic_group_id": None,
+        "semantic_group_goal": None,
+        "semantic_group_invariant": None,
+        "semantic_group_members": [],
+        "semantic_group_coupling_types": [],
+        "semantic_group_verification_targets": [],
+        "semantic_group_status": "NONE",
+        "semantic_group_required": False,
+        "semantic_group_verification": None,
         "status": "pending", "children": [], "summary": "", "verification_status": "unknown",
         "changed_files": [], "failure_evidence": [],
         # The first failed execution is retained independently from the final
@@ -10555,6 +10634,9 @@ PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}"""
             RUN["max_depth"] = max(RUN.get("max_depth", 0), child["depth"])
             update_task_ledger(child)
             children.append(child)
+        children, specs, _coupling = _apply_semantic_coupling_refinement(
+            task, children, execution_contract, specs,
+        )
         _record_decomposition_branch(
             task, specs, children, kind="resplit" if force_smaller else "initial",
         )
@@ -10619,6 +10701,9 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
         RUN["max_depth"] = max(RUN["max_depth"], child["depth"])
         update_task_ledger(child)
         children.append(child)
+    children, specs, _coupling = _apply_semantic_coupling_refinement(
+        task, children, contract, specs,
+    )
     _record_decomposition_branch(
         task, specs, children, kind="resplit" if force_smaller else "initial",
     )
@@ -10653,6 +10738,345 @@ def _record_decomposition_branch(task, specs, children, kind="initial", branch_i
     history.append(branch)
     task["active_decomposition_id"] = branch["branch_id"]
     return branch
+
+
+def _semantic_coupling_inputs(task, children, contract=None):
+    """Build a small analysis input from existing task/contract authority."""
+    contract = contract if isinstance(contract, dict) else {}
+    requirements = [
+        *list(task.get("done_when", []) or []),
+        *list(contract.get("requirements", []) or []),
+        *list(contract.get("success_criteria", []) or []),
+    ]
+    invariants = [
+        *list(contract.get("constraints", []) or []),
+        *list(contract.get("local_preservation_constraints", []) or []),
+        *list(task.get("constraints", []) or []),
+    ]
+    verification_targets = []
+    for key in ("verification_targets", "required_tests", "tests", "verification_contracts"):
+        value = contract.get(key)
+        if isinstance(value, (list, tuple)):
+            verification_targets.extend(value)
+    dependency_map = {}
+    for child in children or []:
+        if not isinstance(child, dict):
+            continue
+        child_id = str(child.get("id", ""))
+        dependencies = child.get("dependencies") or child.get("depends_on") or []
+        if child_id and dependencies:
+            dependency_map[child_id] = list(dependencies) if isinstance(dependencies, (list, tuple)) else [dependencies]
+    return requirements, invariants, verification_targets, dependency_map
+
+
+def _record_semantic_coupling_analysis(task, refinement):
+    """Record bounded coupling observability without persisting source blobs."""
+    if not isinstance(refinement, dict):
+        return
+    plan = refinement.get("plan") if isinstance(refinement.get("plan"), dict) else refinement
+    if not isinstance(plan, dict):
+        return
+    RUN["semantic_coupling_analyses"] = RUN.get("semantic_coupling_analyses", 0) + 1
+    classification = str(plan.get("classification", INDEPENDENT))
+    status = str(plan.get("status", ""))
+    if classification == INDEPENDENT:
+        RUN["semantic_coupling_independent"] = RUN.get("semantic_coupling_independent", 0) + 1
+    elif classification == SEMANTIC_GROUP:
+        RUN["semantic_coupling_groups"] = RUN.get("semantic_coupling_groups", 0) + len(
+            plan.get("groups", []) or []
+        )
+    elif (
+        classification == SEMANTIC_MERGE_REQUIRED
+        or refinement.get("refined_from_classification") == SEMANTIC_MERGE_REQUIRED
+        or plan.get("refined_from_classification") == SEMANTIC_MERGE_REQUIRED
+    ):
+        RUN["semantic_coupling_merge_required"] = RUN.get("semantic_coupling_merge_required", 0) + 1
+    if status == stage9_coupling.ANALYSIS_CONFLICTING:
+        RUN["semantic_coupling_conflicts"] = RUN.get("semantic_coupling_conflicts", 0) + 1
+    elif status == stage9_coupling.ANALYSIS_PARTIAL:
+        RUN["semantic_coupling_partial"] = RUN.get("semantic_coupling_partial", 0) + 1
+    if refinement.get("refined"):
+        RUN["semantic_coupling_replans"] = RUN.get("semantic_coupling_replans", 0) + 1
+    task["semantic_coupling_plan"] = copy.deepcopy(plan)
+    task["semantic_coupling_status"] = status or "UNKNOWN"
+    task["semantic_coupling_classification"] = classification
+    task["semantic_groups"] = copy.deepcopy(plan.get("groups", []) or [])
+    record_run_event(
+        "semantic_coupling_analysis",
+        task_id=task.get("id"),
+        status=status,
+        classification=classification,
+        child_ids=[str(item.get("id", "")) for item in plan.get("children", []) if isinstance(item, dict)],
+        coupling_types=sorted({
+            str(item.get("kind", "")) for item in plan.get("couplings", [])
+            if isinstance(item, dict) and item.get("kind")
+        }),
+        group_ids=[str(item.get("group_id", "")) for item in plan.get("groups", []) if isinstance(item, dict)],
+        merge_required=copy.deepcopy(plan.get("merge_required", [])[:stage9_coupling.MAX_SEMANTIC_COUPLING_GROUPS]),
+        conflict_count=len(plan.get("conflicts", []) or []),
+    )
+
+
+def _apply_semantic_coupling_refinement(task, children, contract=None, specs=None):
+    """Refine existing child objects while preserving their execution identity."""
+    child_list = [child for child in (children or []) if isinstance(child, dict)]
+    if len(child_list) < 2:
+        return child_list, list(specs or []), None
+    requirements, invariants, verification_targets, dependency_map = _semantic_coupling_inputs(
+        task, child_list, contract,
+    )
+    model = _world_model_for_workspace()
+    refinement = stage9_coupling.refine_semantic_decomposition(
+        task.get("goal", ""), child_list,
+        world_model=model,
+        known_dependencies=dependency_map,
+        requirements=requirements,
+        invariants=invariants,
+        verification_targets=verification_targets,
+    )
+    _record_semantic_coupling_analysis(task, refinement)
+    plan = refinement.get("plan", {}) if isinstance(refinement, dict) else {}
+    if plan.get("classification") == stage9_coupling.BLOCKED:
+        # Keep the candidate objects available for diagnostics, but make the
+        # parent explicitly fail closed instead of falling through to a leaf.
+        task["semantic_coupling_blocked"] = True
+        task["semantic_coupling_failure"] = {
+            "failure_type": "SEMANTIC_COUPLING_CONFLICT",
+            "summary": "current authoritative coupling evidence conflicts; decomposition is not accepted",
+            "conflicts": copy.deepcopy(plan.get("conflicts", [])[:stage9_coupling.MAX_SEMANTIC_GROUP_FACTS]),
+        }
+        return child_list, list(specs or []), refinement
+
+    if plan.get("classification") == SEMANTIC_MERGE_REQUIRED and not refinement.get("refined"):
+        # A merge-required split is unsafe until the bounded refinement has
+        # actually produced one executable boundary.  Never allow an
+        # exhausted/no-op replan to reach a Worker as if it were independent.
+        task["semantic_coupling_blocked"] = True
+        task["semantic_coupling_failure"] = {
+            "failure_type": "SEMANTIC_COUPLING_REPLAN_EXHAUSTED",
+            "summary": "unsafe semantic micro-split could not be refined within the bounded replan budget",
+            "replan_attempts": plan.get("replan_attempts", 0),
+            "max_replan_attempts": plan.get(
+                "max_replan_attempts", MAX_SEMANTIC_REPLAN_ATTEMPTS,
+            ),
+            "merge_required": copy.deepcopy(plan.get("merge_required", [])),
+        }
+        return child_list, list(specs or []), refinement
+
+    refined_rows = [
+        row for row in (refinement.get("children", []) if isinstance(refinement, dict) else [])
+        if isinstance(row, dict)
+    ]
+    if not refined_rows:
+        refined_rows = list(plan.get("children", []) or [])
+    existing = {str(child.get("id", "")): child for child in child_list}
+    refined_children = []
+    retained_ids = set()
+    for row in refined_rows:
+        child_id = str(row.get("id", ""))
+        child = existing.get(child_id)
+        if child is None:
+            # The current deterministic merger keeps the first member's id;
+            # reject any future provider that tries to create a new identity.
+            continue
+        retained_ids.add(child_id)
+        for key in (
+            "goal", "done_when", "scope_hint", "targets", "verification_targets",
+            "dependencies", "merged_from", "semantic_merge_required", "semantic_merge_reason",
+        ):
+            if key in row:
+                child[key] = copy.deepcopy(row[key])
+        if row.get("semantic_group_id"):
+            child.update({
+                "semantic_group_id": row.get("semantic_group_id"),
+                "semantic_group_goal": row.get("semantic_group_goal"),
+                "semantic_group_invariant": row.get("semantic_group_invariant"),
+                "semantic_group_members": list(row.get("semantic_group_members", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_MEMBERS],
+                "semantic_group_coupling_types": list(row.get("semantic_group_coupling_types", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_FACTS],
+                "semantic_group_verification_targets": list(row.get("semantic_group_verification_targets", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_VERIFICATION_TARGETS],
+                "semantic_group_required": True,
+                "semantic_group_status": "PLANNED",
+                "parent_goal": task.get("goal"),
+            })
+        refined_children.append(child)
+
+    removed_ids = [child_id for child_id in existing if child_id not in retained_ids]
+    if removed_ids:
+        for child_id in removed_ids:
+            TASKS.pop(child_id, None)
+        task["children"] = [
+            str(child_id) for child_id in task.get("children", [])
+            if str(child_id) not in set(removed_ids)
+        ]
+        RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0) - len(removed_ids))
+        record_run_event(
+            "semantic_decomposition_refined",
+            task_id=task.get("id"), removed_child_ids=removed_ids,
+            retained_child_ids=[str(child.get("id", "")) for child in refined_children],
+            reason="unsafe micro-split merged before Worker execution",
+        )
+    for child in refined_children:
+        TASKS[str(child.get("id", ""))] = child
+        update_task_ledger(child)
+    return refined_children, refined_rows, refinement
+
+
+def _semantic_coupling_blocked_result(task, memory):
+    failure = task.get("semantic_coupling_failure", {}) if isinstance(task, dict) else {}
+    return {
+        "status": "failed",
+        "failure_type": failure.get("failure_type", "SEMANTIC_COUPLING_CONFLICT"),
+        "orchestration_failure": failure.get("failure_type", "SEMANTIC_COUPLING_CONFLICT"),
+        "summary": failure.get("summary", "semantic coupling analysis blocked decomposition"),
+        "semantic_coupling": copy.deepcopy(task.get("semantic_coupling_plan", {})),
+        "semantic_group_status": "BLOCKED",
+        "memory": memory,
+    }
+
+
+def _semantic_group_definitions(children, task=None):
+    """Collect one compact group definition per group id."""
+    definitions = {}
+    task = task if isinstance(task, dict) else {}
+    for group in task.get("semantic_groups", []) or []:
+        if isinstance(group, dict) and group.get("group_id"):
+            definitions[str(group["group_id"])] = copy.deepcopy(group)
+    for child in children or []:
+        if not isinstance(child, dict) or not child.get("semantic_group_id"):
+            continue
+        group_id = str(child.get("semantic_group_id"))
+        definitions.setdefault(group_id, {
+            "group_id": group_id,
+            "goal": child.get("semantic_group_goal", ""),
+            "invariant": child.get("semantic_group_invariant", ""),
+            "member_ids": list(child.get("semantic_group_members", []) or []),
+            "coupling_types": list(child.get("semantic_group_coupling_types", []) or []),
+            "verification_targets": list(child.get("semantic_group_verification_targets", []) or []),
+            "verification_required": True,
+        })
+    return list(definitions.values())[:stage9_coupling.MAX_SEMANTIC_COUPLING_GROUPS]
+
+
+def _attach_semantic_group_to_task(task, group):
+    if not isinstance(task, dict) or not isinstance(group, dict):
+        return task
+    task.update({
+        "semantic_group_id": group.get("group_id"),
+        "semantic_group_goal": group.get("goal"),
+        "semantic_group_invariant": group.get("invariant"),
+        "semantic_group_members": list(group.get("member_ids", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_MEMBERS],
+        "semantic_group_coupling_types": list(group.get("coupling_types", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_FACTS],
+        "semantic_group_verification_targets": list(group.get("verification_targets", []) or [])[:stage9_coupling.MAX_SEMANTIC_GROUP_VERIFICATION_TARGETS],
+        "semantic_group_required": True,
+        "semantic_group_status": "PLANNED",
+    })
+    return task
+
+
+def _analyze_approved_contract_coupling(root_goal, approved_contracts, contract=None):
+    """Analyze a frozen Stage 4 graph without rewriting its authority."""
+    candidates = []
+    dependencies = {}
+    verification_targets = []
+    for item in approved_contracts or []:
+        if not isinstance(item, dict) or not item.get("execution_contract_id"):
+            continue
+        child_id = str(item.get("execution_contract_id"))
+        candidates.append({
+            "id": child_id,
+            "goal": item.get("goal", ""),
+            "done_when": item.get("done_when", []),
+            "scope_hint": [
+                *list(item.get("allowed_mutation_paths", []) or []),
+                *list(item.get("allowed_inspection_paths", []) or []),
+            ],
+            "targets": [
+                *list(item.get("allowed_mutation_paths", []) or []),
+                *list(item.get("plan_node_ids", []) or []),
+            ],
+            "verification_targets": [
+                *list(item.get("required_tests", []) or []),
+                *list(item.get("verification_targets", []) or []),
+            ],
+            "dependencies": list(item.get("dependencies", []) or []),
+        })
+        dependencies[child_id] = list(item.get("dependencies", []) or [])
+        verification_targets.extend(list(item.get("required_tests", []) or []))
+        verification_targets.extend(list(item.get("verification_targets", []) or []))
+    if len(candidates) < 2:
+        return None
+    model = _world_model_for_workspace()
+    plan = stage9_coupling.analyze_semantic_coupling(
+        root_goal,
+        candidates,
+        world_model=model,
+        known_dependencies=dependencies,
+        requirements=(
+            list((contract or {}).get("requirements", []) or [])
+            + list((contract or {}).get("success_criteria", []) or [])
+        ) if isinstance(contract, dict) else [],
+        invariants=(contract or {}).get("constraints", []) if isinstance(contract, dict) else [],
+        verification_targets=verification_targets,
+    )
+    return plan
+
+
+def _verify_semantic_groups(task, completed, *, contract=None):
+    """Run the bounded semantic completion predicate before parent aggregation."""
+    groups = _semantic_group_definitions([item.get("task", {}) for item in completed or []], task)
+    if not groups:
+        return {"passed": True, "status": "NOT_APPLICABLE", "groups": []}
+    model = _world_model_for_workspace()
+    results = {
+        str(item.get("task", {}).get("id", "")): item.get("result", {})
+        for item in completed or [] if isinstance(item, dict)
+    }
+    runner = task.get("semantic_group_verification_runner") if isinstance(task, dict) else None
+    if not callable(runner):
+        runner = RUN.get("_semantic_group_verification_runner")
+    records = []
+    passed = True
+    for group in groups:
+        RUN["semantic_group_verification_attempts"] = RUN.get("semantic_group_verification_attempts", 0) + 1
+        result = stage9_coupling.verify_semantic_group(
+            group, child_results=results, world_model=model,
+            verification_runner=runner if callable(runner) else None,
+        )
+        records.append(result)
+        is_passed = bool(result.get("passed"))
+        passed = passed and is_passed
+        if is_passed:
+            RUN["semantic_group_verification_passes"] = RUN.get("semantic_group_verification_passes", 0) + 1
+        else:
+            RUN["semantic_group_verification_failures"] = RUN.get("semantic_group_verification_failures", 0) + 1
+        for item in completed or []:
+            child = item.get("task") if isinstance(item, dict) else None
+            if isinstance(child, dict) and str(child.get("id")) in set(group.get("member_ids", []) or []):
+                child["semantic_group_status"] = "COMPLETE" if is_passed else "FAILED"
+                child["semantic_group_verification"] = copy.deepcopy(result)
+    task["semantic_group_verification"] = copy.deepcopy(records)
+    task["semantic_group_status"] = "COMPLETE" if passed else "FAILED"
+    if not passed:
+        RUN["semantic_group_recovery_required"] = RUN.get("semantic_group_recovery_required", 0) + 1
+        task["semantic_group_recovery_required"] = True
+        record_run_event(
+            "semantic_group_verification_failed",
+            task_id=task.get("id"),
+            group_ids=[str(item.get("group_id", "")) for item in groups],
+            failures=[{
+                "group_id": item.get("group_id"),
+                "failure_type": item.get("failure_type"),
+                "reason": compact_text(item.get("reason", ""), 360),
+            } for item in records if not item.get("passed")],
+            recovery_required=True,
+        )
+    else:
+        record_run_event(
+            "semantic_group_verification_complete",
+            task_id=task.get("id"),
+            group_ids=[str(item.get("group_id", "")) for item in groups],
+        )
+    return {"passed": passed, "status": "COMPLETE" if passed else "FAILED", "groups": records}
 
 
 def _decomposition_tokens(value):
@@ -11429,6 +11853,35 @@ def _append_world_model_projection(packet, task_text, *, allowed_paths=None):
     return packet + section
 
 
+def _semantic_group_projection_text(task):
+    """Render only the stable group anchor needed by one Worker."""
+    if not isinstance(task, dict) or not task.get("semantic_group_id"):
+        return ""
+    projection = {
+        "group_id": str(task.get("semantic_group_id", ""))[:100],
+        "group_goal": compact_text(task.get("semantic_group_goal", ""), 420),
+        "shared_invariant": compact_text(task.get("semantic_group_invariant", ""), 320),
+        "coupling_types": bounded_list(task.get("semantic_group_coupling_types", []), 6, 80),
+        "members": bounded_list(task.get("semantic_group_members", []), 8, 100),
+        "verification_targets": bounded_list(
+            task.get("semantic_group_verification_targets", []), 6, 180,
+        ),
+    }
+    if not projection["group_goal"] and not projection["shared_invariant"]:
+        return ""
+    return compact_text(json.dumps(projection, ensure_ascii=False, separators=(",", ":")), 900)
+
+
+def _append_semantic_group_projection(packet, task):
+    projection = _semantic_group_projection_text(task)
+    if not projection:
+        return packet
+    section = "\n\nSEMANTIC WORK GROUP (bounded shared goal/invariant):\n" + projection
+    if len(packet) + len(section) > min(MAX_NODE_PACKET_CHARS, MAX_WORKER_MISSION_CHARS):
+        return packet
+    return packet + section
+
+
 def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_summary="",
                        dependency_summaries=None, failure_evidence=None, strategy_context=None,
                        brain_projection=None, worker_mission=None, execution_contract=None):
@@ -11448,9 +11901,11 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
             task_id=task.get("id"),
         )
         allowed_paths = execution_contract.get("allowed_inspection_paths")
+        projected_context = _append_semantic_group_projection(
+            worker_context["rendered_worker_context"], task,
+        )
         return _append_world_model_projection(
-            worker_context["rendered_worker_context"], task.get("goal", ""),
-            allowed_paths=allowed_paths,
+            projected_context, task.get("goal", ""), allowed_paths=allowed_paths,
         )
     if isinstance(execution_contract, dict):
         # A direct caller may provide the old broad projection. The Stage 4A
@@ -11470,10 +11925,10 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
             RUN["project_brain"], task, dependency_summaries, repo_snapshot, record=False,
         )
     if task.get("kind") == "integration":
-        return build_integration_node_packet(
+        return _append_semantic_group_projection(build_integration_node_packet(
             task, root_contract, repo_snapshot, parent_summary,
             dependency_summaries, failure_evidence, brain_projection=brain_projection,
-        )
+        ), task)
     try:
         project_invariants = collect_project_invariants() if WORKSPACE is not None else RUN.get("project_invariants", [])
     except Exception:
@@ -11571,6 +12026,12 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
             "PROJECT WORLD MODEL VIEW (bounded, task-local typed facts):\n"
             f"{world_model_projection}\n\n"
         )
+    semantic_group_projection = _semantic_group_projection_text(task)
+    semantic_group_section = (
+        "SEMANTIC WORK GROUP (bounded shared goal/invariant):\n"
+        f"{semantic_group_projection}\n\n"
+        if semantic_group_projection else ""
+    )
     packet = (
         f"{root_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
@@ -11586,6 +12047,7 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"FAILURE EVIDENCE:\n{json.dumps(failure_projection, ensure_ascii=False)[:1500] if failure_projection else '(none)'}\n\n"
         f"FAILED DECOMPOSITIONS (do not paraphrase these boundaries):\n"
         f"{json.dumps(failed_decompositions, ensure_ascii=False)[:2600] if failed_decompositions else '(none)'}\n\n"
+        f"{semantic_group_section}"
         f"{world_model_section}"
         f"{repository_section}"
         "The real filesystem is the shared source of truth. Inspect files with tools. Do not assume sibling chat history."
@@ -16977,6 +17439,8 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             or task.get("goal"),
             "parent_goal": task.get("parent_goal") or RUN.get("parent_goal"),
             "local_task": task.get("goal"),
+            "group_goal": task.get("semantic_group_goal"),
+            "group_invariant": task.get("semantic_group_invariant"),
             "requirements": task.get("done_when", []),
             "constraints": contract.get("constraints", []),
             "allowed_inspection_paths": (worker_execution_contract or {}).get(
@@ -17274,6 +17738,8 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             or task.get("goal"),
             "parent_goal": task.get("parent_goal") or RUN.get("parent_goal") or parent_summary,
             "local_task": task.get("goal"),
+            "group_goal": task.get("semantic_group_goal"),
+            "group_invariant": task.get("semantic_group_invariant"),
             "requirements": task.get("done_when", []),
             "constraints": contract.get("constraints", []),
             "allowed_inspection_paths": (worker_execution_contract or {}).get(
@@ -18430,6 +18896,9 @@ def decompose_integration_task(task, contract, repo_snapshot, parent_summary="",
     children = _materialize_integration_tasks(task, specs, base_context)
     if not children:
         return []
+    children, specs, _coupling = _apply_semantic_coupling_refinement(
+        task, children, contract, specs,
+    )
     task["integration_split_boundary"] = True
     _record_decomposition_branch(
         task, specs, children, kind="integration_resplit" if force_smaller else "integration",
@@ -19612,6 +20081,9 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
         item for item in completed
         if not _scheduler_result_is_success(item.get("result"))
     ]
+    semantic_group_result = _verify_semantic_groups(
+        task, completed, contract=contract,
+    )
     stage5b_readiness = _stage5b_parent_readiness(
         task, contract, completed, repo_snapshot,
     ) if _stage5b_enabled(task) else None
@@ -19640,6 +20112,12 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             "failure_type": failed_result.get("failure_type", "CHILD_FAILURE"),
             "children": completed,
         }
+        if semantic_group_result.get("groups"):
+            parent_result.update({
+                "semantic_group_status": "INCOMPLETE",
+                "semantic_group_verification": copy.deepcopy(semantic_group_result),
+                "semantic_group_recovery_required": True,
+            })
         if stage5b_readiness is not None:
             parent_result.update({
                 "failure_type": INTEGRATION_NOT_READY,
@@ -19674,6 +20152,48 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             execution_order=scheduler["execution_order"],
             dependency_edges=scheduler["dependency_edges"],
             child_statuses=scheduler["terminal_children"],
+        )
+        return parent_result
+
+    if semantic_group_result.get("groups") and not semantic_group_result.get("passed"):
+        # Member Workers may have individually returned success, but the
+        # semantic unit is not complete.  Stop before the ordinary parent
+        # aggregator can claim completion and leave a bounded recovery record
+        # for the existing parent/recovery lifecycle.
+        failure_summary = "semantic work group verification failed; parent remains incomplete"
+        parent_result = {
+            "status": "failed",
+            "failure_type": "SEMANTIC_GROUP_VERIFICATION_FAILED",
+            "orchestration_failure": "SEMANTIC_GROUP_VERIFICATION_FAILED",
+            "summary": failure_summary,
+            "memory": memory,
+            "children": completed,
+            "semantic_group_status": "FAILED",
+            "semantic_group_verification": copy.deepcopy(semantic_group_result),
+            "semantic_group_recovery_required": True,
+            "recovery_required": True,
+            "failure_diagnosis": {
+                "category": "semantic_group_incomplete",
+                "next_action": "parent_integration_recovery",
+                "summary": failure_summary,
+            },
+        }
+        scheduler["parent_status"] = "failed"
+        scheduler["terminal_children"] = [
+            {
+                "child_id": str(item.get("task", {}).get("id", "")),
+                "status": str(item.get("result", {}).get("status", "failed")),
+            }
+            for item in completed
+        ]
+        _record_task_failure(task, parent_result, phase="semantic_group_verification")
+        _mark_task_result(task, parent_result)
+        record_run_event(
+            "child_scheduler_complete", task_id=task.get("id"), status="failed",
+            execution_order=scheduler["execution_order"],
+            dependency_edges=scheduler["dependency_edges"],
+            child_statuses=scheduler["terminal_children"],
+            semantic_group_status="FAILED",
         )
         return parent_result
 
@@ -19946,7 +20466,33 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
             _mark_task_result(task, result)
             event(f"[FAILED {label}] provider/environment error; no decomposition", task=label)
             return result
+        # Compatibility callers may inject the legacy Decomposer directly.
+        # Ensure the production solve seam still validates any returned split
+        # before a child Worker can run.
+        if len(children) >= 2 and not task.get("semantic_coupling_plan"):
+            children, _unused_specs, _coupling = _apply_semantic_coupling_refinement(
+                task, children, contract,
+            )
+        if task.get("semantic_coupling_blocked"):
+            result = _semantic_coupling_blocked_result(task, memory)
+            _mark_task_result(task, result)
+            event(f"[FAILED {label}] semantic coupling evidence is conflicting", task=label)
+            return result
         if len(children) >= 2:
+            RUN["splits"] += 1
+            return _execute_children(
+                task, children, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
+                fit_decider, leaf_executor, aggregator,
+            )
+        if (
+            len(children) == 1
+            and isinstance(task.get("semantic_coupling_plan"), dict)
+            and task["semantic_coupling_plan"].get("refined")
+        ):
+            # A deterministic MERGE_REQUIRED refinement leaves one combined
+            # child.  Execute that retained child through the normal child
+            # scheduler/parent aggregation path; never fall back to mutating
+            # the broader parent task directly.
             RUN["splits"] += 1
             return _execute_children(
                 task, children, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
@@ -20608,6 +21154,24 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         root["stage5c_enabled"] = True
         root["stage5c_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
         RUN["stage5c_parent_contract"] = copy.deepcopy(parent_stage_contract if approval_bound else contract if isinstance(contract, dict) else {})
+    approved_coupling_plan = _analyze_approved_contract_coupling(
+        root.get("goal", ""), state.get("contracts", []) or [],
+        parent_stage_contract if isinstance(parent_stage_contract, dict) else contract,
+    )
+    approved_group_by_member = {}
+    if isinstance(approved_coupling_plan, dict):
+        _record_semantic_coupling_analysis(root, {"plan": approved_coupling_plan})
+        root["semantic_coupling_plan"] = copy.deepcopy(approved_coupling_plan)
+        root["semantic_groups"] = copy.deepcopy(approved_coupling_plan.get("groups", []) or [])
+        root["semantic_coupling_replan_required"] = approved_coupling_plan.get(
+            "classification"
+        ) == stage9_coupling.MERGE_REQUIRED
+        approved_group_by_member = {
+            str(member): group
+            for group in approved_coupling_plan.get("groups", []) or []
+            if isinstance(group, dict)
+            for member in group.get("member_ids", []) or []
+        }
     TASKS["ROOT"] = root
     RUN["tasks_created"] = max(1, RUN.get("tasks_created", 0))
     update_task_ledger(root)
@@ -20642,6 +21206,11 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             "execution_contract_type": execution_contract.get("responsibility_type"),
             "verification_only": not bool(execution_contract.get("worker_required")),
         })
+        if str(contract_id) in approved_group_by_member:
+            _attach_semantic_group_to_task(
+                task, approved_group_by_member[str(contract_id)],
+            )
+            task["parent_goal"] = root.get("goal", "")
         TASKS[contract_id] = task
         root.setdefault("children", []).append(contract_id)
         RUN["tasks_created"] += 1
@@ -20652,7 +21221,35 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             item for item in dependencies
             if results.get(item, {}).get("status") != "done"
         ]
-        if failed_dependencies:
+        approved_coupling_classification = (
+            approved_coupling_plan.get("classification")
+            if isinstance(approved_coupling_plan, dict) else None
+        )
+        if approved_coupling_classification in {
+            stage9_coupling.BLOCKED, stage9_coupling.MERGE_REQUIRED,
+        }:
+            result = {
+                "status": "blocked",
+                "failure_type": (
+                    "SEMANTIC_COUPLING_CONFLICT"
+                    if approved_coupling_classification == stage9_coupling.BLOCKED
+                    else "SEMANTIC_COUPLING_REPLAN_REQUIRED"
+                ),
+                "orchestration_failure": (
+                    "SEMANTIC_COUPLING_CONFLICT"
+                    if approved_coupling_classification == stage9_coupling.BLOCKED
+                    else "SEMANTIC_COUPLING_REPLAN_REQUIRED"
+                ),
+                "summary": (
+                    "approved execution graph has conflicting current semantic coupling evidence"
+                    if approved_coupling_classification == stage9_coupling.BLOCKED
+                    else "approved execution graph contains an unsafe split that requires bounded replanning"
+                ),
+                "semantic_coupling": copy.deepcopy(approved_coupling_plan),
+                "memory": memory,
+            }
+            _mark_task_result(task, result)
+        elif failed_dependencies:
             result = {
                 "status": "blocked", "failure_type": EXECUTION_DEPENDENCY_BLOCKED,
                 "orchestration_failure": EXECUTION_DEPENDENCY_BLOCKED,
@@ -20717,6 +21314,19 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         for item in state.get("contracts", []) or []
         if isinstance(item, dict)
     ]
+    approved_semantic_group_result = _verify_semantic_groups(
+        root, child_records, contract=parent_stage_contract,
+    )
+    semantic_plan_classification = (
+        approved_coupling_plan.get("classification")
+        if isinstance(approved_coupling_plan, dict) else None
+    )
+    semantic_plan_blocked = bool(
+        isinstance(approved_coupling_plan, dict)
+        and semantic_plan_classification in {
+            stage9_coupling.BLOCKED, stage9_coupling.MERGE_REQUIRED,
+        }
+    )
     if approval_bound:
         root["approval_bound_execution_results"] = [
             {
@@ -20789,7 +21399,46 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             )
         root["integration_routes"] = integration_routes
         root["integration_evidence"] = integration_evidence
-    if RUN.get("stage5b_enabled"):
+    if semantic_plan_blocked or (
+        approved_semantic_group_result.get("groups")
+        and not approved_semantic_group_result.get("passed")
+    ):
+        root_result = {
+            "status": "failed",
+            "failure_type": (
+                "SEMANTIC_GROUP_VERIFICATION_FAILED"
+                if not semantic_plan_blocked else (
+                    "SEMANTIC_COUPLING_CONFLICT"
+                    if semantic_plan_classification == stage9_coupling.BLOCKED
+                    else "SEMANTIC_COUPLING_REPLAN_REQUIRED"
+                )
+            ),
+            "orchestration_failure": (
+                "SEMANTIC_GROUP_VERIFICATION_FAILED"
+                if not semantic_plan_blocked else (
+                    "SEMANTIC_COUPLING_CONFLICT"
+                    if semantic_plan_classification == stage9_coupling.BLOCKED
+                    else "SEMANTIC_COUPLING_REPLAN_REQUIRED"
+                )
+            ),
+            "summary": (
+                (
+                    "approved execution graph is blocked by conflicting semantic coupling evidence"
+                    if semantic_plan_classification == stage9_coupling.BLOCKED
+                    else "approved execution graph requires replanning because its semantic split is unsafe"
+                )
+                if semantic_plan_blocked else
+                "approved execution graph members succeeded but semantic group verification failed"
+            ),
+            "memory": memory,
+            "children": child_records,
+            "semantic_coupling": copy.deepcopy(approved_coupling_plan),
+            "semantic_group_verification": copy.deepcopy(approved_semantic_group_result),
+            "semantic_group_status": "BLOCKED" if semantic_plan_blocked else "FAILED",
+            "semantic_group_recovery_required": not semantic_plan_blocked,
+            "semantic_coupling_replan_required": semantic_plan_classification == stage9_coupling.MERGE_REQUIRED,
+        }
+    elif RUN.get("stage5b_enabled"):
         stage5_parent_contract = parent_stage_contract if approval_bound else contract
         readiness = _stage5b_parent_readiness(root, stage5_parent_contract, child_records, repo_snapshot)
         if readiness and readiness.get("readiness") == "READY":
