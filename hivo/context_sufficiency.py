@@ -216,6 +216,14 @@ def _normalize_anchor(anchor: Mapping[str, Any] | None, *, local_task: Any = Non
         or _text(value.get("goal"), MAX_CONTEXT_REASON_CHARS),
         "parent_goal": _text(value.get("parent_goal") or value.get("parent_goal_anchor"), MAX_CONTEXT_REASON_CHARS),
         "local_task": _text(value.get("local_task") or value.get("task") or local_task, MAX_CONTEXT_REASON_CHARS),
+        # A semantic work group is a bounded, stable extension of the existing
+        # goal anchor.  Evidence completion may replace working evidence, but
+        # it must not replace this group-level intent or invariant.
+        "group_goal": _text(value.get("group_goal") or value.get("semantic_group_goal"), MAX_CONTEXT_REASON_CHARS),
+        "group_invariant": _text(
+            value.get("group_invariant") or value.get("semantic_group_invariant"),
+            MAX_CONTEXT_REASON_CHARS,
+        ),
         "requirements": _unique(
             value.get("requirements") or value.get("authoritative_requirements"),
             limit=MAX_CONTEXT_ANCHOR_LIST_ITEMS,
