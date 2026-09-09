@@ -69,6 +69,11 @@ UNKNOWN_IMPACT_DECISION_SLOT = "UNKNOWN_IMPACT_DECISION_SLOT"
 IMPACT_DECISION_NOT_ALLOWED = "IMPACT_DECISION_NOT_ALLOWED"
 IMPACT_DECISION_TARGET_NOT_ALLOWED = "IMPACT_DECISION_TARGET_NOT_ALLOWED"
 IMPACT_MAP_COMPILE_INVALID = "IMPACT_MAP_COMPILE_INVALID"
+IMPACT_MAP_PARSE_INVALID = "IMPACT_MAP_PARSE_INVALID"
+IMPACT_MAP_UNSUPPORTED_ENVELOPE = "IMPACT_MAP_UNSUPPORTED_ENVELOPE"
+IMPACT_MAP_CANONICALIZATION_FAILED = "IMPACT_MAP_CANONICALIZATION_FAILED"
+IMPACT_MAP_REQUIRED_SEMANTIC_FIELD_MISSING = "IMPACT_MAP_REQUIRED_SEMANTIC_FIELD_MISSING"
+IMPACT_MAP_SEMANTIC_VALIDATION_FAILED = "IMPACT_MAP_SEMANTIC_VALIDATION_FAILED"
 IMPACT_FRAME_COVERAGE_READY = "IMPACT_FRAME_COVERAGE_READY"
 IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP = "IMPACT_FRAME_REQUIREMENT_CAPABILITY_GAP"
 IMPACT_CHOICE_COVERAGE_READY = "IMPACT_CHOICE_COVERAGE_READY"
@@ -8707,7 +8712,471 @@ def normalize_new_surface_proposals(values):
     return result
 
 
+_CANONICAL_IMPACT_ROOT_FIELDS = frozenset({
+    "task_goal", "impacts", "integration_verification", "insufficient_evidence",
+    "new_surface_proposals",
+})
+_CANONICAL_IMPACT_INTERNAL_ROOT_FIELDS = frozenset({
+    "version", "bounds", "provenance", "requirement_obligation_ledger",
+    "semantic_obligation_coverage", "behavior_anchor_closure_actions",
+    "challenge_lifecycle", "obligation_closure_actions", "prohibition_constraints",
+    "deterministic_behavior_anchor_promotions", "obligation_impacts_synthesized",
+    "preservation_obligations_closed", "reuse_obligations_closed",
+    "test_obligations_closed", "prohibition_obligations_closed",
+    "impact_challenges_applicable", "impact_challenges_non_applicable",
+    "challenge_effects_applied", "challenge_effects_suppressed",
+    "challenges_resolved_post_reconciliation", "challenges_remaining_open",
+})
+_CANONICAL_IMPACT_ENTRY_FIELDS = frozenset({
+    "impact_id", "surface_id", "disposition", "action", "interfaces_to_reuse",
+    "verification", "new_surface_proposal_ids", "requirement_ids", "reason",
+    "preserve", "test_contract",
+})
+_KNOWN_IMPACT_ENTRY_COMPAT_FIELDS = frozenset({
+    # These fields are already consumed by the existing Stage 3 normalizer or
+    # hydrator.  They are retained only as explicit compatibility fields; the
+    # canonical semantic validator remains authoritative.
+    "impact_kind", "necessity_status", "candidate_change", "local_verification",
+    "local_test_contract", "existing_interfaces_to_reuse", "interface_surface_ids",
+    "reusable_interfaces", "path", "symbols", "component", "existing_owner",
+    "repository_evidence_ids",
+    "local_preservation_constraints", "prohibition_constraints", "closure_metadata",
+    "model_path", "model_component", "model_symbols", "model_existing_owner",
+    "model_repository_evidence_ids", "model_surface_id", "canonical_surface_id",
+    "seed_id", "seed_surface_id", "surface_kind", "surface_role", "owner_surface_id",
+    "provenance",
+})
+_LEGACY_IMPACT_ENTRY_ALIAS_FIELDS = frozenset({
+    "source_requirement_ids", "source_requirements", "preservation_promises",
+    "verification_contracts", "reused_interfaces", "canonical_interface_reuses",
+    "canonical_interface_reuse",
+})
+_KNOWN_EMPTY_LEGACY_IMPACT_ROOT_FIELDS = frozenset({
+    "canonical_interface_reuses", "canonical_interface_reuse", "reused_interfaces",
+    "preservation_promises", "verification_contracts", "verification_test_contracts",
+})
+_LEGACY_IMPACT_ROOT_FIELDS = frozenset({
+    "impact_decisions", "NEW_SURFACE_PROPOSAL",
+}) | _KNOWN_EMPTY_LEGACY_IMPACT_ROOT_FIELDS
+_CANONICAL_NEW_SURFACE_FIELDS = frozenset({
+    "proposal_id", "kind", "requirement_ids", "reason_existing_surfaces_insufficient",
+    "parent_scope", "intended_responsibility", "verification_responsibility",
+})
+_IMPACT_PLACEHOLDER_IDS = frozenset({"", "n/a", "na", "unknown", "none", "null"})
+
+
+def _canonicalization_string_list(value, field_name, errors):
+    """Normalize only a string or string-list representation.
+
+    The helper is intentionally strict for objects, numbers, and nested
+    structures.  A scalar string is the one harmless representation change
+    supported by the impact-map compatibility boundary.
+    """
+    if value is None:
+        return []
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, (list, tuple)):
+        errors.append(f"{field_name} must be a string or list of strings")
+        return None
+    result = []
+    for item in values:
+        if not isinstance(item, str):
+            errors.append(f"{field_name} must contain only strings")
+            return None
+        text = item.strip()
+        if not text:
+            errors.append(f"{field_name} must not contain empty strings")
+            return None
+        result.append(text)
+    return result
+
+
+def _merge_impact_string_list(output, item, canonical_name, aliases, errors):
+    """Merge one canonical list field and explicit legacy aliases."""
+    values = None
+    present = []
+    for name in (canonical_name,) + tuple(aliases):
+        if name not in item:
+            continue
+        normalized = _canonicalization_string_list(item.get(name), name, errors)
+        if normalized is not None:
+            present.append((name, normalized))
+    for name, normalized in present:
+        if values is not None and normalized != values:
+            errors.append(
+                f"conflicting values for {canonical_name}: {name} disagrees with another alias"
+            )
+            continue
+        values = normalized
+    if present:
+        output[canonical_name] = values if values is not None else []
+
+
+def _merge_impact_text(output, item, canonical_name, aliases, errors):
+    """Merge one text field while rejecting contradictory aliases."""
+    values = []
+    for name in (canonical_name,) + tuple(aliases):
+        if name not in item:
+            continue
+        value = item.get(name)
+        if not isinstance(value, str):
+            errors.append(f"{name} must be a string")
+            continue
+        text = value.strip()
+        values.append((name, text))
+    if not values:
+        return
+    chosen = values[0][1]
+    if any(text != chosen for _, text in values[1:]):
+        errors.append(f"conflicting values for {canonical_name}")
+    output[canonical_name] = chosen
+
+
+def _canonicalize_impact_entry(item, inherited_impact_id=None, location="impact", errors=None):
+    """Map one explicitly supported legacy decision to the canonical entry.
+
+    This function changes field names and envelopes only.  It never creates a
+    requirement, surface, evidence reference, action, or proposal body.
+    """
+    errors = errors if errors is not None else []
+    if not isinstance(item, dict):
+        errors.append(f"{location} must be an object")
+        return None
+    allowed = (
+        _CANONICAL_IMPACT_ENTRY_FIELDS
+        | _KNOWN_IMPACT_ENTRY_COMPAT_FIELDS
+        | _LEGACY_IMPACT_ENTRY_ALIAS_FIELDS
+    )
+    unknown = sorted(set(item) - allowed)
+    if unknown:
+        errors.append(f"{location} contains unrecognized fields: {', '.join(unknown[:6])}")
+    output = {}
+
+    raw_id = item.get("impact_id")
+    if raw_id is not None:
+        if not isinstance(raw_id, str):
+            errors.append(f"{location}.impact_id must be a string")
+        else:
+            raw_id = raw_id.strip()
+    inherited = str(inherited_impact_id or "").strip()
+    if raw_id and inherited and raw_id != inherited:
+        errors.append(f"{location}.impact_id conflicts with its top-level impact key")
+    if inherited:
+        output["impact_id"] = inherited
+    elif raw_id is not None:
+        output["impact_id"] = raw_id
+
+    _merge_impact_string_list(
+        output, item, "requirement_ids", ("source_requirement_ids", "source_requirements"), errors,
+    )
+    _merge_impact_string_list(
+        output, item, "interfaces_to_reuse", ("interface_surface_ids", "reusable_interfaces"), errors,
+    )
+    _merge_impact_string_list(
+        output, item, "verification", ("local_verification",), errors,
+    )
+    _merge_impact_string_list(
+        output, item, "test_contract", ("local_test_contract",), errors,
+    )
+    for field in (
+        "preserve", "new_surface_proposal_ids", "repository_evidence_ids", "symbols",
+        "existing_interfaces_to_reuse", "local_preservation_constraints",
+        "prohibition_constraints",
+    ):
+        if field in item:
+            normalized = _canonicalization_string_list(item.get(field), field, errors)
+            if normalized is not None:
+                output[field] = normalized
+
+    for field in (
+        "surface_id", "impact_kind", "necessity_status", "path", "component",
+        "existing_owner", "model_path", "model_existing_owner",
+    ):
+        if field in item:
+            value = item.get(field)
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{location}.{field} must be a string")
+            else:
+                output[field] = value.strip() if isinstance(value, str) else value
+    for field in (
+        "model_component", "model_surface_id", "canonical_surface_id", "seed_id",
+        "seed_surface_id", "surface_kind", "surface_role", "owner_surface_id", "provenance",
+    ):
+        if field in item:
+            output[field] = copy.deepcopy(item.get(field))
+    for field in ("closure_metadata", "model_symbols", "model_repository_evidence_ids"):
+        if field in item:
+            output[field] = copy.deepcopy(item.get(field))
+
+    _merge_impact_text(output, item, "action", ("candidate_change",), errors)
+    if "reason" in item:
+        value = item.get("reason")
+        if not isinstance(value, str):
+            errors.append(f"{location}.reason must be a string")
+        else:
+            output["reason"] = value.strip()
+
+    disposition_present = "disposition" in item
+    if disposition_present:
+        disposition = item.get("disposition")
+        if not isinstance(disposition, str):
+            errors.append(f"{location}.disposition must be a string")
+        else:
+            output["disposition"] = disposition.strip().upper()
+
+    action = output.get("action")
+    action_disposition = action.strip().upper() if isinstance(action, str) else ""
+    if action_disposition in DISPOSITIONS:
+        current = output.get("disposition")
+        if current and current != action_disposition:
+            errors.append(f"{location}.action disposition conflicts with disposition")
+        else:
+            output["disposition"] = action_disposition
+        # Captured legacy planners put the decision token in ``action`` and
+        # the actual semantic explanation in ``reason``.  Preserve the token
+        # as disposition and use the explanation as the canonical action when
+        # it exists; this is a representation change, not semantic invention.
+        if isinstance(output.get("reason"), str) and output["reason"].strip():
+            output["action"] = output["reason"].strip()
+    elif not disposition_present and any(
+        field in output for field in ("impact_kind", "necessity_status")
+    ):
+        output["disposition"] = _disposition_for_impact(output)
+
+    for field in (
+        "preservation_promises", "verification_contracts", "reused_interfaces",
+        "canonical_interface_reuses", "canonical_interface_reuse",
+    ):
+        if field in item:
+            value = item.get(field)
+            if value not in (None, [], ""):
+                errors.append(f"{location}.{field} has no unambiguous canonical destination")
+
+    return output
+
+
+def _canonicalize_new_surface_proposals(value, errors):
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        errors.append("new_surface_proposals must be a list")
+        return []
+    if len(value) > 4:
+        errors.append("new_surface_proposals bound exceeded")
+    result = []
+    for index, proposal in enumerate(value, 1):
+        if not isinstance(proposal, dict):
+            errors.append(f"new_surface_proposals[{index}] must be an object")
+            continue
+        unknown = sorted(set(proposal) - _CANONICAL_NEW_SURFACE_FIELDS)
+        if unknown:
+            errors.append(
+                f"new_surface_proposals[{index}] contains unrecognized fields: {', '.join(unknown[:6])}"
+            )
+        normalized = copy.deepcopy(proposal)
+        missing = sorted(_CANONICAL_NEW_SURFACE_FIELDS - set(proposal))
+        if missing:
+            errors.append(
+                f"new_surface_proposals[{index}] is missing canonical fields: {', '.join(missing[:6])}"
+            )
+        if "requirement_ids" in proposal:
+            refs = _canonicalization_string_list(
+                proposal.get("requirement_ids"),
+                f"new_surface_proposals[{index}].requirement_ids", errors,
+            )
+            if refs is not None:
+                normalized["requirement_ids"] = refs
+        result.append(normalized)
+    return result
+
+
+def _impact_map_result(status, source_envelope, canonical_candidate=None, errors=None,
+                       canonicalization="FAILED"):
+    return {
+        "valid": status == "VALID",
+        "status": status,
+        "reason_code": None if status == "VALID" else status,
+        "errors": list(errors or [])[:16],
+        "source_envelope": source_envelope,
+        "canonicalization": canonicalization,
+        "canonical_candidate": copy.deepcopy(canonical_candidate)
+        if canonical_candidate is not None else None,
+    }
+
+
+def canonicalize_impact_map_candidate(candidate):
+    """Return one canonical impact-map candidate before semantic validation.
+
+    Supported non-canonical envelopes are limited to the formats observed in
+    the diagnostic run: ``impact_decisions`` lists and top-level IMPACT IDs.
+    Empty legacy metadata is harmless and ignored; non-empty metadata without
+    a canonical semantic destination is rejected rather than discarded.
+    """
+    if not isinstance(candidate, dict):
+        return _impact_map_result(
+            IMPACT_MAP_PARSE_INVALID, "NON_OBJECT",
+            errors=["impact-map response must be a JSON object"],
+        )
+    if _forbidden_context_key(candidate):
+        forbidden = _forbidden_context_key(candidate)
+        return _impact_map_result(
+            IMPACT_MAP_CANONICALIZATION_FAILED, "FORBIDDEN_CONTEXT",
+            errors=[f"raw context field is forbidden: {forbidden}"],
+        )
+
+    errors = []
+    root = candidate
+    has_impacts = "impacts" in root
+    has_impact_decisions = "impact_decisions" in root
+    direct_fields = set(root).intersection(_CANONICAL_IMPACT_ENTRY_FIELDS)
+    keyed_ids = sorted(
+        (key for key in root if _IMPACT_ID_RE.fullmatch(str(key))),
+        key=lambda value: (int(_IMPACT_ID_RE.fullmatch(str(value)).group(1)), str(value)),
+    )
+    if has_impacts:
+        source_envelope = "CANONICAL_ALREADY"
+        raw_impacts = root.get("impacts")
+        if not isinstance(raw_impacts, list):
+            errors.append("impacts must be a list")
+            raw_impacts = []
+        if has_impact_decisions and root.get("impact_decisions") not in (None, [], ""):
+            errors.append("impacts and impact_decisions cannot both contain decisions")
+        if keyed_ids:
+            errors.append("canonical impacts cannot be mixed with top-level impact IDs")
+        if direct_fields:
+            errors.append(
+                "canonical impacts cannot be mixed with top-level direct-decision fields: "
+                + ", ".join(sorted(direct_fields)[:6])
+            )
+    elif has_impact_decisions:
+        source_envelope = "LEGACY_IMPACT_DECISIONS"
+        raw_impacts = root.get("impact_decisions")
+        if not isinstance(raw_impacts, list):
+            errors.append("impact_decisions must be a list")
+            raw_impacts = []
+        if keyed_ids or direct_fields:
+            errors.append("impact_decisions cannot be mixed with another impact envelope")
+    elif keyed_ids:
+        source_envelope = "LEGACY_TOP_LEVEL_IMPACT_IDS"
+        raw_impacts = [(key, root.get(key)) for key in keyed_ids]
+        if direct_fields:
+            errors.append("top-level impact IDs cannot be mixed with direct-decision fields")
+    elif "impact_id" in root:
+        source_envelope = "DIRECT_DECISION"
+        raw_impacts = [{
+            key: value for key, value in root.items()
+            if key in (
+                _CANONICAL_IMPACT_ENTRY_FIELDS
+                | _KNOWN_IMPACT_ENTRY_COMPAT_FIELDS
+                | _LEGACY_IMPACT_ENTRY_ALIAS_FIELDS
+            )
+        }]
+    else:
+        return _impact_map_result(
+            IMPACT_MAP_UNSUPPORTED_ENVELOPE, "UNKNOWN",
+            errors=["no supported canonical impact-map envelope was found"],
+        )
+
+    allowed_root = (
+        _CANONICAL_IMPACT_ROOT_FIELDS
+        | _CANONICAL_IMPACT_INTERNAL_ROOT_FIELDS
+        | _LEGACY_IMPACT_ROOT_FIELDS
+    )
+    if source_envelope == "LEGACY_TOP_LEVEL_IMPACT_IDS":
+        allowed_root = allowed_root | set(keyed_ids)
+    if source_envelope == "DIRECT_DECISION":
+        allowed_root = (
+            allowed_root | _CANONICAL_IMPACT_ENTRY_FIELDS
+            | _KNOWN_IMPACT_ENTRY_COMPAT_FIELDS | _LEGACY_IMPACT_ENTRY_ALIAS_FIELDS
+        )
+    unknown_root = sorted(set(root) - allowed_root)
+    if unknown_root:
+        errors.append("unrecognized top-level fields: " + ", ".join(unknown_root[:6]))
+
+    canonical = {}
+    for field in _CANONICAL_IMPACT_ROOT_FIELDS - {"impacts", "new_surface_proposals"}:
+        if field in root:
+            canonical[field] = copy.deepcopy(root.get(field))
+    for field in _CANONICAL_IMPACT_INTERNAL_ROOT_FIELDS:
+        if field in root:
+            canonical[field] = copy.deepcopy(root.get(field))
+    if "new_surface_proposals" in root:
+        canonical["new_surface_proposals"] = _canonicalize_new_surface_proposals(
+            root.get("new_surface_proposals"), errors,
+        )
+
+    if "verification_test_contracts" in root or "verification_contracts" in root:
+        aliases = []
+        for field in ("verification_test_contracts", "verification_contracts"):
+            if field in root:
+                aliases.append((field, _canonicalization_string_list(root.get(field), field, errors)))
+        nonempty = [(field, value) for field, value in aliases if value]
+        if nonempty:
+            selected = nonempty[0][1]
+            if any(value != selected for _, value in nonempty[1:]):
+                errors.append("verification contract aliases disagree")
+            if "integration_verification" in canonical and canonical["integration_verification"] != selected:
+                errors.append("integration_verification conflicts with verification contract alias")
+            else:
+                canonical["integration_verification"] = selected
+    if "integration_verification" in root:
+        values = _canonicalization_string_list(
+            root.get("integration_verification"), "integration_verification", errors,
+        )
+        if values is not None:
+            canonical["integration_verification"] = values
+    if "insufficient_evidence" in root:
+        values = _canonicalization_string_list(
+            root.get("insufficient_evidence"), "insufficient_evidence", errors,
+        )
+        if values is not None:
+            canonical["insufficient_evidence"] = values
+
+    for field in _KNOWN_EMPTY_LEGACY_IMPACT_ROOT_FIELDS:
+        if field in root and root.get(field) not in (None, [], ""):
+            if field not in {"verification_contracts", "verification_test_contracts"}:
+                errors.append(f"{field} has no unambiguous canonical destination")
+    if "NEW_SURFACE_PROPOSAL" in root and root.get("NEW_SURFACE_PROPOSAL") not in (None, [], "", {}):
+        errors.append(
+            "NEW_SURFACE_PROPOSAL has no canonical proposal contract and cannot be safely mapped"
+        )
+
+    entries = []
+    if source_envelope == "LEGACY_TOP_LEVEL_IMPACT_IDS":
+        for key, item in raw_impacts:
+            entry = _canonicalize_impact_entry(
+                item, inherited_impact_id=str(key), location=str(key), errors=errors,
+            )
+            if entry is not None:
+                entries.append(entry)
+    else:
+        for index, item in enumerate(raw_impacts, 1):
+            entry = _canonicalize_impact_entry(
+                item, location=f"impacts[{index}]", errors=errors,
+            )
+            if entry is not None:
+                entries.append(entry)
+    canonical["impacts"] = entries
+
+    if errors:
+        status = (
+            IMPACT_MAP_UNSUPPORTED_ENVELOPE
+            if source_envelope in {"UNKNOWN", "LEGACY_TOP_LEVEL_IMPACT_IDS", "LEGACY_IMPACT_DECISIONS"}
+            and any("unrecognized" in error or "no canonical" in error for error in errors)
+            else IMPACT_MAP_CANONICALIZATION_FAILED
+        )
+        return _impact_map_result(status, source_envelope, errors=errors)
+    changed = source_envelope != "CANONICAL_ALREADY" or canonical != candidate
+    return _impact_map_result(
+        "VALID", source_envelope, canonical_candidate=canonical,
+        canonicalization="APPLIED" if changed else "NOT_NEEDED",
+    )
+
+
 def normalize_impact_map(candidate, authoritative=False):
+    canonicalization = canonicalize_impact_map_candidate(candidate)
+    if canonicalization.get("valid"):
+        candidate = canonicalization.get("canonical_candidate") or {}
     candidate = candidate if isinstance(candidate, dict) else {}
     # A provider may return one decision object before it learns the enclosing
     # map envelope.  Treat that as a one-decision candidate so the normal
@@ -9600,60 +10069,126 @@ def validate_surface_binding(impact, registry, evidence=None):
     return {"valid": not errors, "errors": errors[:8], "surface": copy.deepcopy(surface)}
 
 
-def validate_planner_output(candidate, requirements=None, allow_legacy=False,
-                            impact_seeds=None):
-    """Validate the response envelope while retaining usable decisions.
+def validate_planner_output_detailed(candidate, requirements=None, allow_legacy=False,
+                                     impact_seeds=None):
+    """Canonicalize and validate the provider-facing Stage 3 response.
 
-    Optional-field and per-decision semantic validation happens during seed
-    binding/hydration.  This pre-call validator only needs one structurally
-    usable decision to keep a mixed response from triggering whole-response
-    brittleness.
+    The boolean compatibility wrapper below remains the public contract used
+    by older callers.  This detailed form keeps the bounded reason visible to
+    the structured-call seam without moving semantic authority out of the
+    existing validator/hydrator.
     """
-    value = candidate if isinstance(candidate, dict) else {}
-    if "impacts" not in value and value.get("impact_id"):
-        impacts = [value]
-    else:
-        impacts = value.get("impacts", [])
-    if not isinstance(impacts, (list, tuple)) or not impacts:
-        return False
+    canonicalization = canonicalize_impact_map_candidate(candidate)
+    if not canonicalization.get("valid"):
+        canonicalization["validation_status"] = "FAILED"
+        canonicalization["validator"] = "validate_planner_output"
+        return canonicalization
+    value = canonicalization.get("canonical_candidate") or {}
+    impacts = value.get("impacts", [])
+    errors = []
+    if not isinstance(impacts, list) or not impacts:
+        errors.append("at least one impact decision is required")
+        result = _impact_map_result(
+            IMPACT_MAP_REQUIRED_SEMANTIC_FIELD_MISSING,
+            canonicalization.get("source_envelope"), value, errors,
+            canonicalization=canonicalization.get("canonicalization", "APPLIED"),
+        )
+        result["validation_status"] = "FAILED"
+        result["validator"] = "validate_planner_output"
+        return result
     if len(impacts) > MAX_IMPACT_ENTRIES:
-        return False
+        errors.append("impact entry bound exceeded")
+
     req_ids = {item["requirement_id"] for item in active_requirements(requirements or [])}
     seed_ids = {
         normalize_impact_id(item.get("impact_id"))
         for item in list(impact_seeds or []) if isinstance(item, dict)
     }
     usable = 0
-    for item in list(impacts):
+    fatal_semantic_error = len(impacts) > MAX_IMPACT_ENTRIES
+    seen = set()
+    for index, item in enumerate(impacts, 1):
+        location = f"impacts[{index}]"
         if not isinstance(item, dict):
+            errors.append(f"{location} must be an object")
             continue
         impact_id = str(item.get("impact_id") or "").strip()
-        if not impact_id:
+        if impact_id.casefold() in _IMPACT_PLACEHOLDER_IDS:
+            errors.append(f"{location}.impact_id is missing or a placeholder")
             continue
+        normalized_id = normalize_impact_id(impact_id)
+        if normalized_id in seen:
+            errors.append(f"{impact_id}: impact ID is duplicated")
+            fatal_semantic_error = True
+            continue
+        seen.add(normalized_id)
         refs = _list_value(item.get("requirement_ids"))
         if not refs:
+            errors.append(f"{impact_id}: requirement_ids is required")
+            continue
+        if any(not isinstance(ref, str) or not ref.strip() for ref in refs):
+            errors.append(f"{impact_id}: requirement_ids must contain non-empty strings")
             continue
         disposition = str(item.get("disposition", "")).upper().strip()
         if not disposition and allow_legacy:
             disposition = _disposition_for_impact(item)
         if disposition not in DISPOSITIONS:
+            errors.append(f"{impact_id}: invalid planner disposition")
             continue
         action = item.get("action") or item.get("reason") or item.get("candidate_change")
         if not isinstance(action, str) or not action.strip():
+            errors.append(f"{impact_id}: action or reason is required")
             continue
-        normalized_id = normalize_impact_id(impact_id)
         if seed_ids and not seed_ids.intersection({normalized_id}) and not _list_value(
             item.get("new_surface_proposal_ids")
         ):
+            errors.append(f"{impact_id}: decision does not reference a known impact seed")
             continue
         # Unknown requirement IDs are deliberately left for per-decision
         # relationship validation, so a mixed response can still proceed.
-        if req_ids and not any(str(ref) for ref in refs):
+        if req_ids and not any(str(ref).strip() for ref in refs):
+            errors.append(f"{impact_id}: no usable Source Requirement relationship")
             continue
         usable += 1
-    if _forbidden_context_key(value):
-        return False
-    return usable > 0
+    forbidden = _forbidden_context_key(value)
+    if forbidden:
+        errors.append(f"raw context field is forbidden: {forbidden}")
+        usable = 0
+        fatal_semantic_error = True
+    if usable and not fatal_semantic_error:
+        result = _impact_map_result(
+            "VALID", canonicalization.get("source_envelope"), value, errors,
+            canonicalization=canonicalization.get("canonicalization", "APPLIED"),
+        )
+        result["validation_status"] = "PASSED"
+        result["validator"] = "validate_planner_output"
+        result["usable_decisions"] = usable
+        return result
+    missing = any(
+        "required" in error or "missing" in error or "placeholder" in error
+        for error in errors
+    )
+    status = (
+        IMPACT_MAP_REQUIRED_SEMANTIC_FIELD_MISSING
+        if missing else IMPACT_MAP_SEMANTIC_VALIDATION_FAILED
+    )
+    result = _impact_map_result(
+        status, canonicalization.get("source_envelope"), value, errors,
+        canonicalization=canonicalization.get("canonicalization", "APPLIED"),
+    )
+    result["validation_status"] = "FAILED"
+    result["validator"] = "validate_planner_output"
+    result["usable_decisions"] = 0
+    return result
+
+
+def validate_planner_output(candidate, requirements=None, allow_legacy=False,
+                            impact_seeds=None):
+    """Boolean compatibility wrapper around detailed canonical validation."""
+    return bool(validate_planner_output_detailed(
+        candidate, requirements=requirements, allow_legacy=allow_legacy,
+        impact_seeds=impact_seeds,
+    ).get("valid"))
 
 
 def _forbidden_context_key(value):

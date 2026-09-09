@@ -709,6 +709,10 @@ class ProviderError(RuntimeError):
 class StructuredOutputError(RuntimeError):
     """The provider replied, but a tiny structured orchestration contract was invalid."""
 
+    def __init__(self, message, code=None):
+        self.code = str(code) if code else None
+        super().__init__(message)
+
 
 class MissionCompilationError(RuntimeError):
     """A bounded worker mission could not be compiled from verified context."""
@@ -4611,6 +4615,7 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
     ]
     last_error = "invalid structured response"
     last_content = ""
+    last_failure_code = None
     for attempt in range(max(1, int(retries))):
         attempt_context = dict(capture_context or {})
         attempt_context["structured_attempt"] = attempt + 1
@@ -4638,6 +4643,10 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
                     structured_content_chars=len(str(last_content)),
                 )
                 return data
+            last_failure_code = (
+                validation.get("reason_code")
+                if isinstance(validation, dict) else None
+            )
             if isinstance(validation, dict) and validation.get("errors"):
                 last_error = "semantic validation failed: " + "; ".join(
                     str(item) for item in validation.get("errors", [])[:8]
@@ -4647,6 +4656,9 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
         except ProviderError:
             raise
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            last_failure_code = (
+                stage3.IMPACT_MAP_PARSE_INVALID if label == "impact-map" else None
+            )
             last_error = str(exc)
         _emit_provider_capture(
             provider_capture,
@@ -4675,7 +4687,10 @@ def structured_model_call(prompt_text, validator, label, schema, retries=MAX_STR
                 {"role": "system", "content": "STRICT JSON REPAIR. Return only valid JSON matching the schema."},
                 {"role": "user", "content": f"{prompt_text}\nPrevious output invalid: {compact_text(last_content, 800)}\nSchema: {schema_text}"},
             ]
-    raise StructuredOutputError(f"invalid {label} after {retries} attempts: {last_error}")
+    raise StructuredOutputError(
+        f"invalid {label} after {retries} attempts: {last_error}",
+        code=last_failure_code,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -7257,6 +7272,8 @@ impact_decision_choices_hash = stage3.impact_decision_choices_hash
 impact_decision_coverage_hash = stage3.impact_decision_coverage_hash
 impact_decision_frame_self_test = stage3.impact_decision_frame_self_test
 bind_impact_decisions_to_seeds = stage3.bind_impact_decisions_to_seeds
+canonicalize_impact_map_candidate = stage3.canonicalize_impact_map_candidate
+validate_planner_output_detailed = stage3.validate_planner_output_detailed
 hydrate_impact_map = stage3.hydrate_impact_map
 audit_impact_surfaces = stage3.audit_impact_surfaces
 derive_do_not_touch_surface_ids = stage3.derive_do_not_touch_surface_ids
@@ -7408,15 +7425,21 @@ def _impact_planner_prompt(context):
 Propose one COMPLETE bounded semantic decision set for the deterministic impact slots in the packet below.
 The orchestrator has already bound every existing slot to a canonical surface. For each known existing
 impact, decide only its disposition: MUST_CHANGE, INTERFACE_REUSE, TEST_CHANGE, PRESERVATION_ONLY,
-VERIFY_ONLY, or INSUFFICIENT_EVIDENCE. Return the impact_id, valid Source Requirement IDs, and a concise
-action/reason. Optionally return canonical INTERFACE surface IDs to reuse, preservation promises, and
-verification/test contracts. Do not author or infer paths, symbols, owners, repository evidence IDs, or
-existing surface bindings. surface_id is unnecessary; if you return one it is non-authoritative and must
-match the supplied seed. Relevant does not mean MUST_CHANGE. A preservation surface remains unmodified
-unless requirements and evidence prove mutation necessary. If no existing surface can safely represent a
-responsibility, emit a separate justified NEW_SURFACE_PROPOSAL rather than using a fake existing identity.
-Do not write code, execute tests, decompose Workers, call tools, or reproduce
-raw source. Return only the requested structured map.
+VERIFY_ONLY, or INSUFFICIENT_EVIDENCE. Return exactly one canonical JSON object whose top-level shape is
+{{"impacts":[...]}}. Each impact entry MUST contain impact_id, disposition, requirement_ids (an array of
+valid Source Requirement IDs), and either action or reason. Use one array member per impact; never use
+numbered top-level keys such as IMPACT-001 and never use an impact_decisions wrapper. A minimal valid
+example is: {{"impacts":[{{"impact_id":"IMPACT-001","disposition":"MUST_CHANGE","requirement_ids":["REQ-001"],"reason":"<short reason>"}}]}}.
+Optional fields are interfaces_to_reuse, verification, preserve, and test_contract. If a new surface is
+strictly required, new_surface_proposals must be an array whose entries contain proposal_id, kind,
+requirement_ids, reason_existing_surfaces_insufficient, parent_scope, intended_responsibility, and
+verification_responsibility. Do not author or infer paths, symbols, owners, repository
+evidence IDs, or existing surface bindings. surface_id is unnecessary; if you return one it is
+non-authoritative and must match the supplied seed. Relevant does not mean MUST_CHANGE. A preservation
+surface remains unmodified unless requirements and evidence prove mutation necessary. If no existing surface
+can safely represent a responsibility, emit a separate justified canonical new_surface_proposals entry
+rather than using a fake existing identity. Do not write code, execute tests, decompose Workers, call tools,
+or reproduce raw source. Return only the requested structured map.
 
 COMPLETE CANONICAL PLANNING PACKET:
 {json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)}"""
@@ -7981,11 +8004,15 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
     RUN["impact_planner_context"] = context
     prompt_text = role_packet.get("base_rendered_packet") if isinstance(role_packet, dict) else _impact_planner_prompt(context)
 
+    last_planner_validation = {}
+
     def validator(data):
-        return stage3.validate_planner_output(
+        nonlocal last_planner_validation
+        last_planner_validation = stage3.validate_planner_output_detailed(
             data, requirements, allow_legacy=structured_call is not None,
             impact_seeds=seeds,
         )
+        return last_planner_validation
 
     try:
         if structured_call is None:
@@ -7997,12 +8024,32 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
             candidate = structured_call(
                 prompt_text, validator, "impact-map", stage3.impact_map_schema(),
             )
-        raw_artifact = stage3.normalize_impact_map(candidate)
+        canonicalization = stage3.canonicalize_impact_map_candidate(candidate)
+        if not canonicalization.get("valid"):
+            last_planner_validation = canonicalization
+            raise StructuredOutputError(
+                f"{canonicalization.get('reason_code')}: "
+                + "; ".join(canonicalization.get("errors", []))
+            )
+        if not last_planner_validation:
+            last_planner_validation = canonicalization
+        canonical_candidate = canonicalization.get("canonical_candidate") or {}
+        RUN["impact_map_canonicalization"] = {
+            key: copy.deepcopy(canonicalization.get(key))
+            for key in ("status", "source_envelope", "canonicalization", "reason_code", "errors")
+        }
+        record_run_event(
+            "impact_map_candidate_canonicalized",
+            status=canonicalization.get("status"),
+            source_envelope=canonicalization.get("source_envelope"),
+            canonicalization=canonicalization.get("canonicalization"),
+        )
+        raw_artifact = stage3.normalize_impact_map(canonical_candidate)
         RUN["raw_impact_planner_output"] = copy.deepcopy(raw_artifact)
         RUN["raw_impact_map"] = copy.deepcopy(raw_artifact)
         record_run_event("impact_planner_output_captured", raw_impact_map=raw_artifact)
         impact_map = stage3.hydrate_impact_map(
-            candidate, registry, requirements, repository_evidence,
+            canonical_candidate, registry, requirements, repository_evidence,
             allow_legacy_exact=structured_call is not None,
             impact_seeds=seeds,
         )
@@ -8041,8 +8088,17 @@ def create_impact_map(task_brain, contract, repository_evidence, structured_call
         raise ImpactPlanningError(str(exc), status=status) from exc
     except StructuredOutputError as exc:
         RUN["impact_map_failures"] = RUN.get("impact_map_failures", 0) + 1
-        record_run_event("impact_planner_invalid", error=str(exc))
-        raise ImpactPlanningError("IMPACT_MAP_INVALID: " + str(exc)) from exc
+        reason_code = (
+            last_planner_validation.get("reason_code")
+            if isinstance(last_planner_validation, dict) else None
+        ) or getattr(exc, "code", None) or stage3.IMPACT_MAP_SEMANTIC_VALIDATION_FAILED
+        RUN["impact_map_failure_reason"] = reason_code
+        record_run_event(
+            "impact_planner_invalid", error=str(exc), reason_code=reason_code,
+        )
+        raise ImpactPlanningError(
+            f"IMPACT_MAP_INVALID: {reason_code}: {str(exc)}", status=reason_code,
+        ) from exc
     if not validation.get("valid"):
         raise ImpactPlanningError("IMPACT_MAP_INCOMPLETE: " + "; ".join(validation.get("errors", [])))
     RUN.setdefault("control_flow", []).append("IMPACT_MAP")
@@ -8358,8 +8414,11 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
         if isinstance(role_packet, dict) else _impact_revision_prompt(context)
     )
 
+    last_revision_validation = {}
+
     def validator(data):
-        return stage3.validate_planner_output(
+        nonlocal last_revision_validation
+        last_revision_validation = stage3.validate_planner_output_detailed(
             data, requirements, allow_legacy=structured_call is not None,
             impact_seeds=RUN.get("impact_seeds", []),
         )
@@ -8374,6 +8433,16 @@ def revise_impact_map(impact_map, validated_challenges, task_brain, contract,
             data = structured_call(
                 prompt_text, validator, "impact-plan-revision", stage3.impact_map_schema(),
             )
+        canonicalization = stage3.canonicalize_impact_map_candidate(data)
+        if not canonicalization.get("valid"):
+            last_revision_validation = canonicalization
+            raise StructuredOutputError(
+                f"{canonicalization.get('reason_code')}: "
+                + "; ".join(canonicalization.get("errors", []))
+            )
+        if not last_revision_validation:
+            last_revision_validation = canonicalization
+        data = canonicalization.get("canonical_candidate") or {}
         revised = stage3.hydrate_impact_map(
             data, registry, requirements, repository_evidence,
             allow_legacy_exact=structured_call is not None,
