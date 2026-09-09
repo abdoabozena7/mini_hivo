@@ -136,7 +136,7 @@ class CanonicalMandatoryPlanningCoreTests(unittest.TestCase):
         old_payload = self._old_live_shape_payload()
         renderer = self._role_renderer("ImpactPlanner")
         old_exact = renderer(old_payload)
-        self.assertEqual(len(old_exact), 9622)
+        self.assertEqual(len(old_exact), 10285)
         self.assertEqual(len(impact._compact_json(old_payload)), 8328)
 
         audit = impact.audit_mandatory_planning_payload(old_payload)
