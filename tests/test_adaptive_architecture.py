@@ -2109,16 +2109,38 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         target = mini.WORKSPACE / "app.py"
         target.write_text("print('ok')\n", encoding="utf-8")
         task = mini.make_task(
-            "1", "Implement one focused behavior", 1, "ROOT", ["behavior is verified"], ["app.py"],
+            "1", "app.py", 1, "ROOT", ["behavior is verified"], ["app.py"],
         )
         failure = {
             "status": "failed", "failure_type": "IMPLEMENTATION_ERROR", "summary": "check failed",
             "failure_evidence": [{"name": "check", "status": "FAIL"}],
         }
+        context_ready = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "context_sufficiency_check", "arguments": {
+                    "context_status": "sufficient",
+                    "reason": "The bounded task, target, and failure evidence are sufficient for the focused retry.",
+                }},
+            }],
+        }
         stale_edit = {
             "role": "assistant", "content": "", "tool_calls": [{
                 "function": {"name": "edit_file", "arguments": {
                     "path": "app.py", "old": "print('missing')", "new": "print('ok')",
+                }},
+            }],
+        }
+        successful_edit_a = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.py", "old": "print('ok')", "new": "print('a')",
+                }},
+            }],
+        }
+        successful_edit_b = {
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "edit_file", "arguments": {
+                    "path": "app.py", "old": "print('a')", "new": "print('b')",
                 }},
             }],
         }
@@ -2130,7 +2152,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         terminal = {"role": "assistant", "content": "verified", "tool_calls": []}
         with patch.object(
             mini, "ask_ollama",
-            side_effect=[stale_edit, executable_check, terminal, stale_edit, executable_check, terminal],
+            side_effect=[
+                context_ready, stale_edit, successful_edit_a, executable_check, terminal,
+                context_ready, stale_edit, successful_edit_b, executable_check, terminal,
+            ],
         ) as ask, patch.object(
             mini, "falsify_task",
             return_value={"status": "skipped", "summary": "deterministic test", "memory": {}},
@@ -2142,17 +2167,17 @@ class AdaptiveArchitectureTests(unittest.TestCase):
                 task, self.contract(), self.strategy_pair()[1], failure, {}, {}, attempt_index=1,
             )
 
-        for call_index in (1, 4):
+        for call_index in (2, 7):
             tool_message = next(
                 message for message in ask.call_args_list[call_index].args[0]
                 if message.get("role") == "tool"
             )
             self.assertIn("MUTATION_RECOVERY", tool_message["content"])
-        self.assertEqual(result_a["status"], "done")
-        self.assertEqual(result_b["status"], "done")
+        self.assertEqual(result_a["status"], "done", result_a)
+        self.assertEqual(result_b["status"], "done", result_b)
         self.assertEqual(mini.RUN["mutation_failures_recorded"], 2)
         self.assertEqual(mini.RUN["mutation_recovery_packets_emitted"], 2)
-        self.assertEqual(target.read_text(encoding="utf-8"), "print('ok')\n")
+        self.assertEqual(target.read_text(encoding="utf-8"), "print('b')\n")
 
     def test_strategy_a_failure_rolls_back_before_b_and_preserves_verified_dependencies(self):
         target = mini.WORKSPACE / "app.js"
