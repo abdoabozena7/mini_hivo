@@ -534,6 +534,55 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
         self.assertFalse(wrong_responsibility["valid"])
         self.assertTrue(wrong_responsibility["semantic_conflicts"])
 
+    def test_invalid_advice_falls_back_to_exact_contract_authority(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        unsafe_advice = {
+            "objective": "Modify src/game.js and add a new paused state owned by InputManager.",
+            "implementation_steps": ["Create an extra state owner outside the approved scope."],
+        }
+        mission = mini.compile_worker_mission(
+            self.mission_task(contract), {}, repo_snapshot={"files": []},
+            execution_contract=contract, advice_policy="contract_fallback",
+            structured_call=lambda *_: unsafe_advice,
+        )
+        self.assertTrue(execution.validate_hydrated_worker_mission(mission, contract, [])["valid"])
+        self.assertEqual(mission["allowed_mutation_paths"], contract["allowed_mutation_paths"])
+        self.assertEqual(mission["allowed_inspection_paths"], contract["allowed_inspection_paths"])
+        self.assertEqual(mission["preservation"], contract["local_preservation_constraints"])
+        self.assertEqual(mission["prohibitions"], contract["structured_prohibitions"])
+        self.assertEqual(mission["do_not_touch"], contract["global_do_not_touch"])
+        self.assertEqual(mission["approved_plan_hash"], contract["plan_hash"])
+        self.assertNotIn("src/game.js", json.dumps(mission["implementation_advice"]))
+        self.assertEqual(mini.RUN["mission_advice_fallbacks"], 1)
+        self.assertEqual(mini.RUN["mission_compilation_failures"], 0)
+
+    def test_valid_advice_keeps_normal_mission_in_fallback_variant(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        advice = {"objective": "Extend InputManager Escape handling."}
+        mission = mini.compile_worker_mission(
+            self.mission_task(contract), {}, repo_snapshot={"files": []},
+            execution_contract=contract, advice_policy="contract_fallback",
+            structured_call=lambda *_: advice,
+        )
+        self.assertEqual(mission["implementation_advice"]["objective"], advice["objective"])
+        self.assertEqual(mini.RUN["mission_advice_fallbacks"], 0)
+
+    def test_fallback_still_blocks_when_contract_mission_validation_fails(self):
+        _, compiled, _ = self.compiled()
+        contract = compiled["contracts"][0]
+        with patch.object(execution, "validate_hydrated_worker_mission",
+                          return_value={"valid": False, "errors": ["authority mismatch"]}):
+            with self.assertRaises(mini.MissionCompilationError):
+                mini.compile_worker_mission(
+                    self.mission_task(contract), {}, repo_snapshot={"files": []},
+                    execution_contract=contract, advice_policy="contract_fallback",
+                    structured_call=lambda *_: {"objective": "Create a new owner."},
+                )
+        self.assertEqual(mini.RUN["mission_advice_fallbacks"], 0)
+        self.assertEqual(mini.RUN["mission_advice_fallback_failures"], 1)
+
     def test_code_location_classifier_requires_evidence_for_slash_compounds(self):
         _, compiled, _ = self.compiled()
         contract = compiled["contracts"][0]

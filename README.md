@@ -266,6 +266,23 @@ deterministic fixture in `tests/test_decomposition_first_experiment.py` checks
 both routes' handoff and approval boundary; it does not establish a live-model
 success rate.
 
+### Experiment 2: Contract mission fallback
+
+`--mission-advice-policy strict` keeps the original Mission Compiler gate.
+`--mission-advice-policy contract_fallback` still calls the same compiler. If
+its advice is rejected, HIVO discards that advice and builds a deterministic
+mission from the approved Execution Contract. The fallback mission must pass
+the existing contract identity, scope, dependency, preservation, size, and
+Worker projection checks before execution. A bad contract or failed fallback
+validation still blocks the Worker. The default remains `strict`.
+
+For a paired comparison, use the same planning route, prompt, model, approved
+plan, and starting project snapshot in two isolated workspaces, changing only
+the mission advice policy. The run metrics record rejected advice,
+`mission_advice_fallback`, and `FIRST_WORKER_STARTED` separately. The fallback
+does not change Worker prompts, tool permissions, budgets, verification, or
+integration.
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a

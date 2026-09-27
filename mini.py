@@ -3612,6 +3612,8 @@ def new_metrics(mode):
         "mission_advice_received": 0,
         "mission_advice_validated": 0,
         "mission_advice_rejected": 0,
+        "mission_advice_fallbacks": 0,
+        "mission_advice_fallback_failures": 0,
         "mission_non_authoritative_fields_rejected": 0,
         "mission_semantic_conflicts": 0,
         "semantic_path_candidates": 0,
@@ -10906,7 +10908,8 @@ def _worker_context_projection_artifact(mission, contract, dependency_summaries=
 
 def compile_worker_mission(task, brain_projection, dependency_summaries=None, repo_snapshot=None,
                            strategy_context=None, task_context=None, structured_call=None,
-                           plan_node_contract=None, execution_contract=None):
+                           plan_node_contract=None, execution_contract=None,
+                           advice_policy="strict"):
     """Compile one node into a bounded Worker mission before any tool call.
 
     Contract-backed nodes use one model call for semantic implementation
@@ -10914,6 +10917,8 @@ def compile_worker_mission(task, brain_projection, dependency_summaries=None, re
     current immutable Execution Contract and that validated advice.  The
     legacy non-contract path intentionally retains its existing schema.
     """
+    if advice_policy not in {"strict", "contract_fallback"}:
+        raise ValueError("unknown mission advice policy")
     RUN["mission_compilations"] = RUN.get("mission_compilations", 0) + 1
     task = task if isinstance(task, dict) else {}
     projection = brain_projection if isinstance(brain_projection, dict) else {}
@@ -11153,6 +11158,66 @@ BOUNDED COMPILER CONTEXT:
             mission = _bound_worker_mission(mission)
         return mission
     except (StructuredOutputError, stage4.ExecutionContractError) as exc:
+        if contract_backed and advice_policy == "contract_fallback":
+            # Discard the model response completely. The deterministic advice
+            # carries no authority; every substantive field comes from the
+            # already approved Execution Contract and is validated again.
+            if not advice_rejection_recorded:
+                RUN["mission_advice_rejected"] = RUN.get("mission_advice_rejected", 0) + 1
+                advice_rejection_recorded = True
+            try:
+                fallback_advice = {
+                    "objective": "Execute the approved Execution Contract within its exact scope.",
+                }
+                fallback_check = stage4.sanitize_mission_advice(
+                    fallback_advice, execution_contract,
+                )
+                if not fallback_check.get("valid"):
+                    raise StructuredOutputError(
+                        MISSION_CONTRACT_VIOLATION + ": deterministic fallback advice is invalid"
+                    )
+                fallback_mission = stage4.hydrate_worker_mission(
+                    execution_contract, fallback_check["advice"], dependencies,
+                )
+                fallback_validation = stage4.validate_hydrated_worker_mission(
+                    fallback_mission, execution_contract, dependencies,
+                )
+                if not fallback_validation.get("valid"):
+                    raise stage4.ExecutionContractError(
+                        MISSION_CONTRACT_VIOLATION,
+                        "; ".join(fallback_validation.get("errors", [])),
+                    )
+                _worker_context_projection_artifact(
+                    fallback_mission, execution_contract, dependencies,
+                    task_id=task.get("id"),
+                )
+            except (StructuredOutputError, stage4.ExecutionContractError) as fallback_exc:
+                RUN["mission_advice_fallback_failures"] = RUN.get(
+                    "mission_advice_fallback_failures", 0,
+                ) + 1
+                record_run_event(
+                    "mission_advice_fallback_failed", task_id=task.get("id"),
+                    original_error=str(exc), fallback_error=str(fallback_exc),
+                )
+                exc = fallback_exc
+            else:
+                RUN["mission_advice_fallbacks"] = RUN.get("mission_advice_fallbacks", 0) + 1
+                RUN["hydrated_worker_missions_created"] = RUN.get(
+                    "hydrated_worker_missions_created", 0,
+                ) + 1
+                record_run_event(
+                    "mission_advice_fallback", task_id=task.get("id"),
+                    execution_contract_id=execution_contract.get("execution_contract_id"),
+                    execution_contract_hash=execution_contract.get("contract_hash"),
+                    rejected_advice_error=str(exc),
+                    fallback_mission_hash=fallback_mission.get("mission_hash"),
+                )
+                record_run_event(
+                    "hydrated_worker_mission_created", task_id=task.get("id"),
+                    execution_contract_id=execution_contract.get("execution_contract_id"),
+                    hydrated_worker_mission=copy.deepcopy(fallback_mission),
+                )
+                return fallback_mission
         RUN["mission_compilation_failures"] = RUN.get("mission_compilation_failures", 0) + 1
         if contract_backed:
             RUN["mission_contract_failures"] = RUN.get("mission_contract_failures", 0) + 1
@@ -18926,6 +18991,7 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
         strategy_context=strategy_context, task_context=task_context,
         plan_node_contract=plan_node_contract,
         execution_contract=execution_contract,
+        advice_policy=RUN.get("mission_advice_policy", "strict"),
     )
     RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
     record_run_event(
@@ -23099,7 +23165,14 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         if execution_contract.get("worker_required") and result.get("status") == "done":
             _experiment_event("CHILD_VERIFIED", child_id=contract_id)
         elif execution_contract.get("worker_required") and result.get("status") != "done":
-            _experiment_blocked("CHILD_VERIFICATION", result)
+            blocker_stage = (
+                "MISSION_COMPILATION"
+                if result.get("orchestration_failure") == "MISSION_COMPILATION_FAILURE"
+                and not any(item.get("kind") == "FIRST_WORKER_STARTED"
+                            for item in RUN.get("experiment_events", []))
+                else "CHILD_VERIFICATION"
+            )
+            _experiment_blocked(blocker_stage, result)
     for child_id, binding in (RUN.get("early_child_plan_bindings") or {}).items():
         node_ids = set(binding.get("plan_node_ids", []))
         matching = [
@@ -26160,9 +26233,11 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           fresh_task_brain=None, reentry_context=None,
                           current_repository_evidence=None,
                           planning_route="current_recursive", early_split_structured_call=None,
-                          experiment_case_id=None):
+                          experiment_case_id=None, mission_advice_policy="strict"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
+    if mission_advice_policy not in {"strict", "contract_fallback"}:
+        raise ValueError("unknown mission advice policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26195,6 +26270,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     elif RUN.get("mode") != "auto":
         RUN["mode"] = "recursive"
     RUN["planning_route"] = planning_route
+    RUN["mission_advice_policy"] = mission_advice_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -28754,6 +28830,8 @@ def parse_args():
     parser.add_argument("--model", help=f"Compatibility option; only {GEMMA_MODEL} is accepted")
     parser.add_argument("--prompt-file")
     parser.add_argument("--experiment-case-id")
+    parser.add_argument("--mission-advice-policy", choices=("strict", "contract_fallback"),
+                        default="strict")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -28814,16 +28892,22 @@ def main():
 
     def handle(user_text, interactive=True):
         nonlocal memory
+        mission_policy = getattr(args, "mission_advice_policy", "strict")
+        mission_kwargs = ({"mission_advice_policy": mission_policy}
+                          if mission_policy != "strict" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
-            result, memory = run_recursive_request(user_text, memory, interactive=interactive)
+            result, memory = run_recursive_request(
+                user_text, memory, interactive=interactive, **mission_kwargs,
+            )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
                      else "current_recursive")
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive, planning_route=route,
                 experiment_case_id=getattr(args, "experiment_case_id", None),
+                **mission_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)
