@@ -33,6 +33,7 @@ from hivo.http_client import HttpTransportError, get_json as http_get_json, post
 from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.mutation_grounding import MutationGrounding, MUTATION_TARGET_UNRESOLVED
+from hivo.target_locator import TargetLocator
 from hivo.worker_progress import WorkerProgress
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
@@ -3277,6 +3278,22 @@ def _mutation_grounding_source_hash():
         return "unavailable"
 
 
+def _target_locator_source_hash():
+    try:
+        source = Path(__file__).parent / "hivo" / "target_locator.py"
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except OSError:
+        return "unavailable"
+
+
+def _worker_progress_source_hash():
+    try:
+        source = Path(__file__).parent / "hivo" / "worker_progress.py"
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except OSError:
+        return "unavailable"
+
+
 def compact_text(text, limit=120):
     one = " ".join(str(text).split())
     return one if len(one) <= limit else one[:max(0, limit - 3)] + "..."
@@ -3323,6 +3340,8 @@ def new_metrics(mode):
     return {
         "run_id": RUN_ID, "source_sha256": _source_hash(),
         "mutation_grounding_source_sha256": _mutation_grounding_source_hash(),
+        "target_locator_source_sha256": _target_locator_source_hash(),
+        "worker_progress_source_sha256": _worker_progress_source_hash(),
         "mode": mode, "model": MODEL,
         "model_capabilities": sorted(MODEL_CAPABILITIES),
         "role_models": {role: MODEL for role in MODEL_POLICY.role_models()},
@@ -3630,6 +3649,8 @@ def new_metrics(mode):
         "worker_progress_runs": [],
         "first_legal_mutation": None,
         "mutation_grounding_runs": [],
+        "target_locator_runs": [],
+        "worker_read_spans": [],
         "mission_non_authoritative_fields_rejected": 0,
         "mission_semantic_conflicts": 0,
         "semantic_path_candidates": 0,
@@ -13778,6 +13799,23 @@ def _worker_mutation_file_fingerprint(path):
         return None
 
 
+def _target_locator_tool_definition(candidate_ids):
+    return {
+        "type": "function",
+        "function": {
+            "name": "read_candidate_span",
+            "description": "Read one controller-ranked source span by candidate ID. The path and lines are fixed by the approved target locator.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "string", "enum": list(candidate_ids)},
+                },
+                "required": ["candidate_id"],
+            },
+        },
+    }
+
+
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="",
                        tool_policy=None, max_steps=None, worker_callback=None,
                        worker_context=None, execution_contract=None,
@@ -14218,6 +14256,16 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     context = "\n\n".join(item for item in (extra_context, durable) if item)
     if context:
         task_text = f"{context}\n\nCURRENT TASK:\n{task_text}"
+    locator_policy = RUN.get("target_locator_policy", "current")
+    locator = None
+    if (locator_policy == "evidence_directed" and role == "Builder"
+            and isinstance(execution_contract, dict)
+            and recovery_strategy is None
+            and execution_contract.get("allowed_inspection_paths")):
+        locator = TargetLocator.build(
+            WORKSPACE, recovery_task_text, execution_contract,
+        )
+        task_text += "\n\n" + locator.packet()
     base_worker_prompt = task_text
     messages.append({"role": "user", "content": task_text})
     evidence = []
@@ -14238,6 +14286,12 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     status = "unknown"
     execution_budget_exhausted = False
     offered_tools = tools_for_role(role, tool_policy=tool_policy)
+    if locator is not None and locator.candidates:
+        offered_tools = [item for item in offered_tools
+                         if item.get("function", {}).get("name") != "read_file_range"]
+        offered_tools.append(_target_locator_tool_definition(
+            item["candidate_id"] for item in locator.candidates
+        ))
     if role == "Builder" and isinstance(recovery_strategy, dict):
         recovery_state = _recovery_strategy_state_for_execution(
             recovery_strategy,
@@ -14260,6 +14314,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     offered_names = {item["function"]["name"] for item in offered_tools}
     if role == "Builder":
         RUN["builder_calls"] = RUN.get("builder_calls", 0) + 1
+        if locator is not None:
+            _experiment_event(
+                "TARGET_LOCATOR_READY", task_id=task_id,
+                candidate_count=len(locator.candidates),
+                top_candidate=(locator.candidates[0]["candidate_id"]
+                               if locator.candidates else None),
+            )
         if not RUN.get("experiment_first_worker_started"):
             RUN["experiment_first_worker_started"] = True
             _experiment_event("FIRST_WORKER_STARTED", task_id=task_id)
@@ -14558,7 +14619,18 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             if not isinstance(args, dict):
                 RUN["invalid_tool_calls"] = RUN.get("invalid_tool_calls", 0) + 1
                 args = {}
-            target = args.get("path") or args.get("command") or "-"
+            selected_candidate = (
+                locator.candidate(args.get("candidate_id"))
+                if locator is not None and name == "read_candidate_span" else None
+            )
+            resolved_read_args = (
+                {"path": selected_candidate["path"],
+                 "start_line": selected_candidate["start_line"],
+                 "end_line": selected_candidate["end_line"]}
+                if selected_candidate is not None else None
+            )
+            target = (selected_candidate["path"] if selected_candidate is not None
+                      else args.get("path") or args.get("command") or "-")
             RUN["tool_calls"] += 1
             tool_was_offered = name in offered_names
             mutation_fingerprint_before = (
@@ -14601,6 +14673,20 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                             result = grounding_decision["result"]
                         else:
                             result = run_tool(name, args, role=role)
+                    elif name == "read_candidate_span" and locator is not None:
+                        if selected_candidate is None:
+                            RUN["invalid_tool_calls"] = RUN.get("invalid_tool_calls", 0) + 1
+                            result = "error: unknown target locator candidate ID"
+                        else:
+                            candidate_path = safe_path(selected_candidate["path"])
+                            try:
+                                current_hash = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+                            except (AttributeError, OSError):
+                                current_hash = None
+                            if current_hash != selected_candidate["file_sha256"]:
+                                result = "error: TARGET_LOCATOR_STALE; candidate source changed before reading"
+                            else:
+                                result = run_tool("read_file_range", resolved_read_args, role=role)
                     elif _browser_tool_request(name, args):
                         current_syntax_failures = _cycle_syntax_failures_for_target(
                             verification_cycle, args.get("path")
@@ -14967,8 +15053,25 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
 
-            if grounding is not None and name in {"read_file", "read_file_range"}:
-                grounding.observe_read(name, args, result, safe_path(args.get("path")))
+            if (name in {"read_file_range", "read_candidate_span"}
+                    and not tool_result_failed(result)
+                    and not result_is_tool_rejection(result)):
+                read_args = resolved_read_args if resolved_read_args is not None else args
+                read_event = {
+                    "task_id": str(task_id),
+                    "tool_step": progress.tool_steps + 1 if progress is not None else len(evidence),
+                    "tool": name, "path": read_args.get("path"),
+                    "start_line": read_args.get("start_line", 1),
+                    "end_line": read_args.get("end_line"),
+                    "candidate_id": selected_candidate["candidate_id"] if selected_candidate else None,
+                }
+                RUN.setdefault("worker_read_spans", []).append(read_event)
+                if locator is not None and selected_candidate is not None:
+                    locator.read_events.append(read_event)
+            if grounding is not None and name in {"read_file", "read_file_range", "read_candidate_span"}:
+                read_name = "read_file_range" if name == "read_candidate_span" else name
+                read_args = resolved_read_args if resolved_read_args is not None else args
+                grounding.observe_read(read_name, read_args, result, safe_path(read_args.get("path")))
             mutation_fingerprint_after = (
                 _worker_mutation_file_fingerprint(args.get("path"))
                 if progress is not None and name in MUTATION_TOOLS else None
@@ -15381,6 +15484,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
     progress_summary = progress.summary() if progress is not None else None
     grounding_summary = grounding.summary() if grounding is not None else None
+    locator_summary = locator.summary() if locator is not None else None
     if progress_summary is not None:
         RUN.setdefault("worker_progress_runs", []).append(progress_summary)
         record_run_event(
@@ -15405,6 +15509,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             first_applied_mutation_step=grounding_summary["first_applied_mutation_step"],
             terminal_reason=grounding_summary["terminal_reason"],
         )
+    if locator_summary is not None:
+        RUN.setdefault("target_locator_runs", []).append(locator_summary)
+        record_run_event(
+            "target_locator_summary", task_id=task_id,
+            candidate_count=len(locator_summary["candidates"]),
+            read_count=len(locator_summary["read_events"]),
+        )
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
                      summary=compact_text(summary, MAX_NODE_SUMMARY_CHARS), evidence_count=len(evidence),
                      context_status=(context_sufficiency_snapshot or {}).get("context_status"),
@@ -15423,6 +15534,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "structured_response_active": structured_response_schema is not None,
         "worker_progress": progress_summary,
         "mutation_grounding": grounding_summary,
+        "target_locator": locator_summary,
         "context_sufficiency": context_sufficiency_snapshot,
         "mutation_authorized": bool((context_sufficiency_snapshot or {}).get("mutation_allowed")) and impact_authorized,
         "impact_contract": impact_contract_snapshot,
@@ -26473,7 +26585,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           planning_route="current_recursive", early_split_structured_call=None,
                           experiment_case_id=None, mission_advice_policy="strict",
                           worker_progress_policy="current",
-                          mutation_grounding_policy="current"):
+                          mutation_grounding_policy="current",
+                          target_locator_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26482,6 +26595,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown Worker progress policy")
     if mutation_grounding_policy not in {"current", "evidence_grounded"}:
         raise ValueError("unknown mutation grounding policy")
+    if target_locator_policy not in {"current", "evidence_directed"}:
+        raise ValueError("unknown target locator policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26517,6 +26632,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["mission_advice_policy"] = mission_advice_policy
     RUN["worker_progress_policy"] = worker_progress_policy
     RUN["mutation_grounding_policy"] = mutation_grounding_policy
+    RUN["target_locator_policy"] = target_locator_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29082,6 +29198,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--mutation-grounding-policy", choices=("current", "evidence_grounded"),
                         default="current")
+    parser.add_argument("--target-locator-policy", choices=("current", "evidence_directed"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29151,12 +29269,15 @@ def main():
         mutation_grounding_policy = getattr(args, "mutation_grounding_policy", "current")
         grounding_kwargs = ({"mutation_grounding_policy": mutation_grounding_policy}
                             if mutation_grounding_policy != "current" else {})
+        target_locator_policy = getattr(args, "target_locator_policy", "current")
+        locator_kwargs = ({"target_locator_policy": target_locator_policy}
+                          if target_locator_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive,
-                **mission_kwargs, **progress_kwargs, **grounding_kwargs,
+                **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29164,7 +29285,7 @@ def main():
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive, planning_route=route,
                 experiment_case_id=getattr(args, "experiment_case_id", None),
-                **mission_kwargs, **progress_kwargs, **grounding_kwargs,
+                **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

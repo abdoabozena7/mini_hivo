@@ -346,6 +346,32 @@ Compare two fresh copies of the same project with
 python scripts/experiment4_report.py D:\cases\rkey\current D:\cases\rkey\evidence_grounded --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
 ```
 
+### Experiment 5: Evidence-directed target localization
+
+`--target-locator-policy current` keeps the Experiment 4 Worker path.
+`--target-locator-policy evidence_directed` searches only the approved
+inspection paths. It scores source lines using lexical terms from the local
+task and Execution Contract, including interface names and common keyboard
+event identifier variants when the requirement mentions keys. It returns up
+to three ranked, non-overlapping spans. The Worker sees candidate IDs and
+uses `read_candidate_span`; the controller fixes the path and range and rejects
+a candidate if the source changed. The focused read remains subject to the
+existing inspection scope guard and supplies Experiment 4's exact mutation
+anchor. In this variant, `read_file_range` is removed from the initial
+Builder's offered tools so narrow reads use candidate IDs.
+
+For a paired comparison, use the same model, task, project snapshot,
+approved plan, `contract_fallback`, `progress_constrained`,
+`evidence_grounded`, 28-step budget, and verifier. Vary only the target
+locator policy. The expected target span is evaluation data passed to the
+reporter; it is never shown to the Worker or used in ranking.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\current --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --mission-advice-policy contract_fallback --worker-progress-policy progress_constrained --mutation-grounding-policy evidence_grounded --target-locator-policy current
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\evidence_directed --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --mission-advice-policy contract_fallback --worker-progress-policy progress_constrained --mutation-grounding-policy evidence_grounded --target-locator-policy evidence_directed
+python scripts/experiment5_report.py D:\cases\rkey\current D:\cases\rkey\evidence_directed --expected-path index.html --expected-start 406 --expected-end 411 --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a

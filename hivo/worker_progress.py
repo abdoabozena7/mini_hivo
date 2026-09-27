@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass, field
 
 
-READ_TOOLS = frozenset({"read_file", "read_file_range", "list_files"})
+READ_TOOLS = frozenset({"read_file", "read_file_range", "read_candidate_span", "list_files"})
 MUTATION_TOOLS = frozenset({"write_file", "edit_file", "edit_file_range"})
 NO_PROGRESS_LIMIT = 3
 
