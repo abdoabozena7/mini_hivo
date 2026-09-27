@@ -247,7 +247,7 @@ will stop at `PLAN_APPROVAL_REQUIRED`, so it can measure planning only.
 ```powershell
 python mini.py --mode current_recursive --workspace D:\cases\pause\baseline --experiment-case-id pause-01
 python mini.py --mode decomposition_first_recursive --workspace D:\cases\pause\experiment --experiment-case-id pause-01
-python scripts/experiment1_report.py D:\cases\pause\baseline D:\cases\pause\experiment --output D:\cases\pause\report.json
+python scripts/experiment1_report.py D:\cases\pause\baseline D:\cases\pause\experiment --output D:\cases\pause\report.json --markdown-output D:\cases\pause\report.md
 ```
 
 The report requires paired runs with the same model, HIVO source hash, and
@@ -255,6 +255,13 @@ subject inventory fingerprint. It counts first Worker entry, the exact first
 blocking stage, verified children, root verification, model calls, elapsed time
 excluding the approval wait, and safety gate activity. An approval wait or user
 rejection is recorded separately from an orchestration blocker. The paired
+report also shows each outcome as count/total and percent, the difference in
+percentage points between routes, and average model calls and elapsed time.
+The Markdown view presents these figures in a compact Arabic table. Execution
+rates exclude runs awaiting approval or rejected by the user from their
+denominator; the approval-wait rate uses all runs. Approval waits are excluded
+from the pre-Worker blocker count.
+The paired
 deterministic fixture in `tests/test_decomposition_first_experiment.py` checks
 both routes' handoff and approval boundary; it does not establish a live-model
 success rate.

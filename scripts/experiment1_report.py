@@ -9,6 +9,14 @@ from pathlib import Path
 
 
 ROUTES = ("current_recursive", "decomposition_first_recursive")
+RATE_FIELDS = (
+    ("worker_reached", "وصل لأول Worker", "eligible"),
+    ("pre_worker_blocked", "اتوقف قبل Worker", "eligible"),
+    ("runs_with_verified_child", "تحقق أول child", "eligible"),
+    ("root_verified", "تحقق الهدف النهائي", "eligible"),
+    ("awaiting_approval", "بانتظار الموافقة", "all"),
+    ("unsafe_terminals", "انتهى بخرق أمان", "eligible"),
+)
 
 
 def event(run, kind):
@@ -72,6 +80,11 @@ def load_runs(paths):
     return runs
 
 
+def rate(count, total):
+    return {"count": count, "total": total,
+            "percent": round(100 * count / total, 1) if total else None}
+
+
 def report(runs):
     grouped = collections.defaultdict(lambda: collections.defaultdict(list))
     for run in runs:
@@ -113,18 +126,99 @@ def report(runs):
             "unsafe_terminals": sum(item["unsafe_terminal"] for item in items),
             "first_blocker_stages": dict(sorted(blockers.items())),
         }
-    return {"cases": len(grouped), "aggregate": aggregate, "runs": detail}
+    for route in ROUTES:
+        item = aggregate[route]
+        item["eligible_runs"] = item["runs"] - item["awaiting_approval"] - item["approval_rejected"]
+        item["rates"] = {
+            key: rate(item[key], item["eligible_runs"] if denominator == "eligible"
+                      else item["runs"])
+            for key, _, denominator in RATE_FIELDS
+        }
+        item["average_model_calls"] = round(
+            sum(run["total_model_calls"] for run in detail if run["route"] == route)
+            / item["runs"], 2,
+        )
+        item["average_elapsed_seconds"] = round(
+            sum(run["elapsed_seconds"] or 0 for run in detail if run["route"] == route)
+            / item["runs"], 2,
+        )
+    comparison = {}
+    for key, _, _ in RATE_FIELDS:
+        left = aggregate[ROUTES[0]]["rates"][key]["percent"]
+        right = aggregate[ROUTES[1]]["rates"][key]["percent"]
+        comparison[key + "_delta_percentage_points"] = (
+            round(right - left, 1) if left is not None and right is not None else None
+        )
+    return {"cases": len(grouped), "aggregate": aggregate,
+            "comparison": comparison, "runs": detail}
+
+
+def format_markdown(result):
+    baseline = result["aggregate"][ROUTES[0]]
+    experiment = result["aggregate"][ROUTES[1]]
+    lines = [
+        f"# Experiment 1 — حالات مزدوجة: {result['cases']}",
+        "",
+        "| المقياس | المسار الحالي | التقسيم المبكر | الفرق |",
+        "|---|---:|---:|---:|",
+    ]
+    for key, label, _ in RATE_FIELDS:
+        left = baseline["rates"][key]
+        right = experiment["rates"][key]
+        delta = result["comparison"][key + "_delta_percentage_points"]
+        left_percent = f"{left['percent']:g}%" if left["percent"] is not None else "غير متاح"
+        right_percent = f"{right['percent']:g}%" if right["percent"] is not None else "غير متاح"
+        delta_text = f"{delta:+g} نقطة مئوية" if delta is not None else "غير متاح"
+        lines.append(
+            f"| {label} | {left['count']}/{left['total']} ({left_percent}) "
+            f"| {right['count']}/{right['total']} ({right_percent}) "
+            f"| {delta_text} |"
+        )
+    lines += [
+        "",
+        "| التكلفة لكل run | المسار الحالي | التقسيم المبكر |",
+        "|---|---:|---:|",
+        f"| متوسط استدعاءات النموذج | {baseline['average_model_calls']:g} "
+        f"| {experiment['average_model_calls']:g} |",
+        f"| متوسط الزمن بالثواني | {baseline['average_elapsed_seconds']:g} "
+        f"| {experiment['average_elapsed_seconds']:g} |",
+        "",
+        "نِسب التنفيذ مقامها الحالات المؤهلة بعد استبعاد انتظار/رفض الموافقة. "
+        "نسبة انتظار الموافقة مقامها كل الحالات. النسبة توضّح العينة المقاسة فقط؛ "
+        "لا تثبت تحسنًا إحصائيًا.",
+        "متوسط التكلفة للملاحظة فقط: المقارنة لا تعني كفاءة أعلى عندما يتوقف "
+        "المساران في مراحل مختلفة.",
+        "",
+        "## أول مرحلة توقف",
+        "",
+    ]
+    for route, name in ((ROUTES[0], "المسار الحالي"), (ROUTES[1], "التقسيم المبكر")):
+        blockers = [run for run in result["runs"]
+                    if run["route"] == route and run["first_blocker_stage"]]
+        if not blockers:
+            lines.append(f"- {name}: لا توجد حالة توقف مسجلة.")
+        for run in blockers:
+            lines.append(
+                f"- {name}، `{run['case_id']}`: "
+                f"`{run['first_blocker_stage']}` / `{run['first_blocker_reason']}` "
+                f"(وصل للـWorker: {'نعم' if run['worker_reached'] else 'لا'})."
+            )
+    return "\n".join(lines) + "\n"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("metrics", nargs="+", help="workspace directories or .agent_experiment.jsonl files")
     parser.add_argument("--output", type=Path, help="write the report as JSON")
+    parser.add_argument("--markdown-output", type=Path,
+                        help="write an Arabic percentage summary as Markdown")
     args = parser.parse_args()
     result = report(load_runs(args.metrics))
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
         args.output.write_text(rendered + "\n", encoding="utf-8")
+    if args.markdown_output:
+        args.markdown_output.write_text(format_markdown(result), encoding="utf-8")
     print(rendered)
 
 
