@@ -1,6 +1,7 @@
 import argparse
 import base64
 import copy
+import difflib
 import hashlib
 import importlib
 import importlib.util
@@ -35,6 +36,7 @@ from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
 from hivo.mutation_grounding import MutationGrounding, MUTATION_TARGET_UNRESOLVED
 from hivo.target_locator import TargetLocator
 from hivo.worker_progress import WorkerProgress
+from hivo import verification_environment as verification_env
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -1134,6 +1136,12 @@ def rollback_transaction():
     ACTIVE_TRANSACTION = None
     if not transaction:
         return []
+    if RUN.get("verification_environment_policy") == "resolved":
+        try:
+            _preserve_candidate_patch(transaction)
+        except (OSError, ValueError) as exc:
+            RUN.setdefault("candidate_patch_save_errors", []).append(str(exc))
+            record_run_event("candidate_patch_save_failed", task_id=transaction.get("task_id"), error=str(exc))
     restored = []
     for raw_path, snapshot in transaction["files"].items():
         target = Path(raw_path)
@@ -1152,6 +1160,49 @@ def rollback_transaction():
     _world_model_revalidate_after_files(restored, phase="rollback")
     record_run_event("transaction_rollback", task_id=transaction.get("task_id"), restored=restored)
     return restored
+
+
+def _preserve_candidate_patch(transaction):
+    """Save the unverified candidate outside source scope before restoration."""
+    root = Path(WORKSPACE).resolve()
+    task_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(transaction.get("task_id") or "task"))
+    artifact_root = root / ".hivo" / "candidate_patches" / str(RUN_ID) / task_id
+    files = []
+    for raw_path, snapshot in transaction.get("files", {}).items():
+        target = Path(raw_path).resolve()
+        try:
+            relative = target.relative_to(root)
+        except ValueError:
+            continue
+        original = snapshot.get("content") if snapshot.get("existed") else None
+        current = target.read_bytes() if target.is_file() else None
+        if original == current:
+            continue
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        candidate_path = artifact_root / relative.parent / (relative.name + ".candidate")
+        patch_path = artifact_root / relative.parent / (relative.name + ".patch")
+        candidate_path.parent.mkdir(parents=True, exist_ok=True)
+        if current is not None:
+            candidate_path.write_bytes(current)
+        diff = difflib.unified_diff(
+            (original or b"").decode("utf-8", "replace").splitlines(keepends=True),
+            (current or b"").decode("utf-8", "replace").splitlines(keepends=True),
+            fromfile="a/" + relative.as_posix(), tofile="b/" + relative.as_posix(),
+        )
+        patch_path.write_text("".join(diff), encoding="utf-8")
+        files.append({"path": relative.as_posix(),
+                      "before_sha256": hashlib.sha256(original or b"").hexdigest() if original is not None else None,
+                      "candidate_sha256": hashlib.sha256(current or b"").hexdigest() if current is not None else None,
+                      "candidate_path": str(candidate_path) if current is not None else None,
+                      "patch_path": str(patch_path)})
+    if files:
+        manifest = {"run_id": RUN_ID, "task_id": transaction.get("task_id"),
+                    "verification_status": "UNVERIFIED", "files": files}
+        manifest_path = artifact_root / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        RUN.setdefault("candidate_patch_artifacts", []).append(str(manifest_path))
+        record_run_event("candidate_patch_preserved", task_id=transaction.get("task_id"),
+                         manifest_path=str(manifest_path), files=[item["path"] for item in files])
 
 
 def backup(target):
@@ -1773,13 +1824,40 @@ def run_command(command):
     parts, error = _validated_command_parts(command)
     if error:
         return f"error: command refused: {error}"
+    resolved_policy = RUN.get("verification_environment_policy") == "resolved"
+    if resolved_policy:
+        preflight = verification_env.preflight_command(parts, WORKSPACE)
+        RUN.setdefault("verification_command_preflights", []).append({
+            "command": command, "status": preflight["status"],
+            "reason": preflight["reason"],
+            "resolved_executable": preflight.get("resolved_executable"),
+        })
+        record_run_event("verification_command_preflight", command=command,
+                         status=preflight["status"], reason=preflight["reason"],
+                         resolved_executable=preflight.get("resolved_executable"))
+        if preflight["status"] == verification_env.VERIFICATION_NOT_APPLICABLE:
+            return f"[not_applicable] VERIFICATION_NOT_APPLICABLE: {preflight['reason']}"
+        if preflight["status"] == verification_env.VERIFIER_UNAVAILABLE:
+            return f"error: VERIFIER_UNAVAILABLE: {preflight['reason']}"
+        parts = preflight["command"]
     try:
         result = subprocess.run(parts, shell=False, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+        if resolved_policy:
+            outcome = verification_env.command_result(result)
+            RUN.setdefault("verification_command_results", []).append({
+                "command": command, **outcome})
+            record_run_event("verification_command_result", command=command, **outcome)
         output = (result.stdout + result.stderr).strip()
         return f"[exit_code={result.returncode}]\n{output or '(no output)'}"
     except subprocess.TimeoutExpired:
         return "error: command timed out (60s limit)"
     except Exception as exc:
+        if resolved_policy and isinstance(exc, OSError):
+            outcome = verification_env.command_result(None, launch_error=exc)
+            RUN.setdefault("verification_command_results", []).append({
+                "command": command, **outcome})
+            record_run_event("verification_command_result", command=command, **outcome)
+            return f"error: VERIFIER_UNAVAILABLE: {exc}"
         return f"tool error: {exc}"
 
 
@@ -16585,6 +16663,16 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
     result["verification_applicability"] = _update_verification_applicability_result(
         artifact, record_task, BROWSER_VERIFICATION, result,
     )
+    if RUN.get("verification_environment_policy") == "resolved":
+        status = verification_env.classify_browser_result(
+            result, transaction=ACTIVE_TRANSACTION, workspace=WORKSPACE,
+        )
+        observation = {"task_id": task.get("id"), "status": status,
+                       "resolved_entrypoint": result.get("resolved_entrypoint"),
+                       "failure_codes": [item.get("code") for item in result.get("failures", [])
+                                         if isinstance(item, dict)]}
+        RUN.setdefault("verification_browser_results", []).append(observation)
+        record_run_event("verification_browser_result", **observation)
     return result
 
 
@@ -17551,6 +17639,20 @@ def classify_failure(builder_result, gate, browser_result=None, falsifier_result
         return "ENVIRONMENT_ERROR"
     if falsifier_result and falsifier_result.get("status") == "provider_failure":
         return "ENVIRONMENT_ERROR"
+    if RUN.get("verification_environment_policy") == "resolved":
+        resolved = verification_env.classify_failed_gate(
+            gate or {}, builder_result, falsifier_result, browser_result,
+            transaction=ACTIVE_TRANSACTION, workspace=WORKSPACE,
+        )
+        if resolved:
+            observation = {"task_id": (ACTIVE_TRANSACTION or {}).get("task_id"),
+                           "status": resolved,
+                           "gate_checks": [item.get("name") for item in
+                                           (gate or {}).get("deterministic_failures", [])
+                                           if isinstance(item, dict)]}
+            RUN.setdefault("verification_resolution_events", []).append(observation)
+            record_run_event("verification_failure_classified", **observation)
+            return resolved
     if browser_result and browser_result.get("environment_error"):
         return "ENVIRONMENT_ERROR"
     if vision_review and vision_review.get("environment_error"):
@@ -26586,7 +26688,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           experiment_case_id=None, mission_advice_policy="strict",
                           worker_progress_policy="current",
                           mutation_grounding_policy="current",
-                          target_locator_policy="current"):
+                          target_locator_policy="current",
+                          verification_environment_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26597,6 +26700,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown mutation grounding policy")
     if target_locator_policy not in {"current", "evidence_directed"}:
         raise ValueError("unknown target locator policy")
+    if verification_environment_policy not in {"current", "resolved"}:
+        raise ValueError("unknown verification environment policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26633,6 +26738,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["worker_progress_policy"] = worker_progress_policy
     RUN["mutation_grounding_policy"] = mutation_grounding_policy
     RUN["target_locator_policy"] = target_locator_policy
+    RUN["verification_environment_policy"] = verification_environment_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29200,6 +29306,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--target-locator-policy", choices=("current", "evidence_directed"),
                         default="current")
+    parser.add_argument("--verification-environment-policy", choices=("current", "resolved"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29272,12 +29380,16 @@ def main():
         target_locator_policy = getattr(args, "target_locator_policy", "current")
         locator_kwargs = ({"target_locator_policy": target_locator_policy}
                           if target_locator_policy != "current" else {})
+        verification_environment_policy = getattr(args, "verification_environment_policy", "current")
+        environment_kwargs = ({"verification_environment_policy": verification_environment_policy}
+                              if verification_environment_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive,
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
+                **environment_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29286,6 +29398,7 @@ def main():
                 user_text, memory, interactive=interactive, planning_route=route,
                 experiment_case_id=getattr(args, "experiment_case_id", None),
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
+                **environment_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)
