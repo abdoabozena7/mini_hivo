@@ -283,6 +283,13 @@ the mission advice policy. The run metrics record rejected advice,
 does not change Worker prompts, tool permissions, budgets, verification, or
 integration.
 
+```powershell
+python scripts/experiment2_report.py D:\cases\rkey\strict D:\cases\rkey\fallback --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
+The report requires the same approved plan hash, planning route, model, code,
+and starting project snapshot in both runs.
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a
