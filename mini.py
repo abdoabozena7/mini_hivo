@@ -2,6 +2,7 @@ import argparse
 import base64
 import copy
 import difflib
+from dataclasses import replace
 import hashlib
 import importlib
 import importlib.util
@@ -37,6 +38,7 @@ from hivo.mutation_grounding import MutationGrounding, MUTATION_TARGET_UNRESOLVE
 from hivo.target_locator import TargetLocator
 from hivo.worker_progress import WorkerProgress
 from hivo import verification_environment as verification_env
+from hivo import verification_surfaces
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -3118,6 +3120,11 @@ def run_tool(name, args, role="System"):
             "requested_from_node": args["path"],
             "project_invariants": active.get("project_invariants", RUN.get("project_invariants", [])),
         }
+        if RUN.get("verification_surface_policy") == "discovery":
+            target_evidence["verification_requirement"] = " ".join((
+                str(active.get("goal") or ""),
+                json.dumps(active.get("requirements", []), ensure_ascii=False),
+            ))
         result = verify_browser_application(
             args["path"], str(active.get("task_id") or "tool"),
             profile=profile, evidence=target_evidence,
@@ -15681,7 +15688,7 @@ def ensure_browser(install_if_missing=False):
         return (result.returncode == 0, "Chromium installed" if result.returncode == 0 else "Chromium install failed")
 
 
-def browser_snapshot(url, task_id="ROOT", profile=None):
+def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement=""):
     RUN["browser_checks"] += 1
     ok, detail = ensure_browser(False)
     if not ok:
@@ -15712,7 +15719,18 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
                         debugState: state}};
             }}""")
             interaction_checks = []
-            has_game_probe = bool(runtime_state.get("gameBridge"))
+            discover_game = (RUN.get("verification_surface_policy") == "discovery"
+                             and profile is not None and profile.kind == "game")
+            verification_surface = None
+            if discover_game:
+                verification_surface, interaction_checks = verification_surfaces.run_game_checks(
+                    page, profile, verification_requirement,
+                )
+                selected = verification_surface.get("selected")
+                if selected and verification_surface["surface_type"] in {"official_test", "existing_app_hook"}:
+                    runtime_state["gameBridge"] = {"name": selected["name"],
+                                                   "surface_type": verification_surface["surface_type"]}
+            has_game_probe = bool(runtime_state.get("gameBridge")) and not discover_game
             if has_game_probe:
                 bridge_expr = GAME_BRIDGE_EXPRESSION
                 page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
@@ -15832,12 +15850,27 @@ def browser_snapshot(url, task_id="ROOT", profile=None):
                     "runtime_state": runtime_state, "interaction_checks": interaction_checks,
                     "screenshot": str(screenshot.relative_to(WORKSPACE))}
         effective = profile or infer_web_profile("web", {})
-        return evaluate_web_snapshot(snapshot, effective)
+        if (discover_game and verification_surface.get("surface_type") in
+                {"observable_browser", "temporary_instrumentation"}):
+            effective = replace(effective, require_game_bridge=False)
+        result = evaluate_web_snapshot(snapshot, effective)
+        if discover_game:
+            result["verification_surface"] = verification_surface
+            result["behavior_test_executed"] = bool(verification_surface.get("behavior_test_executed"))
+            if not verification_surface.get("selected") or not verification_surface.get("all_required_executed"):
+                result["verification_surface_unavailable"] = True
+                result["passed"] = False
+                result["failures"].append({
+                    "code": "verification_surface_unavailable",
+                    "evidence": verification_surface.get("reason", "required behavior could not be exercised"),
+                })
+        return result
     except Exception as exc:
         return {"passed": False, "environment_error": True, "evidence": str(exc)}
 
 
-def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None):
+def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None,
+                               verification_requirement=""):
     target = safe_path(path)
     if target is None:
         return {"passed": False, "environment_error": False, "evidence": f"path escapes workspace: {path}"}
@@ -15852,7 +15885,10 @@ def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None):
     )
     try:
         time.sleep(0.25)
-        result = browser_snapshot(f"http://127.0.0.1:{port}/{relative}", task_id, profile=profile)
+        browser_kwargs = ({"verification_requirement": verification_requirement}
+                          if RUN.get("verification_surface_policy") == "discovery" else {})
+        result = browser_snapshot(f"http://127.0.0.1:{port}/{relative}", task_id,
+                                  profile=profile, **browser_kwargs)
         result["entry_path"] = relative
         return result
     finally:
@@ -16580,7 +16616,10 @@ def verify_browser_application(requested_path=None, task_id="ROOT", profile=None
         )
 
     record_run_event("browser_verification_target", task_id=task_id, **compact_target)
-    browser_result = browser_workspace_snapshot(resolved, task_id, profile=profile)
+    browser_kwargs = ({"verification_requirement": target_evidence.get("verification_requirement", "")}
+                      if RUN.get("verification_surface_policy") == "discovery" else {})
+    browser_result = browser_workspace_snapshot(resolved, task_id, profile=profile,
+                                                **browser_kwargs)
     return {**compact_target, **browser_result}
 
 
@@ -16656,6 +16695,11 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
                 "requested_from_node": requested,
                 "project_invariants": RUN.get("project_invariants", []),
                 "repository_snapshot": _verification_repository_snapshot(),
+                **({"verification_requirement": " ".join((
+                    str(task.get("goal") or ""),
+                    json.dumps(task.get("done_when", []), ensure_ascii=False),
+                    compact_contract(contract or {}),
+                ))} if RUN.get("verification_surface_policy") == "discovery" else {}),
             },
         )
     result["verification_status"] = VERIFICATION_PASS if result.get("passed") else VERIFICATION_FAIL
@@ -16669,6 +16713,8 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
         )
         observation = {"task_id": task.get("id"), "status": status,
                        "resolved_entrypoint": result.get("resolved_entrypoint"),
+                       "surface_type": (result.get("verification_surface") or {}).get("surface_type"),
+                       "behavior_test_executed": result.get("behavior_test_executed", False),
                        "failure_codes": [item.get("code") for item in result.get("failures", [])
                                          if isinstance(item, dict)]}
         RUN.setdefault("verification_browser_results", []).append(observation)
@@ -26689,7 +26735,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           worker_progress_policy="current",
                           mutation_grounding_policy="current",
                           target_locator_policy="current",
-                          verification_environment_policy="current"):
+                          verification_environment_policy="current",
+                          verification_surface_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26702,6 +26749,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown target locator policy")
     if verification_environment_policy not in {"current", "resolved"}:
         raise ValueError("unknown verification environment policy")
+    if verification_surface_policy not in {"current", "discovery"}:
+        raise ValueError("unknown verification surface policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26739,6 +26788,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["mutation_grounding_policy"] = mutation_grounding_policy
     RUN["target_locator_policy"] = target_locator_policy
     RUN["verification_environment_policy"] = verification_environment_policy
+    RUN["verification_surface_policy"] = verification_surface_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29308,6 +29358,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--verification-environment-policy", choices=("current", "resolved"),
                         default="current")
+    parser.add_argument("--verification-surface-policy", choices=("current", "discovery"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29383,6 +29435,9 @@ def main():
         verification_environment_policy = getattr(args, "verification_environment_policy", "current")
         environment_kwargs = ({"verification_environment_policy": verification_environment_policy}
                               if verification_environment_policy != "current" else {})
+        verification_surface_policy = getattr(args, "verification_surface_policy", "current")
+        surface_kwargs = ({"verification_surface_policy": verification_surface_policy}
+                          if verification_surface_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
@@ -29390,6 +29445,7 @@ def main():
                 user_text, memory, interactive=interactive,
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
                 **environment_kwargs,
+                **surface_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29399,6 +29455,7 @@ def main():
                 experiment_case_id=getattr(args, "experiment_case_id", None),
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
                 **environment_kwargs,
+                **surface_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

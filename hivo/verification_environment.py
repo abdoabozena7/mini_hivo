@@ -102,6 +102,11 @@ def classify_browser_result(result, *, transaction=None, workspace=None):
         return VERIFIER_UNAVAILABLE
     if result.get("passed") is True:
         return "PASS"
+    if result.get("verification_surface_unavailable"):
+        if any(item.get("executed") and item.get("passed") is False
+               for item in result.get("interaction_checks", []) if isinstance(item, dict)):
+            return TEST_FAILED
+        return VERIFIER_UNAVAILABLE
     failures = result.get("failures") or []
     codes = {str(item.get("code")) for item in failures if isinstance(item, dict)}
     checks = result.get("interaction_checks") or []

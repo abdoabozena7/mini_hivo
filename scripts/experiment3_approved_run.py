@@ -25,6 +25,8 @@ def main():
         "current", "evidence_directed"), default="current")
     parser.add_argument("--verification-environment-policy", choices=(
         "current", "resolved"), default="current")
+    parser.add_argument("--verification-surface-policy", choices=(
+        "current", "discovery"), default="current")
     parser.add_argument("--mission-advice-policy", choices=(
         "strict", "contract_fallback"), default="contract_fallback")
     args = parser.parse_args()
@@ -61,6 +63,7 @@ def main():
         mutation_grounding_policy=args.mutation_grounding_policy,
         target_locator_policy=args.target_locator_policy,
         verification_environment_policy=args.verification_environment_policy,
+        verification_surface_policy=args.verification_surface_policy,
         plan_approval_selector=select_only_approved_plan,
     )
     print("FINAL_STATUS:", result.get("status"), flush=True)
