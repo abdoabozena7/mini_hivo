@@ -316,6 +316,36 @@ target; child verification still determines whether that edit is correct.
 python scripts/experiment3_report.py D:\cases\rkey\current D:\cases\rkey\progress_constrained --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
 ```
 
+### Experiment 4: Evidence-grounded mutation
+
+`--mutation-grounding-policy current` keeps the original mutation behavior.
+`--mutation-grounding-policy evidence_grounded` requires an initial Builder
+mutation to reference source observed through `read_file` or `read_file_range`
+at the current file hash. Exact replacement text must occur in the observed
+source with the requested match count; line edits must stay inside an observed
+span. Overwriting an existing file requires a full-file read. Creating a file
+requires a read that observed its absence. The contract and existing mutation
+guards remain authoritative.
+
+An unanchored replace returns `REPLACE_NOT_FOUND` or
+`MUTATION_ANCHOR_REQUIRED` before any write. The Worker may perform one
+`read_file_range` refresh of at most 80 lines on that file and retry once.
+A second unanchored attempt returns `MUTATION_TARGET_UNRESOLVED` to the
+controller. The default remains `current`. This policy does not change the
+Worker prompt, model, budget, progress constraint, verifier, recovery, or
+integration.
+
+Compare two fresh copies of the same project with
+`--worker-progress-policy progress_constrained` and
+`--mission-advice-policy contract_fallback` in both runs, varying only
+`--mutation-grounding-policy`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\current --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --worker-progress-policy progress_constrained --mutation-grounding-policy current
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\evidence_grounded --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --worker-progress-policy progress_constrained --mutation-grounding-policy evidence_grounded
+python scripts/experiment4_report.py D:\cases\rkey\current D:\cases\rkey\evidence_grounded --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a

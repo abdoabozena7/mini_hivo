@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--approved-path", action="append", required=True)
     parser.add_argument("--worker-progress-policy", choices=(
         "current", "progress_constrained"), required=True)
+    parser.add_argument("--mutation-grounding-policy", choices=(
+        "current", "evidence_grounded"), default="current")
     parser.add_argument("--mission-advice-policy", choices=(
         "strict", "contract_fallback"), default="contract_fallback")
     args = parser.parse_args()
@@ -52,6 +54,7 @@ def main():
         planning_route=args.route, experiment_case_id=args.case_id,
         mission_advice_policy=args.mission_advice_policy,
         worker_progress_policy=args.worker_progress_policy,
+        mutation_grounding_policy=args.mutation_grounding_policy,
         plan_approval_selector=select_only_approved_plan,
     )
     print("FINAL_STATUS:", result.get("status"), flush=True)
