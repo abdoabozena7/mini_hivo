@@ -32,6 +32,7 @@ from hivo.host_preflight import failed_host_preflight_result, format_host_prefli
 from hivo.http_client import HttpTransportError, get_json as http_get_json, post_json as http_post_json
 from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
+from hivo.worker_progress import WorkerProgress
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -168,6 +169,7 @@ STRATEGY_SEARCH_UNAVAILABLE = "STRATEGY_SEARCH_UNAVAILABLE"
 # The failure router must inspect the resulting evidence before choosing a
 # decomposition, strategy, dependency, verifier, or capability path.
 EXECUTION_BUDGET_EXHAUSTED = "EXECUTION_BUDGET_EXHAUSTED"
+WORKER_NO_MUTATION_PROGRESS = "WORKER_NO_MUTATION_PROGRESS"
 VERIFICATION_TARGET_UNRESOLVED = "VERIFICATION_TARGET_UNRESOLVED"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
@@ -3614,6 +3616,8 @@ def new_metrics(mode):
         "mission_advice_rejected": 0,
         "mission_advice_fallbacks": 0,
         "mission_advice_fallback_failures": 0,
+        "worker_progress_runs": [],
+        "first_legal_mutation": None,
         "mission_non_authoritative_fields_rejected": 0,
         "mission_semantic_conflicts": 0,
         "semantic_path_candidates": 0,
@@ -13747,6 +13751,21 @@ def verification_failure_digest(result, limit=1800):
     return compact_text("\n".join(lines), limit)
 
 
+def _worker_mutation_file_fingerprint(path):
+    """Observe whether an authorized mutation tool actually changed its target."""
+    target = safe_path(path)
+    if target is None:
+        return None
+    try:
+        if not target.exists():
+            return "MISSING"
+        if not target.is_file():
+            return None
+        return hashlib.sha256(target.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id="ROOT", extra_context="",
                        tool_policy=None, max_steps=None, worker_callback=None,
                        worker_context=None, execution_contract=None,
@@ -14237,6 +14256,24 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     step_budget = max_steps if max_steps is not None else {
         "Falsifier": MAX_FALSIFIER_STEPS,
     }.get(role, MAX_TOOL_STEPS)
+    progress_policy = RUN.get("worker_progress_policy", "current")
+    progress = None
+    progress_terminal = False
+    if (role == "Builder" and isinstance(execution_contract, dict)
+            and recovery_state is None
+            and execution_contract.get("allowed_mutation_paths")):
+        progress = WorkerProgress(
+            task_id=str(task_id),
+            approved_targets=tuple(
+                str(path).replace("\\", "/").casefold()
+                for path in execution_contract.get("allowed_mutation_paths", [])
+            ),
+            approved_inspection_paths=tuple(
+                str(path).replace("\\", "/").casefold()
+                for path in execution_contract.get("allowed_inspection_paths", [])
+            ),
+            policy=progress_policy,
+        )
     for _step in range(max(1, int(step_budget))):
         context_reanchor_after_tool = False
         if structured_response_schema is not None:
@@ -14312,6 +14349,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 summary = (
                     "CONTEXT_SUFFICIENCY_REQUIRED: Worker must submit the structured "
                     "context_sufficiency_check before stopping or mutating"
+                )
+                break
+            if (progress is not None and progress_policy == "progress_constrained"
+                    and progress.first_legal_mutation is None):
+                progress_terminal = True
+                status = "failed"
+                summary = (
+                    f"{WORKER_NO_MUTATION_PROGRESS}: Worker stopped without "
+                    "a legal mutation after the context gate passed"
                 )
                 break
             content = assistant_message.get("content", "") or ""
@@ -14470,6 +14516,19 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 result = f"error: malformed tool call: {exc}"
                 evidence.append({"tool": "malformed", "target": "-", "result": result})
                 messages.append({"role": "tool", "tool_name": "malformed", "content": result})
+                if progress is not None:
+                    progress.observe(
+                        name="malformed", target="-", result=result, successful=False,
+                        gate_ready=bool(context_gate is None or context_gate.mutation_allowed),
+                        model_round=_step + 1,
+                        remaining_budget=max(0, int(step_budget) - (_step + 1)),
+                    )
+                    if progress.should_stop():
+                        progress_terminal = True
+                        status = "failed"
+                        summary = f"{WORKER_NO_MUTATION_PROGRESS}: repeated malformed tool calls"
+                        stop = True
+                        break
                 continue
             if isinstance(args, str):
                 try:
@@ -14481,6 +14540,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 args = {}
             target = args.get("path") or args.get("command") or "-"
             RUN["tool_calls"] += 1
+            tool_was_offered = name in offered_names
+            mutation_fingerprint_before = (
+                _worker_mutation_file_fingerprint(args.get("path"))
+                if progress is not None and name in MUTATION_TOOLS else None
+            )
             context_mutation_issue = _context_gate_mutation_guard(
                 name, role=role, target=target,
             )
@@ -14521,7 +14585,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                             result = run_tool(name, args, role=role)
                     else:
                         result = run_tool(name, args, role=role)
-            context_tool_call = name == _CONTEXT_COMPLETION_TOOL and context_gate is not None
+            context_tool_call = (
+                name == _CONTEXT_COMPLETION_TOOL and context_gate is not None
+                and (progress_policy != "progress_constrained" or name in offered_names)
+            )
             context_tool_result = None
             if context_tool_call:
                 try:
@@ -14547,6 +14614,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     impact_validation = impact_authorization
                 unlocked_offered_tools = list(unlocked_offered_tools)
                 offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
+                if progress is not None and progress_policy == "progress_constrained" and context_gate.mutation_allowed:
+                    offered_tools = [
+                        item for item in offered_tools
+                        if item.get("function", {}).get("name") != _CONTEXT_COMPLETION_TOOL
+                    ]
                 offered_names = {item["function"]["name"] for item in offered_tools}
             _update_verification_cycle(verification_cycle, name, args, result)
             mutation_record = None if (context_mutation_blocked or impact_mutation_blocked) else mutation_failure_record(name, target, result, role=role)
@@ -14864,7 +14936,63 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             messages.append({"role": "tool", "tool_name": name, "content": str(result)})
             event(f"[TOOL] {name} {compact_text(target, 80)}", role=role, task=task_id, tool=name)
 
+            if progress is not None:
+                successful_tool = (
+                    tool_was_offered
+                    and not tool_result_failed(result)
+                    and not result_is_tool_rejection(result)
+                    and not context_mutation_blocked
+                    and not impact_mutation_blocked
+                )
+                mutation_fingerprint_after = (
+                    _worker_mutation_file_fingerprint(args.get("path"))
+                    if name in MUTATION_TOOLS else None
+                )
+                changed_file = (
+                    name in MUTATION_TOOLS and successful_tool
+                    and mutation_fingerprint_before is not None
+                    and mutation_fingerprint_after is not None
+                    and mutation_fingerprint_before != mutation_fingerprint_after
+                )
+                progress_event = progress.observe(
+                    name=name, target=target, result=result,
+                    successful=successful_tool,
+                    gate_ready=bool(context_gate is None or context_gate.mutation_allowed),
+                    changed_file=changed_file, model_round=_step + 1,
+                    remaining_budget=max(0, int(step_budget) - (_step + 1)),
+                )
+                if (progress_event["novelty"] == "legal_mutation"
+                        and progress.first_legal_mutation["tool_step"] == progress.tool_steps):
+                    mutation_fact = dict(progress.first_legal_mutation)
+                    RUN["first_legal_mutation"] = mutation_fact
+                    _experiment_event("FIRST_LEGAL_MUTATION", task_id=task_id, **mutation_fact)
+                    record_run_event("first_legal_mutation", task_id=task_id, **mutation_fact)
+                if progress.should_stop():
+                    progress_terminal = True
+                    status = "failed"
+                    summary = (
+                        f"{WORKER_NO_MUTATION_PROGRESS}: no new contract-relevant evidence "
+                        f"for {progress.no_progress_streak} consecutive tool steps after "
+                        f"the context gate became sufficient; approved targets: "
+                        + ", ".join(progress.approved_targets)
+                    )
+                    record_run_event(
+                        "worker_no_mutation_progress", task_id=task_id,
+                        tool_steps_used=progress.tool_steps,
+                        no_progress_streak=progress.no_progress_streak,
+                        approved_targets=list(progress.approved_targets),
+                    )
+                    stop = True
+                    break
+
             if context_tool_call:
+                if (progress is not None and progress_policy == "progress_constrained"
+                        and context_gate.mutation_allowed):
+                    # Keep the successful gate result in the current transcript
+                    # and require a fresh Worker response with the completed
+                    # gate tool removed from the offered schema.
+                    context_reanchor_after_tool = True
+                    break
                 context_feedback = _context_evidence_feedback(context_tool_result)
                 messages = [{
                     "role": "system", "content": system_prompt,
@@ -15193,6 +15321,20 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     )
     if context_gate is not None:
         ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+    progress_summary = progress.summary() if progress is not None else None
+    if progress_summary is not None:
+        RUN.setdefault("worker_progress_runs", []).append(progress_summary)
+        record_run_event(
+            "worker_progress_summary", task_id=task_id,
+            policy=progress_policy,
+            tool_steps=progress_summary["tool_steps"],
+            pre_mutation_read_steps=progress_summary["pre_mutation_read_steps"],
+            unique_evidence=progress_summary["unique_evidence"],
+            repeated_inspections=progress_summary["repeated_inspections"],
+            repeated_gate_checks=progress_summary["repeated_gate_checks"],
+            invalid_rejected_tool_calls=progress_summary["invalid_rejected_tool_calls"],
+            first_legal_mutation=progress_summary["first_legal_mutation"],
+        )
     record_run_event("agent_finished", role=role, task_id=task_id, status=status,
                      summary=compact_text(summary, MAX_NODE_SUMMARY_CHARS), evidence_count=len(evidence),
                      context_status=(context_sufficiency_snapshot or {}).get("context_status"),
@@ -15209,6 +15351,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "structured_response": structured_response,
         "structured_response_error": structured_response_error,
         "structured_response_active": structured_response_schema is not None,
+        "worker_progress": progress_summary,
         "context_sufficiency": context_sufficiency_snapshot,
         "mutation_authorized": bool((context_sufficiency_snapshot or {}).get("mutation_allowed")) and impact_authorized,
         "impact_contract": impact_contract_snapshot,
@@ -15222,6 +15365,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "mutation_failures": mutation_failure_records,
         "failure_type": (
             recovery_terminal_state if recovery_terminal_state else
+            WORKER_NO_MUTATION_PROGRESS if progress_terminal else
             (impact_validation or {}).get("status", stage10_impact.IMPACT_REQUIRED)
             if impact_required and status == "failed" and not impact_authorized and not provider_error and not structured_response_error and (context_sufficiency_snapshot or {}).get("mutation_allowed", True)
             else
@@ -19104,6 +19248,15 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": builder["summary"],
                 "memory": memory, "builder": builder}
+    if builder.get("failure_type") == WORKER_NO_MUTATION_PROGRESS:
+        rollback_transaction()
+        return {
+            "status": "failed", "failure_type": WORKER_NO_MUTATION_PROGRESS,
+            "summary": builder.get("summary", WORKER_NO_MUTATION_PROGRESS),
+            "memory": memory, "builder": builder,
+            "worker_progress": builder.get("worker_progress"),
+            "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
+        }
     if _context_sufficiency_failed(builder):
         rollback_transaction()
         return {"status": "failed", "failure_type": CONTEXT_INSUFFICIENT_FAILURE,
@@ -23170,6 +23323,8 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
                 if result.get("orchestration_failure") == "MISSION_COMPILATION_FAILURE"
                 and not any(item.get("kind") == "FIRST_WORKER_STARTED"
                             for item in RUN.get("experiment_events", []))
+                else "WORKER_PROGRESS"
+                if result.get("failure_type") == WORKER_NO_MUTATION_PROGRESS
                 else "CHILD_VERIFICATION"
             )
             _experiment_blocked(blocker_stage, result)
@@ -26233,11 +26388,14 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           fresh_task_brain=None, reentry_context=None,
                           current_repository_evidence=None,
                           planning_route="current_recursive", early_split_structured_call=None,
-                          experiment_case_id=None, mission_advice_policy="strict"):
+                          experiment_case_id=None, mission_advice_policy="strict",
+                          worker_progress_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
         raise ValueError("unknown mission advice policy")
+    if worker_progress_policy not in {"current", "progress_constrained"}:
+        raise ValueError("unknown Worker progress policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26271,6 +26429,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         RUN["mode"] = "recursive"
     RUN["planning_route"] = planning_route
     RUN["mission_advice_policy"] = mission_advice_policy
+    RUN["worker_progress_policy"] = worker_progress_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -28832,6 +28991,8 @@ def parse_args():
     parser.add_argument("--experiment-case-id")
     parser.add_argument("--mission-advice-policy", choices=("strict", "contract_fallback"),
                         default="strict")
+    parser.add_argument("--worker-progress-policy", choices=("current", "progress_constrained"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -28895,11 +29056,15 @@ def main():
         mission_policy = getattr(args, "mission_advice_policy", "strict")
         mission_kwargs = ({"mission_advice_policy": mission_policy}
                           if mission_policy != "strict" else {})
+        worker_progress_policy = getattr(args, "worker_progress_policy", "current")
+        progress_kwargs = ({"worker_progress_policy": worker_progress_policy}
+                           if worker_progress_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
             result, memory = run_recursive_request(
-                user_text, memory, interactive=interactive, **mission_kwargs,
+                user_text, memory, interactive=interactive,
+                **mission_kwargs, **progress_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -28907,7 +29072,7 @@ def main():
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive, planning_route=route,
                 experiment_case_id=getattr(args, "experiment_case_id", None),
-                **mission_kwargs,
+                **mission_kwargs, **progress_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

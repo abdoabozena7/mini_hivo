@@ -290,6 +290,32 @@ python scripts/experiment2_report.py D:\cases\rkey\strict D:\cases\rkey\fallback
 The report requires the same approved plan hash, planning route, model, code,
 and starting project snapshot in both runs.
 
+### Experiment 3: Progress-constrained Worker
+
+`--worker-progress-policy current` preserves the existing Worker controller.
+`--worker-progress-policy progress_constrained` records contract-relevant evidence
+and actual authorized file changes. After the context gate succeeds, the
+controller removes the completed `context_sufficiency_check` from the offered
+tools. Three consecutive tool calls without new relevant evidence or a legal
+file mutation stop the initial Builder attempt with
+`WORKER_NO_MUTATION_PROGRESS` and a `WORKER_PROGRESS` blocker. The existing
+28-step budget, Worker prompt, model, approval, contract authority, scope
+guards, verification, recovery, and integration remain unchanged. The default
+remains `current`.
+
+The paired run must use the same task, project snapshot, route, approved plan,
+and Mission advice policy in separate workspaces. The run records first legal
+mutation, remaining budget, reads before mutation, unique evidence, repeated
+inspections and gate checks, rejected calls, and the exact first blocker.
+"Legal mutation" here means an authorized mutation tool changed bytes at its
+target; child verification still determines whether that edit is correct.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\current --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --worker-progress-policy current
+.\.venv\Scripts\python.exe scripts/experiment3_approved_run.py --workspace D:\cases\rkey\progress_constrained --prompt-file D:\cases\rkey\prompt.txt --route decomposition_first_recursive --case-id rkey_01 --approved-hash <approved-plan-hash> --approved-path index.html --worker-progress-policy progress_constrained
+python scripts/experiment3_report.py D:\cases\rkey\current D:\cases\rkey\progress_constrained --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a
