@@ -225,6 +225,42 @@ explicitly supplies approved-plan state; it does not silently receive the
 recursive contract graph. Stage 4A adds no model role, no budget increase, no
 parallel scheduler, and no change to mutation recovery.
 
+### Experiment 1: Decomposition-first planning
+
+The recursive CLI has two explicit routes for paired existing-project runs:
+`--mode current_recursive` keeps the existing global Stage 3 order, while
+`--mode decomposition_first_recursive` splits the goal into 2–4 responsibility
+statements before impact reasoning. The early split carries only existing
+requirement IDs and responsibility text; it cannot name a file or grant mutation
+scope. Each child receives a projected requirement ledger and Task Brain, then
+uses the existing ImpactPlanner and ImpactChallenger logic. The local impact
+claims are combined under the unchanged Stage 3 bounds and gate. One final
+plan still needs the same explicit user approval before the existing contract
+compiler or Worker can run. Worker, verification, recovery, model, depth, task
+count, and integration behavior are shared by both routes.
+
+Run each case on two isolated copies of the same starting project snapshot,
+using the same prompt and case ID. Review and approve each final plan through
+the normal interactive terminal UI. A `--prompt-file` run is noninteractive and
+will stop at `PLAN_APPROVAL_REQUIRED`, so it can measure planning only.
+
+```powershell
+python mini.py --mode current_recursive --workspace D:\cases\pause\baseline --experiment-case-id pause-01
+python mini.py --mode decomposition_first_recursive --workspace D:\cases\pause\experiment --experiment-case-id pause-01
+python scripts/experiment1_report.py D:\cases\pause\baseline D:\cases\pause\experiment --output D:\cases\pause\report.json
+```
+
+The report requires paired runs with the same model, HIVO source hash, and
+subject inventory fingerprint. It counts first Worker entry, the exact first
+blocking stage, verified children, root verification, model calls, elapsed time
+excluding the approval wait, and safety gate activity. An approval wait or user
+rejection is recorded separately from an orchestration blocker. The paired
+deterministic fixture in `tests/test_decomposition_first_experiment.py` checks
+both routes' handoff and approval boundary; it does not establish a live-model
+success rate.
+
+### Existing execution lifecycle
+
 Outside the approved Stage 4A contract handoff, each execution receives a
 fresh, bounded Node Packet containing the compact root contract, current node
 contract, parent summary, verified dependency summaries, relevant verified

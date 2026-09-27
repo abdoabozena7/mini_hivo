@@ -50,6 +50,7 @@ from hivo import project_builder as core6_project_builder
 from hivo import change_impact as core6_change_impact
 from hivo import core_orchestrator as core_integration
 from hivo import impact_planning as stage3
+from hivo import decomposition_first as early_planning
 from hivo import execution_contracts as stage4
 from hivo import context_sufficiency as stage7_context
 from hivo import semantic_evidence as stage7_semantic
@@ -7897,7 +7898,9 @@ def _create_impact_map_from_decision_frame(
 def create_impact_map(task_brain, contract, repository_evidence, structured_call=None,
                       verified_planning_context=None):
     """Invoke one bounded ImpactPlanner call and deterministically gate its map."""
-    if RUN.get("impact_planner_calls", 0) >= 1:
+    planner_start = (RUN.get("experiment_local_planner_start", 0)
+                     if RUN.get("experiment_local_child_id") else 0)
+    if RUN.get("impact_planner_calls", 0) - planner_start >= 1:
         raise ImpactPlanningError("only one top-level ImpactPlanner invocation is allowed")
     requirements = _active_stage3_requirements(contract)
     obligation_ledger = stage3.build_requirement_obligation_ledger(requirements)
@@ -8153,7 +8156,9 @@ COMPLETE BOUNDED FALSIFICATION PACKET:
 def challenge_impact_map(impact_map, task_brain, contract, repository_evidence,
                          structured_call=None, verified_planning_context=None):
     """Run exactly one normal weak-model challenge round plus deterministic checks."""
-    if RUN.get("impact_challenger_calls", 0) >= MAX_IMPACT_CHALLENGE_ROUNDS:
+    challenger_start = (RUN.get("experiment_local_challenger_start", 0)
+                        if RUN.get("experiment_local_child_id") else 0)
+    if RUN.get("impact_challenger_calls", 0) - challenger_start >= MAX_IMPACT_CHALLENGE_ROUNDS:
         raise ImpactPlanningError("only one top-level ImpactChallenger round is allowed")
     requirements = _active_stage3_requirements(contract)
     registry = RUN.get("canonical_surface_registry") or stage3.build_canonical_surface_registry(
@@ -8861,6 +8866,293 @@ def _stage3_workspace_fingerprint():
     return stage2.inventory_repository(WORKSPACE).get("fingerprint")
 
 
+def _experiment_event(kind, **payload):
+    if RUN.get("planning_route") not in {"current_recursive", "decomposition_first_recursive"}:
+        return
+    event_data = {
+        "kind": kind,
+        "elapsed_seconds": round(time.time() - RUN_STARTED, 3),
+        "model_calls": RUN.get("model_calls", 0),
+        **payload,
+    }
+    RUN.setdefault("experiment_events", []).append(event_data)
+    record_run_event(kind, planning_route=RUN["planning_route"],
+                     experiment_case_id=RUN.get("experiment_case_id"),
+                     elapsed_seconds=event_data["elapsed_seconds"],
+                     model_calls=event_data["model_calls"], **payload)
+
+
+def _experiment_blocked(stage, result):
+    if not isinstance(result, dict):
+        result = {"status": "blocked", "summary": str(result)}
+    reason = (result.get("terminal_state") or result.get("orchestration_failure")
+              or result.get("failure_type") or result.get("status") or "UNKNOWN")
+    if reason in {PLAN_APPROVAL_REQUIRED, PLAN_REJECTED}:
+        return result
+    detail = compact_text(result.get("summary") or result.get("planning_packet_status")
+                          or reason, 500)
+    RUN.setdefault("first_blocker", {"stage": stage, "reason": reason,
+                                      "detail": detail})
+    _experiment_event("BLOCKED", stage=stage, reason=reason, detail=detail)
+    return result
+
+
+def _early_split_schema():
+    child = {"type": "object", "properties": {
+        "responsibility": {"type": "string"},
+        "requirement_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    }, "required": ["responsibility", "requirement_ids"], "additionalProperties": False}
+    return {"type": "object", "properties": {
+        "children": {"type": "array", "items": child, "minItems": 2, "maxItems": MAX_CHILDREN},
+    }, "required": ["children"], "additionalProperties": False}
+
+
+def _split_before_impact(contract, structured_call=None):
+    requirements = _active_stage3_requirements(contract)
+    root_goal = _authoritative_stage3_task_goal(contract, RUN.get("task_brain"))
+    prompt = ("Divide this coding goal into 2-4 small sequential RESPONSIBILITIES. "
+              "Do not inspect or name files, symbols, tools, code, solutions, or mutation scope. "
+              "Assign every existing requirement ID to at least one responsibility; "
+              "sharing an ID is allowed when responsibilities overlap. Return only the schema.\n"
+              f"GOAL: {compact_text(root_goal, 1000)}\n"
+              f"REQUIREMENTS: {json.dumps(requirements, ensure_ascii=False)}")
+    def valid(value):
+        try:
+            early_planning.validate_split(value, requirements, MAX_CHILDREN)
+            return True
+        except early_planning.EarlySplitError:
+            return False
+    if structured_call is None:
+        candidate = structured_model_call(
+            prompt, valid, "early-responsibility-split", _early_split_schema(),
+        )
+    else:
+        candidate = structured_call(prompt, valid, "early-responsibility-split", _early_split_schema())
+    return early_planning.validate_split(candidate, requirements, MAX_CHILDREN)
+
+
+def prepare_decomposition_first_stage3_context(
+    understanding, contract, interactive=True, terminal_available=None,
+    planner_structured_call=None, challenger_structured_call=None,
+    reviser_structured_call=None,
+    approval_selector=None, approval_answer_reader=None,
+    early_split_structured_call=None, allow_revision=True,
+):
+    """Run local Stage 3 reasoning, then use the existing approval and contract gates."""
+    if understanding.get("project_mode") != EXISTING_PROJECT:
+        return prepare_stage3_context(
+            understanding, contract, interactive=interactive,
+            terminal_available=terminal_available,
+            planner_structured_call=planner_structured_call,
+            challenger_structured_call=challenger_structured_call,
+            approval_selector=approval_selector,
+            approval_answer_reader=approval_answer_reader,
+        )
+    RUN["impact_planning_required"] = True
+    fingerprint_before = _stage3_workspace_fingerprint()
+    root_brain = copy.deepcopy(understanding.get("task_brain") or RUN.get("task_brain") or {})
+    evidence = list((understanding.get("reconnaissance") or {}).get("evidence", [])
+                    or RUN.get("repository_evidence", []) or [])
+    RUN["task_brain"] = copy.deepcopy(root_brain)
+    _experiment_event("EARLY_SPLIT_STARTED")
+    try:
+        children = _split_before_impact(contract, early_split_structured_call)
+    except (early_planning.EarlySplitError, StructuredOutputError, KeyError, ValueError) as exc:
+        return _experiment_blocked("EARLY_SPLIT", {
+            "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+            "summary": str(exc), "project_mode": EXISTING_PROJECT,
+        })
+    RUN["early_responsibilities"] = copy.deepcopy(children)
+    _experiment_event("EARLY_SPLIT_READY", child_ids=[item["child_id"] for item in children])
+    local_maps, local_challenges = [], []
+    for child in children:
+        child_id = child["child_id"]
+        _experiment_event("CHILD_PLAN_STARTED", child_id=child_id)
+        RUN["experiment_local_child_id"] = child_id
+        RUN["experiment_local_planner_start"] = RUN.get("impact_planner_calls", 0)
+        RUN["experiment_local_challenger_start"] = RUN.get("impact_challenger_calls", 0)
+        local_contract = early_planning.local_contract(contract, child)
+        local_brain = early_planning.local_task_brain(root_brain, child)
+        try:
+            RUN["experiment_current_stage"] = "CHILD_IMPACT_PLANNER"
+            impact_map = create_impact_map(
+                local_brain, local_contract, evidence, structured_call=planner_structured_call,
+            )
+            RUN["experiment_current_stage"] = "CHILD_IMPACT_CHALLENGER"
+            challenges = challenge_impact_map(
+                impact_map, local_brain, local_contract, evidence,
+                structured_call=challenger_structured_call,
+            )
+        except ImpactPlanningError as exc:
+            RUN.pop("experiment_local_child_id", None)
+            RUN.pop("experiment_local_planner_start", None)
+            RUN.pop("experiment_local_challenger_start", None)
+            return _experiment_blocked(RUN.get("experiment_current_stage", "CHILD_PLAN"), {
+                "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+                "summary": str(exc), "child_id": child_id,
+                "planning_packet_status": getattr(exc, "status", None),
+            })
+        local_maps.append(impact_map)
+        local_challenges.append(challenges)
+        _experiment_event("CHILD_PLAN_READY", child_id=child_id,
+                          impact_count=len(impact_map.get("impacts", [])))
+        RUN.pop("experiment_local_child_id", None)
+        RUN.pop("experiment_local_planner_start", None)
+        RUN.pop("experiment_local_challenger_start", None)
+    _experiment_event("SCOPE_AGGREGATION_STARTED")
+    try:
+        impact_map, id_maps = early_planning.combine_impact_maps(
+            local_maps, _authoritative_stage3_task_goal(contract, root_brain),
+            stage3.MAX_IMPACT_ENTRIES,
+        )
+        impact_map, id_maps = early_planning.compact_attached_reuse(impact_map, id_maps)
+        registry = stage3.build_canonical_surface_registry(root_brain, evidence)
+        known_surfaces = {item.get("surface_id") for item in registry.get("surfaces", [])}
+        known_proposals = {item.get("proposal_id")
+                           for item in impact_map.get("new_surface_proposals", [])}
+        if any(item.get("surface_id") not in known_surfaces
+               and item.get("surface_id") not in known_proposals
+               and not set(item.get("new_surface_proposal_ids", [])).intersection(known_proposals)
+               for item in impact_map["impacts"]):
+            raise early_planning.EarlySplitError("local plans use inconsistent surface identities")
+        requirements = _active_stage3_requirements(contract)
+        RUN["task_brain"] = copy.deepcopy(root_brain)
+        RUN["canonical_surface_registry"] = registry
+        RUN["impact_seeds"] = stage3.build_impact_seeds(root_brain, requirements, evidence, registry)
+        map_gate = stage3.validate_impact_map(
+            impact_map, requirements, evidence, EXISTING_PROJECT,
+            surface_registry=registry,
+        )
+        if not map_gate.get("valid"):
+            raise early_planning.EarlySplitError("; ".join(map_gate.get("errors", [])))
+        raw_challenges = []
+        for validation, id_map in zip(local_challenges, id_maps):
+            for challenge in validation.get("validated", []):
+                if challenge.get("source") != "MODEL":
+                    continue
+                item = copy.deepcopy(challenge)
+                item["impact_ids"] = [id_map[value] for value in item.get("impact_ids", [])
+                                      if value in id_map]
+                raw_challenges.append(item)
+        deterministic = stage3.deterministic_challenges(
+            impact_map, requirements, evidence, surface_registry=registry,
+        )
+        unique_challenges = {
+            (item.get("challenge_type"), tuple(sorted(item.get("impact_ids", []))),
+             tuple(sorted(item.get("requirement_ids", []))),
+             tuple(sorted(item.get("repository_evidence_ids", []))))
+            for item in raw_challenges + deterministic
+        }
+        if len(unique_challenges) > stage3.MAX_CHALLENGES:
+            raise early_planning.EarlySplitError("combined challenges exceed existing Stage 3 bound")
+        all_challenges = stage3.merge_challenges(raw_challenges, deterministic)
+        validation = stage3.validate_challenges(
+            all_challenges, impact_map, requirements, evidence, surface_registry=registry,
+        )
+        RUN["impact_map"] = copy.deepcopy(impact_map)
+        RUN["canonical_impact_map"] = copy.deepcopy(impact_map)
+        RUN["impact_challenge_validation"] = copy.deepcopy(validation)
+        plan, gate = reconcile_minimal_change_plan(
+            impact_map, validation, contract, evidence,
+        )
+        if not gate.get("valid") and gate.get("errors") == ["plan serialized-size bound exceeded"]:
+            canonical = stage3.canonicalize_final_plan(
+                plan,
+                impact_map=RUN.get("reconciled_impact_map") or impact_map,
+                requirements=requirements,
+                evidence=evidence,
+                surface_registry=registry,
+                source_impact_map=impact_map,
+            )
+            canonical_gate = stage3.validate_change_plan(
+                canonical, requirements, evidence, EXISTING_PROJECT,
+                surface_registry=registry,
+                obligation_ledger=RUN.get("requirement_obligation_ledger"),
+                authoritative_task_goal=_authoritative_stage3_task_goal(contract, root_brain),
+            )
+            if canonical_gate.get("valid"):
+                plan, gate = canonical, canonical_gate
+                RUN["change_plan_gate_failures"] = max(
+                    0, RUN.get("change_plan_gate_failures", 0) - 1,
+                )
+                RUN["minimal_effective_change_plan"] = plan
+                RUN["change_plan_gate"] = gate
+                RUN["plan_gate"] = gate
+                _experiment_event("SCOPE_AGGREGATION_CANONICALIZED",
+                                  plan_id=plan.get("plan_id"))
+    except (early_planning.EarlySplitError, ImpactPlanningError, KeyError, ValueError) as exc:
+        return _experiment_blocked("SCOPE_AGGREGATION", {
+            "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+            "summary": str(exc), "project_mode": EXISTING_PROJECT,
+        })
+    if not gate.get("valid"):
+        return _experiment_blocked("SCOPE_AGGREGATION_GATE", {
+            "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
+            "summary": "; ".join(gate.get("errors", [])), "plan": plan,
+            "plan_gate": gate, "project_mode": EXISTING_PROJECT,
+        })
+    RUN["early_child_plan_bindings"] = {
+        child["child_id"]: {
+            "requirement_ids": list(child["requirement_ids"]),
+            "impact_ids": sorted(set(id_maps[index].values())),
+            "plan_node_ids": [
+                node.get("node_id") for node in plan.get("approved_change_nodes", [])
+                if set(node.get("impact_ids", [])) & set(id_maps[index].values())
+            ],
+        }
+        for index, child in enumerate(children)
+    }
+    _experiment_event("SCOPE_AGGREGATION_READY", plan_id=plan.get("plan_id"))
+    _experiment_event("APPROVAL_REQUIRED", plan_id=plan.get("plan_id"))
+    approval = request_plan_approval(
+        plan, interactive=interactive, terminal_available=terminal_available,
+        selector=approval_selector, answer_reader=approval_answer_reader,
+        allow_revision=allow_revision,
+    )
+    if approval.get("status") == "revision_requested" and allow_revision:
+        contract, _decision = apply_plan_user_revision(
+            contract, approval.get("revision_text", ""),
+        )
+        return prepare_decomposition_first_stage3_context(
+            understanding, contract, interactive=interactive,
+            terminal_available=terminal_available,
+            planner_structured_call=planner_structured_call,
+            challenger_structured_call=challenger_structured_call,
+            approval_selector=approval_selector,
+            approval_answer_reader=approval_answer_reader,
+            early_split_structured_call=early_split_structured_call,
+            allow_revision=False,
+        )
+    fingerprint_after = _stage3_workspace_fingerprint()
+    RUN["stage3_workspace_fingerprint_before"] = fingerprint_before
+    RUN["stage3_workspace_fingerprint_after"] = fingerprint_after
+    RUN["stage3_read_only_before_approval"] = fingerprint_before == fingerprint_after
+    if approval.get("status") != "approved":
+        result = dict(approval)
+        result.update({"project_mode": EXISTING_PROJECT, "impact_map": impact_map,
+                       "plan": plan, "plan_gate": gate, "contract": contract,
+                       "read_only": fingerprint_before == fingerprint_after})
+        return _experiment_blocked("APPROVAL", result)
+    _experiment_event("APPROVED", plan_id=plan.get("plan_id"))
+    RUN["approved_change_plan"] = plan
+    RUN["plan_approval"] = approval.get("approval")
+    RUN["source_contract"] = copy.deepcopy(contract)
+    execution_contracts = compile_approved_plan_execution_contracts(
+        contract=contract, plan=plan, approval=RUN["plan_approval"],
+    )
+    if execution_contracts.get("status") != "ready":
+        return _experiment_blocked("CONTRACTS", execution_contracts)
+    return {
+        "status": "ready", "project_mode": EXISTING_PROJECT, "contract": contract,
+        "impact_map": impact_map, "plan": plan, "plan_gate": gate,
+        "approval": approval.get("approval"),
+        "approved_plan_snapshot": execution_contracts.get("snapshot"),
+        "execution_contracts": execution_contracts.get("contracts", []),
+        "plan_execution_graph": execution_contracts.get("graph"),
+        "read_only": fingerprint_before == fingerprint_after,
+    }
+
+
 def prepare_stage3_context(understanding, contract, interactive=True, terminal_available=None,
                            planner_structured_call=None, challenger_structured_call=None,
                            reviser_structured_call=None, approval_selector=None,
@@ -8875,6 +9167,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         RUN["impact_planning_required"] = False
         return {"status": "ready", "contract": contract, "project_mode": mode}
     RUN["impact_planning_required"] = True
+    _experiment_event("GLOBAL_STAGE3_STARTED")
     fingerprint_before = _stage3_workspace_fingerprint()
     task_brain = understanding.get("task_brain") or RUN.get("task_brain") or {}
     RUN["task_brain"] = copy.deepcopy(task_brain)
@@ -8883,38 +9176,43 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
         or RUN.get("repository_evidence", []) or []
     )
     try:
+        RUN["experiment_current_stage"] = "GLOBAL_IMPACT_PLANNER"
         impact_map = create_impact_map(
             task_brain, contract, repository_evidence,
             structured_call=planner_structured_call,
             verified_planning_context=verified_planning_context,
         )
+        RUN["experiment_current_stage"] = "GLOBAL_IMPACT_CHALLENGER"
         challenge_validation = challenge_impact_map(
             impact_map, task_brain, contract, repository_evidence,
             structured_call=challenger_structured_call,
             verified_planning_context=verified_planning_context,
         )
+        RUN["experiment_current_stage"] = "GLOBAL_PLAN_RECONCILIATION"
         plan, gate = reconcile_minimal_change_plan(
             impact_map, challenge_validation, contract, repository_evidence,
             verified_planning_context=verified_planning_context,
         )
     except ImpactPlanningError as exc:
-        return {
+        return _experiment_blocked(RUN.get("experiment_current_stage", "GLOBAL_STAGE3"), {
             "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
             "summary": str(exc), "project_mode": mode,
             "orchestration_failure": RUN.get("orchestration_failure"),
             "planning_packet_status": getattr(exc, "status", None)
             or RUN.get("planning_packet_status"),
-        }
+        })
     if not gate.get("valid"):
         fingerprint_after = _stage3_workspace_fingerprint()
         RUN["stage3_workspace_fingerprint_before"] = fingerprint_before
         RUN["stage3_workspace_fingerprint_after"] = fingerprint_after
-        return {
+        return _experiment_blocked("GLOBAL_PLAN_GATE", {
             "status": "plan_incomplete", "terminal_state": PLAN_INCOMPLETE,
             "summary": "; ".join(gate.get("errors", [])),
             "project_mode": mode, "impact_map": impact_map,
             "plan": plan, "plan_gate": gate,
-        }
+        })
+    _experiment_event("GLOBAL_STAGE3_READY", plan_id=plan.get("plan_id"))
+    _experiment_event("APPROVAL_REQUIRED", plan_id=plan.get("plan_id"))
     approval = request_plan_approval(
         plan, interactive=interactive, terminal_available=terminal_available,
         selector=approval_selector, answer_reader=approval_answer_reader,
@@ -8977,7 +9275,8 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             "plan": plan, "plan_gate": gate, "contract": contract,
             "read_only": fingerprint_before == fingerprint_after,
         })
-        return result
+        return _experiment_blocked("APPROVAL", result)
+    _experiment_event("APPROVED", plan_id=plan.get("plan_id"))
     RUN["approved_change_plan"] = plan
     RUN["plan_approval"] = approval.get("approval")
     RUN["source_contract"] = copy.deepcopy(contract)
@@ -8992,7 +9291,7 @@ def prepare_stage3_context(understanding, contract, interactive=True, terminal_a
             "plan_gate": gate, "approval": approval.get("approval"),
             "read_only": fingerprint_before == fingerprint_after,
         })
-        return result
+        return _experiment_blocked("CONTRACTS", result)
     return {
         "status": "ready", "project_mode": mode, "contract": contract,
         "impact_map": impact_map, "plan": plan, "plan_gate": gate,
@@ -13631,6 +13930,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "worker_calls": 1 if approval_bound_worker else 0,
                     "builder_calls": 0, "memory": memory, "model_calls": 0,
                 }
+            if not RUN.get("experiment_first_worker_started"):
+                RUN["experiment_first_worker_started"] = True
+                _experiment_event("FIRST_WORKER_STARTED", task_id=task_id)
             if context_gate is not None and not context_gate.mutation_allowed:
                 # Stage 6C's injected callback is a deterministic Worker seam,
                 # not a model conversation. Its exact validated Stage 4
@@ -13862,6 +14164,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     offered_names = {item["function"]["name"] for item in offered_tools}
     if role == "Builder":
         RUN["builder_calls"] = RUN.get("builder_calls", 0) + 1
+        if not RUN.get("experiment_first_worker_started"):
+            RUN["experiment_first_worker_started"] = True
+            _experiment_event("FIRST_WORKER_STARTED", task_id=task_id)
     event(f"[{role.upper()}] {task_id} executing", role=role, task=task_id, action="focused tool loop")
 
     step_budget = max_steps if max_steps is not None else {
@@ -22791,6 +23096,24 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             responsibility_type=execution_contract.get("responsibility_type"),
             status=result.get("status"),
         )
+        if execution_contract.get("worker_required") and result.get("status") == "done":
+            _experiment_event("CHILD_VERIFIED", child_id=contract_id)
+        elif execution_contract.get("worker_required") and result.get("status") != "done":
+            _experiment_blocked("CHILD_VERIFICATION", result)
+    for child_id, binding in (RUN.get("early_child_plan_bindings") or {}).items():
+        node_ids = set(binding.get("plan_node_ids", []))
+        matching = [
+            item for item in state.get("contracts", []) or []
+            if item.get("worker_required")
+            and node_ids.intersection(item.get("plan_node_ids", []) or [])
+        ]
+        if matching and all(
+            results.get(item.get("execution_contract_id"), {}).get("status") == "done"
+            for item in matching
+        ):
+            _experiment_event("EARLY_CHILD_VERIFIED", child_id=child_id,
+                              execution_contract_ids=[item.get("execution_contract_id")
+                                                      for item in matching])
     child_records = [
         {"task": TASKS.get(str(item.get("execution_contract_id")), {}),
          "result": results.get(str(item.get("execution_contract_id")), {"status": "pending"})}
@@ -23092,6 +23415,10 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
         "approval_bound": approval_bound,
     }
     RUN["execution_graph_status"] = root_result["status"]
+    if root_result.get("status") == "done":
+        _experiment_event("ROOT_VERIFIED")
+    else:
+        _experiment_blocked("PARENT_INTEGRATION", root_result)
     return root_result, memory
 
 
@@ -25831,7 +26158,11 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           plan_approval_selector=None, plan_approval_answer_reader=None,
                           terminal_available=None, verified_state_reentry=None,
                           fresh_task_brain=None, reentry_context=None,
-                          current_repository_evidence=None):
+                          current_repository_evidence=None,
+                          planning_route="current_recursive", early_split_structured_call=None,
+                          experiment_case_id=None):
+    if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
+        raise ValueError("unknown recursive planning route")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -25863,6 +26194,11 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         reset_run("recursive")
     elif RUN.get("mode") != "auto":
         RUN["mode"] = "recursive"
+    RUN["planning_route"] = planning_route
+    RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
+        str(user_text).encode("utf-8")
+    ).hexdigest()[:12]
+    _experiment_event("TASK_ACCEPTED")
     supplied_contract = contract_override is not None
     try:
         contract = contract_override or get_goal_contract(user_text, interactive=interactive)
@@ -25870,11 +26206,15 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         event(f"[ERROR] {exc}", role="Coordinator", task="ROOT", action="provider failure")
         result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR",
                   "summary": str(exc), "memory": memory}
+        _experiment_blocked("GOAL_CONTRACT", result)
         if finish:
             finish_metrics("failed")
         return result, memory
     if _contract_needs_clarification(contract):
         result_status = "clarification_required" if contract.get("terminal_state") == "CLARIFICATION_REQUIRED" else "needs_clarification"
+        _experiment_blocked("GOAL_CLARIFICATION", {
+            "status": result_status, "terminal_state": contract.get("terminal_state"),
+        })
         if finish:
             finish_metrics(result_status)
         return {
@@ -25893,19 +26233,28 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     except ProviderError as exc:
         event(f"[ERROR] {exc}", role="Specifier", task="ROOT", action="specification provider failure")
         result = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+        _experiment_blocked("TASK_BRAIN", result)
         if finish:
             finish_metrics("failed")
         return result, memory
     if understanding.get("status") != "ready":
         result = dict(understanding)
         result["memory"] = memory
+        _experiment_blocked("TASK_BRAIN", result)
         if finish:
             finish_metrics(result.get("status", "failed"))
         return result, memory
     contract = understanding.get("contract", contract)
+    RUN["experiment_subject_fingerprint"] = _stage3_workspace_fingerprint()
+    _experiment_event("TASK_BRAIN_READY")
     begin_durable_run(contract)
     try:
-        impact_planning = impact_planning_override or prepare_stage3_context(
+        stage3_entry = (prepare_decomposition_first_stage3_context
+                        if planning_route == "decomposition_first_recursive"
+                        else prepare_stage3_context)
+        stage3_kwargs = ({"early_split_structured_call": early_split_structured_call}
+                         if planning_route == "decomposition_first_recursive" else {})
+        impact_planning = impact_planning_override or stage3_entry(
             understanding, contract, interactive=interactive,
             terminal_available=terminal_available,
             planner_structured_call=impact_planner_structured_call,
@@ -25913,18 +26262,22 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             reviser_structured_call=impact_reviser_structured_call,
             approval_selector=plan_approval_selector,
             approval_answer_reader=plan_approval_answer_reader,
+            **stage3_kwargs,
         )
     except ProviderError as exc:
         result = {
             "status": "failed", "failure_type": "ENVIRONMENT_ERROR",
             "summary": str(exc), "memory": memory,
         }
+        _experiment_blocked(RUN.get("experiment_current_stage", "GLOBAL_STAGE3"), result)
         if finish:
             finish_metrics("failed")
         return result, memory
     if impact_planning.get("status") != "ready":
         result = dict(impact_planning)
         result["memory"] = memory
+        if not RUN.get("first_blocker"):
+            _experiment_blocked(RUN.get("experiment_current_stage", "GLOBAL_STAGE3"), result)
         if finish:
             finish_metrics(result.get("status", "failed"))
         return result, memory
@@ -25938,6 +26291,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             task_id="ROOT",
         )
         result["memory"] = memory
+        _experiment_blocked("EXECUTION_AUTHORIZATION", result)
         if finish:
             finish_metrics("blocked")
         return result, memory
@@ -25958,6 +26312,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                 base=execution_state,
             )
             result["memory"] = memory
+            _experiment_blocked("CONTRACTS", result)
             if finish:
                 finish_metrics(result.get("status", "blocked"))
             return result, memory
@@ -25986,6 +26341,10 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
             return decide_task_fit(task, depth, fit_contract, fit_repo, parent, deps, force_smaller=force_smaller)
     result = solve_task(root, 0, contract, memory, repo_snapshot,
                         fit_decider=routed_fit, leaf_executor=leaf_executor, aggregator=aggregator)
+    if result.get("status") == "done":
+        _experiment_event("ROOT_VERIFIED")
+    elif not RUN.get("first_blocker"):
+        _experiment_blocked("RECURSIVE_EXECUTION", result)
     print(f"[FINAL] {'done' if result['status'] == 'done' else 'failed'}")
     if finish:
         finish_metrics("done" if result["status"] == "done" else "failed")
@@ -28388,9 +28747,13 @@ def read_user_prompt(prompt_label="You> "):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Mini Hivo adaptive task-granularity research prototype")
-    parser.add_argument("--mode", choices=("auto", "baseline", "recursive"), default="auto")
+    parser.add_argument("--mode", choices=(
+        "auto", "baseline", "recursive", "current_recursive",
+        "decomposition_first_recursive",
+    ), default="auto")
     parser.add_argument("--model", help=f"Compatibility option; only {GEMMA_MODEL} is accepted")
     parser.add_argument("--prompt-file")
+    parser.add_argument("--experiment-case-id")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -28455,6 +28818,13 @@ def main():
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
             result, memory = run_recursive_request(user_text, memory, interactive=interactive)
+        elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
+            route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
+                     else "current_recursive")
+            result, memory = run_recursive_request(
+                user_text, memory, interactive=interactive, planning_route=route,
+                experiment_case_id=getattr(args, "experiment_case_id", None),
+            )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)
         print("Agent>", result.get("summary", ""))
