@@ -655,3 +655,36 @@ HTTP 200 envelopes, tool-call responses, thinking-bearing responses, terminal
 empty messages after a tool result, incomplete non-terminal replies, timeouts,
 and runner/VRAM failures. Runtime requests are explicitly non-streaming so a
 partial NDJSON chunk cannot be mistaken for a completed assistant message.
+
+## Experiment 10 — Child Verification Handoff Stability
+
+This is a diagnostic experiment. It keeps the existing Worker, Falsifier,
+verification routing, context guard, evidence aggregation, receipt policy,
+and parent integration decisions. It traces the first failing boundary,
+without issuing receipts, committing a child, or invoking Repairer in replay.
+
+Capture an actual post-Falsifier/pre-browser input by launching
+`scripts/experiment10_capture.py --capture-dir <new-directory>` with the same
+arguments as `scripts/experiment3_approved_run.py`. The observer calls the
+original Falsifier and returns its original result. The capsule saves full
+gate inputs, approved authority, current source bytes, and transaction before
+bytes outside the application workspace. Treat capsules as local run evidence.
+
+Replay that exact capsule with fresh browser verification on every repetition:
+
+```powershell
+.venv\Scripts\python.exe scripts/experiment10_handoff_probe.py --snapshot <capsule.json> --repeat 5 --output-dir <new-directory>
+.venv\Scripts\python.exe scripts/experiment10_report.py --comparison <new-directory>/comparison.json --output <report.md>
+```
+
+The alternative `--run-file <saved-run.jsonl>` imports a historical compact
+projection. Its report explicitly discloses truncated tool result payloads;
+missing records stop at `HANDOFF_SNAPSHOT_INCOMPLETE`. Use `--audit-run-file`
+to compare original terminal labels with earlier recorded route failures.
+
+`VERIFICATION_STARTED` is emitted at the existing browser verifier call.
+`evidence_match_audit` explains the existing matcher without changing it.
+Source/input hashes, repeat decision hashes, fresh browser results, model and
+Repairer call counts are recorded separately. A passing handoff stops at
+`RECEIPT_NOT_REPLAYED`: the normal post-verification impact/commit/receipt
+lifecycle must still run before a child can claim verification.
