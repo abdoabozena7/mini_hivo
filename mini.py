@@ -39,6 +39,7 @@ from hivo.target_locator import TargetLocator
 from hivo.worker_progress import WorkerProgress
 from hivo import verification_environment as verification_env
 from hivo import verification_surfaces
+from hivo import integration_targets
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -135,6 +136,7 @@ from hivo.integration_gate import PARENT_VERIFIED
 from hivo.integration_gate import aggregate_parent_integration as _aggregate_parent_integration_v21
 from hivo.integration_gate import assess_integration_readiness as _assess_integration_readiness_v21
 from hivo.integration_gate import create_verified_child_receipt as _create_verified_child_receipt_v21
+from hivo.integration_gate import fingerprint_dependency_paths as _integration_subject_fingerprint
 from hivo.atomic_child_receipt import create_atomic_child_receipt, validate_atomic_child_receipt, persist_atomic_child_receipt
 from hivo.promotion import ALREADY_PROMOTED
 from hivo.promotion import MAX_PROJECT_BRAIN_RECORDS
@@ -17202,6 +17204,102 @@ def _stage5b_child_projection(completed):
     return projected
 
 
+def _execute_resolved_parent_verification(task, contract, readiness, resolution):
+    """Execute new parent checks; child receipts never enter this proof set."""
+    requirements = [item for item in contract.get("source_requirements", []) or []
+                    if isinstance(item, dict) and item.get("requirement_id") and item.get("text")]
+    if not requirements:
+        ledger = contract.get("source_requirement_ledger") or RUN.get("source_requirement_ledger") or {}
+        requirements = [item for item in ledger.get("requirements", [])
+                        if isinstance(item, dict) and item.get("requirement_id") and item.get("text")]
+    if not requirements:
+        requirements = [{"requirement_id": "PARENT-GOAL", "text": task.get("goal") or contract.get("goal", "")}]
+    evidence, runs = [], []
+    dependencies = [path for reference in readiness.get("child_receipts", [])
+                    for path in reference.get("dependency_paths", [])]
+    for execution in resolution.get("executions", []):
+        for requirement in requirements:
+            verification_id = "PARENT-VERIFY-" + uuid.uuid4().hex
+            before = _integration_subject_fingerprint(WORKSPACE, dependencies + [execution["target"]])
+            profile = infer_web_profile(task.get("goal", ""), {
+                "requirements": [requirement["text"]], "constraints": contract.get("constraints", [])})
+            if execution["tool"] == "verify_web_app":
+                payload = verify_browser_application(
+                    execution["target"], f"{task.get('id')}-integration-{requirement['requirement_id']}",
+                    profile=profile, evidence={"verification_requirement": requirement["text"]},
+                )
+                classification = verification_env.classify_browser_result(payload, workspace=WORKSPACE)
+                checks = payload.get("interaction_checks", [])
+                passed_checks = {item.get("name") for item in checks
+                                 if item.get("passed") is True and item.get("executed", True)}
+                executed = bool(payload.get("behavior_test_executed"))
+                covered = (classification == "PASS" and executed and bool(profile.required_interactions)
+                           and set(profile.required_interactions) <= passed_checks)
+            else:
+                raw = run_command(execution["command"])
+                classification = verification_env.classify_observation({"tool": "run_command", "result": raw}, workspace=WORKSPACE)
+                executed = bool(re.search(r"\[exit_code=\d+\]", raw))
+                covered = classification == "PASS" and executed
+                payload = {"passed": classification == "PASS" and executed, "output": raw}
+            after = _integration_subject_fingerprint(WORKSPACE, dependencies + [execution["target"]])
+            unchanged = before["hash"] == after["hash"]
+            covered = covered and unchanged
+            if classification in {"PASS", verification_env.TEST_FAILED} and executed and unchanged:
+                proof = {"passed": covered if classification == "PASS" else False,
+                         "verification_id": verification_id}
+                if classification == "PASS" and not covered:
+                    proof = {"verification_status": SKIPPED_NOT_APPLICABLE,
+                             "reason": "PARENT_REQUIREMENT_VERIFICATION_UNAVAILABLE"}
+            elif classification == verification_env.TEST_FAILED and payload.get("syntax_failure"):
+                proof = {"passed": False, "verification_id": verification_id}
+            else:
+                proof = {"verification_status": SKIPPED_NOT_APPLICABLE,
+                         "reason": classification if unchanged else "SUBJECT_CHANGED_DURING_PARENT_VERIFICATION"}
+            record = {"artifact_type": "FreshParentVerification", "verification_id": verification_id,
+                      "parent_id": task.get("id"), "target": execution["target"], "tool": execution["tool"],
+                      "resolution_hash": resolution["resolution_hash"], "classification": classification,
+                      "parent_verification_executed": executed, "requirement_ids": [requirement["requirement_id"]],
+                      "covered_requirement_ids": [requirement["requirement_id"]] if covered else [],
+                      "requirement_text_hash": stage6c.canonical_hash(requirement["text"]),
+                      "required_interactions": list(profile.required_interactions),
+                      "subject_before_hash": before["hash"], "subject_after_hash": after["hash"],
+                      "child_evidence_reused_as_proof": 0, "result": payload}
+            record["evidence_hash"] = stage6c.canonical_hash(record)
+            directory = WORKSPACE / EVIDENCE_DIR / "parent_verification"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / (verification_id + ".json")
+            path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+            record["artifact_path"] = str(path)
+            runs.append(record)
+            evidence.append({"tool": execution["tool"], "target": execution["target"],
+                             "result": proof, "verification_id": verification_id,
+                             "parent_id": task.get("id"), "evidence_hash": record["evidence_hash"]})
+            record_run_event("fresh_parent_verification", **{key: value for key, value in record.items() if key != "result"})
+    RUN.setdefault("parent_verification_runs", []).extend(copy.deepcopy(runs))
+    task["parent_requirement_coverage"] = {
+        "required_requirement_ids": [item["requirement_id"] for item in requirements],
+        "covered_requirement_ids": sorted(
+            requirement["requirement_id"] for requirement in requirements
+            if runs and all(requirement["requirement_id"] in item["covered_requirement_ids"]
+                            for item in runs if requirement["requirement_id"] in item["requirement_ids"])
+        ),
+        "child_evidence_reused_as_proof": 0,
+    }
+    coverage = task["parent_requirement_coverage"]
+    if set(coverage["required_requirement_ids"]) != set(coverage["covered_requirement_ids"]):
+        # The legacy browser matcher is not target-specific. A successful
+        # check at one target must not cover an unavailable second target.
+        # Keep genuine failures; withhold positive proof until all required
+        # parent executions have covered their requirements.
+        for item in evidence:
+            if item["result"].get("passed") is True:
+                item["result"] = {"verification_status": SKIPPED_NOT_APPLICABLE,
+                                  "reason": "PARENT_REQUIREMENT_COVERAGE_INCOMPLETE",
+                                  "verification_id": item["verification_id"]}
+    task["parent_integration_evidence"] = copy.deepcopy(evidence)
+    return evidence
+
+
 def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=None, root=False,
                               readiness=None):
     """Perform parent-local deterministic integration after the READY gate."""
@@ -17221,6 +17319,18 @@ def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=N
     RUN["integration_executor_calls"] = RUN.get("integration_executor_calls", 0) + 1
     _start_parent_integration(task, {"error_count": 0, "conflicts": [], "invariant_violation_count": 0})
     evidence = _stage5b_parent_evidence(completed, task)
+    if RUN.get("integration_target_policy") == "resolved":
+        resolution = integration_targets.resolve_integration_targets(
+            task, contract if isinstance(contract, dict) else {}, readiness, RUN.get("child_receipts", {}),
+            workspace=WORKSPACE, repository_snapshot=repo_snapshot or inspect_repository(WORKSPACE),
+        )
+        task["integration_target_resolution"] = copy.deepcopy(resolution)
+        RUN.setdefault("integration_target_resolutions", []).append(copy.deepcopy(resolution))
+        record_run_event("integration_target_resolved", **resolution)
+        readiness = integration_targets.resolved_readiness(readiness, resolution)
+        task["integration_readiness"] = copy.deepcopy(readiness)
+        evidence = (_execute_resolved_parent_verification(task, contract, readiness, resolution)
+                    if resolution["status"] == "RESOLVED" else [])
     result = _aggregate_parent_integration_v21(
         task, contract if isinstance(contract, dict) else {}, readiness, evidence,
         workspace=WORKSPACE,
@@ -17231,6 +17341,9 @@ def _aggregate_stage5b_parent(task, contract, completed, memory, repo_snapshot=N
     result["memory"] = memory
     result["children"] = child_projection
     result["integration_readiness"] = copy.deepcopy(readiness)
+    if RUN.get("integration_target_policy") == "resolved":
+        result["integration_target_resolution"] = copy.deepcopy(task.get("integration_target_resolution"))
+        result["parent_requirement_coverage"] = copy.deepcopy(task.get("parent_requirement_coverage", {}))
     result["integration_routes"] = copy.deepcopy(result.get("routes", []))
     result["integration_executor_calls"] = 1
     RUN["browser_verifier_calls_avoided"] = RUN.get("browser_verifier_calls_avoided", 0) + sum(
@@ -26798,7 +26911,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           target_locator_policy="current",
                           verification_environment_policy="current",
                           verification_surface_policy="current",
-                          child_receipt_policy="current"):
+                          child_receipt_policy="current",
+                          integration_target_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26815,6 +26929,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown verification surface policy")
     if child_receipt_policy not in {"current", "atomic_verified"}:
         raise ValueError("unknown child receipt policy")
+    if integration_target_policy not in {"current", "resolved"}:
+        raise ValueError("unknown integration target policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26854,6 +26970,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["verification_environment_policy"] = verification_environment_policy
     RUN["verification_surface_policy"] = verification_surface_policy
     RUN["child_receipt_policy"] = child_receipt_policy
+    RUN["integration_target_policy"] = integration_target_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29427,6 +29544,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--child-receipt-policy", choices=("current", "atomic_verified"),
                         default="current")
+    parser.add_argument("--integration-target-policy", choices=("current", "resolved"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29508,6 +29627,9 @@ def main():
         child_receipt_policy = getattr(args, "child_receipt_policy", "current")
         receipt_kwargs = ({"child_receipt_policy": child_receipt_policy}
                           if child_receipt_policy != "current" else {})
+        integration_target_policy = getattr(args, "integration_target_policy", "current")
+        integration_kwargs = ({"integration_target_policy": integration_target_policy}
+                              if integration_target_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
@@ -29517,6 +29639,7 @@ def main():
                 **environment_kwargs,
                 **surface_kwargs,
                 **receipt_kwargs,
+                **integration_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29528,6 +29651,7 @@ def main():
                 **environment_kwargs,
                 **surface_kwargs,
                 **receipt_kwargs,
+                **integration_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

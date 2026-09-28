@@ -403,6 +403,49 @@ Its `comparison.json` includes both canonical receipts and unchanged parent
 readiness results. This verifies the receipt boundary; a separate live run
 measures root success.
 
+### Experiment 9: Integration target resolution
+
+`--integration-target-policy current` retains the parent evidence aggregator.
+`--integration-target-policy resolved` runs only after the existing readiness
+gate returns `READY`. It resolves executable locations in this order:
+
+1. Explicit parent integration routes/target.
+2. Parent contract and integration surfaces.
+3. Fresh verified child receipt locations: browser target, mutation paths,
+   then dependency paths.
+4. Known project entrypoints.
+
+Missing explicit targets, conflicting candidates and stale receipts fail
+closed. Supported execution routes use the existing browser verifier or an
+explicit test command/script through the existing command restrictions.
+The resolver reads child receipts for navigation and freshness only.
+
+The parent runs new verification on the integrated workspace for the parent
+requirements. Browser requirements need their existing expected interactions
+to execute and pass. Parent evidence is saved under
+`.agent_evidence/parent_verification` with a new verification ID, evidence hash,
+requirement IDs and subject hashes before/after the check. Only these newly
+executed results enter the parent integration proof. Infrastructure failures
+remain unavailable evidence; executable failures remain failures.
+
+Hold Experiment 8 settings fixed, adding `--integration-target-policy resolved`
+to the approved runner. Compare the boundary independently on the same
+candidate and canonical receipts:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/experiment9_parent_probe.py --run-file D:\cases\rkey\experiment8\.agent_experiment.jsonl --output-dir D:\cases\rkey\parent_probe
+.\.venv\Scripts\python.exe scripts/experiment9_report.py --probe D:\cases\rkey\parent_probe\comparison.json --live D:\cases\rkey\live_resolved --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
+The reporter accepts repeated `--live` arguments and reports every attempt.
+Root success across all attempts is separate from root success after the parent
+reaches `READY`; a frozen parent probe is not labeled as a full root run.
+`--complete-root` continues a saved approved run through the existing root
+completion boundary after new parent verification. It requires all approved
+children's fresh canonical receipts and rejects the separate promotion
+lifecycle. Its result is labeled as a continuation of verified children;
+fresh runs from the initial task remain separate measurements.
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a
