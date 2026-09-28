@@ -27014,7 +27014,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown mission advice policy")
     if worker_progress_policy not in {"current", "progress_constrained"}:
         raise ValueError("unknown Worker progress policy")
-    if mutation_grounding_policy not in {"current", "evidence_grounded"}:
+    if mutation_grounding_policy not in {"current", "evidence_grounded", "evidence_bound"}:
         raise ValueError("unknown mutation grounding policy")
     if target_locator_policy not in {"current", "evidence_directed"}:
         raise ValueError("unknown target locator policy")
@@ -29632,7 +29632,7 @@ def parse_args():
                         default="strict")
     parser.add_argument("--worker-progress-policy", choices=("current", "progress_constrained"),
                         default="current")
-    parser.add_argument("--mutation-grounding-policy", choices=("current", "evidence_grounded"),
+    parser.add_argument("--mutation-grounding-policy", choices=("current", "evidence_grounded", "evidence_bound"),
                         default="current")
     parser.add_argument("--target-locator-policy", choices=("current", "evidence_directed"),
                         default="current")

@@ -90,7 +90,7 @@ SAFETY_KEYS = ("mutation_scope_violations", "dnt_execution_violations", "executi
                "impact_preservation_violations", "invariant_violations_detected", "impact_out_of_scope_changes")
 
 
-def audit_trial(suite, case, policy, repeat):
+def audit_trial(suite, case, policy, repeat, *, expected_semantic_policy=None, expected_policies=None):
     workspace = suite/case["case_id"]/f"{policy}-{repeat}"
     result_path = workspace.parent/f"{workspace.name}-result.json"
     if not result_path.exists():
@@ -100,8 +100,8 @@ def audit_trial(suite, case, policy, repeat):
     manifest = load(suite/"manifest.json")
     pinned = (run.get("model") == manifest["model"]
         and run.get("source_sha256") == manifest["production_sha256"]["mini.py"]
-        and all(run.get(k) == value for k, value in POLICIES.items())
-        and run.get("semantic_evidence_policy") == policy
+        and all(run.get(k) == value for k, value in (expected_policies or POLICIES).items())
+        and run.get("semantic_evidence_policy") == (expected_semantic_policy or policy)
         and run.get("plan_approval", {}).get("plan_hash") == case["approved_plan_hash"]
         and run.get("execution_contract_by_id", {}).get("EXEC-001", {}).get("contract_hash") == case["execution_contract_hash"])
     if not pinned:

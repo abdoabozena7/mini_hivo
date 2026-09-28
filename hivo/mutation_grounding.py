@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +44,7 @@ class MutationGrounding:
     attempts: list[dict] = field(default_factory=list)
     bounded_refreshes: int = 0
     terminal_reason: str | None = None
+    refresh_observations: list[dict] = field(default_factory=list)
 
     def _relative(self, path: Path | None) -> str | None:
         if path is None:
@@ -54,6 +56,14 @@ class MutationGrounding:
 
     def _approved(self, relative: str | None) -> bool:
         return relative in self.approved_targets
+
+    def _observed_hash(self, relative, path):
+        if not self._approved(relative) or path is None:
+            return None
+        try:
+            return _hash(path.read_bytes())
+        except OSError:
+            return None
 
     def observe_read(self, name: str, args: dict, result: str, path: Path | None):
         if name not in READ_TOOLS:
@@ -94,11 +104,18 @@ class MutationGrounding:
             if str(result) != expected_result:
                 return
             span = SourceSpan(_hash(data), first, last, "".join(lines[first - 1:last]))
-            if (self.refresh.get(relative) == "required"
-                    and last - first + 1 <= MAX_REFRESH_LINES):
-                self.refresh[relative] = "ready"
-                self.refresh_anchors[relative] = span
-                self.bounded_refreshes += 1
+        # Experiment 15: a verified small full read observes exactly the same
+        # bounded source as a range read. Tool spelling is not evidence identity.
+        refresh_read = name == "read_file_range" or (self.policy == "evidence_bound" and name == "read_file")
+        if (refresh_read and self.refresh.get(relative) == "required"
+                and 0 < span.last_line - span.first_line + 1 <= MAX_REFRESH_LINES):
+            self.refresh[relative] = "ready"
+            # A refresh authorizes the existing bounded retry; it must not
+            # silently unlock full-file writes or multiple replacements.
+            self.refresh_anchors[relative] = SourceSpan(span.file_hash, span.first_line, span.last_line, span.text)
+            self.bounded_refreshes += 1
+            self.refresh_observations.append({"tool":name,"target":relative,"file_hash":span.file_hash,
+                "source_lines":[span.first_line,span.last_line],"span_hash":_hash(span.text.encode("utf-8"))})
         self.anchors.setdefault(relative, []).append(span)
         self.anchors[relative] = self.anchors[relative][-8:]
 
@@ -168,9 +185,13 @@ class MutationGrounding:
             "grounded": grounded, "grounding_reason": reason,
             "source_lines": list(lines) if lines else None,
             "executed": False, "applied": False, "rejected": False,
+            "evidence_reason":reason, "refresh_state_before":self.refresh.get(relative),
+            "request":dict(args),
+            "request_hash":_hash(json.dumps(args,sort_keys=True,ensure_ascii=False).encode("utf-8")),
+            "source_before_hash":self._observed_hash(relative,path),
         }
         self.attempts.append(attempt)
-        if self.policy != "evidence_grounded" or not self._approved(relative):
+        if self.policy not in {"evidence_grounded", "evidence_bound"} or not self._approved(relative):
             return {"allowed": True, "attempt": attempt}
         state = self.refresh.get(relative)
         if state == "required":
@@ -208,7 +229,7 @@ class MutationGrounding:
             attempt["executed"] = True
             attempt["applied"] = bool(changed_file)
             attempt["rejected"] = not changed_file and str(result).casefold().startswith("error:")
-            if (self.policy == "evidence_grounded" and attempt["rejected"]
+            if (self.policy in {"evidence_grounded", "evidence_bound"} and attempt["rejected"]
                     and "expected" in str(result).casefold()
                     and "replacement" in str(result).casefold()):
                 relative = attempt["target"]
@@ -230,4 +251,5 @@ class MutationGrounding:
             "bounded_refreshes": self.bounded_refreshes,
             "terminal_reason": self.terminal_reason,
             "attempts": list(self.attempts),
+            "refresh_observations":list(self.refresh_observations),
         }
