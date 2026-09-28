@@ -41,6 +41,7 @@ from hivo import verification_environment as verification_env
 from hivo import verification_surfaces
 from hivo import integration_targets
 from hivo import evidence_compatibility as semantic_evidence
+from hivo import evidence_monotonic
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -14827,7 +14828,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     ]
                 offered_names = {item["function"]["name"] for item in offered_tools}
             _update_verification_cycle(verification_cycle, name, args, result)
-            if RUN.get("semantic_evidence_policy") == "compatible" and name in {"run_file", "verify_web_app"}:
+            if RUN.get("semantic_evidence_policy") in {"compatible", "monotonic"} and name in {"run_file", "verify_web_app"}:
                 _collect_semantic_browser_evidence(name, result, task_id=task_id,
                                                   source="controller_tool_result", requested_target=target)
             mutation_record = None if (context_mutation_blocked or impact_mutation_blocked) else mutation_failure_record(name, target, result, role=role)
@@ -16685,7 +16686,7 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
 
     profile = infer_web_profile(task.get("goal", ""), contract or {})
     semantic_before = (_semantic_subject(task.get("id"), route.get("target"))["hash"]
-                       if RUN.get("semantic_evidence_policy") == "compatible" else None)
+                       if RUN.get("semantic_evidence_policy") in {"compatible", "monotonic"} else None)
     current_syntax_failures = _syntax_failures_for_target(syntax_failures, requested)
     if current_syntax_failures:
         result = _verification_cycle_syntax_failure(
@@ -16716,7 +16717,7 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
     result["verification_applicability"] = _update_verification_applicability_result(
         artifact, record_task, BROWSER_VERIFICATION, result,
     )
-    if RUN.get("semantic_evidence_policy") == "compatible":
+    if RUN.get("semantic_evidence_policy") in {"compatible", "monotonic"}:
         _collect_semantic_browser_evidence("verify_web_app", result, task_id=task.get("id"),
                                           source="controller_child_browser", subject_before_hash=semantic_before)
     if RUN.get("verification_environment_policy") == "resolved":
@@ -16923,8 +16924,12 @@ def _semantic_browser_assessments(artifact):
                 or route.get("authority_id") or route.get("authority_type") or route.get("oracle_id")):
             continue
         contract, subject, claims = _semantic_required_claims(child_id, route["target"])
-        assessment = semantic_evidence.assess(claims, RUN.get("canonical_evidence_records", []),
-                                              required_requirement_ids=contract.get("requirement_ids", []))
+        if RUN.get("semantic_evidence_policy") == "monotonic":
+            records = [r for r in RUN.get("canonical_evidence_records", []) if r.get("child_id") == child_id]
+            assessment = evidence_monotonic.assess(claims, records, required_requirement_ids=contract.get("requirement_ids", []))
+        else:
+            assessment = semantic_evidence.assess(claims, RUN.get("canonical_evidence_records", []),
+                                                  required_requirement_ids=contract.get("requirement_ids", []))
         assessments[str(route["target"])] = assessment
         record_run_event("semantic_evidence_assessed", child_id=child_id, target=route["target"],
                          status=assessment["status"], covered_requirement_ids=assessment["covered_requirement_ids"],
@@ -16963,12 +16968,13 @@ def _verification_aggregation(builder_result, falsifier_result=None, browser_res
         if isinstance(verification, dict):
             coverage = verification.get("verification_obligation_coverage")
     semantic_routes = (_semantic_browser_assessments(artifact)
-                       if RUN.get("semantic_evidence_policy") == "compatible" else None)
+                       if RUN.get("semantic_evidence_policy") in {"compatible", "monotonic"} else None)
     aggregation = aggregate_verification_evidence(
         artifact, evidence, browser_result,
         execution_obligation_evidence=obligation_evidence,
         verification_obligation_coverage=coverage,
         semantic_browser_evidence=semantic_routes,
+        semantic_evidence_policy=RUN.get("semantic_evidence_policy", "current"),
     )
     if VERIFICATION_EVIDENCE_UNAVAILABLE in aggregation.get("failure_codes", []):
         RUN["verification_evidence_unavailable"] = RUN.get(
@@ -27018,7 +27024,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown child receipt policy")
     if integration_target_policy not in {"current", "resolved"}:
         raise ValueError("unknown integration target policy")
-    if semantic_evidence_policy not in {"current", "compatible"}:
+    if semantic_evidence_policy not in {"current", "compatible", "monotonic"}:
         raise ValueError("unknown semantic evidence policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
@@ -29636,7 +29642,7 @@ def parse_args():
                         default="current")
     parser.add_argument("--integration-target-policy", choices=("current", "resolved"),
                         default="current")
-    parser.add_argument("--semantic-evidence-policy", choices=("current", "compatible"), default="current")
+    parser.add_argument("--semantic-evidence-policy", choices=("current", "compatible", "monotonic"), default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")

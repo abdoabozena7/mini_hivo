@@ -12,6 +12,7 @@ from hivo.integration_gate import _artifact_from_inputs, _aggregation_from_input
 from hivo.integration_gate import fingerprint_dependency_paths
 from hivo.verification_routing import requires_execution_verification_closure
 from hivo import evidence_compatibility as semantic_evidence
+from hivo import evidence_monotonic
 
 
 def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
@@ -58,6 +59,11 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
         receipt["semantic_browser_evidence"] = copy.deepcopy(semantic)
         receipt["semantic_requirements"] = copy.deepcopy(contract.get("requirements", []))
         receipt["semantic_evidence_hash"] = canonical_hash(semantic)
+    audit = aggregation.get("semantic_compatibility_audit")
+    if isinstance(audit, dict):
+        receipt["semantic_compatibility_audit"] = copy.deepcopy(audit)
+        receipt["monotonic_requirements"] = copy.deepcopy(contract.get("requirements", []))
+        receipt["semantic_compatibility_audit_hash"] = canonical_hash(audit)
     receipt["receipt_hash"] = canonical_hash({
         key: value for key, value in receipt.items() if key != "receipt_hash"
     })
@@ -117,6 +123,30 @@ def validate_atomic_child_receipt(receipt, *, workspace=None, expected_contract_
             checked_semantic = semantic_evidence.assess(expected_claims, records, required_requirement_ids=value.get("requirement_ids", []))
             if checked_semantic["status"] != "PASS" or assessment.get("status") != "PASS":
                 errors.append("semantic evidence does not cover every required assertion")
+    audit = value.get("semantic_compatibility_audit")
+    if isinstance(audit, dict):
+        requirements = expected_requirements if expected_requirements is not None else value.get("monotonic_requirements", [])
+        if value.get("semantic_compatibility_audit_hash") != canonical_hash(audit) or audit.get("policy") != "monotonic":
+            errors.append("monotonic compatibility audit is invalid")
+        errors.extend(evidence_monotonic.binding_errors(audit.get("declared_evidence_bindings", []), requirements, workspace=workspace))
+        for target, assessment in audit.get("browser_assessments", {}).items():
+            # UNKNOWN is absence of usable metadata, not evidence against a
+            # successful current check. Explicit available mismatches still fail.
+            if assessment.get("metadata_status") == "UNKNOWN":
+                if assessment.get("observed_evidence_records") or assessment.get("canonical_evidence_records"):
+                    errors.append("available semantic evidence cannot be labeled UNKNOWN")
+                continue
+            claims = assessment.get("required_claims", [])
+            records = assessment.get("observed_evidence_records", assessment.get("canonical_evidence_records", []))
+            if not claims or not records:
+                errors.append("available semantic inventory is incomplete")
+                continue
+            subject = fingerprint_dependency_paths(workspace, claims[0]["subject_paths"])
+            expected = semantic_evidence.required_claims(requirements, contract_hash=value.get("contract_hash"),
+                child_id=value.get("child_id"), target=target, subject_hash=subject["hash"],
+                subject_paths=[p["path"] for p in subject["paths"]])
+            if claims != expected or semantic_evidence.assess(expected, records, required_requirement_ids=value.get("requirement_ids", []))["status"] != "PASS":
+                errors.append("available evidence is incompatible with approved assertions/current subject")
     return {"valid": not errors, "verified": not errors, "errors": errors,
             "fresh": checked.get("fresh")}
 

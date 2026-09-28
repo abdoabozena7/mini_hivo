@@ -2223,13 +2223,24 @@ def aggregate_verification_evidence(
     execution_obligation_evidence: Iterable[dict] | None = None,
     verification_obligation_coverage: dict | None = None,
     semantic_browser_evidence: dict | None = None,
+    semantic_evidence_policy: str = "compatible",
 ) -> dict:
     """Aggregate every required authority, including a direct oracle."""
     artifact = applicability if isinstance(applicability, dict) else {}
     evidence = [item for item in (execution_evidence or []) if isinstance(item, dict)]
-    aggregation = _aggregate_verification_routes(artifact, evidence, browser_result, semantic_browser_evidence)
-    if semantic_browser_evidence is not None:
-        aggregation["semantic_browser_evidence"] = semantic_browser_evidence
+    selected = semantic_browser_evidence
+    audit = None
+    if semantic_evidence_policy == "monotonic":
+        from hivo import evidence_monotonic
+        legacy = _aggregate_verification_routes(artifact, evidence, browser_result)
+        selected, decisions = evidence_monotonic.fallback_assessments(legacy, semantic_browser_evidence, browser_result)
+        audit = {"policy":"monotonic", "browser_assessments":semantic_browser_evidence or {}, "decisions":decisions,
+                 "declared_evidence_bindings":evidence_monotonic.proof_bindings(legacy["verification_routes"], evidence, browser_result)}
+    aggregation = _aggregate_verification_routes(artifact, evidence, browser_result, selected)
+    if selected is not None and (selected or semantic_evidence_policy != "monotonic"):
+        aggregation["semantic_browser_evidence"] = selected
+    if audit is not None:
+        aggregation["semantic_compatibility_audit"] = audit
     required_set = build_required_execution_verification_set(artifact)
     closure = None
     if requires_execution_verification_closure(artifact):
