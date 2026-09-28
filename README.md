@@ -372,6 +372,37 @@ reporter; it is never shown to the Worker or used in ranking.
 python scripts/experiment5_report.py D:\cases\rkey\current D:\cases\rkey\evidence_directed --expected-path index.html --expected-start 406 --expected-end 411 --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
 ```
 
+### Experiment 8: Atomic verified child receipt
+
+`--child-receipt-policy current` retains the existing receipt handoff.
+`--child-receipt-policy atomic_verified` creates and validates one canonical
+`VerifiedChildReceipt` at the child completion boundary. It carries the child
+ID, covered node IDs, requirement IDs, evidence hash, subject state hash and
+approved contract hash. The receipt is saved atomically under
+`.agent_evidence/verified_child_receipts` before `CHILD_VERIFIED` is emitted.
+The event references that same receipt hash; duplicate publication is ignored.
+The existing parent readiness and integration algorithms consume this receipt.
+
+Legacy syntax/browser routes do not produce an authority-bound execution
+closure. In this variant, their inventory is not treated as a missing closure;
+their actual required verification passes still govern the receipt. Routes
+with approved verification authority retain their closure requirement.
+Invalid, stale or unsaved receipts cannot publish child success.
+
+Hold all Experiment 7 settings fixed and vary only `--child-receipt-policy`.
+To isolate the handoff from model variation, replay one saved child verification
+and candidate patch without rerunning the Worker:
+
+```powershell
+python scripts/experiment8_receipt_replay.py --run-file D:\cases\rkey\previous\.agent_experiment.jsonl --output-dir D:\cases\rkey\receipt_replay
+python scripts/experiment8_report.py --replay D:\cases\rkey\receipt_replay\comparison.json --live D:\cases\rkey\live_atomic --output D:\cases\rkey\report.json --markdown-output D:\cases\rkey\report.md
+```
+
+The replay checks candidate bytes against the saved verification fingerprint.
+Its `comparison.json` includes both canonical receipts and unchanged parent
+readiness results. This verifies the receipt boundary; a separate live run
+measures root success.
+
 ### Existing execution lifecycle
 
 Outside the approved Stage 4A contract handoff, each execution receives a

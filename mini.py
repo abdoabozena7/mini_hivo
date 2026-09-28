@@ -135,6 +135,7 @@ from hivo.integration_gate import PARENT_VERIFIED
 from hivo.integration_gate import aggregate_parent_integration as _aggregate_parent_integration_v21
 from hivo.integration_gate import assess_integration_readiness as _assess_integration_readiness_v21
 from hivo.integration_gate import create_verified_child_receipt as _create_verified_child_receipt_v21
+from hivo.atomic_child_receipt import create_atomic_child_receipt, validate_atomic_child_receipt, persist_atomic_child_receipt
 from hivo.promotion import ALREADY_PROMOTED
 from hivo.promotion import MAX_PROJECT_BRAIN_RECORDS
 from hivo.promotion import PROMOTION_CONFLICT
@@ -16996,7 +16997,9 @@ def _stage5b_child_receipt(task, result, parent_contract=None):
                 if isinstance(item, dict)
             )
     authority_failure = _authority_terminal_failure(task)
-    receipt = _create_verified_child_receipt_v21(
+    atomic_receipt = RUN.get("child_receipt_policy") == "atomic_verified"
+    receipt_builder = create_atomic_child_receipt if atomic_receipt else _create_verified_child_receipt_v21
+    receipt = receipt_builder(
         task, result,
         parent_id=task.get("parent"),
         parent_contract=parent_contract if isinstance(parent_contract, dict) else {},
@@ -17010,10 +17013,39 @@ def _stage5b_child_receipt(task, result, parent_contract=None):
         scope_violations=int(result.get("scope_violations", 0) or 0),
         dnt_violations=int(result.get("dnt_violations", 0) or 0),
     )
+    if atomic_receipt:
+        checked = validate_atomic_child_receipt(
+            receipt, workspace=WORKSPACE,
+            expected_contract_hash=contract.get("contract_hash"),
+            expected_node_ids=task.get("plan_node_ids", []),
+            expected_requirement_ids=contract.get("requirement_ids", []),
+        )
+        record_run_event(
+            "atomic_child_receipt_checked", child_id=receipt.get("child_id"),
+            valid=checked["valid"], verified=checked["verified"],
+            covered_node_ids=receipt.get("covered_node_ids", []),
+            requirement_ids=receipt.get("requirement_ids", []),
+            verification_evidence_hash=receipt.get("verification_evidence_hash"),
+            subject_after_hash=receipt.get("subject_after_hash"),
+            contract_hash=receipt.get("contract_hash"), errors=checked["errors"],
+        )
+    previous = RUN.get("child_receipts", {}).get(str(receipt.get("child_id")), {})
+    new_receipt = previous.get("receipt_hash") != receipt.get("receipt_hash")
+    if atomic_receipt and checked["valid"]:
+        try:
+            receipt_path = persist_atomic_child_receipt(receipt, WORKSPACE)
+            task["verified_child_receipt_path"] = receipt_path
+            result["verified_child_receipt_path"] = receipt_path
+        except OSError as exc:
+            # No success event or authoritative publication without durability.
+            result["status"] = "failed"
+            result["failure_type"] = "CHILD_RECEIPT_PERSISTENCE_FAILED"
+            result["summary"] = str(exc)
+            return None
     task["verified_child_receipt"] = copy.deepcopy(receipt)
     result["verified_child_receipt"] = copy.deepcopy(receipt)
     RUN.setdefault("child_receipts", {})[str(receipt.get("child_id"))] = copy.deepcopy(receipt)
-    if receipt.get("verified") is True:
+    if receipt.get("verified") is True and (not atomic_receipt or (checked["valid"] and new_receipt)):
         RUN["verified_child_receipts_created"] = RUN.get("verified_child_receipts_created", 0) + 1
     record_run_event(
         "verified_child_receipt_created",
@@ -17023,6 +17055,13 @@ def _stage5b_child_receipt(task, result, parent_contract=None):
         dependency_fingerprint=(receipt.get("evidence_dependency_fingerprint") or {}).get("hash"),
         browser=receipt.get("browser"), model_calls=0,
     )
+    if atomic_receipt and checked["valid"] and new_receipt:
+        _experiment_event(
+            "CHILD_VERIFIED", child_id=receipt.get("child_id"),
+            receipt_hash=receipt.get("receipt_hash"),
+            verification_evidence_hash=receipt.get("verification_evidence_hash"),
+            covered_node_ids=receipt.get("covered_node_ids", []),
+        )
     return receipt
 
 
@@ -21983,7 +22022,25 @@ def _mark_task_result(task, result, *, count=True):
             if isinstance(parent_task, dict) and isinstance(parent_task.get("execution_contract"), dict)
             else RUN.get("source_contract", {})
         )
-        _stage5b_child_receipt(task, result, parent_contract=parent_contract)
+        receipt = _stage5b_child_receipt(task, result, parent_contract=parent_contract)
+        if (RUN.get("child_receipt_policy") == "atomic_verified"
+                and status == "done"):
+            checked = validate_atomic_child_receipt(
+                receipt, workspace=WORKSPACE,
+                expected_contract_hash=(task.get("execution_contract") or {}).get("contract_hash"),
+                expected_node_ids=task.get("plan_node_ids", []),
+                expected_requirement_ids=(task.get("execution_contract") or {}).get("requirement_ids", []),
+            )
+            if not checked["valid"]:
+                status = "failed"
+                result["status"] = status
+                result.setdefault("failure_type", "CHILD_RECEIPT_INVALID")
+                result["receipt_validation_errors"] = checked["errors"]
+                if result["failure_type"] == "CHILD_RECEIPT_INVALID":
+                    result["summary"] = "child receipt invalid: " + "; ".join(checked["errors"])
+                task["status"] = status
+                task["verification_status"] = "failed"
+                task["summary"] = compact_text(result.get("summary", ""), MAX_NODE_SUMMARY_CHARS)
     if count:
         if status == "done":
             attach_verified_manifest(task, result)
@@ -23657,10 +23714,14 @@ def execute_approved_plan_graph(contract, memory, repo_snapshot=None, fit_decide
             status=result.get("status"),
         )
         if execution_contract.get("worker_required") and result.get("status") == "done":
-            _experiment_event("CHILD_VERIFIED", child_id=contract_id)
+            if RUN.get("child_receipt_policy") != "atomic_verified":
+                _experiment_event("CHILD_VERIFIED", child_id=contract_id,
+                                  receipt_hash=(result.get("verified_child_receipt") or {}).get("receipt_hash"))
         elif execution_contract.get("worker_required") and result.get("status") != "done":
             blocker_stage = (
-                "MISSION_COMPILATION"
+                "CHILD_RECEIPT"
+                if result.get("failure_type") in {"CHILD_RECEIPT_INVALID", "CHILD_RECEIPT_PERSISTENCE_FAILED"}
+                else "MISSION_COMPILATION"
                 if result.get("orchestration_failure") == "MISSION_COMPILATION_FAILURE"
                 and not any(item.get("kind") == "FIRST_WORKER_STARTED"
                             for item in RUN.get("experiment_events", []))
@@ -26736,7 +26797,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           mutation_grounding_policy="current",
                           target_locator_policy="current",
                           verification_environment_policy="current",
-                          verification_surface_policy="current"):
+                          verification_surface_policy="current",
+                          child_receipt_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26751,6 +26813,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown verification environment policy")
     if verification_surface_policy not in {"current", "discovery"}:
         raise ValueError("unknown verification surface policy")
+    if child_receipt_policy not in {"current", "atomic_verified"}:
+        raise ValueError("unknown child receipt policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26789,6 +26853,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["target_locator_policy"] = target_locator_policy
     RUN["verification_environment_policy"] = verification_environment_policy
     RUN["verification_surface_policy"] = verification_surface_policy
+    RUN["child_receipt_policy"] = child_receipt_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29360,6 +29425,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--verification-surface-policy", choices=("current", "discovery"),
                         default="current")
+    parser.add_argument("--child-receipt-policy", choices=("current", "atomic_verified"),
+                        default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29438,6 +29505,9 @@ def main():
         verification_surface_policy = getattr(args, "verification_surface_policy", "current")
         surface_kwargs = ({"verification_surface_policy": verification_surface_policy}
                           if verification_surface_policy != "current" else {})
+        child_receipt_policy = getattr(args, "child_receipt_policy", "current")
+        receipt_kwargs = ({"child_receipt_policy": child_receipt_policy}
+                          if child_receipt_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
@@ -29446,6 +29516,7 @@ def main():
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
                 **environment_kwargs,
                 **surface_kwargs,
+                **receipt_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29456,6 +29527,7 @@ def main():
                 **mission_kwargs, **progress_kwargs, **grounding_kwargs, **locator_kwargs,
                 **environment_kwargs,
                 **surface_kwargs,
+                **receipt_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

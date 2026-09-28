@@ -27,6 +27,8 @@ def main():
         "current", "resolved"), default="current")
     parser.add_argument("--verification-surface-policy", choices=(
         "current", "discovery"), default="current")
+    parser.add_argument("--child-receipt-policy", choices=(
+        "current", "atomic_verified"), default="current")
     parser.add_argument("--mission-advice-policy", choices=(
         "strict", "contract_fallback"), default="contract_fallback")
     args = parser.parse_args()
@@ -64,6 +66,7 @@ def main():
         target_locator_policy=args.target_locator_policy,
         verification_environment_policy=args.verification_environment_policy,
         verification_surface_policy=args.verification_surface_policy,
+        child_receipt_policy=args.child_receipt_policy,
         plan_approval_selector=select_only_approved_plan,
     )
     print("FINAL_STATUS:", result.get("status"), flush=True)
