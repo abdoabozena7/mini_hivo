@@ -1,0 +1,2934 @@
+{
+  "experiment": 14,
+  "all_completed": true,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "fresh_trials": [
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T181439-d63ee531",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 73.03,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-1\\.agent_runs\\20260928T181439-d63ee531.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T181908-db87550f",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 62.37,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-2\\.agent_runs\\20260928T181908-db87550f.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T182024-82ef4a11",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 67.32,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-3\\.agent_runs\\20260928T182024-82ef4a11.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\monotonic-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T181606-336f9af0",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 15,
+      "tool_calls": 13,
+      "elapsed_seconds": 87.92,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-1\\.agent_runs\\20260928T181606-336f9af0.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T181748-4f36a6f6",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 66.0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-2\\.agent_runs\\20260928T181748-4f36a6f6.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T182145-d5e2984f",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 71.25,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-3\\.agent_runs\\20260928T182145-d5e2984f.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_arrow\\strict-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T182310-5ee2b502",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 13,
+      "tool_calls": 10,
+      "elapsed_seconds": 68.15,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-1\\.agent_runs\\20260928T182310-5ee2b502.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T182713-cbffeafd",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 67.12,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-2\\.agent_runs\\20260928T182713-cbffeafd.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "monotonic",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T182834-f8275511",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 15,
+      "tool_calls": 11,
+      "elapsed_seconds": 72.3,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-3\\.agent_runs\\20260928T182834-f8275511.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\monotonic-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T182432-1b9bfb81",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 66.23,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-1\\.agent_runs\\20260928T182432-1b9bfb81.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T182553-87dda23c",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 66.61,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-2\\.agent_runs\\20260928T182553-87dda23c.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "strict",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T183000-98c88c68",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 13,
+      "tool_calls": 9,
+      "elapsed_seconds": 61.94,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-3\\.agent_runs\\20260928T183000-98c88c68.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\arena_q_restart\\strict-3-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "monotonic",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T183116-00a75e6b",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 42.45,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-1\\.agent_runs\\20260928T183116-00a75e6b.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-1-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "monotonic",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T183359-8e944d11",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.74,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-2\\.agent_runs\\20260928T183359-8e944d11.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-2-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "monotonic",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T183450-2542631f",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.2,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-3\\.agent_runs\\20260928T183450-2542631f.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\monotonic-3-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "strict",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T183212-724c120a",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 42.9,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-1\\.agent_runs\\20260928T183212-724c120a.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-1-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "strict",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T183309-3261a629",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 36.3,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-2\\.agent_runs\\20260928T183309-3261a629.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-2-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "strict",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T183541-b627e5cd",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 36.74,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-3\\.agent_runs\\20260928T183541-b627e5cd.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2\\node_unique\\strict-3-result.json"
+      }
+    }
+  ],
+  "fresh_summary": {
+    "monotonic": {
+      "expected_attempts": 9,
+      "completed_attempts": 9,
+      "verification_executable_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_pass_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "valid_receipt_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "child_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "root_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "false_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 100,
+      "total_tool_calls": 72,
+      "agent_tool_calls_per_root_verified": 8.0,
+      "total_elapsed_seconds": 527.68,
+      "model_calls_per_root_verified": 11.11,
+      "seconds_per_root_verified": 58.63,
+      "first_blockers": {},
+      "all_pass_receipt_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      }
+    },
+    "strict": {
+      "expected_attempts": 9,
+      "completed_attempts": 9,
+      "verification_executable_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_pass_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "valid_receipt_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "child_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "root_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "false_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 100,
+      "total_tool_calls": 73,
+      "agent_tool_calls_per_root_verified": 8.11,
+      "total_elapsed_seconds": 535.89,
+      "model_calls_per_root_verified": 11.11,
+      "seconds_per_root_verified": 59.54,
+      "first_blockers": {},
+      "all_pass_receipt_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      }
+    }
+  },
+  "by_case": {
+    "arena_arrow": {
+      "monotonic": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 34,
+        "total_tool_calls": 25,
+        "agent_tool_calls_per_root_verified": 8.33,
+        "total_elapsed_seconds": 202.72,
+        "model_calls_per_root_verified": 11.33,
+        "seconds_per_root_verified": 67.57,
+        "first_blockers": {}
+      },
+      "strict": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 37,
+        "total_tool_calls": 29,
+        "agent_tool_calls_per_root_verified": 9.67,
+        "total_elapsed_seconds": 225.17,
+        "model_calls_per_root_verified": 12.33,
+        "seconds_per_root_verified": 75.06,
+        "first_blockers": {}
+      }
+    },
+    "arena_q_restart": {
+      "monotonic": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 39,
+        "total_tool_calls": 29,
+        "agent_tool_calls_per_root_verified": 9.67,
+        "total_elapsed_seconds": 207.57,
+        "model_calls_per_root_verified": 13.0,
+        "seconds_per_root_verified": 69.19,
+        "first_blockers": {}
+      },
+      "strict": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 36,
+        "total_tool_calls": 26,
+        "agent_tool_calls_per_root_verified": 8.67,
+        "total_elapsed_seconds": 194.78,
+        "model_calls_per_root_verified": 12.0,
+        "seconds_per_root_verified": 64.93,
+        "first_blockers": {}
+      }
+    },
+    "node_unique": {
+      "monotonic": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 27,
+        "total_tool_calls": 18,
+        "agent_tool_calls_per_root_verified": 6.0,
+        "total_elapsed_seconds": 117.39,
+        "model_calls_per_root_verified": 9.0,
+        "seconds_per_root_verified": 39.13,
+        "first_blockers": {}
+      },
+      "strict": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 27,
+        "total_tool_calls": 18,
+        "agent_tool_calls_per_root_verified": 6.0,
+        "total_elapsed_seconds": 115.94,
+        "model_calls_per_root_verified": 9.0,
+        "seconds_per_root_verified": 38.65,
+        "first_blockers": {}
+      }
+    }
+  },
+  "protocol_summary": {
+    "current": {
+      "positive_aggregation_rate": {
+        "numerator": 7,
+        "denominator": 10,
+        "percent": 70.0
+      },
+      "positive_receipt_rate": {
+        "numerator": 7,
+        "denominator": 10,
+        "percent": 70.0
+      },
+      "aggregation_false_accept_rate": {
+        "numerator": 9,
+        "denominator": 12,
+        "percent": 75.0
+      },
+      "final_false_accept_rate": {
+        "numerator": 9,
+        "denominator": 12,
+        "percent": 75.0
+      }
+    },
+    "monotonic": {
+      "positive_aggregation_rate": {
+        "numerator": 9,
+        "denominator": 10,
+        "percent": 90.0
+      },
+      "positive_receipt_rate": {
+        "numerator": 9,
+        "denominator": 10,
+        "percent": 90.0
+      },
+      "aggregation_false_accept_rate": {
+        "numerator": 9,
+        "denominator": 12,
+        "percent": 75.0
+      },
+      "final_false_accept_rate": {
+        "numerator": 0,
+        "denominator": 12,
+        "percent": 0.0
+      }
+    },
+    "strict": {
+      "positive_aggregation_rate": {
+        "numerator": 9,
+        "denominator": 10,
+        "percent": 90.0
+      },
+      "positive_receipt_rate": {
+        "numerator": 9,
+        "denominator": 10,
+        "percent": 90.0
+      },
+      "aggregation_false_accept_rate": {
+        "numerator": 0,
+        "denominator": 12,
+        "percent": 0.0
+      },
+      "final_false_accept_rate": {
+        "numerator": 0,
+        "denominator": 12,
+        "percent": 0.0
+      }
+    }
+  },
+  "correct_evidence_preserved": {
+    "current": {
+      "numerator": 7,
+      "denominator": 7,
+      "percent": 100.0
+    },
+    "monotonic": {
+      "numerator": 9,
+      "denominator": 9,
+      "percent": 100.0
+    }
+  },
+  "paired_handoffs": {
+    "arena_arrow": {
+      "monotonic": {
+        "numerator": 2,
+        "denominator": 2,
+        "percent": 100.0
+      },
+      "strict": {
+        "numerator": 2,
+        "denominator": 2,
+        "percent": 100.0
+      }
+    },
+    "arena_q_restart": {
+      "monotonic": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "strict": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      }
+    },
+    "node_unique": {
+      "monotonic": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "strict": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      }
+    }
+  },
+  "same_input_hashes": true,
+  "fixed_component_pins_valid": true,
+  "final_receipt_gate_changed": false,
+  "default_changed": false,
+  "hypothesis_confirmed_on_tested_sample": true,
+  "fresh_root_rate_not_lower_by_case": true,
+  "paired_child_rate_not_lower_by_case": true,
+  "protocol_outcomes": [
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "INVALID_RECEIPT",
+          "metadata_status": "AVAILABLE",
+          "decision": "SEMANTIC_RESCUE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence",
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "target missing or different",
+            "observed surface differs",
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "target missing or different",
+            "observed surface differs",
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence",
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "requirement missing or different"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "requirement missing or different"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "INVALID_RECEIPT",
+          "metadata_status": "AVAILABLE",
+          "decision": "SEMANTIC_RESCUE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PASS",
+          "reasons": [],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence",
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "target missing or different",
+            "observed surface differs",
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "target missing or different",
+            "observed surface differs",
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "fresh behavior does not cover required assertions"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence",
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "requirement missing or different"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "requirement missing or different"
+          ],
+          "inventory_status": "AVAILABLE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "arena.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "declared evidence requirement differs from approved requirements"
+      ],
+      "aggregation_failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence behavior is not bound to required verification"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "declared evidence behavior is not bound to required verification"
+      ],
+      "aggregation_failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target"
+      ],
+      "aggregation_failure_codes": [],
+      "strict_decisions": null,
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "declared evidence target differs from required verification target"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": null,
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "unrelated.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "strict",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "aggregation_failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "strict_decisions": [
+        {
+          "target": "unrelated.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable",
+            "target missing or different"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "unrelated.html",
+          "result": "PENDING",
+          "reasons": [
+            "required browser claim identity UNKNOWN",
+            "fresh browser PASS unavailable",
+            "target missing or different"
+          ],
+          "inventory_status": "UNKNOWN"
+        }
+      ],
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    }
+  ],
+  "upstream_exclusions": [
+    "timer_pause",
+    "python_clamp"
+  ],
+  "development_revision": "suite-v1 interrupted during implementation after skipped-browser empty artifact regression was found in paired Node replay. suite-v2 is the complete frozen-version comparison; pilot retained separately, not mixed into v2 rates.",
+  "evidence_paths": {
+    "suite": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2",
+    "probe": "D:\\projects\\Ai\\mini_hivo_experiment14\\evidence-v2\\comparison.json",
+    "handoffs": "D:\\projects\\Ai\\mini_hivo_experiment14\\handoffs-v2\\comparison.json"
+  }
+}
