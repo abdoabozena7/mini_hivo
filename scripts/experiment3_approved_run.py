@@ -31,6 +31,7 @@ def main():
         "current", "atomic_verified"), default="current")
     parser.add_argument("--integration-target-policy", choices=(
         "current", "resolved"), default="current")
+    parser.add_argument("--semantic-evidence-policy", choices=("current", "compatible"), default="current")
     parser.add_argument("--mission-advice-policy", choices=(
         "strict", "contract_fallback"), default="contract_fallback")
     args = parser.parse_args()
@@ -70,6 +71,7 @@ def main():
         verification_surface_policy=args.verification_surface_policy,
         child_receipt_policy=args.child_receipt_policy,
         integration_target_policy=args.integration_target_policy,
+        semantic_evidence_policy=args.semantic_evidence_policy,
         plan_approval_selector=select_only_approved_plan,
     )
     print("FINAL_STATUS:", result.get("status"), flush=True)

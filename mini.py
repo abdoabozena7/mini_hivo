@@ -40,6 +40,7 @@ from hivo.worker_progress import WorkerProgress
 from hivo import verification_environment as verification_env
 from hivo import verification_surfaces
 from hivo import integration_targets
+from hivo import evidence_compatibility as semantic_evidence
 from hivo.playbooks import classify_project, playbook_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
@@ -14826,6 +14827,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     ]
                 offered_names = {item["function"]["name"] for item in offered_tools}
             _update_verification_cycle(verification_cycle, name, args, result)
+            if RUN.get("semantic_evidence_policy") == "compatible" and name in {"run_file", "verify_web_app"}:
+                _collect_semantic_browser_evidence(name, result, task_id=task_id,
+                                                  source="controller_tool_result", requested_target=target)
             mutation_record = None if (context_mutation_blocked or impact_mutation_blocked) else mutation_failure_record(name, target, result, role=role)
             if mutation_record is not None:
                 RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
@@ -16680,6 +16684,8 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
         return result
 
     profile = infer_web_profile(task.get("goal", ""), contract or {})
+    semantic_before = (_semantic_subject(task.get("id"), route.get("target"))["hash"]
+                       if RUN.get("semantic_evidence_policy") == "compatible" else None)
     current_syntax_failures = _syntax_failures_for_target(syntax_failures, requested)
     if current_syntax_failures:
         result = _verification_cycle_syntax_failure(
@@ -16710,6 +16716,9 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
     result["verification_applicability"] = _update_verification_applicability_result(
         artifact, record_task, BROWSER_VERIFICATION, result,
     )
+    if RUN.get("semantic_evidence_policy") == "compatible":
+        _collect_semantic_browser_evidence("verify_web_app", result, task_id=task.get("id"),
+                                          source="controller_child_browser", subject_before_hash=semantic_before)
     if RUN.get("verification_environment_policy") == "resolved":
         status = verification_env.classify_browser_result(
             result, transaction=ACTIVE_TRANSACTION, workspace=WORKSPACE,
@@ -16850,6 +16859,79 @@ def _verification_applicability_from_results(builder_result, falsifier_result=No
     return None
 
 
+def _semantic_execution_contract(child_id):
+    task = TASKS.get(str(child_id), {})
+    return (task.get("execution_contract") or RUN.get("execution_contract_by_id", {}).get(str(child_id)) or {})
+
+
+def _semantic_subject(child_id, target):
+    contract = _semantic_execution_contract(child_id)
+    return _integration_subject_fingerprint(WORKSPACE, list(contract.get("allowed_inspection_paths", [])) + [target])
+
+
+def _semantic_required_claims(child_id, target):
+    contract = _semantic_execution_contract(child_id)
+    subject = _semantic_subject(child_id, target)
+    requirements = [r for r in contract.get("requirements", [])
+                    if isinstance(r, dict) and r.get("requirement_id") in contract.get("requirement_ids", [])]
+    claims = semantic_evidence.required_claims(
+        requirements, contract_hash=contract.get("contract_hash"), child_id=str(child_id), target=target,
+        subject_hash=subject["hash"], subject_paths=[p["path"] for p in subject["paths"]],
+    ) if contract.get("contract_hash") else []
+    return contract, subject, claims
+
+
+def _collect_semantic_browser_evidence(tool, result, *, task_id, source,
+                                       subject_before_hash=None, requested_target=None):
+    if tool == "run_file" and Path(str(requested_target or "")).suffix.casefold() not in {".html", ".htm"}:
+        return []
+    try:
+        payload = json.loads(result) if isinstance(result, str) else result
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    target = payload.get("resolved_entrypoint") or payload.get("entry_path")
+    if not semantic_evidence.target_identity(target):
+        return []
+    contract, subject, claims = _semantic_required_claims(task_id, target)
+    records = semantic_evidence.normalize_browser_result(
+        payload, claims, tool=tool, source=source,
+        subject_before_hash=subject_before_hash or subject["hash"], subject_after_hash=subject["hash"],
+    )
+    existing = {r["record_hash"] for r in RUN.get("canonical_evidence_records", [])}
+    fresh = [r for r in records if r["record_hash"] not in existing]
+    if fresh:
+        directory = WORKSPACE / EVIDENCE_DIR / "semantic_evidence"
+        directory.mkdir(parents=True, exist_ok=True)
+        raw_hash = semantic_evidence.canonical_hash(payload)
+        (directory / (raw_hash + ".raw.json")).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        for record in fresh:
+            (directory / (record["record_hash"] + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+            record_run_event("canonical_evidence_record", child_id=task_id, record_hash=record["record_hash"],
+                             requirement_id=record["requirement_id"], obligation_id=record["obligation_id"],
+                             target=record["target"], assertion=record["assertion"], result=record["result"], tool=tool)
+        RUN.setdefault("canonical_evidence_records", []).extend(copy.deepcopy(fresh))
+    return records
+
+
+def _semantic_browser_assessments(artifact):
+    child_id = str(artifact.get("child_id"))
+    assessments = {}
+    for route in artifact.get("verification_routes", []):
+        if (route.get("kind") != BROWSER_VERIFICATION or not route.get("target")
+                or route.get("authority_id") or route.get("authority_type") or route.get("oracle_id")):
+            continue
+        contract, subject, claims = _semantic_required_claims(child_id, route["target"])
+        assessment = semantic_evidence.assess(claims, RUN.get("canonical_evidence_records", []),
+                                              required_requirement_ids=contract.get("requirement_ids", []))
+        assessments[str(route["target"])] = assessment
+        record_run_event("semantic_evidence_assessed", child_id=child_id, target=route["target"],
+                         status=assessment["status"], covered_requirement_ids=assessment["covered_requirement_ids"],
+                         claim_decisions=assessment["claim_decisions"])
+    return assessments
+
+
 def _verification_aggregation(builder_result, falsifier_result=None, browser_result=None):
     artifact = _verification_applicability_from_results(
         builder_result, falsifier_result, browser_result,
@@ -16880,10 +16962,13 @@ def _verification_aggregation(builder_result, falsifier_result=None, browser_res
         verification = builder_result.get("verification")
         if isinstance(verification, dict):
             coverage = verification.get("verification_obligation_coverage")
+    semantic_routes = (_semantic_browser_assessments(artifact)
+                       if RUN.get("semantic_evidence_policy") == "compatible" else None)
     aggregation = aggregate_verification_evidence(
         artifact, evidence, browser_result,
         execution_obligation_evidence=obligation_evidence,
         verification_obligation_coverage=coverage,
+        semantic_browser_evidence=semantic_routes,
     )
     if VERIFICATION_EVIDENCE_UNAVAILABLE in aggregation.get("failure_codes", []):
         RUN["verification_evidence_unavailable"] = RUN.get(
@@ -17021,6 +17106,7 @@ def _stage5b_child_receipt(task, result, parent_contract=None):
             expected_contract_hash=contract.get("contract_hash"),
             expected_node_ids=task.get("plan_node_ids", []),
             expected_requirement_ids=contract.get("requirement_ids", []),
+            expected_requirements=contract.get("requirements", []) if "semantic_browser_evidence" in receipt else None,
         )
         record_run_event(
             "atomic_child_receipt_checked", child_id=receipt.get("child_id"),
@@ -19631,6 +19717,41 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
     return projection, mission
 
 
+def _commit_verified_leaf(task, contract, builder, falsifier, browser, gate, memory):
+    """Existing post-verification impact and commit boundary, also resumable."""
+    if gate.get("passed") is not True:
+        raise ValueError("verified leaf commit requires a passing evidence gate")
+    impact_contract = _accepted_impact_contract_for_result(task, builder)
+    if task.get("impact_contract_required") and (
+        impact_contract is not None or _impact_result_requires_artifact(builder)
+    ):
+        impact_comparison = _impact_post_mutation_check(
+            impact_contract, verification_result=gate,
+            verification_evidence=merged_verification_evidence(builder, falsifier),
+            task_id=task.get("id", "ROOT"), task=task,
+        )
+        task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
+        if not impact_comparison.get("passed"):
+            rollback_transaction()
+            task["impact_contract_status"] = impact_comparison.get("status")
+            return {"status": "failed",
+                    "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
+                    "summary": "pre-mutation impact contract did not match the verified mutation",
+                    "memory": memory, "builder": builder, "falsifier": falsifier, "browser": browser, "gate": gate,
+                    "impact_contract": impact_contract, "impact_comparison": impact_comparison,
+                    "recovery_required": True}
+    changed = commit_transaction()
+    task["changed_files"] = [str(Path(path).relative_to(WORKSPACE)) if Path(path).is_relative_to(WORKSPACE) else str(path)
+                             for path in changed]
+    remember_verified_outcome(task, contract, builder["summary"], changed)
+    result = {"status": "done", "summary": builder["summary"], "memory": memory, "builder": builder,
+              "falsifier": falsifier, "browser": browser, "gate": gate, "changed_files": changed,
+              "impact_contract": task.get("impact_contract") or impact_contract,
+              "impact_comparison": task.get("impact_contract_comparison")}
+    attach_verified_manifest(task, result)
+    return result
+
+
 def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None,
                  strategy_context=None):
     if task.get("kind") == "integration":
@@ -19774,41 +19895,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}", role="Quality Review",
           task=task["id"], action="deterministic evidence gate")
     if gate["passed"]:
-        impact_contract = _accepted_impact_contract_for_result(task, builder)
-        if task.get("impact_contract_required") and (
-            impact_contract is not None or _impact_result_requires_artifact(builder)
-        ):
-            impact_comparison = _impact_post_mutation_check(
-                impact_contract,
-                verification_result=gate,
-                verification_evidence=merged_verification_evidence(builder, falsifier),
-                task_id=task.get("id", "ROOT"),
-                task=task,
-            )
-            task["impact_contract_comparison"] = copy.deepcopy(impact_comparison)
-            if not impact_comparison.get("passed"):
-                rollback_transaction()
-                task["impact_contract_status"] = impact_comparison.get("status")
-                return {
-                    "status": "failed",
-                    "failure_type": impact_comparison.get("failure_type") or stage10_impact.IMPACT_VERIFICATION_FAILED,
-                    "summary": "pre-mutation impact contract did not match the verified mutation",
-                    "memory": memory, "builder": builder, "falsifier": falsifier,
-                    "browser": browser, "gate": gate,
-                    "impact_contract": impact_contract,
-                    "impact_comparison": impact_comparison,
-                    "recovery_required": True,
-                }
-        changed = commit_transaction()
-        task["changed_files"] = [str(Path(path).relative_to(WORKSPACE)) if Path(path).is_relative_to(WORKSPACE) else str(path)
-                                 for path in changed]
-        remember_verified_outcome(task, contract, builder["summary"], changed)
-        result = {"status": "done", "summary": builder["summary"], "memory": memory, "builder": builder,
-                  "falsifier": falsifier, "browser": browser, "gate": gate, "changed_files": changed,
-                  "impact_contract": task.get("impact_contract") or impact_contract,
-                  "impact_comparison": task.get("impact_contract_comparison")}
-        attach_verified_manifest(task, result)
-        return result
+        return _commit_verified_leaf(task, contract, builder, falsifier, browser, gate, memory)
 
     failure_type = classify_failure(builder, gate, browser, falsifier)
     if failure_type != "IMPLEMENTATION_ERROR":
@@ -26912,7 +26999,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           verification_environment_policy="current",
                           verification_surface_policy="current",
                           child_receipt_policy="current",
-                          integration_target_policy="current"):
+                          integration_target_policy="current", semantic_evidence_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -26931,6 +27018,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown child receipt policy")
     if integration_target_policy not in {"current", "resolved"}:
         raise ValueError("unknown integration target policy")
+    if semantic_evidence_policy not in {"current", "compatible"}:
+        raise ValueError("unknown semantic evidence policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -26971,6 +27060,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["verification_surface_policy"] = verification_surface_policy
     RUN["child_receipt_policy"] = child_receipt_policy
     RUN["integration_target_policy"] = integration_target_policy
+    RUN["semantic_evidence_policy"] = semantic_evidence_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29546,6 +29636,7 @@ def parse_args():
                         default="current")
     parser.add_argument("--integration-target-policy", choices=("current", "resolved"),
                         default="current")
+    parser.add_argument("--semantic-evidence-policy", choices=("current", "compatible"), default="current")
     parser.add_argument("--workspace")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
@@ -29630,6 +29721,9 @@ def main():
         integration_target_policy = getattr(args, "integration_target_policy", "current")
         integration_kwargs = ({"integration_target_policy": integration_target_policy}
                               if integration_target_policy != "current" else {})
+        semantic_evidence_policy = getattr(args, "semantic_evidence_policy", "current")
+        semantic_kwargs = ({"semantic_evidence_policy": semantic_evidence_policy}
+                           if semantic_evidence_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
@@ -29640,6 +29734,7 @@ def main():
                 **surface_kwargs,
                 **receipt_kwargs,
                 **integration_kwargs,
+                **semantic_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29652,6 +29747,7 @@ def main():
                 **surface_kwargs,
                 **receipt_kwargs,
                 **integration_kwargs,
+                **semantic_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

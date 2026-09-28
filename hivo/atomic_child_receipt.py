@@ -9,7 +9,9 @@ import tempfile
 from hivo.integration_gate import canonical_hash, create_verified_child_receipt
 from hivo.integration_gate import validate_verified_child_receipt
 from hivo.integration_gate import _artifact_from_inputs, _aggregation_from_inputs
+from hivo.integration_gate import fingerprint_dependency_paths
 from hivo.verification_routing import requires_execution_verification_closure
+from hivo import evidence_compatibility as semantic_evidence
 
 
 def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
@@ -28,6 +30,15 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
             and not requires_execution_verification_closure(aggregation)
             and not isinstance(aggregation.get("execution_verification_closure"), dict)):
         aggregation.pop("required_execution_verification_set", None)
+    semantic = aggregation.get("semantic_browser_evidence")
+    if semantic is not None:
+        evidence = list(kwargs.get("verification_evidence") or result.get("verification_evidence") or [])
+        for assessment in semantic.values():
+            evidence.extend({"tool": r["provenance"]["tool"], "target": r["target"], "result": {
+                "passed": r["result"] == "PASS", "canonical_record_hash": r["record_hash"],
+                "requirement_id": r["requirement_id"], "obligation_id": r["obligation_id"]}}
+                for r in assessment["canonical_evidence_records"])
+        kwargs["verification_evidence"] = evidence
     receipt = create_verified_child_receipt(
         task, result, verification_aggregation=aggregation,
         verification_applicability=verification_applicability, **kwargs,
@@ -43,6 +54,10 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
     receipt["verification_evidence_hash"] = canonical_hash(receipt.get("verification_evidence", []))
     receipt["subject_after_hash"] = receipt.get("verified_subject_state_hash")
     receipt["contract_hash"] = (receipt.get("authority") or {}).get("execution_contract_hash")
+    if semantic is not None:
+        receipt["semantic_browser_evidence"] = copy.deepcopy(semantic)
+        receipt["semantic_requirements"] = copy.deepcopy(contract.get("requirements", []))
+        receipt["semantic_evidence_hash"] = canonical_hash(semantic)
     receipt["receipt_hash"] = canonical_hash({
         key: value for key, value in receipt.items() if key != "receipt_hash"
     })
@@ -50,7 +65,8 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
 
 
 def validate_atomic_child_receipt(receipt, *, workspace=None, expected_contract_hash=None,
-                                  expected_node_ids=None, expected_requirement_ids=None):
+                                  expected_node_ids=None, expected_requirement_ids=None,
+                                  expected_requirements=None):
     checked = validate_verified_child_receipt(receipt, workspace=workspace)
     value = receipt if isinstance(receipt, dict) else {}
     errors = list(checked.get("errors", []))
@@ -79,6 +95,28 @@ def validate_atomic_child_receipt(receipt, *, workspace=None, expected_contract_
         errors.append("approved node coverage missing")
     if expected_requirement_ids and not set(expected_requirement_ids).issubset(value.get("requirement_ids") or []):
         errors.append("approved requirement coverage missing")
+    if "semantic_browser_evidence" in value:
+        semantic = value["semantic_browser_evidence"]
+        requirements = expected_requirements if expected_requirements is not None else value.get("semantic_requirements", [])
+        if value.get("semantic_evidence_hash") != canonical_hash(semantic) or not semantic:
+            errors.append("semantic evidence hash or inventory is invalid")
+        browser_targets = {r.get("target") for r in value.get("verification_routes", []) if r.get("kind") == "BROWSER"}
+        for target, assessment in semantic.items():
+            records = assessment.get("canonical_evidence_records", [])
+            claims = assessment.get("required_claims", [])
+            if target not in browser_targets or not claims or not records:
+                errors.append("semantic browser target has no bound claims/evidence")
+                continue
+            subject = fingerprint_dependency_paths(workspace, claims[0]["subject_paths"])
+            expected_claims = semantic_evidence.required_claims(
+                requirements, contract_hash=value.get("contract_hash"), child_id=value.get("child_id"), target=target,
+                subject_hash=subject["hash"], subject_paths=[p["path"] for p in subject["paths"]],
+            )
+            if claims != expected_claims:
+                errors.append("semantic claim identity differs from approved requirements/current subject")
+            checked_semantic = semantic_evidence.assess(expected_claims, records, required_requirement_ids=value.get("requirement_ids", []))
+            if checked_semantic["status"] != "PASS" or assessment.get("status") != "PASS":
+                errors.append("semantic evidence does not cover every required assertion")
     return {"valid": not errors, "verified": not errors, "errors": errors,
             "fresh": checked.get("fresh")}
 

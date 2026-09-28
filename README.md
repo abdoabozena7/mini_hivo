@@ -688,3 +688,40 @@ Source/input hashes, repeat decision hashes, fresh browser results, model and
 Repairer call counts are recorded separately. A passing handoff stops at
 `RECEIPT_NOT_REPLAYED`: the normal post-verification impact/commit/receipt
 lifecycle must still run before a child can claim verification.
+
+## Experiment 11 — Semantic Evidence Compatibility
+
+Opt in with `--semantic-evidence-policy compatible`; `current` remains the
+default. Keep every other Experiment 10 policy, model, approved plan and
+28-step Worker budget fixed. The approved-run harness accepts the same flag.
+
+For legacy browser routes, the controller retains full executed verifier
+results before their tool-history projection is shortened. It creates
+`CanonicalEvidenceRecord` artifacts under `.agent_evidence/semantic_evidence/`.
+Identity binds the child and approved contract, requirement ID and text hash,
+browser target/file surface, assertion and its parameters, and current source
+fingerprint. The original tool remains provenance. A page-load PASS, Worker
+prose, another input key, another target/requirement, missing interactions,
+stale source, or a failed terminal case cannot prove the requested behavior.
+Conflicting executed FAIL evidence is retained and prevents acceptance.
+
+Only assertions already supported by the existing browser verifier can be
+normalized; unsupported requirements remain unresolved. Syntax, focused tests,
+explicit approved verification authorities and direct-oracle closure checks
+keep their existing gates. Atomic child receipts retain the canonical records
+and recheck their hashes, approved claims, complete requirement coverage and
+source freshness. Parent integration still executes fresh verification.
+
+Compare the historical failing candidate through fresh browser verification
+and the normal impact/commit/receipt boundary:
+
+```powershell
+.venv\Scripts\python.exe scripts/experiment11_evidence_probe.py --run-file <old-run.jsonl> --recovery-capture <full-capture.json> --output-dir <new-directory>
+```
+
+The old archive stores compact tool payloads. Recovery of an accepted Impact
+Contract requires its content hash to match the original authorization event,
+and matching execution contract, context anchor and transaction source bytes.
+The comparison discloses that recovery and does not claim a fresh Worker run
+or parent proof. Run fresh approved end-to-end trials separately, each in a
+clean workspace; include upstream failures in the denominator.

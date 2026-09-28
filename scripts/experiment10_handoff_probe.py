@@ -20,7 +20,7 @@ from hivo.integration_gate import canonical_hash
 RUN_FIELDS = ("source_contract", "project_invariants", "repository_evidence", "planning_route", "impact_planning_required",
               "plan_approval", "approved_plan_snapshot", "approved_change_plan", "execution_contracts",
               "execution_contract_by_id", "execution_contract_status", "verification_environment_policy",
-              "verification_surface_policy", "child_receipt_policy", "integration_target_policy")
+              "verification_surface_policy", "child_receipt_policy", "integration_target_policy", "semantic_evidence_policy")
 
 
 def read_run(path):

@@ -2102,6 +2102,7 @@ def _aggregate_verification_routes(
     artifact: dict[str, Any],
     evidence: list[dict[str, Any]],
     browser_result: dict | None,
+    semantic_browser_evidence: dict | None = None,
 ) -> dict[str, Any]:
     routes = _authority_routes(artifact)
     actual_passes: list[dict[str, Any]] = []
@@ -2129,6 +2130,23 @@ def _aggregate_verification_routes(
             route["result"] = BLOCKED_REQUIRED_TARGET_MISSING
             required_missing.append(route)
             actual_failures.append(route)
+            continue
+        # Experiment 11 applies to legacy browser routes. Approved authority
+        # and direct-oracle receipt/closure checks retain their exact routing.
+        semantic = (semantic_browser_evidence or {}).get(str(route.get("target")))
+        if (kind == BROWSER and isinstance(semantic, dict)
+                and not _route_authority_key(route) and not route.get("authority_type")
+                and not _is_direct_route(route)):
+            route["result"] = semantic["status"]
+            route["semantic_evidence"] = {
+                "required_requirement_ids": semantic["required_requirement_ids"],
+                "covered_requirement_ids": semantic["covered_requirement_ids"],
+                "record_hashes": [r["record_hash"] for r in semantic["canonical_evidence_records"]],
+            }
+            if route["result"] == PASS:
+                actual_passes.append(route)
+            elif route["result"] == FAIL:
+                actual_failures.append(route)
             continue
         matched = [
             item for item in evidence
@@ -2204,11 +2222,14 @@ def aggregate_verification_evidence(
     *,
     execution_obligation_evidence: Iterable[dict] | None = None,
     verification_obligation_coverage: dict | None = None,
+    semantic_browser_evidence: dict | None = None,
 ) -> dict:
     """Aggregate every required authority, including a direct oracle."""
     artifact = applicability if isinstance(applicability, dict) else {}
     evidence = [item for item in (execution_evidence or []) if isinstance(item, dict)]
-    aggregation = _aggregate_verification_routes(artifact, evidence, browser_result)
+    aggregation = _aggregate_verification_routes(artifact, evidence, browser_result, semantic_browser_evidence)
+    if semantic_browser_evidence is not None:
+        aggregation["semantic_browser_evidence"] = semantic_browser_evidence
     required_set = build_required_execution_verification_set(artifact)
     closure = None
     if requires_execution_verification_closure(artifact):
