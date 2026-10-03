@@ -1,0 +1,496 @@
+{
+  "experiment": 17,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "fixed_semantic_policy": "strict",
+  "fixed_grounding_policy": "evidence_bound",
+  "classification_policy": "field_scoped",
+  "protocol": [
+    {
+      "case_id": "timer_pause",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    }
+  ],
+  "fresh": [
+    {
+      "case_id": "timer_pause",
+      "repeat": 1,
+      "profile_policy_pinned": true,
+      "expected_profile": "timer",
+      "child_browser_checks": 2,
+      "child_browser_profiles_correct": 2,
+      "child_browser_behavior_passes": 2,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 7,
+      "grounding_terminal_failure": true,
+      "formal_child_verification_started": true,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 320.735,
+        "model_calls": 48,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: child verification did not produce a verified receipt; semantic browser target has no bound claims/evidence"
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\timer_pause\\evidence_bound-1"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 2,
+      "profile_policy_pinned": true,
+      "expected_profile": "timer",
+      "child_browser_checks": 0,
+      "child_browser_profiles_correct": 0,
+      "child_browser_behavior_passes": 0,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 3,
+      "grounding_terminal_failure": true,
+      "formal_child_verification_started": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 49.137,
+        "model_calls": 15,
+        "stage": "MUTATION_GROUNDING",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\timer_pause\\evidence_bound-2"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 3,
+      "profile_policy_pinned": true,
+      "expected_profile": "timer",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 11,
+      "grounding_terminal_failure": true,
+      "formal_child_verification_started": true,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 235.513,
+        "model_calls": 60,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: child verification did not produce a verified receipt; semantic browser target has no bound claims/evidence"
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\timer_pause\\evidence_bound-3"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 1,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_arrow\\evidence_bound-1"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 2,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_arrow\\evidence_bound-2"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 3,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_arrow\\evidence_bound-3"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 1,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_q_restart\\evidence_bound-1"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 2,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_q_restart\\evidence_bound-2"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 3,
+      "profile_policy_pinned": true,
+      "expected_profile": "game",
+      "child_browser_checks": 1,
+      "child_browser_profiles_correct": 1,
+      "child_browser_behavior_passes": 1,
+      "child_browser_environment_errors": 0,
+      "first_legal_mutation": true,
+      "applied_mutations": 1,
+      "grounding_terminal_failure": false,
+      "formal_child_verification_started": true,
+      "child_verified": true,
+      "root_verified": true,
+      "first_reported_blocker": null,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence_workspace": "D:\\projects\\Ai\\mini_hivo_experiment17\\isolated-v2\\arena_q_restart\\evidence_bound-3"
+    }
+  ],
+  "summary": {
+    "timer_pause": {
+      "first_legal_mutation": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "formal_child_verification": {
+        "numerator": 2,
+        "denominator": 3,
+        "percent": 66.67
+      },
+      "child_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "root_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "grounding_terminal_failure": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "correct_child_profiles": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "child_browser_behavior_passes": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "first_reported_blockers": {
+        "CHILD_RECEIPT_INVALID": 2,
+        "MUTATION_TARGET_UNRESOLVED": 1
+      }
+    },
+    "arena_arrow": {
+      "first_legal_mutation": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "formal_child_verification": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "child_verified": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "root_verified": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "grounding_terminal_failure": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "correct_child_profiles": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "child_browser_behavior_passes": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "first_reported_blockers": {}
+    },
+    "arena_q_restart": {
+      "first_legal_mutation": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "formal_child_verification": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "child_verified": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "root_verified": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "grounding_terminal_failure": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "correct_child_profiles": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "child_browser_behavior_passes": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "first_reported_blockers": {}
+    }
+  },
+  "safety_counters": {
+    "mutation_scope_violations": 0,
+    "dnt_execution_violations": 0,
+    "execution_contract_scope_violations": 0,
+    "impact_preservation_violations": 0,
+    "invariant_violations_detected": 0,
+    "impact_out_of_scope_changes": 0
+  },
+  "identity_mutation_checks": 27,
+  "production_default_changed": false,
+  "limits": "The deterministic protocol uses nine frozen contract instances and 27 identity-field perturbations. Fresh execution is three attempts per task from frozen approved contracts, not an estimate for all domains."
+}

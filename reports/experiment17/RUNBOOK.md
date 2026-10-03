@@ -33,7 +33,11 @@ Use fresh directories and the same installed model/dependencies.
 .venv\Scripts\python.exe -X utf8 scripts/experiment17_report.py --suite D:\projects\Ai\mini_hivo_experiment17\new-suite --output-dir D:\projects\Ai\mini_hivo_experiment17\new-report
 ```
 
-The report currently reads the original frozen-contract suites named in its
-source for the deterministic comparison. Fresh workspaces and full original
-logs remain outside this repo. The fresh-run report has not been generated or
-committed yet.
+The report reads the original frozen-contract suites named in its source for
+the deterministic comparison. The valid fresh suite is
+`D:\projects\Ai\mini_hivo_experiment17\isolated-v2`; its manifest is saved in
+this report directory. Fresh workspaces and full original logs remain outside
+the repo. An earlier attempt in the shared checkout was interrupted by a
+checkout change that broke the source pin before trial 6. Its partial runs are
+excluded from all reported fresh-run denominators. The isolated suite uses one
+stable source pin for all nine trials.
