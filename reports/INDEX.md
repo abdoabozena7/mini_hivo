@@ -20,7 +20,7 @@ This index identifies the final report and machine-readable measurements for eve
 | 14 | [report](experiment14/experiment14-report.md) | [JSON](experiment14/experiment14-results.json) | [Evidence protocol](experiment14/supporting/evidence-v2/comparison.json), [handoffs](experiment14/supporting/handoffs-v2/comparison.json); v1 retained |
 | 15 | [report](experiment15/experiment15-report.md) | [JSON](experiment15/experiment15-results.json) | [Binding protocol](experiment15/supporting/binding-v2/comparison.json); v1 retained |
 | 16 | [report](experiment16/experiment16-report.md) | [JSON](experiment16/experiment16-results.json) | Timer/Python first-blocker diagnosis |
-| 17 | [runbook and status](experiment17/RUNBOOK.md) | **No completed final results yet** | Opt-in code and deterministic tests are committed; fresh run is in progress outside this repository |
+| 17 | [partial classification checkpoint](experiment17/classification-protocol.md) | [Protocol JSON](experiment17/classification-protocol.json); **no completed final run results yet** | [Runbook](experiment17/RUNBOOK.md); fresh execution is in progress outside this repository |
 
 The JSON files for Experiments 1–11 and the supporting comparison/matrix JSON for Experiments 12–15 were copied byte-for-byte from the local experiment directories. The source and repository copies were checked with SHA-256. Reports for Experiments 12–16 were already tracked. Raw workspaces, model transcripts, and some native verifier payloads remain outside Git; they are not silently counted as uploaded evidence.
 

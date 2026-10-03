@@ -20,6 +20,6 @@ Checkpoint: 2026-10-03. The core feature work preceding these experiments is alr
 | 14 | `b61c474` | Strict aggregation compatibility; [report](../reports/experiment14/experiment14-report.md) |
 | 15 | `e768fda` | Bounded evidence-to-edit binding; [report](../reports/experiment15/experiment15-report.md) |
 | 16 | `6eeca6c` | Timer/Python first-blocker isolation; [report](../reports/experiment16/experiment16-report.md) |
-| 17 | `cbed365` | Opt-in field-scoped browser classification, harness, and tests; **fresh-run report pending** |
+| 17 | `cbed365` | Opt-in field-scoped browser classification, harness, and tests; [deterministic checkpoint](../reports/experiment17/classification-protocol.md); **fresh-run report pending** |
 
 Commits preserve their original author and commit dates. Completed reports and numeric JSON results for Experiments 1–16 are indexed in [reports/INDEX.md](../reports/INDEX.md), along with the available comparison artifacts. Large raw run workspaces remain outside the Git repository, so GitHub does not contain every raw trace. Experiment 17 currently has a checked deterministic classification protocol but no completed fresh-run outcome.

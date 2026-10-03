@@ -1,0 +1,100 @@
+{
+  "experiment": 17,
+  "status": "deterministic_classification_protocol_only",
+  "source_contracts": "Three frozen Timer contracts from Experiment 16 and six frozen game contracts from Experiment 15",
+  "rows": [
+    {
+      "case_id": "timer_pause",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "timer",
+      "expected_kind": "timer",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 1,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 2,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 3,
+      "old_kind": "game",
+      "field_scoped_kind": "game",
+      "expected_kind": "game",
+      "identity_variants_unchanged": 3,
+      "input_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    }
+  ],
+  "summary": {
+    "timer_correct_current": 0,
+    "timer_correct_field_scoped": 3,
+    "timer_total": 3,
+    "game_correct_current": 6,
+    "game_correct_field_scoped": 6,
+    "game_total": 6,
+    "identity_perturbations_unchanged": 27,
+    "identity_perturbations_total": 27
+  },
+  "fresh_worker_results": "not_included",
+  "claim_scope": "Classifier behavior on frozen approved contracts; no Worker, Child, or Root success inferred"
+}
