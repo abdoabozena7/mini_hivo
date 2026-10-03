@@ -1,5 +1,7 @@
 # Mini Hivo
 
+**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md).
+
 Mini Hivo is a local coding-agent orchestrator pinned to one model:
 `gemma4:e4b`. Every model-backed role uses that exact model. Cross-model
 routing and fallback are intentionally disabled so experiment results remain
