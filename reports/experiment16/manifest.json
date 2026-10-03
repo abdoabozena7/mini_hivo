@@ -1,0 +1,72 @@
+{
+  "experiment": 16,
+  "cases": [
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "source": "timer.html",
+      "symbol": "pause",
+      "goal": "Fix Pause in the countdown timer so it freezes the visible time without resetting it, while preserving Start and Reset.",
+      "integration_target": "timer.html",
+      "expected_interactions": [
+        "timer_start_changes_visible_time",
+        "timer_pause_freezes_visible_time",
+        "timer_reset_restores_visible_time"
+      ],
+      "seed_sha256": {
+        "timer.html": "84fa3f7e5ef89445b6628a5d1b4f37501e7f68cfe318c5ea3d28dd5ac67a371d"
+      },
+      "approved_plan_hash": "cff3a6c590011c02d59aa6a0c6043e66713672c43029023af7ae842894c8d51a",
+      "execution_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "source": "numbers_api.py",
+      "symbol": "clamp_number",
+      "goal": "Fix clamp_number so values above upper clamp to upper, while preserving lower-bound clamping, values inside the bounds, and ValueError for inverted bounds.",
+      "test_target": "tests/test_clamp.py",
+      "integration_target": "python tests/test_clamp.py",
+      "expected_tests": 5,
+      "seed_sha256": {
+        "numbers_api.py": "c4cc50eb84c001013791ebe87f5b83f4250ca55eba96e0b2ad43d850b9712a4a",
+        "tests/test_clamp.py": "672a11da462960c302e33922201c41977c6d0181cd4159908c180790f357edcb"
+      },
+      "approved_plan_hash": "89cac93b5e756eaff5017f408b97924c3c30b14bfa41fdca130a67a2deaee374",
+      "execution_contract_hash": "dea8ea007ebc370daf1c92c79c3e7a2eec0e33b048a0db8989b3e4f5d8f61f99"
+    }
+  ],
+  "repeats": 3,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "policies": {
+    "planning_route": "decomposition_first_recursive",
+    "mission_advice_policy": "contract_fallback",
+    "worker_progress_policy": "progress_constrained",
+    "mutation_grounding_policy": "evidence_bound",
+    "target_locator_policy": "evidence_directed",
+    "verification_environment_policy": "resolved",
+    "verification_surface_policy": "discovery",
+    "child_receipt_policy": "atomic_verified",
+    "integration_target_policy": "resolved"
+  },
+  "fixed_semantic_evidence_policy": "strict",
+  "production_sha256": {
+    "mini.py": "c8ee02ba7153ee72e22db2c764480c00dc9727d9951154f91a4166f661f814b0",
+    "hivo/evidence_compatibility.py": "9b1614721414c6326b6828053ac1cdbfd4ce9474a75f61640af5d120fd5ec67a",
+    "hivo/atomic_child_receipt.py": "21e9c0e197f00469da57e6f4c7a950698ed0111269fb4a0aaebf70202e3493bd",
+    "hivo/verification_routing.py": "5489d09c51234f1e3717d4cb58619c9736574ceb010a9841f02c3ec6f9d62206",
+    "hivo/verification.py": "74cfde6c378a34799cb365507f7062fe6dcd27287a2ccd21aaebfcc7daaaf29c",
+    "hivo/verification_surfaces.py": "6b9e251b8373d00ae3ad94012d967735a0c66efda9b0dbc13a5d9473c96378fd",
+    "hivo/worker_progress.py": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+    "hivo/mutation_grounding.py": "11d318d175435ab05115d8c48a02da2b89143769bd71e0bdeea9331b790d4ac7",
+    "hivo/integration_targets.py": "e5b8bde6682e162a60c302de798843c25bcdbfc63ea6a26c56146e26332c41a5",
+    "hivo/evidence_monotonic.py": "2525c66cc0fa5cf74b70a1eb1eb8d39784b985522c3826485c1213a7bf4312c2",
+    "hivo/evidence_strict.py": "aefb9e8168a1d6a83bfd930894f6bc9b0f0c22d753279f7a9872c838601cfcc8"
+  },
+  "baseline_suite": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1",
+  "boundary": "frozen approved contract to child verification and parent proof",
+  "planning_cost_included": false,
+  "decision_changes": false,
+  "default_change_allowed": false
+}
