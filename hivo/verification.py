@@ -47,8 +47,31 @@ def interaction_expectations(profile: WebVerificationProfile) -> tuple[str, ...]
     )
 
 
-def infer_web_profile(task_text: str, contract: dict | None = None) -> WebVerificationProfile:
-    combined = f"{task_text} {json.dumps(contract or {}, ensure_ascii=False)}".lower()
+def _profile_semantic_text(task_text: str, contract: dict | None) -> str:
+    """Project-type evidence only; authority IDs, hashes and provenance are data."""
+    source = contract if isinstance(contract, dict) else {}
+    parts = [str(task_text or "")]
+    for field in ("goal", "original_goal", "requirements", "success_criteria",
+                  "allowed_mutation_paths", "allowed_inspection_paths", "target_paths",
+                  "integration_test_target", "verification_target", "entrypoint"):
+        value = source.get(field)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if isinstance(item, dict) and field in {"requirements", "success_criteria"}:
+                item = item.get("text")
+            if isinstance(item, str):
+                parts.append(item)
+    return " ".join(parts).lower()
+
+
+def infer_web_profile(task_text: str, contract: dict | None = None,
+                      *, classification_policy: str = "current") -> WebVerificationProfile:
+    if classification_policy == "current":
+        combined = f"{task_text} {json.dumps(contract or {}, ensure_ascii=False)}".lower()
+    elif classification_policy == "field_scoped":
+        combined = _profile_semantic_text(task_text, contract)
+    else:
+        raise ValueError("unknown verification classification policy")
     game = any(word in combined for word in ("game", "3d", "webgl", "three.js", "hovercraft"))
     timer = not game and any(word in combined for word in (
         "timer", "countdown", "pomodoro", "focus timer", "مؤقت", "عد تنازلي",

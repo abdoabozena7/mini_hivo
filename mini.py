@@ -3120,7 +3120,10 @@ def run_tool(name, args, role="System"):
                 route_artifact, None, BROWSER_VERIFICATION, unresolved,
             )
             return json.dumps(unresolved, ensure_ascii=False)
-        profile = infer_web_profile(str(active.get("goal") or "web"), active)
+        profile = infer_web_profile(
+            str(active.get("goal") or "web"), active,
+            classification_policy=RUN.get("verification_classification_policy", "current"),
+        )
         target_evidence = {
             "requested_from_node": args["path"],
             "project_invariants": active.get("project_invariants", RUN.get("project_invariants", [])),
@@ -16684,7 +16687,10 @@ def optional_browser_check(task, contract=None, syntax_failures=None, execution_
         )
         return result
 
-    profile = infer_web_profile(task.get("goal", ""), contract or {})
+    profile = infer_web_profile(
+        task.get("goal", ""), contract or {},
+        classification_policy=RUN.get("verification_classification_policy", "current"),
+    )
     semantic_before = (_semantic_subject(task.get("id"), route.get("target"))["hash"]
                        if RUN.get("semantic_evidence_policy") in {"compatible", "monotonic", "strict"} else None)
     current_syntax_failures = _syntax_failures_for_target(syntax_failures, requested)
@@ -17316,7 +17322,8 @@ def _execute_resolved_parent_verification(task, contract, readiness, resolution)
             verification_id = "PARENT-VERIFY-" + uuid.uuid4().hex
             before = _integration_subject_fingerprint(WORKSPACE, dependencies + [execution["target"]])
             profile = infer_web_profile(task.get("goal", ""), {
-                "requirements": [requirement["text"]], "constraints": contract.get("constraints", [])})
+                "requirements": [requirement["text"]], "constraints": contract.get("constraints", [])},
+                classification_policy=RUN.get("verification_classification_policy", "current"))
             if execution["tool"] == "verify_web_app":
                 payload = verify_browser_application(
                     execution["target"], f"{task.get('id')}-integration-{requirement['requirement_id']}",
@@ -27007,7 +27014,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           verification_environment_policy="current",
                           verification_surface_policy="current",
                           child_receipt_policy="current",
-                          integration_target_policy="current", semantic_evidence_policy="current"):
+                          integration_target_policy="current", semantic_evidence_policy="current",
+                          verification_classification_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -27028,6 +27036,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown integration target policy")
     if semantic_evidence_policy not in {"current", "compatible", "monotonic", "strict"}:
         raise ValueError("unknown semantic evidence policy")
+    if verification_classification_policy not in {"current", "field_scoped"}:
+        raise ValueError("unknown verification classification policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -27069,6 +27079,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["child_receipt_policy"] = child_receipt_policy
     RUN["integration_target_policy"] = integration_target_policy
     RUN["semantic_evidence_policy"] = semantic_evidence_policy
+    RUN["verification_classification_policy"] = verification_classification_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29640,6 +29651,8 @@ def parse_args():
                         default="current")
     parser.add_argument("--verification-surface-policy", choices=("current", "discovery"),
                         default="current")
+    parser.add_argument("--verification-classification-policy", choices=("current", "field_scoped"),
+                        default="current")
     parser.add_argument("--child-receipt-policy", choices=("current", "atomic_verified"),
                         default="current")
     parser.add_argument("--integration-target-policy", choices=("current", "resolved"),
@@ -29732,6 +29745,9 @@ def main():
         semantic_evidence_policy = getattr(args, "semantic_evidence_policy", "current")
         semantic_kwargs = ({"semantic_evidence_policy": semantic_evidence_policy}
                            if semantic_evidence_policy != "current" else {})
+        classification_policy = getattr(args, "verification_classification_policy", "current")
+        classification_kwargs = ({"verification_classification_policy": classification_policy}
+                                 if classification_policy != "current" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory)
         elif args.mode == "recursive":
@@ -29743,6 +29759,7 @@ def main():
                 **receipt_kwargs,
                 **integration_kwargs,
                 **semantic_kwargs,
+                **classification_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29756,6 +29773,7 @@ def main():
                 **receipt_kwargs,
                 **integration_kwargs,
                 **semantic_kwargs,
+                **classification_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

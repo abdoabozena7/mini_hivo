@@ -88,7 +88,11 @@ def execute_trial(directory, case_id, policy, repeat):
         raise ValueError("model differs from pinned experiment model")
     mini.reset_run("decomposition_first_recursive")
     mini.RUN.update(copy.deepcopy(POLICIES))
+    classification_policy = manifest.get("verification_classification_policy", "current")
+    if classification_policy not in {"current", "field_scoped"}:
+        raise ValueError("unknown verification classification policy in manifest")
     mini.RUN.update(semantic_evidence_policy="strict", mutation_grounding_policy=policy, experiment_case_id=case_id,
+        verification_classification_policy=classification_policy,
         project_mode=mini.EXISTING_PROJECT, impact_planning_required=True,
         repository_evidence=copy.deepcopy(approved["repository_evidence"]),
         task_brain=copy.deepcopy(approved["task_brain"]), task_brain_validation=copy.deepcopy(approved["task_brain_validation"]),
