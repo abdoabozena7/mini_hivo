@@ -1,0 +1,194 @@
+{
+  "candidate_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+  "original_sha256": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661",
+  "requirement": "Allow the R key to restart Hopline after game over or win, while preserving existing keyboard and touch controls.",
+  "direct": {
+    "current": {
+      "policy": "current",
+      "source_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+      "classification": "VERIFIER_UNAVAILABLE",
+      "passed": false,
+      "surface_type": null,
+      "selected_surface": null,
+      "behavior_test_executed": false,
+      "checks": [],
+      "failure_codes": [
+        "missing_game_bridge",
+        "missing_interaction",
+        "missing_interaction",
+        "missing_interaction",
+        "missing_interaction"
+      ]
+    },
+    "discovery": {
+      "policy": "discovery",
+      "source_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+      "classification": "PASS",
+      "passed": true,
+      "surface_type": "existing_app_hook",
+      "selected_surface": "__HOPLINE__",
+      "behavior_test_executed": true,
+      "checks": [
+        {
+          "name": "keyboard_movement",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        },
+        {
+          "name": "restart_resets_state",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": [
+            {
+              "setup": "forceCollision",
+              "precondition_met": true,
+              "passed": true
+            },
+            {
+              "setup": "forceWin",
+              "precondition_met": true,
+              "passed": true
+            }
+          ]
+        },
+        {
+          "name": "goal_win_state",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        },
+        {
+          "name": "touch_control",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        }
+      ],
+      "failure_codes": []
+    },
+    "original_control": {
+      "policy": "discovery",
+      "source_sha256": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661",
+      "classification": "TEST_FAILED",
+      "passed": false,
+      "surface_type": "existing_app_hook",
+      "selected_surface": "__HOPLINE__",
+      "behavior_test_executed": true,
+      "checks": [
+        {
+          "name": "keyboard_movement",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        },
+        {
+          "name": "restart_resets_state",
+          "executed": true,
+          "passed": false,
+          "terminal_cases": [
+            {
+              "setup": "forceCollision",
+              "precondition_met": true,
+              "passed": false
+            },
+            {
+              "setup": "forceWin",
+              "precondition_met": true,
+              "passed": false
+            }
+          ]
+        },
+        {
+          "name": "goal_win_state",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        },
+        {
+          "name": "touch_control",
+          "executed": true,
+          "passed": true,
+          "terminal_cases": []
+        }
+      ],
+      "failure_codes": [
+        "failed_interaction"
+      ]
+    }
+  },
+  "live_runs": [
+    {
+      "source_sha256": "20581f8bf2004baaf97f85dcf37ce41e9b1505a68a9d297804233ab2f65f0178",
+      "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approved": true,
+      "policy": "discovery",
+      "first_legal_mutation_step": 5,
+      "candidate_hashes": [
+        "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+      ],
+      "final_source_sha256": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661",
+      "browser_results": [
+        {
+          "task_id": "EXEC-001",
+          "status": "VERIFIER_UNAVAILABLE",
+          "resolved_entrypoint": "index.html",
+          "surface_type": null,
+          "behavior_test_executed": false,
+          "failure_codes": []
+        }
+      ],
+      "repairer_calls": 0,
+      "child_verified": false,
+      "child_receipt_verified": false,
+      "integration_readiness_reason": "NOT_READY_CHILD_FAILURE",
+      "integration_missing_coverage": [
+        "NODE-001"
+      ],
+      "root_verified": false,
+      "first_blocker": {
+        "stage": "CHILD_VERIFICATION",
+        "reason": "VERIFIER_UNAVAILABLE",
+        "detail": "verification failed: VERIFIER_UNAVAILABLE"
+      },
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "status": "failed"
+    },
+    {
+      "source_sha256": "20581f8bf2004baaf97f85dcf37ce41e9b1505a68a9d297804233ab2f65f0178",
+      "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approved": true,
+      "policy": "discovery",
+      "first_legal_mutation_step": 5,
+      "candidate_hashes": [],
+      "final_source_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+      "browser_results": [
+        {
+          "task_id": "EXEC-001",
+          "status": "PASS",
+          "resolved_entrypoint": "index.html",
+          "surface_type": "existing_app_hook",
+          "behavior_test_executed": true,
+          "failure_codes": []
+        }
+      ],
+      "repairer_calls": 0,
+      "child_verified": true,
+      "child_receipt_verified": false,
+      "integration_readiness_reason": "NOT_READY_CHILD_UNVERIFIED",
+      "integration_missing_coverage": [
+        "NODE-001"
+      ],
+      "root_verified": false,
+      "first_blocker": {
+        "stage": "PARENT_INTEGRATION",
+        "reason": "INTEGRATION_NOT_READY",
+        "detail": "approved plan execution graph is not ready for parent integration"
+      },
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "status": "failed"
+    }
+  ]
+}

@@ -1,0 +1,1381 @@
+{
+  "experiment": 12,
+  "mode": "reference_payload_and_adversarial_protocol_replay",
+  "model_calls": 0,
+  "Worker_or_root_success_claimed": false,
+  "outcomes": [
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 6,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 6,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 1,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 1,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 3,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 10,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 10,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 2,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 2,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 5,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED",
+        "VERIFICATION_EVIDENCE_UNAVAILABLE"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "failure_codes": [
+        "VERIFICATION_EVIDENCE_UNAVAILABLE",
+        "REQUIRED_VERIFICATION_NOT_RUN"
+      ],
+      "record_count": 0,
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false,
+      "aggregation_false_reject": false
+    }
+  ],
+  "provenance_limit": "Cross-tool alias and mismatch records are deliberately replayed protocol fixtures; native reference tool results are separately retained."
+}

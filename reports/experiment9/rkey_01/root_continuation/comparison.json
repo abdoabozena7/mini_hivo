@@ -1,0 +1,617 @@
+{
+  "comparison": "same candidate bytes and same canonical child receipts; new parent verification in resolved route",
+  "completion_mode": "continue_existing_verified_children",
+  "input_run": "D:\\projects\\Ai\\mini_hivo_experiment8\\rkey_01\\live_atomic\\.agent_experiment.jsonl",
+  "policies": {
+    "current": {
+      "status": "failed",
+      "integration_result": "INTEGRATION_FAILED",
+      "summary": "required integration target is unresolved",
+      "parent_verification_receipt": null,
+      "resolution": null,
+      "parent_verification_runs": [],
+      "parent_requirement_coverage": {},
+      "child_evidence_reused_as_proof": 0,
+      "source_sha256": {
+        "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+      },
+      "root_verified": false,
+      "root_verified_event": false,
+      "model_calls": 0,
+      "readiness": "READY",
+      "source_unchanged": true
+    },
+    "resolved": {
+      "status": "done",
+      "integration_result": "PARENT_VERIFIED",
+      "summary": "parent integration verified by real required evidence",
+      "parent_verification_receipt": {
+        "schema_version": "V21.5B",
+        "artifact_type": "ParentVerificationReceipt",
+        "parent_id": "ROOT",
+        "verified": true,
+        "receipt_status": "PARENT_VERIFIED",
+        "parent_contract_hash": null,
+        "plan_hash": null,
+        "readiness_hash": "08ecc883914582ca83dc8ec7c2e86f53d24cf4731bc4b4af1e5d1862b1de8324",
+        "child_receipts": [
+          {
+            "child_id": "EXEC-001",
+            "receipt_hash": "0160b5e8640011ba78e25ce62dece08ed03c7d2ae981a416101b2c85cf5554fe"
+          }
+        ],
+        "child_receipt_hashes": [
+          "0160b5e8640011ba78e25ce62dece08ed03c7d2ae981a416101b2c85cf5554fe"
+        ],
+        "execution_verification_closures": [],
+        "integration_routes": [
+          {
+            "kind": "INTEGRATION_TEST",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PENDING",
+            "reason_codes": [
+              "PARENT_INTEGRATION_RESPONSIBILITY"
+            ],
+            "evidence_refs": [
+              "parent:integration"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "verified_child_browser_target"
+          },
+          {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PENDING",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:ROOT",
+              "repo:entrypoint:index.html"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "explicit_parent_route",
+            "requested_from_node": null
+          }
+        ],
+        "integration_route_results": [
+          {
+            "kind": "INTEGRATION_TEST",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PASS",
+            "reason_codes": [
+              "PARENT_INTEGRATION_RESPONSIBILITY"
+            ],
+            "evidence_refs": [
+              "parent:integration"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "verified_child_browser_target"
+          },
+          {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PASS",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:ROOT",
+              "repo:entrypoint:index.html"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "explicit_parent_route",
+            "requested_from_node": null
+          }
+        ],
+        "integration_evidence": [
+          {
+            "tool": "verify_web_app",
+            "target": "index.html",
+            "result": {
+              "passed": true,
+              "verification_id": "PARENT-VERIFY-08319c666bee450c929a2bfb758c598b"
+            },
+            "verification_id": "PARENT-VERIFY-08319c666bee450c929a2bfb758c598b"
+          }
+        ],
+        "parent_contract_id": "ROOT",
+        "subject_state": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T080844-a280cedd/index.html",
+              "exists": true,
+              "sha256": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661",
+              "size": 31361
+            },
+            {
+              "path": ".agent_host_preflight.json",
+              "exists": true,
+              "sha256": "8e3b1961a62f22d017e77ee102e64dcf5f10f5da1c6a9483f0366b0860e14f0f",
+              "size": 3851
+            },
+            {
+              "path": "52706/index.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "55801/index.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "59701/index.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "index.html",
+              "exists": true,
+              "sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+              "size": 32172
+            },
+            {
+              "path": "package.json",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment8/rkey_01/live_atomic/index.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            }
+          ],
+          "hash": "58367ba59939b45d784af42ebd34f6579d2dbdcb5529f3fea33792bf6830e44d"
+        },
+        "provenance": {
+          "source": "deterministic_parent_integration_evidence",
+          "model_calls": 0,
+          "raw_worker_transcript_included": false,
+          "child_receipts_mutated": false,
+          "memory_promotion": false
+        },
+        "receipt_hash": "8228d96fcec8482f3dcc598a3ef9a34abe1b6528c97a13f4f9b449dab46b13fb"
+      },
+      "resolution": {
+        "artifact_type": "IntegrationTargetResolution",
+        "parent_id": "ROOT",
+        "input_readiness_hash": "5d28ac3520172ef825ff3790cd2f89d6450d5558310406529ca621210475e726",
+        "status": "RESOLVED",
+        "routes": [
+          {
+            "kind": "INTEGRATION_TEST",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PENDING",
+            "reason_codes": [
+              "PARENT_INTEGRATION_RESPONSIBILITY"
+            ],
+            "evidence_refs": [
+              "parent:integration"
+            ],
+            "resolution_source": "verified_child_browser_target",
+            "resolution_status": "RESOLVED"
+          },
+          {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "result": "PENDING",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:ROOT",
+              "repo:entrypoint:index.html"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "explicit_parent_route",
+            "requested_from_node": null
+          }
+        ],
+        "executions": [
+          {
+            "target": "index.html",
+            "tool": "verify_web_app",
+            "source": "verified_child_browser_target"
+          }
+        ],
+        "resolutions": [
+          {
+            "route_index": 0,
+            "kind": "INTEGRATION_TEST",
+            "resolved": true,
+            "candidates": [
+              {
+                "target": "index.html",
+                "tool": "verify_web_app",
+                "source": "verified_child_browser_target",
+                "rank": 100
+              }
+            ],
+            "target": "index.html",
+            "source": "verified_child_browser_target",
+            "tool": "verify_web_app"
+          },
+          {
+            "route_index": 1,
+            "kind": "BROWSER",
+            "resolved": true,
+            "candidates": [
+              {
+                "target": "index.html",
+                "tool": "verify_web_app",
+                "source": "explicit_parent_route",
+                "rank": 100
+              }
+            ],
+            "target": "index.html",
+            "source": "explicit_parent_route",
+            "tool": "verify_web_app"
+          }
+        ],
+        "model_calls": 0,
+        "child_evidence_reused_as_proof": 0,
+        "reason": null,
+        "resolution_hash": "0f33ef2457ec0da9b1ca43e3e2d2e4cca8bce7d7655720e0811b6f6fa37cf5ee"
+      },
+      "parent_verification_runs": [
+        {
+          "artifact_type": "FreshParentVerification",
+          "verification_id": "PARENT-VERIFY-08319c666bee450c929a2bfb758c598b",
+          "parent_id": "ROOT",
+          "target": "index.html",
+          "tool": "verify_web_app",
+          "resolution_hash": "0f33ef2457ec0da9b1ca43e3e2d2e4cca8bce7d7655720e0811b6f6fa37cf5ee",
+          "classification": "PASS",
+          "parent_verification_executed": true,
+          "requirement_ids": [
+            "REQ-001"
+          ],
+          "covered_requirement_ids": [
+            "REQ-001"
+          ],
+          "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+          "required_interactions": [
+            "keyboard_movement",
+            "restart_resets_state",
+            "goal_win_state",
+            "touch_control"
+          ],
+          "subject_before_hash": "58367ba59939b45d784af42ebd34f6579d2dbdcb5529f3fea33792bf6830e44d",
+          "subject_after_hash": "58367ba59939b45d784af42ebd34f6579d2dbdcb5529f3fea33792bf6830e44d",
+          "child_evidence_reused_as_proof": 0,
+          "result": {
+            "requested_from_node": "index.html",
+            "resolved_entrypoint": "index.html",
+            "resolution_source": "unique_root_html",
+            "resolution_status": "RESOLVED",
+            "passed": true,
+            "environment_error": false,
+            "title": "Hopline — City Crossing",
+            "url": "http://127.0.0.1:54175/index.html",
+            "text": "HOPLINE\nCITY CROSSING\nSCORE\n00\nBEST\n00\nRUSH HOUR. YOUR MOVE.\nOWN THE CROSSING.\n\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\n\nSTART CROSSING  →\nTRAFFIC WINS THIS ROUND\nCLOSE CALL.\n\nYou made it across 0 blocks. The next opening is already coming.\n\nCROSS AGAIN  ↻\nW\nA\nS\nD\nOR ARROW KEYS · ONE KEY, ONE HOP\nGO!",
+            "console_errors": [],
+            "page_errors": [],
+            "network_errors": [],
+            "runtime_state": {
+              "canvasCount": 1,
+              "gameBridge": {
+                "name": "__HOPLINE__",
+                "surface_type": "existing_app_hook"
+              },
+              "debugState": null
+            },
+            "interaction_checks": [
+              {
+                "name": "keyboard_movement",
+                "executed": true,
+                "passed": true,
+                "before": {
+                  "status": "playing",
+                  "score": 0,
+                  "best": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0,
+                    "x": 0,
+                    "z": 0
+                  },
+                  "laneCount": 27,
+                  "vehicleCount": 28
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 1,
+                  "best": 1,
+                  "player": {
+                    "row": 1,
+                    "col": 0,
+                    "x": 0,
+                    "z": -3.2
+                  },
+                  "laneCount": 27,
+                  "vehicleCount": 28
+                },
+                "input": "ArrowUp"
+              },
+              {
+                "name": "restart_resets_state",
+                "executed": true,
+                "passed": true,
+                "input": "r",
+                "cases": [
+                  {
+                    "setup": "forceCollision",
+                    "precondition_met": true,
+                    "before": {
+                      "status": "gameover",
+                      "score": 0,
+                      "best": 1,
+                      "player": {
+                        "row": 0,
+                        "col": 0,
+                        "x": 0,
+                        "z": 0
+                      },
+                      "laneCount": 27,
+                      "vehicleCount": 28
+                    },
+                    "after": {
+                      "status": "playing",
+                      "score": 0,
+                      "best": 1,
+                      "player": {
+                        "row": 0,
+                        "col": 0,
+                        "x": 0,
+                        "z": 0
+                      },
+                      "laneCount": 27,
+                      "vehicleCount": 28
+                    },
+                    "passed": true
+                  },
+                  {
+                    "setup": "forceWin",
+                    "precondition_met": true,
+                    "before": {
+                      "status": "won",
+                      "score": 24,
+                      "best": 24,
+                      "player": {
+                        "row": 24,
+                        "col": 0,
+                        "x": 0,
+                        "z": -76.8
+                      },
+                      "laneCount": 27,
+                      "vehicleCount": 28
+                    },
+                    "after": {
+                      "status": "playing",
+                      "score": 0,
+                      "best": 24,
+                      "player": {
+                        "row": 0,
+                        "col": 0,
+                        "x": 0,
+                        "z": 0
+                      },
+                      "laneCount": 27,
+                      "vehicleCount": 28
+                    },
+                    "passed": true
+                  }
+                ]
+              },
+              {
+                "name": "goal_win_state",
+                "executed": true,
+                "passed": true,
+                "after": {
+                  "status": "won",
+                  "score": 24,
+                  "best": 24,
+                  "player": {
+                    "row": 24,
+                    "col": 0,
+                    "x": 0,
+                    "z": -76.8
+                  },
+                  "laneCount": 27,
+                  "vehicleCount": 28
+                }
+              },
+              {
+                "name": "touch_control",
+                "executed": true,
+                "passed": true,
+                "before": {
+                  "status": "playing",
+                  "score": 0,
+                  "best": 24,
+                  "player": {
+                    "row": 0,
+                    "col": 0,
+                    "x": 0,
+                    "z": 0
+                  },
+                  "laneCount": 27,
+                  "vehicleCount": 28
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 1,
+                  "best": 24,
+                  "player": {
+                    "row": 1,
+                    "col": 0,
+                    "x": 0,
+                    "z": -1.279
+                  },
+                  "laneCount": 27,
+                  "vehicleCount": 28
+                },
+                "input": "pointerdown"
+              }
+            ],
+            "screenshot": ".agent_evidence\\task_ROOT-integration-REQ-001.png",
+            "failures": [],
+            "verification_profile": {
+              "kind": "game",
+              "require_title": true,
+              "require_canvas": true,
+              "require_game_bridge": true,
+              "required_interactions": [
+                "keyboard_movement",
+                "restart_resets_state",
+                "goal_win_state",
+                "touch_control"
+              ]
+            },
+            "verification_surface": {
+              "surface_type": "existing_app_hook",
+              "selected": {
+                "name": "__HOPLINE__",
+                "methods": [
+                  "start",
+                  "restart",
+                  "step",
+                  "forceCollision",
+                  "forceWin"
+                ],
+                "stateKeys": [
+                  "status",
+                  "score",
+                  "best",
+                  "player",
+                  "laneCount",
+                  "vehicleCount"
+                ],
+                "score": 35
+              },
+              "candidates": [
+                {
+                  "name": "__HOPLINE__",
+                  "methods": [
+                    "start",
+                    "restart",
+                    "step",
+                    "forceCollision",
+                    "forceWin"
+                  ],
+                  "stateKeys": [
+                    "status",
+                    "score",
+                    "best",
+                    "player",
+                    "laneCount",
+                    "vehicleCount"
+                  ],
+                  "score": 35
+                }
+              ],
+              "action_functions": [],
+              "dom": {
+                "canvasCount": 1,
+                "controls": [
+                  {
+                    "tag": "button",
+                    "id": "start-button",
+                    "text": "Start crossing  →",
+                    "dataMove": null
+                  },
+                  {
+                    "tag": "button",
+                    "id": "restart-button",
+                    "text": "Cross again  ↻",
+                    "dataMove": null
+                  },
+                  {
+                    "tag": "button",
+                    "id": null,
+                    "text": "↑",
+                    "dataMove": "up"
+                  },
+                  {
+                    "tag": "button",
+                    "id": null,
+                    "text": "←",
+                    "dataMove": "left"
+                  },
+                  {
+                    "tag": "button",
+                    "id": null,
+                    "text": "↓",
+                    "dataMove": "down"
+                  },
+                  {
+                    "tag": "button",
+                    "id": null,
+                    "text": "→",
+                    "dataMove": "right"
+                  }
+                ],
+                "liveRegions": 2
+              },
+              "required_interactions": [
+                "goal_win_state",
+                "keyboard_movement",
+                "restart_resets_state",
+                "touch_control"
+              ],
+              "executed_interactions": [
+                "keyboard_movement",
+                "restart_resets_state",
+                "goal_win_state",
+                "touch_control"
+              ],
+              "behavior_test_executed": true,
+              "all_required_executed": true
+            },
+            "behavior_test_executed": true,
+            "entry_path": "index.html"
+          },
+          "evidence_hash": "efcbca9b07da8845b3811d8d4b5e671eaf4aa13dcd23b70e658852c866ac2a9a",
+          "artifact_path": "D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\root_continuation\\resolved\\.agent_evidence\\parent_verification\\PARENT-VERIFY-08319c666bee450c929a2bfb758c598b.json"
+        }
+      ],
+      "parent_requirement_coverage": {
+        "required_requirement_ids": [
+          "REQ-001"
+        ],
+        "covered_requirement_ids": [
+          "REQ-001"
+        ],
+        "child_evidence_reused_as_proof": 0
+      },
+      "child_evidence_reused_as_proof": 0,
+      "source_sha256": {
+        "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+      },
+      "root_verified": true,
+      "root_verified_event": true,
+      "model_calls": 0,
+      "readiness": "READY",
+      "source_unchanged": true
+    }
+  }
+}

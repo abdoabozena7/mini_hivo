@@ -1,0 +1,39 @@
+{
+  "case_id": "experiment2-rkey-01",
+  "planning_route": "decomposition_first_recursive",
+  "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+  "runs": {
+    "strict": {
+      "policy": "strict",
+      "status": "failed",
+      "advice_rejected": 1,
+      "fallback_used": 0,
+      "fallback_failed": 0,
+      "worker_started": false,
+      "verified_child": false,
+      "root_verified": false,
+      "first_blocker_stage": "MISSION_COMPILATION",
+      "first_blocker_reason": "MISSION_COMPILATION_FAILURE",
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "model_calls": 11,
+      "elapsed_seconds": 57.89
+    },
+    "contract_fallback": {
+      "policy": "contract_fallback",
+      "status": "failed",
+      "advice_rejected": 1,
+      "fallback_used": 1,
+      "fallback_failed": 0,
+      "worker_started": true,
+      "verified_child": false,
+      "root_verified": false,
+      "first_blocker_stage": "CHILD_VERIFICATION",
+      "first_blocker_reason": "EXECUTION_BUDGET_EXHAUSTED",
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "model_calls": 39,
+      "elapsed_seconds": 86.22
+    }
+  }
+}

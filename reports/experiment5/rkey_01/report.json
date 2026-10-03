@@ -1,0 +1,69 @@
+{
+  "case_id": "rkey_01",
+  "expected_target": {
+    "path": "index.html",
+    "start_line": 406,
+    "end_line": 411
+  },
+  "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+  "runs": {
+    "current": {
+      "policy": "current",
+      "worker_started": true,
+      "candidate_count": 0,
+      "true_target_top1": false,
+      "true_target_top3": false,
+      "candidate_spans": [],
+      "first_relevant_bounded_read_step": null,
+      "irrelevant_bounded_reads": 1,
+      "bounded_read_spans": [
+        "index.html:90-100"
+      ],
+      "mutation_attempts": 2,
+      "grounded_mutation_attempts": 0,
+      "grounded_attempt_percent": 0.0,
+      "first_legal_file_change_step": null,
+      "budget_remaining_at_first_change": null,
+      "verification_tool_calls_after_change": 0,
+      "verification_attempted_after_change": false,
+      "verified_child_commit": false,
+      "root_verified": false,
+      "first_blocker_stage": "MUTATION_GROUNDING",
+      "first_blocker_reason": "MUTATION_TARGET_UNRESOLVED",
+      "scope_violations": 0,
+      "preservation_violations": 0
+    },
+    "evidence_directed": {
+      "policy": "evidence_directed",
+      "worker_started": true,
+      "candidate_count": 3,
+      "true_target_top1": true,
+      "true_target_top3": true,
+      "candidate_spans": [
+        "LOC-001 index.html:397-411",
+        "LOC-002 index.html:422-436",
+        "LOC-003 index.html:533-547"
+      ],
+      "first_relevant_bounded_read_step": 1,
+      "irrelevant_bounded_reads": 2,
+      "bounded_read_spans": [
+        "index.html:397-411",
+        "index.html:422-436",
+        "index.html:533-547"
+      ],
+      "mutation_attempts": 1,
+      "grounded_mutation_attempts": 1,
+      "grounded_attempt_percent": 100.0,
+      "first_legal_file_change_step": 5,
+      "budget_remaining_at_first_change": 23,
+      "verification_tool_calls_after_change": 3,
+      "verification_attempted_after_change": true,
+      "verified_child_commit": false,
+      "root_verified": false,
+      "first_blocker_stage": "CHILD_VERIFICATION",
+      "first_blocker_reason": "CONTEXT_INSUFFICIENT",
+      "scope_violations": 0,
+      "preservation_violations": 0
+    }
+  }
+}

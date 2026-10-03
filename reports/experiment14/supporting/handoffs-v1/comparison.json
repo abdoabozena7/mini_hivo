@@ -1,0 +1,389 @@
+{
+  "experiment": 14,
+  "scope": "exact captured child handoffs + native verification confirmation; no Root success claim",
+  "selection": "Every terminally completed monotonic Worker, no selection on verification PASS",
+  "rows": [
+    {
+      "case_id": "arena_arrow",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_arrow\\monotonic-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "c7b161ddf358e42ea8180d4edc2c902241b3e2c8d2c6c4525cc4351bdea79e29",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "strict",
+          "input_hash": "c7b161ddf358e42ea8180d4edc2c902241b3e2c8d2c6c4525cc4351bdea79e29",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_arrow\\monotonic-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "943e83d8f761353d0be24c3f903ad289149f2b2e13b2f843c6f63c284751efe3",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "strict",
+          "input_hash": "943e83d8f761353d0be24c3f903ad289149f2b2e13b2f843c6f63c284751efe3",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 3,
+      "eligible": false,
+      "reason": "NO_COMPLETED_WORKER_HANDOFF"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_q_restart\\monotonic-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "5a34e32eae4fda537cae8aa1fa2a00a5a25f24187f35ec14f20c3888392110c7",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "strict",
+          "input_hash": "5a34e32eae4fda537cae8aa1fa2a00a5a25f24187f35ec14f20c3888392110c7",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_q_restart\\monotonic-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "b14e643e2e0073475eb5387338ff5509991a4a43f650b369446559f5cf78017d",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "strict",
+          "input_hash": "b14e643e2e0073475eb5387338ff5509991a4a43f650b369446559f5cf78017d",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 3,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_q_restart\\monotonic-3-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "86d15c904a8b84ed159606ebea4840bcdf73ba48793d437eebf2cb0593becdd9",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "strict",
+          "input_hash": "86d15c904a8b84ed159606ebea4840bcdf73ba48793d437eebf2cb0593becdd9",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\node_unique\\monotonic-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "42fcd0b89d84f5a67e5276ad4fcc7fcee32f75eb69d2c615bbd9f5e00d853faa",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "strict",
+          "input_hash": "42fcd0b89d84f5a67e5276ad4fcc7fcee32f75eb69d2c615bbd9f5e00d853faa",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic browser target has no bound claims/evidence",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic browser target has no bound claims/evidence"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\node_unique\\monotonic-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "9aba605efb77dc3425c31ae5df7dbb471c064b55d7d5bab9ed2371f843648d1a",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "strict",
+          "input_hash": "9aba605efb77dc3425c31ae5df7dbb471c064b55d7d5bab9ed2371f843648d1a",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic browser target has no bound claims/evidence",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic browser target has no bound claims/evidence"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 3,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\node_unique\\monotonic-3-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "monotonic",
+          "input_hash": "f75c2b49c4a59c15f70728466cd448d2dd2509f55daf72318820d82fa6b18e8e",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "strict",
+          "input_hash": "f75c2b49c4a59c15f70728466cd448d2dd2509f55daf72318820d82fa6b18e8e",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic browser target has no bound claims/evidence",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic browser target has no bound claims/evidence"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    }
+  ]
+}

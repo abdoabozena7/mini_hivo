@@ -1,0 +1,3117 @@
+{
+  "experiment": 11,
+  "sample_tasks": 1,
+  "fixed_worker_budget": 28,
+  "frozen_comparison": {
+    "experiment": 11,
+    "input_run": "D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\live_resolved\\.agent_experiment.jsonl",
+    "input_run_id": "20260928T084006-f38f1d1b",
+    "capture_mode": "historical_compact_projection",
+    "limits": [
+      "Original tool payloads are archived in compact form; matcher fields and inventory are preserved.",
+      "Accepted Impact Contract recovered by matching its original authorization hash from a later full capture.",
+      "No parent integration or fresh Worker/Falsifier execution is claimed in this comparison."
+    ],
+    "recovered_artifact": {
+      "capture_path": "D:\\projects\\Ai\\mini_hivo_experiment10\\rkey_01\\full_capture\\EXEC-001.json",
+      "impact_hash": "1056d356a7cf776c54d1a133f4fb43f94d5b7eabae57ad215fd85c892b90dfc8",
+      "original_impact_authorization_hash_matched": true,
+      "context_anchor_hash_matched": true,
+      "execution_contract_equal": true,
+      "before_source_sha256": {
+        "index.html": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661"
+      },
+      "candidate_source_sha256": {
+        "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+      }
+    },
+    "same_frozen_input": true,
+    "same_candidate_source": true,
+    "policies": [
+      {
+        "events": [
+          {
+            "kind": "CHILD_EXECUTION_FINISHED",
+            "sequence": 1,
+            "child_id": "EXEC-001",
+            "status": "done",
+            "input_hash": "59a4a5cad96db52aca78289fbf239ea783401ef3f542dab036d8b6571e552250"
+          },
+          {
+            "kind": "VERIFICATION_TARGET_RESOLVED",
+            "sequence": 2,
+            "target": "index.html",
+            "source": "unique_root_html"
+          },
+          {
+            "kind": "VERIFICATION_APPLICABLE",
+            "sequence": 3,
+            "required": true,
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ]
+          },
+          {
+            "kind": "VERIFICATION_CONTEXT_SUFFICIENT",
+            "sequence": 4,
+            "context_status": "sufficient",
+            "source": "existing_worker_context_guard"
+          },
+          {
+            "kind": "VERIFICATION_STARTED",
+            "sequence": 5,
+            "target": "index.html",
+            "task_id": "EXEC-001",
+            "source": "existing_verify_browser_application"
+          },
+          {
+            "kind": "VERIFICATION_FINISHED",
+            "sequence": 6,
+            "passed": true,
+            "behavior_test_executed": true
+          },
+          {
+            "kind": "BLOCKED",
+            "sequence": 7,
+            "stage": "VERIFICATION_EVIDENCE_AGGREGATION",
+            "reason": "INVALID_RECEIPT"
+          }
+        ],
+        "first_blocker": {
+          "stage": "VERIFICATION_EVIDENCE_AGGREGATION",
+          "reason": "INVALID_RECEIPT"
+        },
+        "verification_started": true,
+        "evidence_gate_passed": false,
+        "terminal_classification": "VERIFICATION_NOT_APPLICABLE",
+        "route_results": [
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "target": "index.html",
+            "result": "PASS"
+          },
+          {
+            "kind": "BROWSER",
+            "target": "index.html",
+            "result": "INVALID_RECEIPT"
+          }
+        ],
+        "decision_hash": "75c9626bbfb5ff6dde3410cd4c34f928255e20bcae866222b73473000577264b",
+        "applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "index.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "index.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:index.html",
+                "repo:entrypoint:index.html"
+              ],
+              "result": "PENDING",
+              "requested_from_node": "index.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": []
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [
+              "index.html"
+            ],
+            "known_test_files": [],
+            "observed_file_types": [
+              "html"
+            ]
+          },
+          "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+          "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b"
+        },
+        "browser": {
+          "requested_from_node": "index.html",
+          "resolved_entrypoint": "index.html",
+          "resolution_source": "deterministic_reconnaissance",
+          "resolution_status": "RESOLVED",
+          "passed": true,
+          "environment_error": false,
+          "title": "Hopline — City Crossing",
+          "url": "http://127.0.0.1:55975/index.html",
+          "text": "HOPLINE\nCITY CROSSING\nSCORE\n00\nBEST\n00\nRUSH HOUR. YOUR MOVE.\nOWN THE CROSSING.\n\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\n\nSTART CROSSING  →\nTRAFFIC WINS THIS ROUND\nCLOSE CALL.\n\nYou made it across 0 blocks. The next opening is already coming.\n\nCROSS AGAIN  ↻\nW\nA\nS\nD\nOR ARROW KEYS · ONE KEY, ONE HOP\nGO!",
+          "console_errors": [],
+          "page_errors": [],
+          "network_errors": [],
+          "runtime_state": {
+            "canvasCount": 1,
+            "gameBridge": {
+              "name": "__HOPLINE__",
+              "surface_type": "existing_app_hook"
+            },
+            "debugState": null
+          },
+          "interaction_checks": [
+            {
+              "name": "keyboard_movement",
+              "executed": true,
+              "passed": true,
+              "before": {
+                "status": "playing",
+                "score": 0,
+                "best": 0,
+                "player": {
+                  "row": 0,
+                  "col": 0,
+                  "x": 0,
+                  "z": 0
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "after": {
+                "status": "playing",
+                "score": 1,
+                "best": 1,
+                "player": {
+                  "row": 1,
+                  "col": 0,
+                  "x": 0,
+                  "z": -3.2
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "input": "ArrowUp"
+            },
+            {
+              "name": "restart_resets_state",
+              "executed": true,
+              "passed": true,
+              "input": "r",
+              "cases": [
+                {
+                  "setup": "forceCollision",
+                  "precondition_met": true,
+                  "before": {
+                    "status": "gameover",
+                    "score": 0,
+                    "best": 1,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "after": {
+                    "status": "playing",
+                    "score": 0,
+                    "best": 1,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "passed": true
+                },
+                {
+                  "setup": "forceWin",
+                  "precondition_met": true,
+                  "before": {
+                    "status": "won",
+                    "score": 24,
+                    "best": 24,
+                    "player": {
+                      "row": 24,
+                      "col": 0,
+                      "x": 0,
+                      "z": -76.8
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "after": {
+                    "status": "playing",
+                    "score": 0,
+                    "best": 24,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "passed": true
+                }
+              ]
+            },
+            {
+              "name": "goal_win_state",
+              "executed": true,
+              "passed": true,
+              "after": {
+                "status": "won",
+                "score": 24,
+                "best": 24,
+                "player": {
+                  "row": 24,
+                  "col": 0,
+                  "x": 0,
+                  "z": -76.8
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              }
+            },
+            {
+              "name": "touch_control",
+              "executed": true,
+              "passed": true,
+              "before": {
+                "status": "playing",
+                "score": 0,
+                "best": 24,
+                "player": {
+                  "row": 0,
+                  "col": 0,
+                  "x": 0,
+                  "z": 0
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "after": {
+                "status": "playing",
+                "score": 1,
+                "best": 24,
+                "player": {
+                  "row": 1,
+                  "col": 0,
+                  "x": 0,
+                  "z": -0.888
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "input": "pointerdown"
+            }
+          ],
+          "screenshot": ".agent_evidence\\task_EXEC-001.png",
+          "failures": [],
+          "verification_profile": {
+            "kind": "game",
+            "require_title": true,
+            "require_canvas": true,
+            "require_game_bridge": true,
+            "required_interactions": [
+              "keyboard_movement",
+              "restart_resets_state",
+              "goal_win_state",
+              "touch_control"
+            ]
+          },
+          "verification_surface": {
+            "surface_type": "existing_app_hook",
+            "selected": {
+              "name": "__HOPLINE__",
+              "methods": [
+                "start",
+                "restart",
+                "step",
+                "forceCollision",
+                "forceWin"
+              ],
+              "stateKeys": [
+                "status",
+                "score",
+                "best",
+                "player",
+                "laneCount",
+                "vehicleCount"
+              ],
+              "score": 35
+            },
+            "candidates": [
+              {
+                "name": "__HOPLINE__",
+                "methods": [
+                  "start",
+                  "restart",
+                  "step",
+                  "forceCollision",
+                  "forceWin"
+                ],
+                "stateKeys": [
+                  "status",
+                  "score",
+                  "best",
+                  "player",
+                  "laneCount",
+                  "vehicleCount"
+                ],
+                "score": 35
+              }
+            ],
+            "action_functions": [],
+            "dom": {
+              "canvasCount": 1,
+              "controls": [
+                {
+                  "tag": "button",
+                  "id": "start-button",
+                  "text": "Start crossing  →",
+                  "dataMove": null
+                },
+                {
+                  "tag": "button",
+                  "id": "restart-button",
+                  "text": "Cross again  ↻",
+                  "dataMove": null
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "↑",
+                  "dataMove": "up"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "←",
+                  "dataMove": "left"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "↓",
+                  "dataMove": "down"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "→",
+                  "dataMove": "right"
+                }
+              ],
+              "liveRegions": 2
+            },
+            "required_interactions": [
+              "goal_win_state",
+              "keyboard_movement",
+              "restart_resets_state",
+              "touch_control"
+            ],
+            "executed_interactions": [
+              "keyboard_movement",
+              "restart_resets_state",
+              "goal_win_state",
+              "touch_control"
+            ],
+            "behavior_test_executed": true,
+            "all_required_executed": true
+          },
+          "behavior_test_executed": true,
+          "entry_path": "index.html",
+          "verification_status": "PASS",
+          "verification_route": {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:requested_target:index.html",
+              "repo:entrypoint:index.html"
+            ],
+            "result": "PENDING",
+            "requested_from_node": "index.html",
+            "resolution_status": "RESOLVED",
+            "resolution_source": "unique_root_html",
+            "candidates": []
+          },
+          "verification_applicability": {
+            "schema_version": "V20.5A",
+            "child_id": "EXEC-001",
+            "model_calls": 0,
+            "verification_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PENDING",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "PASS",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "repository_evidence": {
+              "known_entrypoints": [
+                "index.html"
+              ],
+              "known_test_files": [],
+              "observed_file_types": [
+                "html"
+              ]
+            },
+            "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "last_result": "PASS"
+          }
+        },
+        "gate": {
+          "passed": false,
+          "checks": [
+            {
+              "name": "verification_aggregation",
+              "status": "FAIL",
+              "source": "deterministic",
+              "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"index.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:index.html\", \"repo:entrypoint:index.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"index.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+            }
+          ],
+          "deterministic_failures": [
+            {
+              "name": "verification_aggregation",
+              "status": "FAIL",
+              "source": "deterministic",
+              "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"index.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:index.html\", \"repo:entrypoint:index.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"index.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+            }
+          ],
+          "advisory_checks": [],
+          "advisory_failures": [],
+          "verification_aggregation": {
+            "child_id": "EXEC-001",
+            "verification_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "INVALID_RECEIPT",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "actual_passes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              }
+            ],
+            "actual_failures": [
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "INVALID_RECEIPT",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "skipped_not_applicable": [],
+            "required_target_failures": [],
+            "required_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "INVALID_RECEIPT",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "invalid_receipts": [
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "INVALID_RECEIPT",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "failure_codes": [
+              "REQUIRED_VERIFICATION_FAILED"
+            ],
+            "evidence_available": true,
+            "passed": false,
+            "model_calls": 0,
+            "required_execution_verification_set": {
+              "schema_version": "V25.6",
+              "artifact_type": "RequiredExecutionVerificationSet",
+              "child_id": "EXEC-001",
+              "plan_id": null,
+              "plan_hash": null,
+              "verification_digest": null,
+              "coverage_hash": null,
+              "applicable_authority_ids": [],
+              "required_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "required_verification_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "approved_verification_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "system_authority_ids": [],
+              "optional_authority_ids": [],
+              "routes": [
+                {
+                  "authority_id": "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                  "verification_id": null,
+                  "oracle_id": null,
+                  "oracle_hash": null,
+                  "authority_type": null,
+                  "authority_source": null,
+                  "route_type": "SYNTAX_STATIC_GATE",
+                  "execution_channel": null,
+                  "target": "index.html",
+                  "required": true,
+                  "applicable": true,
+                  "route_hash": "f6985a3ac9b05ea080e5ee292f4d2255db60d34c7e70cba963a3a880db4cd2c0"
+                },
+                {
+                  "authority_id": "UNRESOLVED-ROUTE-7DED71D99E202654",
+                  "verification_id": null,
+                  "oracle_id": null,
+                  "oracle_hash": null,
+                  "authority_type": null,
+                  "authority_source": null,
+                  "route_type": "BROWSER",
+                  "execution_channel": null,
+                  "target": "index.html",
+                  "required": true,
+                  "applicable": true,
+                  "route_hash": "7ded71d99e202654195f1deab6fff3b263937836646d6738583e1e624e78b881"
+                }
+              ],
+              "set_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64",
+              "canonical_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64"
+            },
+            "execution_obligation_evidence": [],
+            "all_required_passed": false
+          }
+        },
+        "evidence_match_audit": [
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "target": "index.html",
+            "matched_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "related_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "matched_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "related_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "separate_browser_pass": false,
+            "related_without_match": false
+          },
+          {
+            "kind": "BROWSER",
+            "target": "index.html",
+            "matched_evidence_indices": [],
+            "related_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "matched_tools": [],
+            "related_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "separate_browser_pass": true,
+            "related_without_match": true
+          }
+        ],
+        "model_calls": 0,
+        "repairer_calls": 0,
+        "child_receipts_issued": 0,
+        "root_verification_attempted": false,
+        "policy": "current",
+        "source_sha256": {
+          "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+        },
+        "source_unchanged": true,
+        "canonical_record_count": 0,
+        "child_verified": false,
+        "parent_verification_executed": false
+      },
+      {
+        "events": [
+          {
+            "kind": "CHILD_EXECUTION_FINISHED",
+            "sequence": 1,
+            "child_id": "EXEC-001",
+            "status": "done",
+            "input_hash": "59a4a5cad96db52aca78289fbf239ea783401ef3f542dab036d8b6571e552250"
+          },
+          {
+            "kind": "VERIFICATION_TARGET_RESOLVED",
+            "sequence": 2,
+            "target": "index.html",
+            "source": "unique_root_html"
+          },
+          {
+            "kind": "VERIFICATION_APPLICABLE",
+            "sequence": 3,
+            "required": true,
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ]
+          },
+          {
+            "kind": "VERIFICATION_CONTEXT_SUFFICIENT",
+            "sequence": 4,
+            "context_status": "sufficient",
+            "source": "existing_worker_context_guard"
+          },
+          {
+            "kind": "VERIFICATION_STARTED",
+            "sequence": 5,
+            "target": "index.html",
+            "task_id": "EXEC-001",
+            "source": "existing_verify_browser_application"
+          },
+          {
+            "kind": "VERIFICATION_FINISHED",
+            "sequence": 6,
+            "passed": true,
+            "behavior_test_executed": true
+          },
+          {
+            "kind": "VERIFICATION_HANDOFF_ACCEPTED",
+            "sequence": 7
+          },
+          {
+            "kind": "RECEIPT_NOT_REPLAYED",
+            "sequence": 8,
+            "reason": "POST_VERIFICATION_COMMIT_AND_RECEIPT_LIFECYCLE_OUTSIDE_DIAGNOSTIC"
+          }
+        ],
+        "first_blocker": null,
+        "verification_started": true,
+        "evidence_gate_passed": true,
+        "terminal_classification": null,
+        "route_results": [
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "target": "index.html",
+            "result": "PASS"
+          },
+          {
+            "kind": "BROWSER",
+            "target": "index.html",
+            "result": "PASS"
+          }
+        ],
+        "decision_hash": "15c928da78ccdc28be088510cbacb0e12f8c75e6ac28d3b917bc0abf05715765",
+        "applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "index.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "index.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:index.html",
+                "repo:entrypoint:index.html"
+              ],
+              "result": "PENDING",
+              "requested_from_node": "index.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": []
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [
+              "index.html"
+            ],
+            "known_test_files": [],
+            "observed_file_types": [
+              "html"
+            ]
+          },
+          "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+          "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b"
+        },
+        "browser": {
+          "requested_from_node": "index.html",
+          "resolved_entrypoint": "index.html",
+          "resolution_source": "deterministic_reconnaissance",
+          "resolution_status": "RESOLVED",
+          "passed": true,
+          "environment_error": false,
+          "title": "Hopline — City Crossing",
+          "url": "http://127.0.0.1:62840/index.html",
+          "text": "HOPLINE\nCITY CROSSING\nSCORE\n00\nBEST\n00\nRUSH HOUR. YOUR MOVE.\nOWN THE CROSSING.\n\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\n\nSTART CROSSING  →\nTRAFFIC WINS THIS ROUND\nCLOSE CALL.\n\nYou made it across 0 blocks. The next opening is already coming.\n\nCROSS AGAIN  ↻\nW\nA\nS\nD\nOR ARROW KEYS · ONE KEY, ONE HOP\nGO!",
+          "console_errors": [],
+          "page_errors": [],
+          "network_errors": [],
+          "runtime_state": {
+            "canvasCount": 1,
+            "gameBridge": {
+              "name": "__HOPLINE__",
+              "surface_type": "existing_app_hook"
+            },
+            "debugState": null
+          },
+          "interaction_checks": [
+            {
+              "name": "keyboard_movement",
+              "executed": true,
+              "passed": true,
+              "before": {
+                "status": "playing",
+                "score": 0,
+                "best": 0,
+                "player": {
+                  "row": 0,
+                  "col": 0,
+                  "x": 0,
+                  "z": 0
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "after": {
+                "status": "playing",
+                "score": 1,
+                "best": 1,
+                "player": {
+                  "row": 1,
+                  "col": 0,
+                  "x": 0,
+                  "z": -3.2
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "input": "ArrowUp"
+            },
+            {
+              "name": "restart_resets_state",
+              "executed": true,
+              "passed": true,
+              "input": "r",
+              "cases": [
+                {
+                  "setup": "forceCollision",
+                  "precondition_met": true,
+                  "before": {
+                    "status": "gameover",
+                    "score": 0,
+                    "best": 1,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "after": {
+                    "status": "playing",
+                    "score": 0,
+                    "best": 1,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "passed": true
+                },
+                {
+                  "setup": "forceWin",
+                  "precondition_met": true,
+                  "before": {
+                    "status": "won",
+                    "score": 24,
+                    "best": 24,
+                    "player": {
+                      "row": 24,
+                      "col": 0,
+                      "x": 0,
+                      "z": -76.8
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "after": {
+                    "status": "playing",
+                    "score": 0,
+                    "best": 24,
+                    "player": {
+                      "row": 0,
+                      "col": 0,
+                      "x": 0,
+                      "z": 0
+                    },
+                    "laneCount": 27,
+                    "vehicleCount": 28
+                  },
+                  "passed": true
+                }
+              ]
+            },
+            {
+              "name": "goal_win_state",
+              "executed": true,
+              "passed": true,
+              "after": {
+                "status": "won",
+                "score": 24,
+                "best": 24,
+                "player": {
+                  "row": 24,
+                  "col": 0,
+                  "x": 0,
+                  "z": -76.8
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              }
+            },
+            {
+              "name": "touch_control",
+              "executed": true,
+              "passed": true,
+              "before": {
+                "status": "playing",
+                "score": 0,
+                "best": 24,
+                "player": {
+                  "row": 0,
+                  "col": 0,
+                  "x": 0,
+                  "z": 0
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "after": {
+                "status": "playing",
+                "score": 1,
+                "best": 24,
+                "player": {
+                  "row": 1,
+                  "col": 0,
+                  "x": 0,
+                  "z": -1.014
+                },
+                "laneCount": 27,
+                "vehicleCount": 28
+              },
+              "input": "pointerdown"
+            }
+          ],
+          "screenshot": ".agent_evidence\\task_EXEC-001.png",
+          "failures": [],
+          "verification_profile": {
+            "kind": "game",
+            "require_title": true,
+            "require_canvas": true,
+            "require_game_bridge": true,
+            "required_interactions": [
+              "keyboard_movement",
+              "restart_resets_state",
+              "goal_win_state",
+              "touch_control"
+            ]
+          },
+          "verification_surface": {
+            "surface_type": "existing_app_hook",
+            "selected": {
+              "name": "__HOPLINE__",
+              "methods": [
+                "start",
+                "restart",
+                "step",
+                "forceCollision",
+                "forceWin"
+              ],
+              "stateKeys": [
+                "status",
+                "score",
+                "best",
+                "player",
+                "laneCount",
+                "vehicleCount"
+              ],
+              "score": 35
+            },
+            "candidates": [
+              {
+                "name": "__HOPLINE__",
+                "methods": [
+                  "start",
+                  "restart",
+                  "step",
+                  "forceCollision",
+                  "forceWin"
+                ],
+                "stateKeys": [
+                  "status",
+                  "score",
+                  "best",
+                  "player",
+                  "laneCount",
+                  "vehicleCount"
+                ],
+                "score": 35
+              }
+            ],
+            "action_functions": [],
+            "dom": {
+              "canvasCount": 1,
+              "controls": [
+                {
+                  "tag": "button",
+                  "id": "start-button",
+                  "text": "Start crossing  →",
+                  "dataMove": null
+                },
+                {
+                  "tag": "button",
+                  "id": "restart-button",
+                  "text": "Cross again  ↻",
+                  "dataMove": null
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "↑",
+                  "dataMove": "up"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "←",
+                  "dataMove": "left"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "↓",
+                  "dataMove": "down"
+                },
+                {
+                  "tag": "button",
+                  "id": null,
+                  "text": "→",
+                  "dataMove": "right"
+                }
+              ],
+              "liveRegions": 2
+            },
+            "required_interactions": [
+              "goal_win_state",
+              "keyboard_movement",
+              "restart_resets_state",
+              "touch_control"
+            ],
+            "executed_interactions": [
+              "keyboard_movement",
+              "restart_resets_state",
+              "goal_win_state",
+              "touch_control"
+            ],
+            "behavior_test_executed": true,
+            "all_required_executed": true
+          },
+          "behavior_test_executed": true,
+          "entry_path": "index.html",
+          "verification_status": "PASS",
+          "verification_route": {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "index.html",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:requested_target:index.html",
+              "repo:entrypoint:index.html"
+            ],
+            "result": "PENDING",
+            "requested_from_node": "index.html",
+            "resolution_status": "RESOLVED",
+            "resolution_source": "unique_root_html",
+            "candidates": []
+          },
+          "verification_applicability": {
+            "schema_version": "V20.5A",
+            "child_id": "EXEC-001",
+            "model_calls": 0,
+            "verification_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PENDING",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "PASS",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS"
+              }
+            ],
+            "repository_evidence": {
+              "known_entrypoints": [
+                "index.html"
+              ],
+              "known_test_files": [],
+              "observed_file_types": [
+                "html"
+              ]
+            },
+            "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "last_result": "PASS"
+          }
+        },
+        "gate": {
+          "passed": true,
+          "checks": [],
+          "deterministic_failures": [],
+          "advisory_checks": [],
+          "advisory_failures": [],
+          "verification_aggregation": {
+            "child_id": "EXEC-001",
+            "verification_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "PASS",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS",
+                "semantic_evidence": {
+                  "required_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "covered_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "record_hashes": [
+                    "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc",
+                    "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4",
+                    "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620",
+                    "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6",
+                    "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                  ]
+                }
+              }
+            ],
+            "actual_passes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "PASS",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS",
+                "semantic_evidence": {
+                  "required_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "covered_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "record_hashes": [
+                    "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc",
+                    "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4",
+                    "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620",
+                    "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6",
+                    "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                  ]
+                }
+              }
+            ],
+            "actual_failures": [],
+            "skipped_not_applicable": [],
+            "required_target_failures": [],
+            "required_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "result": "PASS",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "result": "PASS",
+                "requested_from_node": "index.html",
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "candidates": [],
+                "actual_result": "PASS",
+                "semantic_evidence": {
+                  "required_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "covered_requirement_ids": [
+                    "REQ-001"
+                  ],
+                  "record_hashes": [
+                    "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc",
+                    "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4",
+                    "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620",
+                    "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6",
+                    "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                  ]
+                }
+              }
+            ],
+            "invalid_receipts": [],
+            "failure_codes": [],
+            "evidence_available": true,
+            "passed": true,
+            "model_calls": 0,
+            "semantic_browser_evidence": {
+              "index.html": {
+                "status": "PASS",
+                "required_requirement_ids": [
+                  "REQ-001"
+                ],
+                "covered_requirement_ids": [
+                  "REQ-001"
+                ],
+                "claim_decisions": [
+                  {
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                    ]
+                  }
+                ],
+                "canonical_evidence_records": [
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                  }
+                ],
+                "required_claims": [
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  }
+                ],
+                "tool_used_as_identity": false
+              }
+            },
+            "required_execution_verification_set": {
+              "schema_version": "V25.6",
+              "artifact_type": "RequiredExecutionVerificationSet",
+              "child_id": "EXEC-001",
+              "plan_id": null,
+              "plan_hash": null,
+              "verification_digest": null,
+              "coverage_hash": null,
+              "applicable_authority_ids": [],
+              "required_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "required_verification_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "approved_verification_authority_ids": [
+                "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                "UNRESOLVED-ROUTE-7DED71D99E202654"
+              ],
+              "system_authority_ids": [],
+              "optional_authority_ids": [],
+              "routes": [
+                {
+                  "authority_id": "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+                  "verification_id": null,
+                  "oracle_id": null,
+                  "oracle_hash": null,
+                  "authority_type": null,
+                  "authority_source": null,
+                  "route_type": "SYNTAX_STATIC_GATE",
+                  "execution_channel": null,
+                  "target": "index.html",
+                  "required": true,
+                  "applicable": true,
+                  "route_hash": "f6985a3ac9b05ea080e5ee292f4d2255db60d34c7e70cba963a3a880db4cd2c0"
+                },
+                {
+                  "authority_id": "UNRESOLVED-ROUTE-7DED71D99E202654",
+                  "verification_id": null,
+                  "oracle_id": null,
+                  "oracle_hash": null,
+                  "authority_type": null,
+                  "authority_source": null,
+                  "route_type": "BROWSER",
+                  "execution_channel": null,
+                  "target": "index.html",
+                  "required": true,
+                  "applicable": true,
+                  "route_hash": "7ded71d99e202654195f1deab6fff3b263937836646d6738583e1e624e78b881"
+                }
+              ],
+              "set_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64",
+              "canonical_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64"
+            },
+            "execution_obligation_evidence": [],
+            "all_required_passed": true
+          }
+        },
+        "evidence_match_audit": [
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "target": "index.html",
+            "matched_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "related_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "matched_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "related_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "separate_browser_pass": false,
+            "related_without_match": false
+          },
+          {
+            "kind": "BROWSER",
+            "target": "index.html",
+            "matched_evidence_indices": [],
+            "related_evidence_indices": [
+              5,
+              8,
+              9
+            ],
+            "matched_tools": [],
+            "related_tools": [
+              "run_file",
+              "run_file",
+              "run_file"
+            ],
+            "separate_browser_pass": true,
+            "related_without_match": true
+          }
+        ],
+        "model_calls": 0,
+        "repairer_calls": 0,
+        "child_receipts_issued": 0,
+        "root_verification_attempted": false,
+        "receipt_continuation": {
+          "status": "done",
+          "failure_type": null,
+          "impact_comparison": {
+            "status": "IMPACT_CONTRACT_PASSED",
+            "passed": true,
+            "failure_type": null,
+            "comparisons": [
+              {
+                "kind": "target",
+                "target": "index.html",
+                "status": "EXPECTED_AND_OBSERVED",
+                "actual": [
+                  {
+                    "target": "index.html",
+                    "kind": "path",
+                    "path": "index.html"
+                  },
+                  {
+                    "target": "index.html",
+                    "path": "index.html",
+                    "kind": "path"
+                  }
+                ]
+              },
+              {
+                "kind": "verification_obligation",
+                "id": "impact-obligation-1",
+                "status": "SATISFIED"
+              }
+            ],
+            "missing": [],
+            "unexpected_related": [],
+            "out_of_scope": [],
+            "preservation_violations": [],
+            "obligations": [
+              {
+                "id": "impact-obligation-1",
+                "category": "BEHAVIOR",
+                "meaning": "Allow the R key to restart Hopline after game over or win, while preserving existing keyboard and touch controls.",
+                "target": "",
+                "required": true,
+                "verification_kind": "existing_gate",
+                "mode": "controller",
+                "status": "SATISFIED",
+                "provenance": [
+                  {
+                    "source_identity": "controller:approved-task-contract",
+                    "path": "controller:approved-task-contract",
+                    "location": "EXEC-001",
+                    "evidence_kind": "approved_task_contract",
+                    "evidence_id": "",
+                    "authority_tier": "HIGH",
+                    "authority_score": 100,
+                    "excerpt": "Modify entrypoint logic to intercept 'R' key press post-game state."
+                  }
+                ]
+              }
+            ],
+            "unresolved_obligations": [],
+            "conflicts": [],
+            "actual_changed_paths": [
+              "index.html"
+            ],
+            "contract_hash": "1056d356a7cf776c54d1a133f4fb43f94d5b7eabae57ad215fd85c892b90dfc8",
+            "revision": 0,
+            "bounded": true
+          },
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "receipt_path": "D:\\projects\\Ai\\mini_hivo_experiment11\\rkey_01\\frozen-comparison\\compatible\\.agent_evidence\\verified_child_receipts\\dd90aca37315a7049fec04ee885200dcb01c0daeacb99e7045d4abce81df1179.json",
+          "receipt": {
+            "schema_version": "V21.5B",
+            "artifact_type": "VerifiedChildReceipt",
+            "child_id": "EXEC-001",
+            "parent_id": "ROOT",
+            "verified": true,
+            "receipt_status": "VERIFIED",
+            "verification_status": "passed",
+            "terminal_child_status": "done",
+            "verification_failure_reasons": [],
+            "child_authority_hash": "cce59a754ab6b4db1dadb4e9e2943a529fef8a4c4da2ce8d967f33f9c5082c3d",
+            "authority": {
+              "execution_contract_id": "EXEC-001",
+              "execution_contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+              "plan_id": "PLAN-465262CD697D",
+              "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+              "parent_contract_hash": null
+            },
+            "parent_contract_hash": null,
+            "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+            "mutation_paths": [
+              "index.html"
+            ],
+            "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+            "verification_routes": [
+              {
+                "kind": "SYNTAX_STATIC_GATE",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "result": "PASS",
+                "reason_codes": [
+                  "SUPPORTED_SOURCE_PRESENT",
+                  "CONTRACT_REQUIRES_SYNTAX"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:mutation_paths"
+                ],
+                "resolution_status": "RESOLVED",
+                "resolution_source": "contract_source_paths"
+              },
+              {
+                "kind": "BROWSER",
+                "required": true,
+                "applicable": true,
+                "target": "index.html",
+                "result": "PASS",
+                "reason_codes": [
+                  "SUPPORTED_TARGET_PRESENT"
+                ],
+                "evidence_refs": [
+                  "child:EXEC-001",
+                  "contract:requested_target:index.html",
+                  "repo:entrypoint:index.html"
+                ],
+                "resolution_status": "RESOLVED",
+                "resolution_source": "unique_root_html",
+                "requested_from_node": "index.html"
+              }
+            ],
+            "required_execution_verification_set": null,
+            "execution_verification_closure": null,
+            "execution_verification_closure_hash": null,
+            "browser": {
+              "required": true,
+              "applicable": true,
+              "resolved_target": "index.html",
+              "result": "PASS",
+              "verifier_invoked": true
+            },
+            "verification_aggregation": {
+              "passed": true,
+              "evidence_available": true,
+              "failure_codes": [],
+              "actual_passes": [
+                {
+                  "kind": "SYNTAX_STATIC_GATE",
+                  "required": true,
+                  "applicable": true,
+                  "target": "index.html",
+                  "result": "PASS",
+                  "reason_codes": [
+                    "SUPPORTED_SOURCE_PRESENT",
+                    "CONTRACT_REQUIRES_SYNTAX"
+                  ],
+                  "evidence_refs": [
+                    "child:EXEC-001",
+                    "contract:mutation_paths"
+                  ],
+                  "resolution_status": "RESOLVED",
+                  "resolution_source": "contract_source_paths"
+                },
+                {
+                  "kind": "BROWSER",
+                  "required": true,
+                  "applicable": true,
+                  "target": "index.html",
+                  "result": "PASS",
+                  "reason_codes": [
+                    "SUPPORTED_TARGET_PRESENT"
+                  ],
+                  "evidence_refs": [
+                    "child:EXEC-001",
+                    "contract:requested_target:index.html",
+                    "repo:entrypoint:index.html"
+                  ],
+                  "resolution_status": "RESOLVED",
+                  "resolution_source": "unique_root_html",
+                  "requested_from_node": "index.html"
+                }
+              ],
+              "actual_failures": [],
+              "skipped_not_applicable": [],
+              "required_execution_verification_set_hash": null,
+              "execution_verification_closure": null
+            },
+            "verification_evidence": [
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 397-411 of 558] 397: } 398: group.position.set(-28 + i * 14, 14 + (i % 2) * 3, -12 - i * 15); scene.add(group); 399: animatedClouds.push({ group, speed: .22 + i * .025 }); 400: } 401: } 402: 403: function bindControls() { 404: document.getElementById('start-button').addEventListener('click', startGame); 405: document.getElementById('restart-button').addEventListener('click', restartGame); 406: window.addEventListener('keydown', event => { 407: const key = event.key.toLowerCase(); 408: const moves = { arrowup: [0, 1], w: [0, 1], arrowdown: [0, -1], s: [0, -1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }; 409: if (!moves[key]) return; 410: event.preventDefault(); 411: if (!event.repeat) requestMove(...moves[key]);"
+              },
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 422-436 of 558] 422: function startGame() { 423: if (state.status === 'gameover' || state.status === 'won') return restartGame(); 424: if (state.status === 'playing') return; 425: state.status = 'playing'; introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); showStatus('Find the gap'); 426: } 427: function restartGame() { 428: state.status = 'playing'; state.score = 0; state.row = 0; state.col = 0; state.maxRow = 0; 429: state.hopping = false; state.queuedMove = null; 430: player.position.set(0, PLAYER_Y, 0); player.rotation.set(0, 0, 0); player.scale.setScalar(PLAYER_SCALE); 431: introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); updateHud(); showStatus('Fresh run'); 432: } 433: function requestMove(dx, dRow) { 434: if (state.status === 'ready') startGame(); 435: if (state.status !== 'playing') return false; 436: if (state.hopping) { s..."
+              },
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 533-547 of 558] 533: window.__HOPLINE__ = { 534: getState: () => ({ 535: status: state.status, score: state.score, best: state.best, 536: player: { row: state.row, col: state.col, x: Number(player ? player.position.x.toFixed(3) : 0), z: Number(player ? player.position.z.toFixed(3) : 0) }, 537: laneCount: lanes.length, vehicleCount: vehicles.length 538: }), 539: start: startGame, 540: restart: restartGame, 541: step: direction => { 542: const map = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] }; 543: return map[direction] ? requestMove(...map[direction]) : false; 544: }, 545: forceCollision: () => endGame('collision'), 546: forceWin: () => { 547: if (state.status !== 'playing') restartGame();"
+              },
+              {
+                "tool": "context_sufficiency_check",
+                "target": "-",
+                "result": "{\"anchor_hash\": \"15b0be7a4bc1b76413727991c20643a50ba600141800582f8822453ee4f5e818\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to intercept 'R' key press post-game state (game over or win) to restart Hopline, while preserving existing controls. LOC-001 handles keydown events, LOC-002 handles game state transitions (startGame/restartGame), and LOC-003 is the public API object. The keydown listener in LOC-001 is the most appropriate place to add the 'R' key logic, as it intercepts all key presses. I will modify LOC-001 to check ...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+              },
+              {
+                "tool": "edit_file",
+                "target": "index.html",
+                "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\live_resolved\\index.html (1 replacement(s)) (managed backup: .agent_backups\\20260928T084006-f38f1d1b\\index.html)"
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:63220/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "run_command",
+                "target": "npm test",
+                "result": "[not_applicable] VERIFICATION_NOT_APPLICABLE: package.json is absent"
+              },
+              {
+                "tool": "run_command",
+                "target": "npm test",
+                "result": "[not_applicable] VERIFICATION_NOT_APPLICABLE: package.json is absent"
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:55942/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:62382/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db"
+                }
+              }
+            ],
+            "required_evidence": [
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 397-411 of 558] 397: } 398: group.position.set(-28 + i * 14, 14 + (i % 2) * 3, -12 - i * 15); scene.add(group); 399: animatedClouds.push({ group, speed: .22 + i * .025 }); 400: } 401: } 402: 403: function bindControls() { 404: document.getElementById('start-button').addEventListener('click', startGame); 405: document.getElementById('restart-button').addEventListener('click', restartGame); 406: window.addEventListener('keydown', event => { 407: const key = event.key.toLowerCase(); 408: const moves = { arrowup: [0, 1], w: [0, 1], arrowdown: [0, -1], s: [0, -1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }; 409: if (!moves[key]) return; 410: event.preventDefault(); 411: if (!event.repeat) requestMove(...moves[key]);"
+              },
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 422-436 of 558] 422: function startGame() { 423: if (state.status === 'gameover' || state.status === 'won') return restartGame(); 424: if (state.status === 'playing') return; 425: state.status = 'playing'; introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); showStatus('Find the gap'); 426: } 427: function restartGame() { 428: state.status = 'playing'; state.score = 0; state.row = 0; state.col = 0; state.maxRow = 0; 429: state.hopping = false; state.queuedMove = null; 430: player.position.set(0, PLAYER_Y, 0); player.rotation.set(0, 0, 0); player.scale.setScalar(PLAYER_SCALE); 431: introEl.classList.add('is-hidden'); resultEl.classList.add('is-hidden'); updateHud(); showStatus('Fresh run'); 432: } 433: function requestMove(dx, dRow) { 434: if (state.status === 'ready') startGame(); 435: if (state.status !== 'playing') return false; 436: if (state.hopping) { s..."
+              },
+              {
+                "tool": "read_candidate_span",
+                "target": "index.html",
+                "result": "[lines 533-547 of 558] 533: window.__HOPLINE__ = { 534: getState: () => ({ 535: status: state.status, score: state.score, best: state.best, 536: player: { row: state.row, col: state.col, x: Number(player ? player.position.x.toFixed(3) : 0), z: Number(player ? player.position.z.toFixed(3) : 0) }, 537: laneCount: lanes.length, vehicleCount: vehicles.length 538: }), 539: start: startGame, 540: restart: restartGame, 541: step: direction => { 542: const map = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] }; 543: return map[direction] ? requestMove(...map[direction]) : false; 544: }, 545: forceCollision: () => endGame('collision'), 546: forceWin: () => { 547: if (state.status !== 'playing') restartGame();"
+              },
+              {
+                "tool": "context_sufficiency_check",
+                "target": "-",
+                "result": "{\"anchor_hash\": \"15b0be7a4bc1b76413727991c20643a50ba600141800582f8822453ee4f5e818\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to intercept 'R' key press post-game state (game over or win) to restart Hopline, while preserving existing controls. LOC-001 handles keydown events, LOC-002 handles game state transitions (startGame/restartGame), and LOC-003 is the public API object. The keydown listener in LOC-001 is the most appropriate place to add the 'R' key logic, as it intercepts all key presses. I will modify LOC-001 to check ...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+              },
+              {
+                "tool": "edit_file",
+                "target": "index.html",
+                "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\live_resolved\\index.html (1 replacement(s)) (managed backup: .agent_backups\\20260928T084006-f38f1d1b\\index.html)"
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:63220/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "run_command",
+                "target": "npm test",
+                "result": "[not_applicable] VERIFICATION_NOT_APPLICABLE: package.json is absent"
+              },
+              {
+                "tool": "run_command",
+                "target": "npm test",
+                "result": "[not_applicable] VERIFICATION_NOT_APPLICABLE: package.json is absent"
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:55942/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "run_file",
+                "target": "index.html",
+                "result": "{\"requested_from_node\": \"index.html\", \"resolved_entrypoint\": \"index.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Hopline — City Crossing\", \"url\": \"http://127.0.0.1:62382/index.html\", \"text\": \"HOPLINE\\nCITY CROSSING\\nSCORE\\n00\\nBEST\\n00\\nRUSH HOUR. YOUR MOVE.\\nOWN THE CROSSING.\\n\\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\\n\\nSTART CROSSING →\\nTRAFFIC WINS THIS ROUND\\nCLOSE CALL.\\n\\nYou made it across 0 blocks. The next opening is already coming.\\n\\nCROSS AGAIN ↻\\nW\\nA\\nS\\nD\\nOR ARROW KEYS · ONE KEY, ONE HOP\\nGO!\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file...."
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee"
+                }
+              },
+              {
+                "tool": "verify_web_app",
+                "target": "index.html",
+                "result": {
+                  "passed": true,
+                  "canonical_record_hash": "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309",
+                  "requirement_id": "REQ-001",
+                  "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db"
+                }
+              }
+            ],
+            "coverage": {
+              "plan_node_ids": [
+                "NODE-001"
+              ],
+              "owned_plan_node_ids": [
+                "NODE-001"
+              ],
+              "responsibility_units": [
+                "Allow the R key to restart Hopline after game over or win, while preserving existing keyboard and touch controls."
+              ]
+            },
+            "verified_subject_state_hash": "d517d974b1dd98a02fd72bb12190c1ccc0857c339f41e52c57e0ca637c2a4ff1",
+            "verified_subject_state": {
+              "schema_version": "V21.5B",
+              "paths": [
+                {
+                  "path": ".agent_backups/20260928T084006-f38f1d1b/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "55942/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "62382/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "63220/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "index.html",
+                  "exists": true,
+                  "sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+                  "size": 32172
+                },
+                {
+                  "path": "package.json",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "projects/Ai/mini_hivo_experiment9/rkey_01/live_resolved/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                }
+              ],
+              "hash": "d517d974b1dd98a02fd72bb12190c1ccc0857c339f41e52c57e0ca637c2a4ff1"
+            },
+            "evidence_dependency_fingerprint": {
+              "schema_version": "V21.5B",
+              "paths": [
+                {
+                  "path": ".agent_backups/20260928T084006-f38f1d1b/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "55942/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "62382/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "63220/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "index.html",
+                  "exists": true,
+                  "sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+                  "size": 32172
+                },
+                {
+                  "path": "package.json",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                },
+                {
+                  "path": "projects/Ai/mini_hivo_experiment9/rkey_01/live_resolved/index.html",
+                  "exists": false,
+                  "sha256": null,
+                  "size": 0
+                }
+              ],
+              "hash": "d517d974b1dd98a02fd72bb12190c1ccc0857c339f41e52c57e0ca637c2a4ff1"
+            },
+            "provenance": {
+              "source": "deterministic_stage5a_verified_semantics",
+              "model_calls": 0,
+              "raw_worker_transcript_included": false,
+              "memory_promotion": false
+            },
+            "receipt_hash": "dd90aca37315a7049fec04ee885200dcb01c0daeacb99e7045d4abce81df1179",
+            "covered_node_ids": [
+              "NODE-001"
+            ],
+            "requirement_ids": [
+              "REQ-001"
+            ],
+            "verification_evidence_hash": "a7bcf2654a2e9120eec86a0de1983dd23e67fa88a7ac2d3e6f2d89a869e69746",
+            "subject_after_hash": "d517d974b1dd98a02fd72bb12190c1ccc0857c339f41e52c57e0ca637c2a4ff1",
+            "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+            "semantic_browser_evidence": {
+              "index.html": {
+                "status": "PASS",
+                "required_requirement_ids": [
+                  "REQ-001"
+                ],
+                "covered_requirement_ids": [
+                  "REQ-001"
+                ],
+                "claim_decisions": [
+                  {
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6"
+                    ]
+                  },
+                  {
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "requirement_id": "REQ-001",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "result": "PASS",
+                    "record_hashes": [
+                      "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                    ]
+                  }
+                ],
+                "canonical_evidence_records": [
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "b523e835e7db92549eaf878b6253225abe48c948293cd7e34b82b24ead61bebc"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "852d370360488928084bf15a13f0a8239f18ff7f8d43a78ed8031de174b1e5c4"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "47f92a40770b304e82b16ef68799683ed08489ce20c0b4dfcb2d6fd1f7e05620"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "0ea27fb5cdda2ac163057d0ca7bca079bbdba9fd43a863d0bc0bcf7975a177f6"
+                  },
+                  {
+                    "artifact_type": "CanonicalEvidenceRecord",
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ],
+                    "result": "PASS",
+                    "raw_result_hash": "5421c682b3f7c978001bce88d1181c281db857b44f50b173567e6ea9a6e8b716",
+                    "provenance": {
+                      "tool": "verify_web_app",
+                      "source": "controller_child_browser",
+                      "executed": true
+                    },
+                    "subject_before_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_after_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "record_hash": "ad9f90020da88f038aa084bebe9e2915ed5779f9ccd6f09b235d514d35b02309"
+                  }
+                ],
+                "required_claims": [
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "browser_contract",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-e0e1470edebd1b9916ae1b17330f21e28d7b7143116cfc04906de3839d79d2fe",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "keyboard_movement",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-879ad8e4f24fd46b40cebbefc3dbf6b5d3904f5fd3adcc680bd726306b6b7c9a",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "restart_resets_state",
+                      "parameters": {
+                        "input": "r",
+                        "terminal_cases": [
+                          "forceCollision",
+                          "forceWin"
+                        ]
+                      }
+                    },
+                    "obligation_id": "CLAIM-3485f4f3ace77d8b4ed7aad8151bd1925e2d7d6a407249f4f58297b0c264c29e",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "goal_win_state",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-a8c8cae91a3fd2fce0af780f451610550a4eb7f0ee36d7f681f4ab5caad664ee",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  },
+                  {
+                    "child_id": "EXEC-001",
+                    "requirement_id": "REQ-001",
+                    "requirement_text_hash": "fc645a6b7c3351d2c6d34044401933f4edea4e5385dd08b0456cc2b271becb4d",
+                    "contract_hash": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1",
+                    "target": "index.html",
+                    "surface_id": "file:index.html",
+                    "assertion": {
+                      "name": "touch_control",
+                      "parameters": {}
+                    },
+                    "obligation_id": "CLAIM-979abc0104a44d55f8a7b3c12943e53d1dcd682131464be56f61c411940512db",
+                    "subject_hash": "47ab76ab5d63b16d1db6a021a02ac2cb36d42920af6f5ca684b97fe47fbe2c78",
+                    "subject_paths": [
+                      "index.html"
+                    ]
+                  }
+                ],
+                "tool_used_as_identity": false
+              }
+            },
+            "semantic_requirements": [
+              {
+                "requirement_id": "REQ-001",
+                "text": "Allow the R key to restart Hopline after game over or win, while preserving existing keyboard and touch controls.",
+                "provenance": "USER_STATED",
+                "status": "active"
+              }
+            ],
+            "semantic_evidence_hash": "686d505381f86a252e96fbc44117af6686ae045155b6c3a54affab8aa98bf380"
+          }
+        },
+        "policy": "compatible",
+        "source_sha256": {
+          "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+        },
+        "source_unchanged": true,
+        "canonical_record_count": 5,
+        "child_verified": true,
+        "parent_verification_executed": false
+      }
+    ]
+  },
+  "fresh_trials": [
+    {
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment11\\rkey_01\\fresh-1",
+      "run_id": "20260928T101901-207e7d32",
+      "source_sha256": "48c0346276dd4336b83d4afe79ce86e63d75fedf9352c1b9203166649da3701c",
+      "model": "gemma4:e4b",
+      "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approval_status": "APPROVED",
+      "execution_contract_hashes": {
+        "EXEC-001": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1"
+      },
+      "policies": {
+        "planning_route": "decomposition_first_recursive",
+        "mission_advice_policy": "contract_fallback",
+        "worker_progress_policy": "progress_constrained",
+        "mutation_grounding_policy": "evidence_grounded",
+        "target_locator_policy": "evidence_directed",
+        "verification_environment_policy": "resolved",
+        "verification_surface_policy": "discovery",
+        "child_receipt_policy": "atomic_verified",
+        "integration_target_policy": "resolved",
+        "semantic_evidence_policy": "compatible"
+      },
+      "unchanged_worker_component_hashes": {
+        "worker_progress_source_sha256": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+        "mutation_grounding_source_sha256": "ea269861b3e819befbc5d615e36329eb6131f1f26a2a29f8ad9828ca0825b082",
+        "target_locator_source_sha256": "a24f247899596042c8b777dc5f74cde990a4496f68de14b65d7c5b3bcadc48c3"
+      },
+      "worker_started": true,
+      "legal_mutation_committed": true,
+      "first_legal_mutation": {
+        "tool_step": 5,
+        "model_round": 5,
+        "remaining_budget": 23,
+        "tool": "edit_file",
+        "target": "index.html"
+      },
+      "child_behavior_pass": true,
+      "canonical_evidence_records": 5,
+      "semantic_aggregation_pass": true,
+      "child_verified_events": 1,
+      "verified_receipts": 1,
+      "receipt_validations": {
+        "EXEC-001": {
+          "valid": true,
+          "verified": true,
+          "errors": [],
+          "fresh": true
+        }
+      },
+      "node_001_preserved": true,
+      "fresh_parent_behavior_executed": true,
+      "parent_requirement_ids_covered": [
+        "REQ-001"
+      ],
+      "child_evidence_reused_as_parent_proof": 0,
+      "root_verified": true,
+      "first_blocker": null,
+      "status": "done",
+      "model_calls": 20,
+      "repairer_calls": 0,
+      "elapsed_seconds": 216.26,
+      "provider_timeouts": 0,
+      "provider_retries": 0,
+      "safety": {
+        "execution_contract_scope_violations": 0,
+        "mutation_scope_violations": 0,
+        "impact_out_of_scope_changes": 0,
+        "impact_preservation_violations": 0,
+        "dnt_execution_violations": 0,
+        "unapproved_scope_expansions": 0,
+        "invariant_violations_detected": 0
+      }
+    },
+    {
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment11\\rkey_01\\fresh-2",
+      "run_id": "20260928T102258-09c0e72a",
+      "source_sha256": "e97c04e94b145a0da28b3ccace32b7cc43d2ab8bae79a1fe224991508223f236",
+      "model": "gemma4:e4b",
+      "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approval_status": "APPROVED",
+      "execution_contract_hashes": {
+        "EXEC-001": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1"
+      },
+      "policies": {
+        "planning_route": "decomposition_first_recursive",
+        "mission_advice_policy": "contract_fallback",
+        "worker_progress_policy": "progress_constrained",
+        "mutation_grounding_policy": "evidence_grounded",
+        "target_locator_policy": "evidence_directed",
+        "verification_environment_policy": "resolved",
+        "verification_surface_policy": "discovery",
+        "child_receipt_policy": "atomic_verified",
+        "integration_target_policy": "resolved",
+        "semantic_evidence_policy": "compatible"
+      },
+      "unchanged_worker_component_hashes": {
+        "worker_progress_source_sha256": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+        "mutation_grounding_source_sha256": "ea269861b3e819befbc5d615e36329eb6131f1f26a2a29f8ad9828ca0825b082",
+        "target_locator_source_sha256": "a24f247899596042c8b777dc5f74cde990a4496f68de14b65d7c5b3bcadc48c3"
+      },
+      "worker_started": true,
+      "legal_mutation_committed": true,
+      "first_legal_mutation": {
+        "tool_step": 5,
+        "model_round": 5,
+        "remaining_budget": 23,
+        "tool": "edit_file",
+        "target": "index.html"
+      },
+      "child_behavior_pass": true,
+      "canonical_evidence_records": 5,
+      "semantic_aggregation_pass": true,
+      "child_verified_events": 1,
+      "verified_receipts": 1,
+      "receipt_validations": {
+        "EXEC-001": {
+          "valid": true,
+          "verified": true,
+          "errors": [],
+          "fresh": true
+        }
+      },
+      "node_001_preserved": true,
+      "fresh_parent_behavior_executed": true,
+      "parent_requirement_ids_covered": [
+        "REQ-001"
+      ],
+      "child_evidence_reused_as_parent_proof": 0,
+      "root_verified": true,
+      "first_blocker": null,
+      "status": "done",
+      "model_calls": 24,
+      "repairer_calls": 0,
+      "elapsed_seconds": 224.65,
+      "provider_timeouts": 0,
+      "provider_retries": 0,
+      "safety": {
+        "execution_contract_scope_violations": 0,
+        "mutation_scope_violations": 0,
+        "impact_out_of_scope_changes": 0,
+        "impact_preservation_violations": 0,
+        "dnt_execution_violations": 0,
+        "unapproved_scope_expansions": 0,
+        "invariant_violations_detected": 0
+      }
+    },
+    {
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment11\\rkey_01\\fresh-3",
+      "run_id": "20260928T102702-d291b1d4",
+      "source_sha256": "e97c04e94b145a0da28b3ccace32b7cc43d2ab8bae79a1fe224991508223f236",
+      "model": "gemma4:e4b",
+      "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approval_status": "APPROVED",
+      "execution_contract_hashes": {
+        "EXEC-001": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1"
+      },
+      "policies": {
+        "planning_route": "decomposition_first_recursive",
+        "mission_advice_policy": "contract_fallback",
+        "worker_progress_policy": "progress_constrained",
+        "mutation_grounding_policy": "evidence_grounded",
+        "target_locator_policy": "evidence_directed",
+        "verification_environment_policy": "resolved",
+        "verification_surface_policy": "discovery",
+        "child_receipt_policy": "atomic_verified",
+        "integration_target_policy": "resolved",
+        "semantic_evidence_policy": "compatible"
+      },
+      "unchanged_worker_component_hashes": {
+        "worker_progress_source_sha256": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+        "mutation_grounding_source_sha256": "ea269861b3e819befbc5d615e36329eb6131f1f26a2a29f8ad9828ca0825b082",
+        "target_locator_source_sha256": "a24f247899596042c8b777dc5f74cde990a4496f68de14b65d7c5b3bcadc48c3"
+      },
+      "worker_started": true,
+      "legal_mutation_committed": true,
+      "first_legal_mutation": {
+        "tool_step": 5,
+        "model_round": 5,
+        "remaining_budget": 23,
+        "tool": "edit_file",
+        "target": "index.html"
+      },
+      "child_behavior_pass": true,
+      "canonical_evidence_records": 10,
+      "semantic_aggregation_pass": true,
+      "child_verified_events": 1,
+      "verified_receipts": 1,
+      "receipt_validations": {
+        "EXEC-001": {
+          "valid": true,
+          "verified": true,
+          "errors": [],
+          "fresh": true
+        }
+      },
+      "node_001_preserved": true,
+      "fresh_parent_behavior_executed": true,
+      "parent_requirement_ids_covered": [
+        "REQ-001"
+      ],
+      "child_evidence_reused_as_parent_proof": 0,
+      "root_verified": true,
+      "first_blocker": null,
+      "status": "done",
+      "model_calls": 21,
+      "repairer_calls": 0,
+      "elapsed_seconds": 303.45,
+      "provider_timeouts": 0,
+      "provider_retries": 0,
+      "safety": {
+        "execution_contract_scope_violations": 0,
+        "mutation_scope_violations": 0,
+        "impact_out_of_scope_changes": 0,
+        "impact_preservation_violations": 0,
+        "dnt_execution_violations": 0,
+        "unapproved_scope_expansions": 0,
+        "invariant_violations_detected": 0
+      }
+    },
+    {
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment11\\rkey_01\\fresh-4",
+      "run_id": "20260928T103227-aec721a8",
+      "source_sha256": "e97c04e94b145a0da28b3ccace32b7cc43d2ab8bae79a1fe224991508223f236",
+      "model": "gemma4:e4b",
+      "plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+      "approval_status": "APPROVED",
+      "execution_contract_hashes": {
+        "EXEC-001": "0e31866873797ef91adc3ca86e4531b70aef45b621162f39ee3490089c2557f1"
+      },
+      "policies": {
+        "planning_route": "decomposition_first_recursive",
+        "mission_advice_policy": "contract_fallback",
+        "worker_progress_policy": "progress_constrained",
+        "mutation_grounding_policy": "evidence_grounded",
+        "target_locator_policy": "evidence_directed",
+        "verification_environment_policy": "resolved",
+        "verification_surface_policy": "discovery",
+        "child_receipt_policy": "atomic_verified",
+        "integration_target_policy": "resolved",
+        "semantic_evidence_policy": "compatible"
+      },
+      "unchanged_worker_component_hashes": {
+        "worker_progress_source_sha256": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+        "mutation_grounding_source_sha256": "ea269861b3e819befbc5d615e36329eb6131f1f26a2a29f8ad9828ca0825b082",
+        "target_locator_source_sha256": "a24f247899596042c8b777dc5f74cde990a4496f68de14b65d7c5b3bcadc48c3"
+      },
+      "worker_started": true,
+      "legal_mutation_committed": true,
+      "first_legal_mutation": {
+        "tool_step": 5,
+        "model_round": 5,
+        "remaining_budget": 23,
+        "tool": "edit_file",
+        "target": "index.html"
+      },
+      "child_behavior_pass": true,
+      "canonical_evidence_records": 10,
+      "semantic_aggregation_pass": true,
+      "child_verified_events": 1,
+      "verified_receipts": 1,
+      "receipt_validations": {
+        "EXEC-001": {
+          "valid": true,
+          "verified": true,
+          "errors": [],
+          "fresh": true
+        }
+      },
+      "node_001_preserved": true,
+      "fresh_parent_behavior_executed": true,
+      "parent_requirement_ids_covered": [
+        "REQ-001"
+      ],
+      "child_evidence_reused_as_parent_proof": 0,
+      "root_verified": true,
+      "first_blocker": null,
+      "status": "done",
+      "model_calls": 23,
+      "repairer_calls": 0,
+      "elapsed_seconds": 625.43,
+      "provider_timeouts": 0,
+      "provider_retries": 0,
+      "safety": {
+        "execution_contract_scope_violations": 0,
+        "mutation_scope_violations": 0,
+        "impact_out_of_scope_changes": 0,
+        "impact_preservation_violations": 0,
+        "dnt_execution_violations": 0,
+        "unapproved_scope_expansions": 0,
+        "invariant_violations_detected": 0
+      }
+    }
+  ],
+  "metrics": {
+    "worker_started": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "child_behavior_pass": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "semantic_aggregation_pass": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "node_001_preserved": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "fresh_parent_behavior_executed": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "root_verified": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    },
+    "valid_receipts_per_verified_child_event": {
+      "numerator": 4,
+      "denominator": 4,
+      "percent": 100.0
+    }
+  },
+  "scope_preservation_violation_count": 0,
+  "repairer_calls": 0,
+  "child_evidence_reused_as_parent_proof": 0,
+  "implementation_commit": "9db6907",
+  "validation_tests": {
+    "passed": 196,
+    "total": 196,
+    "new_policy_tests": 10,
+    "post_extraction_ast_equal": true
+  }
+}

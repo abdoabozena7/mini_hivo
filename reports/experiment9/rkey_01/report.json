@@ -1,0 +1,181 @@
+{
+  "sample_size": 1,
+  "comparison": "same candidate bytes and same canonical child receipts; new parent verification in resolved route",
+  "required_requirement_ids": [
+    "REQ-001"
+  ],
+  "completion_mode": "continue_existing_verified_children",
+  "probe": {
+    "current": {
+      "target_resolved": false,
+      "target": null,
+      "target_source": null,
+      "parent_verification_executed": false,
+      "behavior_checks_passed": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "parent_requirements_covered": {
+        "numerator": 0,
+        "denominator": 1,
+        "percent": 0.0
+      },
+      "covered_requirement_ids": [],
+      "fresh_proof_hash_matches": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "child_evidence_reused_as_proof": 0,
+      "parent_verified": false,
+      "root_verified": false,
+      "status": "failed",
+      "summary": "required integration target is unresolved",
+      "root_verified_event": false,
+      "source_unchanged": true,
+      "parent_receipt_hash": null,
+      "fresh_verification_ids": []
+    },
+    "resolved": {
+      "target_resolved": true,
+      "target": "index.html",
+      "target_source": "verified_child_browser_target",
+      "parent_verification_executed": true,
+      "behavior_checks_passed": {
+        "numerator": 4,
+        "denominator": 4,
+        "percent": 100.0
+      },
+      "parent_requirements_covered": {
+        "numerator": 1,
+        "denominator": 1,
+        "percent": 100.0
+      },
+      "covered_requirement_ids": [
+        "REQ-001"
+      ],
+      "fresh_proof_hash_matches": {
+        "numerator": 1,
+        "denominator": 1,
+        "percent": 100.0
+      },
+      "child_evidence_reused_as_proof": 0,
+      "parent_verified": true,
+      "root_verified": true,
+      "status": "done",
+      "summary": "parent integration verified by real required evidence",
+      "root_verified_event": true,
+      "source_unchanged": true,
+      "parent_receipt_hash": "8228d96fcec8482f3dcc598a3ef9a34abe1b6528c97a13f4f9b449dab46b13fb",
+      "fresh_verification_ids": [
+        "PARENT-VERIFY-08319c666bee450c929a2bfb758c598b"
+      ]
+    }
+  },
+  "live_runs": [
+    {
+      "target_resolved": false,
+      "target": null,
+      "target_source": null,
+      "parent_verification_executed": false,
+      "behavior_checks_passed": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "parent_requirements_covered": {
+        "numerator": 0,
+        "denominator": 1,
+        "percent": 0.0
+      },
+      "covered_requirement_ids": [],
+      "fresh_proof_hash_matches": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "child_evidence_reused_as_proof": 0,
+      "parent_verified": false,
+      "root_verified": false,
+      "status": "failed",
+      "summary": null,
+      "root_verified_event": false,
+      "source_unchanged": null,
+      "parent_receipt_hash": null,
+      "fresh_verification_ids": [],
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\live_resolved",
+      "parent_ready_reached": false,
+      "first_blocker": {
+        "stage": "CHILD_VERIFICATION",
+        "reason": "VERIFICATION_NOT_APPLICABLE",
+        "detail": "verification failed: VERIFICATION_NOT_APPLICABLE"
+      },
+      "repairer_calls": 0,
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "model": "gemma4:e4b",
+      "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43"
+    },
+    {
+      "target_resolved": false,
+      "target": null,
+      "target_source": null,
+      "parent_verification_executed": false,
+      "behavior_checks_passed": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "parent_requirements_covered": {
+        "numerator": 0,
+        "denominator": 1,
+        "percent": 0.0
+      },
+      "covered_requirement_ids": [],
+      "fresh_proof_hash_matches": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "child_evidence_reused_as_proof": 0,
+      "parent_verified": false,
+      "root_verified": false,
+      "status": "failed",
+      "summary": null,
+      "root_verified_event": false,
+      "source_unchanged": null,
+      "parent_receipt_hash": null,
+      "fresh_verification_ids": [],
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment9\\rkey_01\\live_resolved_retry",
+      "parent_ready_reached": false,
+      "first_blocker": {
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "repairer_calls": 1,
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "model": "gemma4:e4b",
+      "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43"
+    }
+  ],
+  "live_rates": {
+    "root_success_all_attempts": {
+      "numerator": 0,
+      "denominator": 2,
+      "percent": 0.0
+    },
+    "root_success_after_parent_ready": {
+      "numerator": 0,
+      "denominator": 0,
+      "percent": null
+    }
+  },
+  "root_continuation_success": {
+    "numerator": 1,
+    "denominator": 1,
+    "percent": 100.0
+  }
+}

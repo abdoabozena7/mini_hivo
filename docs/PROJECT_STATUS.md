@@ -11,7 +11,7 @@ Checkpoint: 2026-10-03. This page tracks capabilities, not individual defects. T
 | Impact Map, challenge, minimal change plan, explicit approval, and immutable execution contracts | Implemented | `hivo/impact_planning.py`, `hivo/execution_contracts.py`, `hivo/approval_bound_execution.py` |
 | Recursive task decomposition, scoped Worker missions, dependency scheduling, mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
 | Browser/unit verification routing, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
-| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Implemented through Experiment 16; Experiment 17 in progress | `scripts/`, `tests/`, `reports/` |
+| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Completed report metrics archived through Experiment 16; Experiment 17 in progress | `scripts/`, `tests/`, `reports/` |
 
 “Implemented” means a code path and focused tests exist. It does **not** claim reliable end-to-end completion for every project or that an experimental policy is the default.
 

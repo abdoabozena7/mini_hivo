@@ -1,0 +1,527 @@
+{
+  "experiment": 13,
+  "scope": "exact captured child handoffs + native verification confirmation; no Root success claim",
+  "selection": "Every terminally completed current Worker, no selection on verification PASS",
+  "rows": [
+    {
+      "case_id": "arena_arrow",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "cb6e9304260443e7f7a093212991ed666e24772a6543f9c25706691b91cd8a92",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "commit_status": null,
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": null,
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "cb6e9304260443e7f7a093212991ed666e24772a6543f9c25706691b91cd8a92",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "cb6e9304260443e7f7a093212991ed666e24772a6543f9c25706691b91cd8a92",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "9d80275a677d1dacd65574524469ec14e78a7c135c822b0e47bba87f97104211",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "commit_status": null,
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": null,
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "9d80275a677d1dacd65574524469ec14e78a7c135c822b0e47bba87f97104211",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "9d80275a677d1dacd65574524469ec14e78a7c135c822b0e47bba87f97104211",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "repeat": 3,
+      "eligible": false,
+      "reason": "NO_COMPLETED_WORKER_HANDOFF"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "commit_status": null,
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": null,
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "c8fb8e3a7378883d8950fbaf8379fd98f5fa80b85f8dde623d40aa4fcf643e2a",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "commit_status": null,
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": null,
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "c8fb8e3a7378883d8950fbaf8379fd98f5fa80b85f8dde623d40aa4fcf643e2a",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "c8fb8e3a7378883d8950fbaf8379fd98f5fa80b85f8dde623d40aa4fcf643e2a",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "repeat": 3,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-3-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "7433d2bc46e9c88c80b3cc0fc2bf61016a2a8da8eeed525aacacab3edce5f351",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "commit_status": null,
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": null,
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "7433d2bc46e9c88c80b3cc0fc2bf61016a2a8da8eeed525aacacab3edce5f351",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "7433d2bc46e9c88c80b3cc0fc2bf61016a2a8da8eeed525aacacab3edce5f351",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": null
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 1,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic evidence hash or inventory is invalid",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic evidence hash or inventory is invalid"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 2,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-2-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "f0a9a234f38429d5810efd8d5f8b62ddd419577aee0739dd4320a3405362a657",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "f0a9a234f38429d5810efd8d5f8b62ddd419577aee0739dd4320a3405362a657",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic evidence hash or inventory is invalid",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic evidence hash or inventory is invalid"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "f0a9a234f38429d5810efd8d5f8b62ddd419577aee0739dd4320a3405362a657",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "repeat": 3,
+      "eligible": true,
+      "source": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-3-EXEC-001-handoff.json",
+      "arms": [
+        {
+          "policy": "current",
+          "input_hash": "ae83d63ec2ed4f099b9274b83f506a403d415f02fd4805b29b903bdd7b412a7c",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "compatible",
+          "input_hash": "ae83d63ec2ed4f099b9274b83f506a403d415f02fd4805b29b903bdd7b412a7c",
+          "eligible": true,
+          "child_verified": false,
+          "blocker": "child receipt invalid: semantic evidence hash or inventory is invalid",
+          "commit_status": "failed",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": false,
+            "verified": false,
+            "errors": [
+              "semantic evidence hash or inventory is invalid"
+            ],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        },
+        {
+          "policy": "monotonic",
+          "input_hash": "ae83d63ec2ed4f099b9274b83f506a403d415f02fd4805b29b903bdd7b412a7c",
+          "eligible": true,
+          "child_verified": true,
+          "blocker": null,
+          "commit_status": "done",
+          "model_calls": 0,
+          "repairer_calls": 0,
+          "root_verification_executed": false,
+          "receipt_validation": {
+            "valid": true,
+            "verified": true,
+            "errors": [],
+            "fresh": true
+          },
+          "fresh_unit_confirmation": {
+            "output": "[exit_code=0]\nunique behavior tests: 4 passed",
+            "passed": true
+          }
+        }
+      ]
+    }
+  ]
+}

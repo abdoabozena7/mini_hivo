@@ -1,0 +1,102 @@
+{
+  "comparison": "same historical child verification evidence, same candidate bytes; no Worker rerun",
+  "sample_size": 1,
+  "replay": {
+    "current": {
+      "receipt_verified": false,
+      "valid_verified_receipts": {
+        "numerator": 0,
+        "denominator": 1,
+        "percent": 0.0
+      },
+      "coverage_preservation": {
+        "numerator": 0,
+        "denominator": 1,
+        "percent": 0.0
+      },
+      "evidence_hash_match": {
+        "numerator": 0,
+        "denominator": 0,
+        "percent": null
+      },
+      "received_node_ids": [],
+      "readiness": "NOT_READY",
+      "reason": "NOT_READY_CHILD_UNVERIFIED",
+      "receipt_hash": "c35dfc58874d447c376c504cbf8db53fe1de12a4f196c6d01ccf9dc2116b0c7f",
+      "candidate_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+      "model_calls": 0
+    },
+    "atomic_verified": {
+      "receipt_verified": true,
+      "valid_verified_receipts": {
+        "numerator": 1,
+        "denominator": 1,
+        "percent": 100.0
+      },
+      "coverage_preservation": {
+        "numerator": 1,
+        "denominator": 1,
+        "percent": 100.0
+      },
+      "evidence_hash_match": {
+        "numerator": 1,
+        "denominator": 1,
+        "percent": 100.0
+      },
+      "received_node_ids": [
+        "NODE-001"
+      ],
+      "readiness": "READY",
+      "reason": null,
+      "receipt_hash": "34cfcf817aa38a23cf411b8db0e3112cf4ddcff174ea057df9342829a74a8d66",
+      "candidate_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+      "model_calls": 0
+    }
+  },
+  "live": {
+    "workspace": "D:\\projects\\Ai\\mini_hivo_experiment8\\rkey_01\\live_atomic",
+    "status": "failed",
+    "child_verified_count": 1,
+    "valid_receipts_per_verified_child": {
+      "numerator": 1,
+      "denominator": 1,
+      "percent": 100.0
+    },
+    "receipt_event_evidence_hash_match": {
+      "numerator": 1,
+      "denominator": 1,
+      "percent": 100.0
+    },
+    "coverage_preservation": {
+      "numerator": 1,
+      "denominator": 1,
+      "percent": 100.0
+    },
+    "received_node_ids": [
+      "NODE-001"
+    ],
+    "integration_readiness": "READY",
+    "integration_reason": null,
+    "root_verified": false,
+    "first_blocker": {
+      "stage": "PARENT_INTEGRATION",
+      "reason": "INTEGRATION_FAILED",
+      "detail": "required integration target is unresolved"
+    },
+    "repairer_calls": 0,
+    "browser_results": [
+      {
+        "task_id": "EXEC-001",
+        "status": "PASS",
+        "resolved_entrypoint": "index.html",
+        "surface_type": "existing_app_hook",
+        "behavior_test_executed": true,
+        "failure_codes": []
+      }
+    ],
+    "scope_violations": 0,
+    "preservation_violations": 0,
+    "model": "gemma4:e4b",
+    "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43"
+  }
+}

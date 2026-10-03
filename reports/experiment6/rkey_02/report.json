@@ -1,0 +1,188 @@
+{
+  "case_id": "rkey_02",
+  "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+  "source_sha256": "da292691b089155f4c06aca393a0264b86922384338e787b20e271e5e38d7bdf",
+  "runs": {
+    "current": {
+      "verification_environment_policy": "current",
+      "worker_started": true,
+      "first_legal_mutation_step": 5,
+      "npm_preflights": [],
+      "npm_results": [],
+      "browser_results": [],
+      "verification_resolution": [],
+      "tool_evidence": [
+        {
+          "role": "Builder",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        },
+        {
+          "role": "Falsifier",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        },
+        {
+          "role": "Falsifier",
+          "tool": "run_command",
+          "target": "echo \"Testing R key logic...\"",
+          "status": "failed",
+          "result": "error: command refused: executable 'echo' is not in the verification allowlist"
+        },
+        {
+          "role": "Falsifier",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        }
+      ],
+      "repairer_calls": 1,
+      "candidate_patches": [],
+      "child_verified": false,
+      "root_verified": false,
+      "first_blocker": {
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "status": "failed"
+    },
+    "resolved": {
+      "verification_environment_policy": "resolved",
+      "worker_started": true,
+      "first_legal_mutation_step": 5,
+      "npm_preflights": [],
+      "npm_results": [],
+      "browser_results": [
+        {
+          "task_id": "EXEC-001",
+          "status": "VERIFIER_UNAVAILABLE",
+          "resolved_entrypoint": "index.html",
+          "failure_codes": [
+            "missing_game_bridge",
+            "missing_interaction",
+            "missing_interaction",
+            "missing_interaction",
+            "missing_interaction"
+          ]
+        }
+      ],
+      "verification_resolution": [
+        {
+          "task_id": "EXEC-001",
+          "status": "VERIFIER_UNAVAILABLE",
+          "gate_checks": [
+            "browser_contract",
+            "verification_aggregation"
+          ]
+        }
+      ],
+      "tool_evidence": [
+        {
+          "role": "Builder",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        },
+        {
+          "role": "Builder",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        },
+        {
+          "role": "Builder",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        },
+        {
+          "role": "Falsifier",
+          "tool": "run_file",
+          "target": "index.html",
+          "status": "succeeded",
+          "passed": true,
+          "environment_error": false,
+          "failure_codes": [],
+          "interaction_checks": 0
+        }
+      ],
+      "repairer_calls": 0,
+      "candidate_patches": [
+        {
+          "run_id": "20260927T212445-3b682d96",
+          "task_id": "EXEC-001",
+          "verification_status": "UNVERIFIED",
+          "files": [
+            {
+              "path": "index.html",
+              "before_sha256": "3d031b1f28499a3bf0fc3f0f5bbac6521476e566373ad22ea75b2ab72293c661",
+              "candidate_sha256": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c",
+              "candidate_path": "D:\\projects\\Ai\\mini_hivo_experiment6\\rkey_02\\resolved\\.hivo\\candidate_patches\\20260927T212445-3b682d96\\EXEC-001\\index.html.candidate",
+              "patch_path": "D:\\projects\\Ai\\mini_hivo_experiment6\\rkey_02\\resolved\\.hivo\\candidate_patches\\20260927T212445-3b682d96\\EXEC-001\\index.html.patch"
+            }
+          ]
+        }
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "first_blocker": {
+        "stage": "CHILD_VERIFICATION",
+        "reason": "VERIFIER_UNAVAILABLE",
+        "detail": "verification failed: VERIFIER_UNAVAILABLE"
+      },
+      "scope_violations": 0,
+      "preservation_violations": 0,
+      "status": "failed"
+    }
+  },
+  "npm_probe": [
+    {
+      "policy": "current",
+      "result": "tool error: [WinError 2] The system cannot find the file specified",
+      "preflight": [],
+      "command_results": []
+    },
+    {
+      "policy": "resolved",
+      "result": "[not_applicable] VERIFICATION_NOT_APPLICABLE: package.json is absent",
+      "preflight": [
+        {
+          "command": "npm test",
+          "status": "VERIFICATION_NOT_APPLICABLE",
+          "reason": "package.json is absent",
+          "resolved_executable": null
+        }
+      ],
+      "command_results": []
+    }
+  ]
+}

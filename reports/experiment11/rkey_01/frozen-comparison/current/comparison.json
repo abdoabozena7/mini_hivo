@@ -1,0 +1,781 @@
+{
+  "events": [
+    {
+      "kind": "CHILD_EXECUTION_FINISHED",
+      "sequence": 1,
+      "child_id": "EXEC-001",
+      "status": "done",
+      "input_hash": "59a4a5cad96db52aca78289fbf239ea783401ef3f542dab036d8b6571e552250"
+    },
+    {
+      "kind": "VERIFICATION_TARGET_RESOLVED",
+      "sequence": 2,
+      "target": "index.html",
+      "source": "unique_root_html"
+    },
+    {
+      "kind": "VERIFICATION_APPLICABLE",
+      "sequence": 3,
+      "required": true,
+      "reason_codes": [
+        "SUPPORTED_TARGET_PRESENT"
+      ]
+    },
+    {
+      "kind": "VERIFICATION_CONTEXT_SUFFICIENT",
+      "sequence": 4,
+      "context_status": "sufficient",
+      "source": "existing_worker_context_guard"
+    },
+    {
+      "kind": "VERIFICATION_STARTED",
+      "sequence": 5,
+      "target": "index.html",
+      "task_id": "EXEC-001",
+      "source": "existing_verify_browser_application"
+    },
+    {
+      "kind": "VERIFICATION_FINISHED",
+      "sequence": 6,
+      "passed": true,
+      "behavior_test_executed": true
+    },
+    {
+      "kind": "BLOCKED",
+      "sequence": 7,
+      "stage": "VERIFICATION_EVIDENCE_AGGREGATION",
+      "reason": "INVALID_RECEIPT"
+    }
+  ],
+  "first_blocker": {
+    "stage": "VERIFICATION_EVIDENCE_AGGREGATION",
+    "reason": "INVALID_RECEIPT"
+  },
+  "verification_started": true,
+  "evidence_gate_passed": false,
+  "terminal_classification": "VERIFICATION_NOT_APPLICABLE",
+  "route_results": [
+    {
+      "kind": "SYNTAX_STATIC_GATE",
+      "target": "index.html",
+      "result": "PASS"
+    },
+    {
+      "kind": "BROWSER",
+      "target": "index.html",
+      "result": "INVALID_RECEIPT"
+    }
+  ],
+  "decision_hash": "75c9626bbfb5ff6dde3410cd4c34f928255e20bcae866222b73473000577264b",
+  "applicability": {
+    "schema_version": "V20.5A",
+    "child_id": "EXEC-001",
+    "model_calls": 0,
+    "verification_routes": [
+      {
+        "kind": "SYNTAX_STATIC_GATE",
+        "required": true,
+        "applicable": true,
+        "target": "index.html",
+        "reason_codes": [
+          "SUPPORTED_SOURCE_PRESENT",
+          "CONTRACT_REQUIRES_SYNTAX"
+        ],
+        "evidence_refs": [
+          "child:EXEC-001",
+          "contract:mutation_paths"
+        ],
+        "result": "PENDING",
+        "resolution_status": "RESOLVED",
+        "resolution_source": "contract_source_paths"
+      },
+      {
+        "kind": "BROWSER",
+        "required": true,
+        "applicable": true,
+        "target": "index.html",
+        "reason_codes": [
+          "SUPPORTED_TARGET_PRESENT"
+        ],
+        "evidence_refs": [
+          "child:EXEC-001",
+          "contract:requested_target:index.html",
+          "repo:entrypoint:index.html"
+        ],
+        "result": "PENDING",
+        "requested_from_node": "index.html",
+        "resolution_status": "RESOLVED",
+        "resolution_source": "unique_root_html",
+        "candidates": []
+      }
+    ],
+    "repository_evidence": {
+      "known_entrypoints": [
+        "index.html"
+      ],
+      "known_test_files": [],
+      "observed_file_types": [
+        "html"
+      ]
+    },
+    "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+    "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b"
+  },
+  "browser": {
+    "requested_from_node": "index.html",
+    "resolved_entrypoint": "index.html",
+    "resolution_source": "deterministic_reconnaissance",
+    "resolution_status": "RESOLVED",
+    "passed": true,
+    "environment_error": false,
+    "title": "Hopline — City Crossing",
+    "url": "http://127.0.0.1:55975/index.html",
+    "text": "HOPLINE\nCITY CROSSING\nSCORE\n00\nBEST\n00\nRUSH HOUR. YOUR MOVE.\nOWN THE CROSSING.\n\nGuide Pip through the city one clean hop at a time. Read the traffic, keep your rhythm, and reach the rooftop garden.\n\nSTART CROSSING  →\nTRAFFIC WINS THIS ROUND\nCLOSE CALL.\n\nYou made it across 0 blocks. The next opening is already coming.\n\nCROSS AGAIN  ↻\nW\nA\nS\nD\nOR ARROW KEYS · ONE KEY, ONE HOP\nGO!",
+    "console_errors": [],
+    "page_errors": [],
+    "network_errors": [],
+    "runtime_state": {
+      "canvasCount": 1,
+      "gameBridge": {
+        "name": "__HOPLINE__",
+        "surface_type": "existing_app_hook"
+      },
+      "debugState": null
+    },
+    "interaction_checks": [
+      {
+        "name": "keyboard_movement",
+        "executed": true,
+        "passed": true,
+        "before": {
+          "status": "playing",
+          "score": 0,
+          "best": 0,
+          "player": {
+            "row": 0,
+            "col": 0,
+            "x": 0,
+            "z": 0
+          },
+          "laneCount": 27,
+          "vehicleCount": 28
+        },
+        "after": {
+          "status": "playing",
+          "score": 1,
+          "best": 1,
+          "player": {
+            "row": 1,
+            "col": 0,
+            "x": 0,
+            "z": -3.2
+          },
+          "laneCount": 27,
+          "vehicleCount": 28
+        },
+        "input": "ArrowUp"
+      },
+      {
+        "name": "restart_resets_state",
+        "executed": true,
+        "passed": true,
+        "input": "r",
+        "cases": [
+          {
+            "setup": "forceCollision",
+            "precondition_met": true,
+            "before": {
+              "status": "gameover",
+              "score": 0,
+              "best": 1,
+              "player": {
+                "row": 0,
+                "col": 0,
+                "x": 0,
+                "z": 0
+              },
+              "laneCount": 27,
+              "vehicleCount": 28
+            },
+            "after": {
+              "status": "playing",
+              "score": 0,
+              "best": 1,
+              "player": {
+                "row": 0,
+                "col": 0,
+                "x": 0,
+                "z": 0
+              },
+              "laneCount": 27,
+              "vehicleCount": 28
+            },
+            "passed": true
+          },
+          {
+            "setup": "forceWin",
+            "precondition_met": true,
+            "before": {
+              "status": "won",
+              "score": 24,
+              "best": 24,
+              "player": {
+                "row": 24,
+                "col": 0,
+                "x": 0,
+                "z": -76.8
+              },
+              "laneCount": 27,
+              "vehicleCount": 28
+            },
+            "after": {
+              "status": "playing",
+              "score": 0,
+              "best": 24,
+              "player": {
+                "row": 0,
+                "col": 0,
+                "x": 0,
+                "z": 0
+              },
+              "laneCount": 27,
+              "vehicleCount": 28
+            },
+            "passed": true
+          }
+        ]
+      },
+      {
+        "name": "goal_win_state",
+        "executed": true,
+        "passed": true,
+        "after": {
+          "status": "won",
+          "score": 24,
+          "best": 24,
+          "player": {
+            "row": 24,
+            "col": 0,
+            "x": 0,
+            "z": -76.8
+          },
+          "laneCount": 27,
+          "vehicleCount": 28
+        }
+      },
+      {
+        "name": "touch_control",
+        "executed": true,
+        "passed": true,
+        "before": {
+          "status": "playing",
+          "score": 0,
+          "best": 24,
+          "player": {
+            "row": 0,
+            "col": 0,
+            "x": 0,
+            "z": 0
+          },
+          "laneCount": 27,
+          "vehicleCount": 28
+        },
+        "after": {
+          "status": "playing",
+          "score": 1,
+          "best": 24,
+          "player": {
+            "row": 1,
+            "col": 0,
+            "x": 0,
+            "z": -0.888
+          },
+          "laneCount": 27,
+          "vehicleCount": 28
+        },
+        "input": "pointerdown"
+      }
+    ],
+    "screenshot": ".agent_evidence\\task_EXEC-001.png",
+    "failures": [],
+    "verification_profile": {
+      "kind": "game",
+      "require_title": true,
+      "require_canvas": true,
+      "require_game_bridge": true,
+      "required_interactions": [
+        "keyboard_movement",
+        "restart_resets_state",
+        "goal_win_state",
+        "touch_control"
+      ]
+    },
+    "verification_surface": {
+      "surface_type": "existing_app_hook",
+      "selected": {
+        "name": "__HOPLINE__",
+        "methods": [
+          "start",
+          "restart",
+          "step",
+          "forceCollision",
+          "forceWin"
+        ],
+        "stateKeys": [
+          "status",
+          "score",
+          "best",
+          "player",
+          "laneCount",
+          "vehicleCount"
+        ],
+        "score": 35
+      },
+      "candidates": [
+        {
+          "name": "__HOPLINE__",
+          "methods": [
+            "start",
+            "restart",
+            "step",
+            "forceCollision",
+            "forceWin"
+          ],
+          "stateKeys": [
+            "status",
+            "score",
+            "best",
+            "player",
+            "laneCount",
+            "vehicleCount"
+          ],
+          "score": 35
+        }
+      ],
+      "action_functions": [],
+      "dom": {
+        "canvasCount": 1,
+        "controls": [
+          {
+            "tag": "button",
+            "id": "start-button",
+            "text": "Start crossing  →",
+            "dataMove": null
+          },
+          {
+            "tag": "button",
+            "id": "restart-button",
+            "text": "Cross again  ↻",
+            "dataMove": null
+          },
+          {
+            "tag": "button",
+            "id": null,
+            "text": "↑",
+            "dataMove": "up"
+          },
+          {
+            "tag": "button",
+            "id": null,
+            "text": "←",
+            "dataMove": "left"
+          },
+          {
+            "tag": "button",
+            "id": null,
+            "text": "↓",
+            "dataMove": "down"
+          },
+          {
+            "tag": "button",
+            "id": null,
+            "text": "→",
+            "dataMove": "right"
+          }
+        ],
+        "liveRegions": 2
+      },
+      "required_interactions": [
+        "goal_win_state",
+        "keyboard_movement",
+        "restart_resets_state",
+        "touch_control"
+      ],
+      "executed_interactions": [
+        "keyboard_movement",
+        "restart_resets_state",
+        "goal_win_state",
+        "touch_control"
+      ],
+      "behavior_test_executed": true,
+      "all_required_executed": true
+    },
+    "behavior_test_executed": true,
+    "entry_path": "index.html",
+    "verification_status": "PASS",
+    "verification_route": {
+      "kind": "BROWSER",
+      "required": true,
+      "applicable": true,
+      "target": "index.html",
+      "reason_codes": [
+        "SUPPORTED_TARGET_PRESENT"
+      ],
+      "evidence_refs": [
+        "child:EXEC-001",
+        "contract:requested_target:index.html",
+        "repo:entrypoint:index.html"
+      ],
+      "result": "PENDING",
+      "requested_from_node": "index.html",
+      "resolution_status": "RESOLVED",
+      "resolution_source": "unique_root_html",
+      "candidates": []
+    },
+    "verification_applicability": {
+      "schema_version": "V20.5A",
+      "child_id": "EXEC-001",
+      "model_calls": 0,
+      "verification_routes": [
+        {
+          "kind": "SYNTAX_STATIC_GATE",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_SOURCE_PRESENT",
+            "CONTRACT_REQUIRES_SYNTAX"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:mutation_paths"
+          ],
+          "result": "PENDING",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "contract_source_paths"
+        },
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "PASS",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "PASS"
+        }
+      ],
+      "repository_evidence": {
+        "known_entrypoints": [
+          "index.html"
+        ],
+        "known_test_files": [],
+        "observed_file_types": [
+          "html"
+        ]
+      },
+      "verification_applicability_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+      "verification_routes_hash": "223629dd83071da28667b803107f4a851a61177e2335f3af1f7eb1e384c50f0b",
+      "last_result": "PASS"
+    }
+  },
+  "gate": {
+    "passed": false,
+    "checks": [
+      {
+        "name": "verification_aggregation",
+        "status": "FAIL",
+        "source": "deterministic",
+        "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"index.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:index.html\", \"repo:entrypoint:index.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"index.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+      }
+    ],
+    "deterministic_failures": [
+      {
+        "name": "verification_aggregation",
+        "status": "FAIL",
+        "source": "deterministic",
+        "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"index.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:index.html\", \"repo:entrypoint:index.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"index.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+      }
+    ],
+    "advisory_checks": [],
+    "advisory_failures": [],
+    "verification_aggregation": {
+      "child_id": "EXEC-001",
+      "verification_routes": [
+        {
+          "kind": "SYNTAX_STATIC_GATE",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_SOURCE_PRESENT",
+            "CONTRACT_REQUIRES_SYNTAX"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:mutation_paths"
+          ],
+          "result": "PASS",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "contract_source_paths"
+        },
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "INVALID_RECEIPT",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "PASS"
+        }
+      ],
+      "actual_passes": [
+        {
+          "kind": "SYNTAX_STATIC_GATE",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_SOURCE_PRESENT",
+            "CONTRACT_REQUIRES_SYNTAX"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:mutation_paths"
+          ],
+          "result": "PASS",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "contract_source_paths"
+        }
+      ],
+      "actual_failures": [
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "INVALID_RECEIPT",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "PASS"
+        }
+      ],
+      "skipped_not_applicable": [],
+      "required_target_failures": [],
+      "required_routes": [
+        {
+          "kind": "SYNTAX_STATIC_GATE",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_SOURCE_PRESENT",
+            "CONTRACT_REQUIRES_SYNTAX"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:mutation_paths"
+          ],
+          "result": "PASS",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "contract_source_paths"
+        },
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "INVALID_RECEIPT",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "PASS"
+        }
+      ],
+      "invalid_receipts": [
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "INVALID_RECEIPT",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "PASS"
+        }
+      ],
+      "failure_codes": [
+        "REQUIRED_VERIFICATION_FAILED"
+      ],
+      "evidence_available": true,
+      "passed": false,
+      "model_calls": 0,
+      "required_execution_verification_set": {
+        "schema_version": "V25.6",
+        "artifact_type": "RequiredExecutionVerificationSet",
+        "child_id": "EXEC-001",
+        "plan_id": null,
+        "plan_hash": null,
+        "verification_digest": null,
+        "coverage_hash": null,
+        "applicable_authority_ids": [],
+        "required_authority_ids": [
+          "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+          "UNRESOLVED-ROUTE-7DED71D99E202654"
+        ],
+        "required_verification_authority_ids": [
+          "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+          "UNRESOLVED-ROUTE-7DED71D99E202654"
+        ],
+        "approved_verification_authority_ids": [
+          "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+          "UNRESOLVED-ROUTE-7DED71D99E202654"
+        ],
+        "system_authority_ids": [],
+        "optional_authority_ids": [],
+        "routes": [
+          {
+            "authority_id": "UNRESOLVED-ROUTE-F6985A3AC9B05EA0",
+            "verification_id": null,
+            "oracle_id": null,
+            "oracle_hash": null,
+            "authority_type": null,
+            "authority_source": null,
+            "route_type": "SYNTAX_STATIC_GATE",
+            "execution_channel": null,
+            "target": "index.html",
+            "required": true,
+            "applicable": true,
+            "route_hash": "f6985a3ac9b05ea080e5ee292f4d2255db60d34c7e70cba963a3a880db4cd2c0"
+          },
+          {
+            "authority_id": "UNRESOLVED-ROUTE-7DED71D99E202654",
+            "verification_id": null,
+            "oracle_id": null,
+            "oracle_hash": null,
+            "authority_type": null,
+            "authority_source": null,
+            "route_type": "BROWSER",
+            "execution_channel": null,
+            "target": "index.html",
+            "required": true,
+            "applicable": true,
+            "route_hash": "7ded71d99e202654195f1deab6fff3b263937836646d6738583e1e624e78b881"
+          }
+        ],
+        "set_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64",
+        "canonical_hash": "6fc1c13eecd80ad3c4ec9deb0a9b796672314f3142fff7ff4d27a065b4e03a64"
+      },
+      "execution_obligation_evidence": [],
+      "all_required_passed": false
+    }
+  },
+  "evidence_match_audit": [
+    {
+      "kind": "SYNTAX_STATIC_GATE",
+      "target": "index.html",
+      "matched_evidence_indices": [
+        5,
+        8,
+        9
+      ],
+      "related_evidence_indices": [
+        5,
+        8,
+        9
+      ],
+      "matched_tools": [
+        "run_file",
+        "run_file",
+        "run_file"
+      ],
+      "related_tools": [
+        "run_file",
+        "run_file",
+        "run_file"
+      ],
+      "separate_browser_pass": false,
+      "related_without_match": false
+    },
+    {
+      "kind": "BROWSER",
+      "target": "index.html",
+      "matched_evidence_indices": [],
+      "related_evidence_indices": [
+        5,
+        8,
+        9
+      ],
+      "matched_tools": [],
+      "related_tools": [
+        "run_file",
+        "run_file",
+        "run_file"
+      ],
+      "separate_browser_pass": true,
+      "related_without_match": true
+    }
+  ],
+  "model_calls": 0,
+  "repairer_calls": 0,
+  "child_receipts_issued": 0,
+  "root_verification_attempted": false,
+  "policy": "current",
+  "source_sha256": {
+    "index.html": "4ad2bdaf3edd59687e504c5c543d1c694c038aaa1a85e3e6c244a049f70f475c"
+  },
+  "source_unchanged": true,
+  "canonical_record_count": 0,
+  "child_verified": false,
+  "parent_verification_executed": false
+}
