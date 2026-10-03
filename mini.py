@@ -181,6 +181,7 @@ STRATEGY_SEARCH_UNAVAILABLE = "STRATEGY_SEARCH_UNAVAILABLE"
 # decomposition, strategy, dependency, verifier, or capability path.
 EXECUTION_BUDGET_EXHAUSTED = "EXECUTION_BUDGET_EXHAUSTED"
 WORKER_NO_MUTATION_PROGRESS = "WORKER_NO_MUTATION_PROGRESS"
+NO_EXECUTION_PROGRESS = "NO_EXECUTION_PROGRESS"
 VERIFICATION_TARGET_UNRESOLVED = "VERIFICATION_TARGET_UNRESOLVED"
 # Keep the old name as a read-only compatibility alias for callers that
 # inspected the v3 prototype; all new routing uses the v5 name above.
@@ -14423,10 +14424,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "Falsifier": MAX_FALSIFIER_STEPS,
     }.get(role, MAX_TOOL_STEPS)
     progress_policy = RUN.get("worker_progress_policy", "current")
+    no_tool_policy = RUN.get("worker_no_tool_policy", "current")
     grounding_policy = RUN.get("mutation_grounding_policy", "current")
     progress = None
     grounding = None
     progress_terminal = False
+    no_progress_terminal = False
+    no_tool_reanchors = 0
     grounding_terminal = False
     if (role == "Builder" and isinstance(execution_contract, dict)
             and recovery_state is None
@@ -14518,6 +14522,25 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             break
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
+            if (no_tool_policy == "bounded_reanchor" and progress is not None
+                    and progress.tool_steps == 0 and not evidence):
+                if no_tool_reanchors == 0 and _step + 1 < max(1, int(step_budget)):
+                    no_tool_reanchors = 1
+                    RUN["worker_no_tool_reanchors"] = RUN.get("worker_no_tool_reanchors", 0) + 1
+                    _experiment_event("WORKER_NO_TOOL_REANCHORED", task_id=task_id,
+                                      step=int(_step) + 1)
+                    messages.append({"role": "user", "content":
+                        "You have not inspected or modified the task yet. Either establish "
+                        "context and execute, or return an explicit blocker."})
+                    continue
+                no_progress_terminal = True
+                RUN["worker_no_progress_exits"] = RUN.get("worker_no_progress_exits", 0) + 1
+                _experiment_event("NO_EXECUTION_PROGRESS", task_id=task_id,
+                                  step=int(_step) + 1,
+                                  reanchors=no_tool_reanchors)
+                status = "failed"
+                summary = f"{NO_EXECUTION_PROGRESS}: Worker stopped without a tool call or context decision"
+                break
             if context_gate is not None and not context_gate.mutation_allowed:
                 status = "failed"
                 summary = (
@@ -15547,7 +15570,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             summary = "TASK_TOO_BROAD: maximum focused tool-step budget reached"
 
     context_sufficiency_snapshot = context_gate.snapshot() if context_gate is not None else None
-    if context_gate is not None and not context_gate.mutation_allowed:
+    if context_gate is not None and not context_gate.mutation_allowed and not no_progress_terminal:
         # A Worker cannot turn an incomplete gate into a normal budget or
         # completion outcome. Preserve the explicit bounded failure model.
         status = "failed"
@@ -15563,7 +15586,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             )
         execution_budget_exhausted = False
         context_sufficiency_snapshot = context_gate.snapshot()
-    if impact_required and ACTIVE_IMPACT_CONTRACT is None and status not in {"provider_failure", "structured_response_failure"}:
+    if (impact_required and ACTIVE_IMPACT_CONTRACT is None and not no_progress_terminal
+            and status not in {"provider_failure", "structured_response_failure"}):
         status = "failed"
         summary = "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
     impact_contract_snapshot = copy.deepcopy(ACTIVE_IMPACT_CONTRACT) if impact_required else None
@@ -15644,6 +15668,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "mutation_failures": mutation_failure_records,
         "failure_type": (
             recovery_terminal_state if recovery_terminal_state else
+            NO_EXECUTION_PROGRESS if no_progress_terminal else
             MUTATION_TARGET_UNRESOLVED if grounding_terminal else
             WORKER_NO_MUTATION_PROGRESS if progress_terminal else
             (impact_validation or {}).get("status", stage10_impact.IMPACT_REQUIRED)
@@ -19868,6 +19893,15 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": builder["summary"],
                 "memory": memory, "builder": builder}
+    if builder.get("failure_type") == NO_EXECUTION_PROGRESS:
+        rollback_transaction()
+        return {
+            "status": "failed", "failure_type": NO_EXECUTION_PROGRESS,
+            "summary": builder.get("summary", NO_EXECUTION_PROGRESS),
+            "memory": memory, "builder": builder,
+            "worker_progress": builder.get("worker_progress"),
+            "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
+        }
     if builder.get("failure_type") == WORKER_NO_MUTATION_PROGRESS:
         rollback_transaction()
         return {
@@ -27015,7 +27049,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           verification_surface_policy="current",
                           child_receipt_policy="current",
                           integration_target_policy="current", semantic_evidence_policy="current",
-                          verification_classification_policy="current"):
+                          verification_classification_policy="current",
+                          worker_no_tool_policy="current"):
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -27038,6 +27073,8 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
         raise ValueError("unknown semantic evidence policy")
     if verification_classification_policy not in {"current", "field_scoped"}:
         raise ValueError("unknown verification classification policy")
+    if worker_no_tool_policy not in {"current", "bounded_reanchor"}:
+        raise ValueError("unknown Worker no-tool policy")
     if verified_state_reentry is not None or fresh_task_brain is not None:
         # Explicit V24 route: Stage 6A has already produced the fresh brain,
         # so do not invoke Stage 2 extraction/reconnaissance or any model role
@@ -27080,6 +27117,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["integration_target_policy"] = integration_target_policy
     RUN["semantic_evidence_policy"] = semantic_evidence_policy
     RUN["verification_classification_policy"] = verification_classification_policy
+    RUN["worker_no_tool_policy"] = worker_no_tool_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
         str(user_text).encode("utf-8")
     ).hexdigest()[:12]
@@ -29643,6 +29681,8 @@ def parse_args():
                         default="strict")
     parser.add_argument("--worker-progress-policy", choices=("current", "progress_constrained"),
                         default="current")
+    parser.add_argument("--worker-no-tool-policy", choices=("current", "bounded_reanchor"),
+                        default="current")
     parser.add_argument("--mutation-grounding-policy", choices=("current", "evidence_grounded", "evidence_bound"),
                         default="current")
     parser.add_argument("--target-locator-policy", choices=("current", "evidence_directed"),
@@ -29724,6 +29764,9 @@ def main():
         worker_progress_policy = getattr(args, "worker_progress_policy", "current")
         progress_kwargs = ({"worker_progress_policy": worker_progress_policy}
                            if worker_progress_policy != "current" else {})
+        no_tool_policy = getattr(args, "worker_no_tool_policy", "current")
+        no_tool_kwargs = ({"worker_no_tool_policy": no_tool_policy}
+                          if no_tool_policy != "current" else {})
         mutation_grounding_policy = getattr(args, "mutation_grounding_policy", "current")
         grounding_kwargs = ({"mutation_grounding_policy": mutation_grounding_policy}
                             if mutation_grounding_policy != "current" else {})
@@ -29759,7 +29802,7 @@ def main():
                 **receipt_kwargs,
                 **integration_kwargs,
                 **semantic_kwargs,
-                **classification_kwargs,
+                **classification_kwargs, **no_tool_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -29773,7 +29816,7 @@ def main():
                 **receipt_kwargs,
                 **integration_kwargs,
                 **semantic_kwargs,
-                **classification_kwargs,
+                **classification_kwargs, **no_tool_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

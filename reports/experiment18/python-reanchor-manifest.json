@@ -1,0 +1,54 @@
+{
+  "experiment": 18,
+  "case_set": "python",
+  "cases": [
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "source": "numbers_api.py",
+      "symbol": "clamp_number",
+      "goal": "Fix clamp_number so values above upper clamp to upper, while preserving lower-bound clamping, values inside the bounds, and ValueError for inverted bounds.",
+      "test_target": "tests/test_clamp.py",
+      "integration_target": "python tests/test_clamp.py",
+      "expected_tests": 5,
+      "seed_sha256": {
+        "numbers_api.py": "c4cc50eb84c001013791ebe87f5b83f4250ca55eba96e0b2ad43d850b9712a4a",
+        "tests/test_clamp.py": "672a11da462960c302e33922201c41977c6d0181cd4159908c180790f357edcb"
+      },
+      "approved_plan_hash": "89cac93b5e756eaff5017f408b97924c3c30b14bfa41fdca130a67a2deaee374",
+      "execution_contract_hash": "dea8ea007ebc370daf1c92c79c3e7a2eec0e33b048a0db8989b3e4f5d8f61f99"
+    }
+  ],
+  "repeats": 3,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "baseline_suite": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1",
+  "policies": {
+    "planning_route": "decomposition_first_recursive",
+    "mission_advice_policy": "contract_fallback",
+    "worker_progress_policy": "progress_constrained",
+    "mutation_grounding_policy": "evidence_bound",
+    "target_locator_policy": "evidence_directed",
+    "verification_environment_policy": "resolved",
+    "verification_surface_policy": "discovery",
+    "child_receipt_policy": "atomic_verified",
+    "integration_target_policy": "resolved"
+  },
+  "fixed_semantic_evidence_policy": "strict",
+  "verification_classification_policy": "field_scoped",
+  "worker_no_tool_policy": "bounded_reanchor",
+  "production_sha256": {
+    "mini.py": "70df7daf8468383a0a7938f4296c4a77777d54281ade47402e9043a99b4d9dcb",
+    "hivo/evidence_compatibility.py": "15d4b502d69086b71286f8ad8dbbe7fc8de61057cce92c60c4710cb5f4795293",
+    "hivo/atomic_child_receipt.py": "044a3c66b3828e73af50635ec2b57cb8440796a471fbfaa6f72540a9ecfaa99c",
+    "hivo/verification_routing.py": "1d2de83dfaa60e249e2e63221bbae57e44799f2102d06789a140dd8d32e2ea4b",
+    "hivo/verification.py": "741779be66432c552e9e52b29d3f047cdf5d6e1f0685b8b08e706c517ffff2db",
+    "hivo/verification_surfaces.py": "c8427b91bcbe1a0f860100e24f2f0db377e7c775ff1a71ab9684a21e9357684c",
+    "hivo/worker_progress.py": "c1b4c90c8ec37b8dfd4799027b729814fa275745c9c47a3b88f91b18be9dcacb",
+    "hivo/mutation_grounding.py": "99e755cbd4b08306095337d33fb85b97087eb2bd8206907ef9fd9920d0822061",
+    "hivo/integration_targets.py": "52e789e93c7878d02a5d838cd9c2bceca7e754f718348a9136af0df898ba3808",
+    "hivo/evidence_monotonic.py": "f61021df70d4acb05ef97faac36b6a332e580e8e990b8d03b904aaf0f1214c8e",
+    "hivo/evidence_strict.py": "b1d55fff066d3990038283f76469d31f5da7361f38b66cc3a61e5523cbc1085e"
+  },
+  "default_change_allowed": false
+}
