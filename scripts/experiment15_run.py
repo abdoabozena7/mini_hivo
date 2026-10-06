@@ -94,9 +94,13 @@ def execute_trial(directory, case_id, policy, repeat):
     no_tool_policy = manifest.get("worker_no_tool_policy", "current")
     if no_tool_policy not in {"current", "bounded_reanchor"}:
         raise ValueError("unknown Worker no-tool policy in manifest")
+    context_closure_policy = manifest.get("worker_context_decision_policy", "current")
+    if context_closure_policy not in {"current", "bounded_closure"}:
+        raise ValueError("unknown Worker context-decision policy in manifest")
     mini.RUN.update(semantic_evidence_policy="strict", mutation_grounding_policy=policy, experiment_case_id=case_id,
         verification_classification_policy=classification_policy,
         worker_no_tool_policy=no_tool_policy,
+        worker_context_decision_policy=context_closure_policy,
         project_mode=mini.EXISTING_PROJECT, impact_planning_required=True,
         repository_evidence=copy.deepcopy(approved["repository_evidence"]),
         task_brain=copy.deepcopy(approved["task_brain"]), task_brain_validation=copy.deepcopy(approved["task_brain_validation"]),
