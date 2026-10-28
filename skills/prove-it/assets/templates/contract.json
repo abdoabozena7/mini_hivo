@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "task_id": "example-task",
+  "goal": "REPLACE_ME with the actual requested user outcome",
+  "kind": "generic",
+  "source_paths": [
+    "REPLACE_ME"
+  ],
+  "scope_rationale": "REPLACE_ME: implementation, config, dependency locks and verifier sources; exclude output, secrets and large assets",
+  "authorization": "REPLACE_ME: allowed local actions and existing resource, privacy and safety constraints",
+  "requirements": [
+    {
+      "id": "R01",
+      "claim": "REPLACE_ME with a specific observable outcome",
+      "oracle": "REPLACE_ME with an expected result independent of the implementation",
+      "failure_example": "REPLACE_ME with an incorrect implementation this check must catch",
+      "runtime_required": true,
+      "checks": [
+        "acceptance"
+      ],
+      "negative_checks": [],
+      "negative_control_exception": "REPLACE_ME with a specific risk-based reason only when a negative control is not appropriate",
+      "review_required": true
+    }
+  ],
+  "checks": [
+    {
+      "id": "acceptance",
+      "description": "REPLACE_ME with the actual user-facing journey",
+      "mode": "live",
+      "role": "acceptance",
+      "command": [
+        "{python}",
+        "REPLACE_ME"
+      ],
+      "timeout_seconds": 120,
+      "expected_exit_codes": [
+        0
+      ],
+      "assertions": [
+        {
+          "type": "json",
+          "file": "result.json",
+          "pointer": "/outcome",
+          "op": "eq",
+          "value": "REPLACE_ME"
+        }
+      ],
+      "artifacts": [
+        {
+          "glob": "result.json",
+          "min_count": 1,
+          "min_bytes": 2
+        }
+      ]
+    }
+  ],
+  "plan": {
+    "strategy": "serial",
+    "rationale": "REPLACE_ME with the dependency and resource reasoning",
+    "delegation": {
+      "available": false,
+      "evidence": "REPLACE_ME with the actual tool capability inspection"
+    },
+    "tasks": [
+      {
+        "id": "T01",
+        "title": "Investigate and implement the requested change",
+        "outcome": "REPLACE_ME with the concrete implementation deliverable",
+        "owner": "coordinator",
+        "role": "implement",
+        "execution": "serial",
+        "depends_on": [],
+        "write_scope": [
+          "REPLACE_ME"
+        ],
+        "outputs": [
+          "REPLACE_ME"
+        ],
+        "requirements": [
+          "R01"
+        ],
+        "checks": [
+          "acceptance"
+        ],
+        "acceptance": "REPLACE_ME with the observable result needed to verify this step"
+      },
+      {
+        "id": "T02",
+        "title": "Integrate and verify the complete user journey",
+        "outcome": "REPLACE_ME with the final integrated behavior",
+        "owner": "coordinator",
+        "role": "integrate",
+        "execution": "serial",
+        "depends_on": [
+          "T01"
+        ],
+        "write_scope": [],
+        "outputs": [
+          "current-source runtime evidence and inspection report"
+        ],
+        "requirements": [
+          "R01"
+        ],
+        "checks": [
+          "acceptance"
+        ],
+        "acceptance": "REPLACE_ME with the complete user journey and independent expected outcome"
+      }
+    ]
+  }
+}

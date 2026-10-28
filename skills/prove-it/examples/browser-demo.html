@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prove It - Browser Fixture</title><link rel="icon" href="data:,">
+<style>
+body {font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#172033}
+main {max-width:680px;margin:48px auto;padding:28px;background:white;border:1px solid #d9e0e7;border-radius:16px}
+h1 {margin-top:0;font-size:28px} label {display:block;margin-bottom:8px}
+form {display:flex;gap:10px} input {flex:1;min-width:0;padding:12px;border:1px solid #8794a7;border-radius:8px;font-size:16px}
+button {padding:12px 20px;border:0;border-radius:8px;background:#174ca4;color:white;font-size:16px;cursor:pointer}
+li {padding:10px 0} #error {color:#a41524;min-height:24px} .meta {color:#596579;font-size:14px}
+@media(max-width:600px){main{margin:20px 12px;padding:20px}form{flex-direction:column}}
+</style></head>
+<body><main><p class="meta">HARNESS DEMO / NOT PROJECT ACCEPTANCE</p><h1>Exercise the real interface</h1>
+<p>Add an item, inspect the result, then reload. The browser fixture stores real local state.</p>
+<label for="item">Item</label><form id="form"><input id="item" autocomplete="off"><button id="add" type="submit">Add item</button></form>
+<p id="error" role="alert"></p><ul id="items"></ul><p id="count">0 items</p>
+</main><script>
+const items=JSON.parse(localStorage.getItem('prove-it-items')||'[]');
+function draw(){const list=document.querySelector('#items');list.replaceChildren();for(const text of items){const li=document.createElement('li');li.textContent=text;list.append(li);}document.querySelector('#count').textContent=items.length+' items';}
+document.querySelector('#form').addEventListener('submit',event=>{event.preventDefault();const input=document.querySelector('#item');if(!input.value.trim()){document.querySelector('#error').textContent='Enter an item';return;}document.querySelector('#error').textContent='';items.push(input.value.trim());localStorage.setItem('prove-it-items',JSON.stringify(items));input.value='';draw();});
+draw();
+</script></body></html>

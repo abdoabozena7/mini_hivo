@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prove It"
+  short_description: "Plan, exercise, inspect, and verify real behavior."
+  default_prompt: "Use Prove It to plan this task, execute real user journeys, and verify current-source evidence before completion."

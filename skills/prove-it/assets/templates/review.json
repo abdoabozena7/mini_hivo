@@ -1,0 +1,17 @@
+{
+  "reviewer": "REPLACE_ME with actual reviewer identity",
+  "independence": "same-agent",
+  "requirements": [
+    {
+      "requirement_id": "R01",
+      "verdict": "not-reviewed",
+      "observations": "REPLACE_ME with what was actually inspected; include UI states or measured physical outcomes and limitations",
+      "evidence": [
+        {
+          "check_id": "acceptance",
+          "file": "result.json"
+        }
+      ]
+    }
+  ]
+}
