@@ -6,7 +6,7 @@ This index identifies the final report and machine-readable measurements for eve
 |---|---|---|---|
 | 1 | [final report](experiment1/final/report.md) | [JSON](experiment1/final/report.json) | Earlier paired and individual reports in `experiment1/` |
 | 2 | [report](experiment2/rkey_01/report.md) | [JSON](experiment2/rkey_01/report.json) | One paired case |
-| 3 | [report](experiment3/rkey_01/report.md) | [JSON](experiment3/rkey_01/report.json) | One paired case |
+| 3 | [report](experiment3/rkey_01/report.md) | [JSON](experiment3/rkey_01/report.json) | One paired case  [Tasneem follow-up: existing fix history](experiment3/follow-up-greenfield-feedback/REPORT.md) |
 | 4 | [latest report](experiment4/rkey_03/report.md) | [JSON](experiment4/rkey_03/report.json) | Prior `rkey_02` report retained |
 | 5 | [report](experiment5/rkey_01/report.md) | [JSON](experiment5/rkey_01/report.json) | One paired case |
 | 6 | [latest report](experiment6/rkey_02/report.md) | [JSON](experiment6/rkey_02/report.json) | Prior `rkey_01` report retained |
