@@ -1,0 +1,160 @@
+{
+  "follow_up": "Experiment 18A, Tasneem schema and rejected-feedback correction",
+  "measurement_status": "Retrospective extraction; no tests or live runs executed for publication",
+  "baseline": "5e66d34db1827b814abf98f56b0b77b5ef6f8ee5",
+  "published_treatment": "2a8b94590734cec3375047a18e0dc71df2476f85",
+  "branch": "fix/experiment18a-evidence-feedback",
+  "python": "3.11.9",
+  "source_files": {
+    "hivo/context_sufficiency.py": "78274dcfe82697e2e1790ee52ecc104be9a81c653ad23f2a8e8405753770f094",
+    "mini.py": "28692637ce1e588bfcd5d7db1eb23cf43d78e47da267c4247a85dabaa9d72984",
+    "tests/test_experiment18a_schema_feedback.py": "0c6c6deb829c11cdc022ef7ad3745cb4a89e950a4ddcd264f48028718fb8a80a"
+  },
+  "recorded_ledgers": [
+    {
+      "source_file": "before-results.json",
+      "source_sha256": "78b894900426b832ba4399784fd7d772a8329983938fb2cbedd4550d1c00ae64",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "pattern": "test_experiment18a_schema_feedback.py",
+          "tests": 9,
+          "exit_code": 1,
+          "summary": [
+            "FAILED (failures=7)"
+          ],
+          "log": "before-test_experiment18a_schema_feedback.py.log"
+        },
+        {
+          "pattern": "test_context_sufficiency_gate.py",
+          "tests": 9,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "before-test_context_sufficiency_gate.py.log"
+        },
+        {
+          "pattern": "test_greenfield_context_progress.py",
+          "tests": 9,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "before-test_greenfield_context_progress.py.log"
+        },
+        {
+          "pattern": "test_repair_impact_anchor.py",
+          "tests": 3,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "before-test_repair_impact_anchor.py.log"
+        }
+      ]
+    },
+    {
+      "source_file": "before-state-reproduction-results.json",
+      "source_sha256": "cd60d4f5d0e5005b520b0c9343767f0832ac699282697f752e3e4a4269bd7ad0",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "pattern": "test_experiment18a_schema_feedback.py",
+          "tests": 9,
+          "exit_code": 1,
+          "summary": [
+            "FAILED (failures=7)"
+          ],
+          "log": "before-state-reproduction-test_experiment18a_schema_feedback.py.log"
+        }
+      ]
+    },
+    {
+      "source_file": "after-results.json",
+      "source_sha256": "79dd2c7bb4f319e7ecbe749478b86617f6849c91145b0916bc956baf91dae0d3",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "pattern": "test_experiment18a_schema_feedback.py",
+          "tests": 9,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "after-test_experiment18a_schema_feedback.py.log"
+        },
+        {
+          "pattern": "test_context_sufficiency_gate.py",
+          "tests": 9,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "after-test_context_sufficiency_gate.py.log"
+        },
+        {
+          "pattern": "test_greenfield_context_progress.py",
+          "tests": 9,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "after-test_greenfield_context_progress.py.log"
+        },
+        {
+          "pattern": "test_repair_impact_anchor.py",
+          "tests": 3,
+          "exit_code": 0,
+          "summary": [
+            "OK"
+          ],
+          "log": "after-test_repair_impact_anchor.py.log"
+        }
+      ]
+    }
+  ],
+  "selected_after_methods": 30,
+  "supported_kind_values_tested": 21,
+  "new_methods": 9,
+  "existing_methods": 21,
+  "limitations": [
+    "Seven baseline failure records include subtests; not seven independent experiments",
+    "Run-010 did not exercise an unsupported-kind rejection",
+    "No complete live Repairer recovery demonstrated"
+  ],
+  "git_status_at_preparation": {
+    "team_main": "f842fb8fb6e63e3064891d26ee0b24981e55c847",
+    "fork_main": "7e96a3708d1dd9f0570104f63d70264aa9935fd5",
+    "fixes_are_ancestors_of_neither_main": true,
+    "checked_live_refs_and_pr_states": true,
+    "team_pr7": {
+      "state": "open",
+      "merged": false,
+      "head": "2a8b94590734cec3375047a18e0dc71df2476f85"
+    },
+    "team_pr9": {
+      "state": "open",
+      "merged": false,
+      "head": "d15b6068f78dd5b9e46daacd81f5543af5c2cf89"
+    },
+    "team_pr10": {
+      "state": "open",
+      "merged": false,
+      "head": "6ec3bda16e88af764f63ea9fc7319096ffd25cbe"
+    },
+    "note": "Status snapshot before follow-up publication, not a future integration guarantee"
+  },
+  "run010_report": {
+    "source_file": "Run-010/REPORT.md",
+    "source_sha256": "b0bd376db4a76e342196d63af2ae4e72c019215419efa6b94dedd515f5934b07",
+    "availability": "LOCAL-ONLY original report",
+    "implementation": "2a8b94590734cec3375047a18e0dc71df2476f85",
+    "builder_context_checks": 1,
+    "repairer_context_checks": 2,
+    "unsupported_kind_errors_observed": 0,
+    "candidate_bytes": 13012,
+    "final_transaction_acceptance": false,
+    "outcome": "Manually stopped; partial game, required verification failed"
+  }
+}
