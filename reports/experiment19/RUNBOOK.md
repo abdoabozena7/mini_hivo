@@ -1,5 +1,9 @@
 # Experiment 19 — Offline Reproduction
 
+**Recorded live campaign:** production observations lead the [report](experiment19-report.md). See [live results](supporting/live-results-20261107.json), [protocol](supporting/live-protocol-20261107.json) and [evidence](supporting/live-evidence-20261107.json). Raw harnesses remain local-only; this is not a portable live runner. No new execution was performed for this update.
+
+**Historical commands below:** require their original pinned source/test revision. Updated parent recognition/tests intentionally fail historical pin/count checks; do not relax those checks or relabel results. Future historical reproduction requires its immutable revision in a separately approved isolated checkout; current-revision checks need a separately defined cohort. None were run for this preparation.
+
 ## Prerequisites and fixed boundary
 
 Use Python 3.11 or a supported later version, existing Mini Hivo test dependencies,
@@ -62,9 +66,7 @@ git diff 2a8b94590734cec3375047a18e0dc71df2476f85 --name-only
 ```
 
 The intended review boundary is the unmerged PR #7 head, not current team main.
-At preparation time team main lacks that dependency. A clean team PR needs an
-appropriate team base branch or maintainer-approved dependency integration;
-the submission must not silently become cumulative.
+The historical preparation proposed a stacked base. PR #9 was subsequently published cumulatively against team main by explicit approval; the dependency-relative Experiment 19 boundary remains unchanged. This local preparation does not alter its target or history.
 
 Read the [report](experiment19-report.md) before interpreting denominators.
 Protocol decisions, unit methods, Worker progress, final transaction acceptance

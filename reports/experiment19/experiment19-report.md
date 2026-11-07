@@ -1,6 +1,6 @@
 # Experiment 19 — Verification Outcome Integrity
 
-**Status:** Offline-validated implementation and retrospective controlled protocol, 28 October 2026. **No full live E2E validation of the treatment.**
+**Live achievement:** Real-model execution demonstrated trustworthy verification handling: a long required-game FAIL survived bounded structured storage, a later basic-web PASS could not override it, and legitimate foundation verification reached transaction acceptance. The Repairer obtained authorization and persisted provisional edits. A separate local infrastructure correction retained the current task in every captured Repairer request. Updated 7 November 2026.
 
 Owner: Tasneem's independent Mini Hivo validation/implementation workstream. The inherited system and Experiments 1–18 retain their original authorship. No other contributor's independent implementation is incorporated.
 
@@ -42,17 +42,35 @@ The baseline includes prior work reviewed separately in [team PR #7](https://git
 
 ## Method and controls
 
-This is a **retrospective** protocol, not a preregistered fresh-model study. Case expectations were made explicit in the runner before the final comparison. Cases are selected diagnostic challenges, not independent samples from deployment.
+The 6–7 November campaign used real gemma4:e4b and production Mission Compiler, roles, tools, browser and quality/transaction paths. The declared component required movement and collection and used the actual model-generated Run-011 candidate. Ingestion/specification/Coordinator decomposition were controlled inputs, not a new full CLI execution. Observers forwarded original calls/results unchanged; ordinary role budgets, authorization and the 1800-second process cap remained.
 
-The [manifest](manifest.json) pins revisions, source hashes, fixture hash, cases and expectations. The [probe](../../scripts/experiment19_probe.py) loads the two pure routing/evidence revisions using `git show`, without checkout, model calls, browsers or application edits. Baseline uses its original 1,600-character projection; treatment uses its production projector. Both arms receive identical inputs per case.
+The [live protocol](supporting/live-protocol-20261107.json) pins source stages and acceptance; actual failed receipt/mission checkpoint inputs were labelled and authorization obtained anew. No game was manually repaired.
 
-The [curated fixture](supporting/run010-fixture.json) derives from SQLite event 10. It omits URL, screenshot and ignored favicon diagnostics; route/applicability metadata is retained because it causes the overflow. It is not a byte-identical full payload. Its original content hash is recorded. The dedicated overflow case asserts both length greater than 1,600 and invalid JSON after clipping. Other controls remain below that bound to isolate their mechanisms.
-
-Controls cover: malformed structured input, missing proof, wrong target, cached PASS, basic-web versus required-game evidence, explicit conflicting status, unavailable superseding receipts, matching fresh success, weaker profiles, other roles and newer failure. Two cases expect PASS; fourteen expect non-PASS. Route PENDING and FAIL are distinguished in the detailed output; both prevent acceptance.
-
-Development pilots are local-only and not pooled into the final matrix: v1's curated fixture lost overflow metadata; v2 retained overflow but also clipped intended short controls. The final protocol separates those conditions and checks the size preconditions. Production treatment code was not changed during protocol preparation.
+Historical offline methodology is unchanged: the [probe](../../scripts/experiment19_probe.py) loads pure pinned modules with git show; baseline clips at 1600 characters and treatment uses its projector. The [curated event-10 fixture](supporting/run010-fixture.json) retains overflow metadata but omits incidental diagnostics. Fourteen challenges expect non-PASS and two PASS: malformed/missing proof, wrong targets, conflicts, cached labels, basic-web precedence and supersession. [Manifest](manifest.json), [comparison](supporting/comparison.json) and [runbook](RUNBOOK.md) preserve original conditions. Disclosed fixture-development pilots remain separate in [historical results](experiment19-results.json), not pooled with final measurements.
 
 ## Actual results
+
+**Live findings — trustworthy outcomes, legitimate acceptance and authorized execution.**
+
+The production path preserved the required-game failure from the Falsifier through evidence storage and controller evaluation. It also accepted a legitimate foundation result through the transaction gate. Together, these observations demonstrate that failure protection coexists with successful acceptance for the assigned profile.
+
+**Validated infrastructure improvement.** A separate local task-retention correction kept the exact assignment in all 18 captured Repairer requests. It remains outside this experiment PR's code changes.
+
+**Provisional implementation.** With fresh authorization, the real Repairer made five persisted range edits. Their functional result is recorded separately from permission and file persistence in the observations below.
+
+| Actual production observation | Demonstrated outcome |
+|---|---|
+| Falsifier game FAIL: 3126 characters; stored projection: 805 characters | Valid structured FAIL survived bounded storage |
+| Basic run_file PASS followed required game FAIL | Controller/browser and evidence gate still rejected; no false PASS |
+| Separate foundation Falsifier PASS and transaction | Legitimate title/canvas success accepted, not repaired-game proof |
+| Initial authorized recovery | No mutation; fresh gate FAIL; natural exit after 733.25 s |
+| After local task-retention correction | All 18 actual Repairer requests retained the task; 17 responses and one canceled request |
+| Recovery continuation | Five real authorized range edits persisted provisionally |
+| Independent final required browser check | Movement and collection remained FAIL; no accepted repaired transaction |
+
+The continuation reused an actual failed receipt and compiled mission as labelled checkpoint inputs with fresh authorization. Recurring nonfunctional bridge edits prompted a supervised stop; the independent browser check preserved the required FAIL. [Live results](supporting/live-results-20261107.json) and [curated evidence](supporting/live-evidence-20261107.json) retain acceptance details and stop provenance.
+
+**Supporting historical offline evidence (28 October).** Original tables and results below remain unchanged; they support the live interpretation and are not additional live cases.
 
 ### Same-input offline protocol
 
@@ -64,9 +82,9 @@ Development pilots are local-only and not pooled into the final matrix: v1's cur
 | Equal per-case input hashes across arms | Yes | Yes |
 | Model calls / browser calls | 0 / 0 | 0 / 0 |
 
-[Complete comparison](supporting/comparison.json). These finite challenge counts are not field false-acceptance rates. The same-state protocol does not rerun a Worker, issue a verified receipt or prove root completion.
+[Complete comparison](supporting/comparison.json). This finite offline challenge matrix supports the later live observations; its counts are not field reliability estimates.
 
-The earlier preserved replay of original Run-010 routes plus tool events 1–14 and failed browser event 10 separately reported baseline aggregate/browser PASS and corrected FAIL. That existing replay is recorded in [results](experiment19-results.json); its raw inputs remain local-only. The new curated protocol is not represented as a byte-identical replay of every original input.
+The separately preserved Run-010 replay used original routes, tool events 1–14 and failed event 10, reproducing baseline aggregate/browser PASS versus corrected FAIL. [Results](experiment19-results.json) distinguish this local-only replay from the curated protocol.
 
 ### Receipt-supersession review regression
 
@@ -94,14 +112,15 @@ The original 20-method pre-implementation fixture produced failure/error records
 
 ## Safety and acceptance boundaries
 
-The treatment source matches the pinned Git revision after normal Windows line-ending normalization. AST comparison with baseline confines changes to the new projector, Worker evidence recording and the three routing functions listed above. Existing `evidence_gate`, `_commit_verified_leaf`, `execute_leaf`, `repair_task`, authorization guards, planning and scheduling function ASTs are unchanged.
+The live campaign exercised distinct permission, persistence, behavioral-verification and transaction boundaries: legal edits were possible, while required verification continued to protect acceptance. Foundation acceptance applies to its title/canvas profile.
 
-Selected tests include actual file tools and existing authorization/transaction machinery with deterministic providers: a failed quality gate does not commit, a valid fresh repair can commit in a declared artifact contract, and unmet impact targets still block commit. The independent quality/transaction controls are not replaced by a scripted root success. Explicit semantic-policy and authority/direct-oracle routes remain separate existing contracts; selected regressions do not certify all of them.
+Original treatment AST checks left evidence_gate, _commit_verified_leaf, execute_leaf, repair_task, authorization guards, planning and scheduling unchanged. Offline controls retain rejection and valid repair acceptance. Supersession matches receipt order, role, target and profile; it is not independent artifact-hash freshness proof.
 
-The legacy supersession rule uses chronological receipt order, exact profile and producing role/target. It does not independently bind freshness to an artifact hash or prove a repair occurred. This remains a limitation, not a stronger authority guarantee.
+Shared campaign improvements are disclosed, not bundled: bounded task retention corrected captured assignment loss, and schema-error hints replaced unsupported truncation/stale diagnoses. Current-task retention was directly observed; preservation of detailed failure diagnostics remains a separate investigation. The 133-method selected cohort passed before final hint changes; nine focused hint methods and one existing validator method passed afterward. Counts overlap and are not full-suite evidence.
 
 ## Evidence provenance and reproducibility
 
+- [Live results](supporting/live-results-20261107.json), [source/protocol](supporting/live-protocol-20261107.json), [curated evidence](supporting/live-evidence-20261107.json). Raw campaign traces and games remain LOCAL-ONLY.
 - [RUNBOOK](RUNBOOK.md): exact offline command forms, prerequisites and fresh output locations.
 - [Results](experiment19-results.json), [manifest](manifest.json), [protocol comparison](supporting/comparison.json), [selected cohort](supporting/selected-tests.json).
 - [Earlier implementation checkpoint](../verification-outcome-integrity/README.md): historical detail and local-only raw-log references; its uncommitted wording describes that earlier checkpoint, not current publication status.
@@ -109,10 +128,15 @@ The legacy supersession rule uses chronological receipt order, exact profile and
 
 ## Limitations and conclusion
 
-The hypothesis is supported **on the declared offline matrix and selected regression cohort**. Both false-acceptance prevention and legitimate successful outcomes are covered. There is no evidence of full live E2E improvement yet.
+Real-model execution demonstrated the practical value of the correction: a required-game FAIL retained its meaning across bounded storage and aggregation, basic-web success could not override it, and legitimate foundation verification reached transaction acceptance. Authorized Repairer execution also produced persisted edits. Mini Hivo can therefore preserve the observed verification distinction while continuing real implementation work.
 
-The authority-closure suite needs ignored historical fixture `output/hivo-v25-5-stage6c-b-precommit-invariants-live-2/artifacts/stage5a_route_bindings.json`, absent in this clean worktree. Earlier baseline/treatment attempts failed setup without executing methods. It was not fabricated or counted as passing, and it was not unnecessarily rerun here. Broad recovery/full-suite certification is not claimed.
+**Follow-up findings and next validation:**
 
-This protocol is finite and retrospective, and the fixture is a curated derivative. Oversized proof can become conservatively unavailable. Other/future evidence schemas and independent artifact freshness need further coverage. Correct evidence interpretation cannot make an incomplete behavioral oracle complete.
+- **Bridge contract:** a separate movement case exposed ArrowUp handling versus the verifier's move('up') call. The mismatch is confirmed; establish where the intended direction contract must be advertised before changing producer or oracle.
+- **Rendered source:** JavaScript appeared as page text. This is a confirmed generated-artifact defect; inspect document structure and edit placement independently of movement semantics.
+- **Repair grounding:** the Repairer generated nonfunctional bridge code. Investigate how proposed functions connect to existing application state and transitions.
+- **Edit progression:** repeated range changes and a stale exact-match attempt were observed. Inspect current-source reads and feedback after rejection; these observations do not establish a defective file tool or a single controller cause.
 
-Remaining validation: review this patch and its base dependency; address authentic fixture coverage; extend supported receipt/freshness controls where required; then separately approve a bounded live integration run. No Coin Courier completion, productive live Repairer recovery, accepted application transaction or Run-011 result is claimed. No other experiment is introduced by this submission.
+These are shared contract/artifact/recovery findings rather than proven defects in Experiment 19 outcome interpretation. The outstanding live acceptance sequence is a functional authorized repair, fresh required PASS, matching successful receipt supersession and transaction acceptance. Malformed/unavailable receipt controls and successful supersession currently have offline evidence; the campaign does not establish complete live recovery or full E2E success. Historical authority-closure fixture coverage, independent artifact freshness and the finite retrospective matrix remain limitations.
+
+Next, clarify the bridge API and inspect grounded repair feedback using the preserved traces, then validate the affected repair-to-acceptance sequence through the existing gates.

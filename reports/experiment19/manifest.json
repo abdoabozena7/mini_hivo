@@ -125,5 +125,11 @@
       "_evidence_matches",
       "_parse_result"
     ]
+  },
+  "live_campaign": {
+    "results": "supporting/live-results-20261107.json",
+    "protocol": "supporting/live-protocol-20261107.json",
+    "evidence": "supporting/live-evidence-20261107.json",
+    "historical_fields_scope": "Existing source/hash/count pins describe the original offline study, not this later campaign or updated checkout."
   }
 }
