@@ -4,6 +4,8 @@
 
 **Contribution:** Tasneem's post-handoff evidence investigation, focused implementation and regression validation. Original Experiment 18A's schema-mismatch diagnosis and the pre-existing Context Sufficiency/Impact mechanisms remain prior work, not newly attributed contributions.
 
+> **Integration addendum (16 November 2026):** The historical status statements below (`team main` at `f842fb8` and PR #7 unmerged) reflect the 28 October 2026 preparation snapshot. The referenced PR #7 fixes (`5e66d34` / `2a8b945`) were subsequently integrated into `main` in Experiment 20 (`68000c7`) and preserved through Experiments 21–22 (`4502318`), and this follow-up documentation was merged onto `main` alongside PR #9 (`ac85b95`) and PR #11.
+
 ## Research question and relationship to existing research
 
 Does aligning the advertised evidence request schema with its existing runtime whitelist, while reporting rejected decisions from the actual unchanged gate snapshot, eliminate contradictory tool feedback without granting, revoking or weakening mutation authority?

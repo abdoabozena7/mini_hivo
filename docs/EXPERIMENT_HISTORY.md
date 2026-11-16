@@ -1,5 +1,9 @@
 # Experiment history on `main`
 
+## Unified `main` integration — 16 November 2026
+
+`main` fast-forwarded to `codex/experiment22-verification-integrity` (`4502318`, integrating Experiment 22 and PR #9/#10's production verification-integrity and child-scoped verification changes), cherry-picked PR #9's live-evidence documentation commit (`ac85b95`, reconciling `reports/INDEX.md`), and integrated the retrospective Experiment 3 / Experiment 18A follow-up reports from PRs #11 and #12 (`ac49c44`, `97e125a`) with explicit integration addenda clarifying that PR #7 (`5e66d34` / `2a8b945`) was already merged via Experiment 20 (`68000c7`). Draft WIP PR #8 remains unmerged and outside `main`.
+
 ## Isolated follow-up on this branch — 8 November 2026
 
 Experiment 22 builds on Experiment 21 `56b328d` and integrates PR #9's verification-outcome integrity implementation once with PR #10's child-scoped verification changes. It fixes a reproduced parser case where `{"status":"ERROR","passed":true}` was treated as PASS. The parser now requires recognized, mutually consistent statuses; unknown/conflicting receipts are unavailable and explicit failures remain failures. [Report](../reports/experiment22/experiment22-report.md), [protocol](../reports/experiment22/PROTOCOL.md), and [181-method selected regression results](../reports/experiment22/experiment22-results.json). PRs #11/#12 are unrelated retrospective documentation submissions with stale PR #7 status claims; neither was merged into this experiment. No live-model or full E2E result is claimed.

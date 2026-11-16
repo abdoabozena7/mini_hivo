@@ -4,6 +4,8 @@
 
 **Contribution:** Tasneem's post-handoff investigation, implementation and validation. The original Experiment 3 and inherited progress/grounding mechanisms retain their original authorship. This is a follow-up, not a newly numbered experiment or a claim to have implemented those original mechanisms.
 
+> **Integration addendum (16 November 2026):** The historical status statements below (`team main` at `f842fb8` and PR #7 unmerged) reflect the 28 October 2026 preparation snapshot. The referenced PR #7 fixes (`5e66d34` / `2a8b945`) were subsequently integrated into `main` in Experiment 20 (`68000c7`) and preserved through Experiments 21–22 (`4502318`), and this follow-up documentation was merged onto `main` alongside PR #9 (`ac85b95`) and PR #12.
+
 ## Research question and relation to Experiment 3
 
 Can the ordinary greenfield Worker retain a successful Context Sufficiency decision in its next model request, perform a legitimately authorized mutation, and terminate a persistent context-only loop before exhausting its budget?
