@@ -127,6 +127,20 @@ call. مثلًا كان بيعتبر شرط التشغيل بـ arguments وشر
 decision واحدة حقيقية لازمة قبل أول كتابة، وإن التكرار محدود. كمان failure
 بتاعة الـ context ما بقاش بيتكتب فوق سببها برسالة impact gate لسه ما اتجربتش.
 
+في تشخيص لاحق، الـ evidence provider نفسه بقى يفرق بشكل صريح بين تعريف
+dependency مفقودة وبين تعريف output المستخدم طالب إنشاءه. الإعفاء
+`not_applicable` محتاج دليلين مع بعض: source requirement أصلية بتطلب إنشاء
+نفس المسار، وfilesystem observation إن المسار لسه مش موجود. ده ما بيدّعيش
+إن implementation أو tests اتنفذوا، وما بيدخلش facts مصطنعة للـ World Model.
+الـ Worker لسه لازم يقدم sufficiency decision فعلية، والـ unknown dependencies
+والـ existing files ما بياخدوش الإعفاء. الـ negative controls بتثبت إن claim
+من غير الدليلين مش كفاية لتصريح التعديل.
+
+التعديل ده حلّ تصنيف requests بتاعة الملفات الجديدة في الـ trace، لكنه مش
+دليل على نجاح الـ task: إحدى المحاولات بعدها طلبت `unittest execution`
+كدليل repository غير موجود، وفضلت blocking. النتيجة دي محفوظة كفشل، مش
+متقدمة على إنها uplift أو نجاح عام.
+
 ### تصريح التنفيذ اتفهم على إنه اكتمال المهمة
 
 بعد نجاح الـ context check، كان ممكن الـ Worker يرد بوصف للـ check نفسها،
@@ -200,7 +214,7 @@ promotion لكل experiment policy. كل الـ existing policy defaults فضل�
 ## سجل الاختبارات والقياس
 
 الـ baseline offline suite شغّل **1703 tests: OK، مع 4 skipped**.
-بعد الدمج والإصلاحات، الـ complete suite شغّل **1726 tests: OK، مع 4 skipped**.
+بعد الدمج والإصلاحات، الـ complete suite شغّل **1729 tests: OK، مع 4 skipped**.
 الـ skips الأربعة دول legacy scheduler tests معلّمة أصلًا، مش tests جديدة
 اتشالت عشان الدمج يعدّي. الـ self-test العام اتشغّل من نفس CLI واتراجع منفصلًا.
 

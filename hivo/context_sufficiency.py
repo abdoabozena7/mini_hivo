@@ -170,7 +170,7 @@ def _bounded_facts(value: Any) -> list[str]:
 
 def _resolution_status(value: Any) -> str:
     status = str(value or "").strip().casefold()
-    return status if status in {"resolved", "partial", "unresolved", "conflicting"} else ""
+    return status if status in {"resolved", "partial", "unresolved", "conflicting", "not_applicable"} else ""
 
 
 def _merge_resolution_status(current: Any, incoming: Any) -> str:
@@ -183,6 +183,8 @@ def _merge_resolution_status(current: Any, incoming: Any) -> str:
         return "unresolved"
     if "partial" in statuses:
         return "partial"
+    if statuses == {"not_applicable"}:
+        return "not_applicable"
     return "resolved" if statuses else ""
 
 
@@ -482,6 +484,13 @@ def _provider_resolution(result: Any, request: Mapping[str, str], evidence: list
     status = _resolution_status(source.get("resolution_status"))
     if not status:
         return None
+    if status == "not_applicable" and not (
+        any(item.get("source_kind") in {"USER_STATED", "USER_CONFIRMED"}
+            and item.get("role") == "new_artifact_contract" for item in evidence)
+        and any(item.get("source_kind") == "DIRECT_OBSERVATION"
+                and item.get("role") == "absent_new_artifact" for item in evidence)
+    ):
+        status = "unresolved"
     facts = _bounded_facts(source.get("facts_established"))
     return {
         "request_kind": _text(source.get("request_kind") or request.get("kind"), 80),

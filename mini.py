@@ -2874,6 +2874,61 @@ def _world_model_revalidate_after_files(changed_paths, *, phase="commit"):
     return {"revalidated": [item for item in results if item.get("resolution_status") == "resolved"], "targets": results}
 
 
+def _new_artifact_context_evidence(request):
+    """Distinguish source-authorized future outputs from missing dependencies."""
+    if (RUN.get("project_mode") != NEW_PROJECT
+            or request.get("kind") not in {
+                "contract", "authoritative_contract", "definition", "symbol_definition",
+                "tests", "test_expectation",
+            }):
+        return None
+    target = safe_path(request.get("target"))
+    if target is None or target.exists():
+        return None
+    relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
+    for requirement in ledger_requirements(RUN.get("source_requirement_ledger")):
+        if requirement.get("provenance") not in {USER_STATED, USER_CONFIRMED}:
+            continue
+        text = str(requirement.get("text", ""))
+        declared = any(
+            reference.get("classification") == "CODE_PATH"
+            and reference.get("intent") == "MUTATION"
+            and reference.get("action", "").casefold().startswith(("creat", "writ"))
+            and reference.get("path", "").casefold() == relative.casefold()
+            for reference in stage4.code_location_references(text, include_action=True)
+        )
+        if not declared:
+            continue
+        requirement_id = requirement["requirement_id"]
+        absence = (
+            f"{relative} does not exist in the current workspace. Its existing definition or test "
+            "is not a prerequisite: the source requirement explicitly asks this task to create it. "
+            "No implementation or verification is being claimed."
+        )
+        evidence = [{
+            "kind": request["kind"], "target": request["target"],
+            "source_identity": f"source-requirement:{requirement_id}",
+            "source_kind": requirement["provenance"], "role": "new_artifact_contract",
+            "excerpt": compact_text(text, _CONTEXT_PROVIDER_EXCERPT_CHARS),
+            "authoritative": True,
+        }, {
+            "kind": request["kind"], "target": request["target"],
+            "source_identity": f"workspace:{relative}", "source_kind": "DIRECT_OBSERVATION",
+            "role": "absent_new_artifact", "excerpt": absence, "authoritative": True,
+        }]
+        record_run_event(
+            "new_artifact_context_evidence", requirement_id=requirement_id,
+            target=relative, resolution_status="not_applicable",
+        )
+        return {
+            "request_kind": request["kind"], "target": request["target"],
+            "resolution_status": "not_applicable", "facts_established": [text, absence],
+            "evidence": evidence, "resolver": "SOURCE_REQUIREMENT_LEDGER",
+            "source_scan_performed": False,
+        }
+    return None
+
+
 def _provide_targeted_context_evidence(request, context):
     """Resolve one validated request into a bounded semantic evidence bundle."""
     request = request if isinstance(request, dict) else {}
@@ -2896,6 +2951,9 @@ def _provide_targeted_context_evidence(request, context):
             "evidence": [],
             "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
         }
+    creation_evidence = _new_artifact_context_evidence(checked["request"])
+    if creation_evidence is not None:
+        return creation_evidence
     repository_map = RUN.get("repository_map") if isinstance(RUN, dict) else None
     world_model = _world_model_for_workspace(WORKSPACE, repository_map=repository_map)
     result = stage7_semantic.resolve_targeted_evidence(

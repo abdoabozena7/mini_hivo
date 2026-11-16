@@ -17,6 +17,7 @@ class ContextSufficiencyGateTests(unittest.TestCase):
             "active_contract": mini.ACTIVE_CONTRACT,
             "active_tool_contract": mini.ACTIVE_TOOL_CONTRACT,
             "active_gate": mini.ACTIVE_CONTEXT_SUFFICIENCY_GATE,
+            "active_world_model": mini.ACTIVE_PROJECT_WORLD_MODEL,
         }
         self._temp = tempfile.TemporaryDirectory()
         mini.WORKSPACE = Path(self._temp.name)
@@ -30,6 +31,7 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         mini.ACTIVE_CONTRACT = self._saved["active_contract"]
         mini.ACTIVE_TOOL_CONTRACT = self._saved["active_tool_contract"]
         mini.ACTIVE_CONTEXT_SUFFICIENCY_GATE = self._saved["active_gate"]
+        mini.ACTIVE_PROJECT_WORLD_MODEL = self._saved["active_world_model"]
         self._temp.cleanup()
 
     @staticmethod
@@ -176,6 +178,87 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         self.assertFalse(result["mutation_authorized"])
         self.assertEqual(mini.RUN["context_sufficiency_checks"], 0)
         self.assertIn("CONTEXT_SUFFICIENCY_REQUIRED", result["summary"])
+
+    def test_explicit_new_outputs_need_creation_contracts_not_existing_definitions(self):
+        mini.RUN["project_mode"] = mini.NEW_PROJECT
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a greeting utility.\n"
+            "- Create hello.py that prints MERGE_OK.\n"
+            "- Create test_hello.py with unittest checks of the exact output.",
+            use_model=False,
+        )
+        gate = stage7.ContextSufficiencyGate(
+            {"root_goal": "Create a greeting utility.", "local_task": "Create hello.py."},
+            evidence_provider=mini._provide_targeted_context_evidence,
+        )
+        result = gate.evaluate({
+            "context_status": "insufficient",
+            "reason": "The requested files do not exist yet.",
+            "needed_evidence": [
+                {"kind": "definition", "target": "hello.py",
+                 "why": "Need the source definition before implementing the utility."},
+                {"kind": "test_expectation", "target": "test_hello.py",
+                 "why": "Need the requested test contract before implementing its checks."},
+            ],
+        })
+        self.assertFalse(result["mutation_allowed"])
+        self.assertTrue(result["evidence"])
+        self.assertTrue(all(
+            item["resolution_status"] == "not_applicable"
+            for item in result["semantic_resolutions"]
+        ))
+        self.assertTrue(any(
+            item.get("source_kind") == mini.USER_STATED for item in result["evidence"]
+        ))
+        self.assertTrue(any(
+            item.get("source_kind") == "DIRECT_OBSERVATION" for item in result["evidence"]
+        ))
+        authorized = gate.evaluate({
+            "context_status": "sufficient",
+            "reason": "The user specifies new outputs, not missing pre-existing dependencies.",
+        })
+        self.assertTrue(authorized["mutation_allowed"])
+        self.assertFalse((mini.WORKSPACE / "hello.py").exists())
+
+    def test_missing_dependency_cannot_be_exempted_without_source_creation_authority(self):
+        mini.RUN["project_mode"] = mini.NEW_PROJECT
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a utility.\n- Create hello.py using an external_api.py dependency.",
+            use_model=False,
+        )
+        gate = stage7.ContextSufficiencyGate(
+            {"local_task": "Create hello.py."},
+            evidence_provider=mini._provide_targeted_context_evidence,
+        )
+        result = gate.evaluate({
+            "context_status": "insufficient", "reason": "The external dependency is absent.",
+            "needed_evidence": [{
+                "kind": "definition", "target": "external_api.py",
+                "why": "Need the actual external dependency interface before implementing its caller.",
+            }],
+        })
+        self.assertEqual(result["semantic_resolutions"][0]["resolution_status"], "unresolved")
+        self.assertFalse(gate.evaluate({
+            "context_status": "sufficient", "reason": "Assume the dependency is available.",
+        })["mutation_allowed"])
+
+    def test_unproven_not_applicable_provider_claim_does_not_authorize_mutation(self):
+        gate = stage7.ContextSufficiencyGate(
+            self._anchor(),
+            evidence_provider=lambda *_args: {
+                "resolution_status": "not_applicable", "facts_established": [],
+                "evidence": [],
+            },
+        )
+        gate.evaluate({
+            "context_status": "insufficient", "reason": "The external contract is missing.",
+            "needed_evidence": [{
+                "kind": "contract", "target": "external_api",
+                "why": "Need the actual interface before changing the implementation.",
+            }],
+        })
+        result = gate.evaluate({"context_status": "sufficient", "reason": "Assume it is safe."})
+        self.assertFalse(result["mutation_allowed"])
 
     def test_missing_contract_is_completed_before_mutation(self):
         requests = []

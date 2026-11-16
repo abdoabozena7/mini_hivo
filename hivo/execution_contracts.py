@@ -2763,7 +2763,7 @@ _ADVICE_MUTATION_VERBS = re.compile(
     re.IGNORECASE,
 )
 _ADVICE_SAFE_VERBS = re.compile(
-    r"\b(?:call|check|confirm|inspect|invoke|look\s+at|read|reference|review|reuse|use|verify)\w*\b",
+    r"\b(?:call|check|confirm|inspect|invoke|look\s+at|read|reference|review|reuse|us(?:e|ing)|verify)\w*\b",
     re.IGNORECASE,
 )
 _ADVICE_NEGATION = re.compile(
@@ -2963,7 +2963,7 @@ def classify_code_location_reference(value, contract=None):
 
 def _advice_safe_intent(verb):
     value = str(verb or "").casefold()
-    if value.startswith(("call", "invoke", "reference", "reuse", "use")):
+    if value.startswith(("call", "invoke", "reference", "reuse", "use", "using")):
         return "REUSE"
     return "INSPECTION"
 
@@ -2978,7 +2978,7 @@ def _advice_action_events(text):
     return sorted(actions, key=lambda item: (item[0], item[1]))
 
 
-def _advice_local_intent(text, start, end, actions=None):
+def _advice_local_action(text, start, end, actions=None):
     """Find intent only in the clause local to one detected candidate."""
     actions = list(actions if actions is not None else _advice_action_events(text))
     previous = [item for item in actions if item[1] <= start]
@@ -2994,10 +2994,10 @@ def _advice_local_intent(text, start, end, actions=None):
             between = text[end:next_candidate[0]]
             if next_candidate[0] - end <= 70 and not _ADVICE_CLAUSE_BOUNDARY.search(between):
                 candidate = next_candidate
-    return candidate[2] if candidate is not None else "UNKNOWN"
+    return candidate
 
 
-def code_location_references(text, contract=None):
+def code_location_references(text, contract=None, *, include_action=False):
     """Return classified path candidates with clause-local semantic intent."""
     source = str(text or "")
     actions = _advice_action_events(source)
@@ -3007,9 +3007,12 @@ def code_location_references(text, contract=None):
         if reference is None:
             continue
         reference_end = path_match.start(1) + len(reference.get("text", ""))
-        reference["intent"] = _advice_local_intent(
+        action = _advice_local_action(
             source, path_match.start(1), reference_end, actions,
         )
+        reference["intent"] = action[2] if action is not None else "UNKNOWN"
+        if include_action:
+            reference["action"] = action[3] if action is not None else ""
         references.append(reference)
     return references
 
