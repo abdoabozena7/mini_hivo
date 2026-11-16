@@ -354,6 +354,41 @@ class HostPreflightTests(unittest.TestCase):
         finally:
             mini.HOST_PREFLIGHT_RESULT = old_result
 
+    def test_prompt_file_task_failures_exit_nonzero_without_interactive_questions(self):
+        prompt_path = self.workspace / "prompt.txt"
+        prompt_path.write_text("deterministic test prompt", encoding="utf-8")
+        preflight_result = {
+            "passed": True, "status": "PASS", "preflight_id": "main-task-failure",
+            "marker_path": str(self.workspace / preflight.HOST_PREFLIGHT_MARKER),
+            "report": {"status": "PASS", "duration_seconds": 0.1},
+        }
+        old_result = mini.HOST_PREFLIGHT_RESULT
+        try:
+            for mode in ("baseline", "recursive"):
+                with self.subTest(mode=mode):
+                    args = SimpleNamespace(
+                        mode=mode, model=None, prompt_file=str(prompt_path),
+                        workspace=str(self.workspace), self_test=False,
+                        install_browser=False, no_bootstrap=True,
+                    )
+                    with patch.object(mini, "parse_args", return_value=args), \
+                            patch.object(mini, "ensure_dependencies", return_value=True), \
+                            patch.object(mini, "get_workspace", return_value=self.workspace), \
+                            patch.object(mini, "run_host_preflight", return_value=preflight_result), \
+                            patch.object(mini, "select_local_ollama_model"), \
+                            patch.object(mini, "load_memory", return_value={}), \
+                            patch.object(mini, f"run_{mode}_request", return_value=(
+                                {"status": "failed", "summary": "verification failed"}, {},
+                            )) as run:
+                        with self.assertRaises(SystemExit) as exit_info:
+                            mini.main()
+                    self.assertEqual(exit_info.exception.code, 1)
+                    run.assert_called_once_with(
+                        "deterministic test prompt", {}, interactive=False,
+                    )
+        finally:
+            mini.HOST_PREFLIGHT_RESULT = old_result
+
 
 if __name__ == "__main__":
     unittest.main()

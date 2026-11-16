@@ -159,6 +159,46 @@ class PreMutationImpactContractTests(unittest.TestCase):
         self.assertTrue(accepted["verification_obligations"])
         self.assertIsNone(impact.impact_mutation_block_reason(accepted))
 
+    def test_creation_paths_come_from_local_requirements_not_generic_goal_words(self):
+        candidate = mini._impact_candidate_for_worker(
+            "Create a small Python greeting utility.", "ROOT",
+            context_anchor={"requirements": [
+                "Create src/greet.py using only the standard library.",
+                "Create tests/test_greet.py with greeting tests.",
+                "Preserve settings.json unchanged.",
+            ]},
+        )
+        accepted = self.accept(candidate)
+        actual = impact.capture_actual_mutation_impact(
+            changed_paths=["src/greet.py", "tests/test_greet.py"],
+        )
+        result = impact.compare_pre_mutation_impact(
+            accepted, actual, verification_result={"passed": True},
+        )
+        self.assertTrue(result["passed"], result)
+        unrelated = impact.capture_actual_mutation_impact(
+            changed_paths=["src/greet.py", "tests/test_greet.py", "settings.json"],
+        )
+        rejected = impact.compare_pre_mutation_impact(
+            accepted, unrelated, verification_result={"passed": True},
+        )
+        self.assertFalse(rejected["passed"])
+        self.assertTrue(rejected["out_of_scope"])
+
+    def test_requirement_path_hints_never_expand_approved_mutation_paths(self):
+        candidate = mini._impact_candidate_for_worker(
+            "Create a greeting utility.", "EXEC-001",
+            context_anchor={"requirements": ["Create unauthorized.py."]},
+            execution_contract={"allowed_mutation_paths": ["src/greet.py"]},
+        )
+        accepted = self.accept(candidate, allowed_mutation_paths=["src/greet.py"])
+        actual = impact.capture_actual_mutation_impact(changed_paths=["unauthorized.py"])
+        result = impact.compare_pre_mutation_impact(
+            accepted, actual, verification_result={"passed": True},
+        )
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["out_of_scope"])
+
     def test_missing_known_consumer_rejects_contract_before_mutation(self):
         model = self.model([
             ("src/a.py", "def A(value):\n    return value\n"),

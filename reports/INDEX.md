@@ -20,7 +20,14 @@ This index identifies the final report and machine-readable measurements for eve
 | 14 | [report](experiment14/experiment14-report.md) | [JSON](experiment14/experiment14-results.json) | [Evidence protocol](experiment14/supporting/evidence-v2/comparison.json), [handoffs](experiment14/supporting/handoffs-v2/comparison.json); v1 retained |
 | 15 | [report](experiment15/experiment15-report.md) | [JSON](experiment15/experiment15-results.json) | [Binding protocol](experiment15/supporting/binding-v2/comparison.json); v1 retained |
 | 16 | [report](experiment16/experiment16-report.md) | [JSON](experiment16/experiment16-results.json) | Timer/Python first-blocker diagnosis |
-| 17 | [partial classification checkpoint](experiment17/classification-protocol.md) | [Protocol JSON](experiment17/classification-protocol.json); **no completed final run results yet** | [Runbook](experiment17/RUNBOOK.md); fresh execution is in progress outside this repository |
+| 17 | [report](experiment17/experiment17-report.md) | [JSON](experiment17/experiment17-results.json) | [Deterministic checkpoint](experiment17/classification-protocol.md), [protocol JSON](experiment17/classification-protocol.json), [runbook](experiment17/RUNBOOK.md) |
+| 18 | [report](experiment18/experiment18-report.md) | [JSON](experiment18/experiment18-results.json) | [Runbook](experiment18/RUNBOOK.md); Python policy comparison and Timer/Python fresh audit |
+| 19 | [report](experiment19/experiment19-report.md) | [JSON](experiment19/experiment19-results.json) | [Runbook](experiment19/RUNBOOK.md); current/closure comparison and preserved failure denominators |
+
+The [2026-11-16 consolidation report](../docs/BRANCH_CONSOLIDATION.md) records
+branch provenance, integration repairs, offline regression results, and new
+request-to-result attempts. These are new measurements, not replacements for
+the historical Experiment 1–19 results.
 
 The JSON files for Experiments 1–11 and the supporting comparison/matrix JSON for Experiments 12–15 were copied byte-for-byte from the local experiment directories. The source and repository copies were checked with SHA-256. Reports for Experiments 12–16 were already tracked. Raw workspaces, model transcripts, and some native verifier payloads remain outside Git; they are not silently counted as uploaded evidence.
 

@@ -623,7 +623,7 @@ class ApprovedPlanExecutionContractTests(unittest.TestCase):
         def intents(text):
             return {
                 item["path"]: item["intent"]
-                for item in execution._advice_path_references(text, contract)
+                for item in execution.code_location_references(text, contract)
             }
 
         self.assertEqual(

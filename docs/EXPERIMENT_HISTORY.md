@@ -1,6 +1,6 @@
 # Experiment history on `main`
 
-Checkpoint: 2026-10-03. The core feature work preceding these experiments is already a linear series of commits on `main`. Experiments 1–17 continue that same line. Old feature branches are historical snapshots; merging their divergent ancestry again would duplicate earlier work. The branch names can remain for navigation, while `main` carries the reviewable commit sequence.
+Checkpoint: 2026-11-16. The original core feature work was previously transplanted into a linear series on `main`. The [history-preserving consolidation](BRANCH_CONSOLIDATION.md) now also makes the original feature commits ancestors of `main`, without replaying their older implementation over newer fixes. Experiments 17–19 are integrated through a separate content merge. Original branch names and complete commit IDs are retained in the consolidation inventory, so retiring a branch name does not remove its history.
 
 | Experiment | Commit(s) | What the commit records |
 |---|---|---|
@@ -20,6 +20,9 @@ Checkpoint: 2026-10-03. The core feature work preceding these experiments is alr
 | 14 | `b61c474` | Strict aggregation compatibility; [report](../reports/experiment14/experiment14-report.md) |
 | 15 | `e768fda` | Bounded evidence-to-edit binding; [report](../reports/experiment15/experiment15-report.md) |
 | 16 | `6eeca6c` | Timer/Python first-blocker isolation; [report](../reports/experiment16/experiment16-report.md) |
-| 17 | `cbed365` | Opt-in field-scoped browser classification, harness, and tests; [deterministic checkpoint](../reports/experiment17/classification-protocol.md); **fresh-run report pending** |
+| 17 | `cbed365`, `a855283` | Opt-in field-scoped browser classification, [deterministic checkpoint](../reports/experiment17/classification-protocol.md), and [nine fresh approved-contract outcomes](../reports/experiment17/experiment17-report.md) |
+| 18 | `9c7b51f` | Opt-in bounded no-tool Worker re-anchor and [Python/Timer audit](../reports/experiment18/experiment18-report.md) |
+| 19 | `9ad7daf` | Opt-in mandatory context-decision closure and [controlled Python comparison](../reports/experiment19/experiment19-report.md); no default promotion |
+| Consolidation | `f65f1ab`, `1f067ed` | Original core ancestry merge and Experiment 17–19 content merge; [decisions, repairs, and fresh validation](BRANCH_CONSOLIDATION.md) |
 
-Commits preserve their original author and commit dates. Completed reports and numeric JSON results for Experiments 1–16 are indexed in [reports/INDEX.md](../reports/INDEX.md), along with the available comparison artifacts. Large raw run workspaces remain outside the Git repository, so GitHub does not contain every raw trace. Experiment 17 currently has a checked deterministic classification protocol but no completed fresh-run outcome.
+Commits preserve their original author and commit dates. Reports and numeric JSON results for Experiments 1–19 are indexed in [reports/INDEX.md](../reports/INDEX.md), along with the available comparison artifacts. Historical raw run workspaces remain outside the Git repository, so GitHub does not contain every old raw trace. In particular, a completed experiment report is not a claim that every task succeeded: Timer still failed child/root completion in Experiment 17, and the Experiment 19 closure policy did not establish a reliability improvement.

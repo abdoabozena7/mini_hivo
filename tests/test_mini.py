@@ -393,6 +393,26 @@ Requirements:
         self.assertFalse((mini.WORKSPACE / "missing.js").exists())
         self.assertEqual(result["mutation_failures"][0]["category"], "MISSING_TARGET")
 
+    def test_nonzero_match_count_mismatch_returns_current_source_without_applying(self):
+        target = mini.WORKSPACE / "app.py"
+        original = "value = 1\n"
+        target.write_text(original, encoding="utf-8")
+        arguments = {
+            "path": "app.py", "old": "value = 1", "new": "value = 2",
+            "expected_replacements": 2,
+        }
+        refusal = mini.edit_file(**arguments)
+        record = mini.mutation_failure_record("edit_file", "app.py", refusal)
+        _feedback, recovery = mini._enrich_mutation_result(
+            "edit_file", arguments, record, refusal,
+        )
+        self.assertIsNotNone(recovery)
+        self.assertEqual(recovery["current_matching_replacements"], 1)
+        self.assertEqual(recovery["requested_expected_replacements"], 2)
+        self.assertIn("value = 1", recovery["fresh_context"])
+        self.assertFalse(recovery["mutation_applied"])
+        self.assertEqual(target.read_text(encoding="utf-8"), original)
+
     def test_syntax_invalid_mutation_reports_candidate_and_current_workspace_separately(self):
         target = mini.WORKSPACE / "app.py"
         original = "value = 1\n"

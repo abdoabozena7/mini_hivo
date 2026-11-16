@@ -262,7 +262,7 @@ def context_sufficiency_schema() -> dict[str, Any]:
                 "items": {
                     "type": "object",
                     "properties": {
-                        "kind": {"type": "string"},
+                        "kind": {"type": "string", "enum": sorted(EVIDENCE_REQUEST_KINDS)},
                         "target": {"type": "string"},
                         "why": {"type": "string", "maxLength": MAX_CONTEXT_EVIDENCE_PURPOSE_CHARS},
                     },

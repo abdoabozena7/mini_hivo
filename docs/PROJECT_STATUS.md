@@ -1,6 +1,6 @@
 # Mini Hivo — architecture and feature status
 
-Checkpoint: 2026-10-03. This page tracks capabilities, not individual defects. The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md).
+Checkpoint: 2026-11-16. This page tracks capabilities, not individual defects. The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, integration decisions, and fresh validation separately.
 
 ## What exists in the code
 
@@ -11,15 +11,17 @@ Checkpoint: 2026-10-03. This page tracks capabilities, not individual defects. T
 | Impact Map, challenge, minimal change plan, explicit approval, and immutable execution contracts | Implemented | `hivo/impact_planning.py`, `hivo/execution_contracts.py`, `hivo/approval_bound_execution.py` |
 | Recursive task decomposition, scoped Worker missions, dependency scheduling, mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
 | Browser/unit verification routing, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
-| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Completed report metrics archived through Experiment 16; Experiment 17 in progress | `scripts/`, `tests/`, `reports/` |
+| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Reports and numeric results archived through Experiment 19; original histories integrated without rewriting | `scripts/`, `tests/`, `reports/` |
 
 “Implemented” means a code path and focused tests exist. It does **not** claim reliable end-to-end completion for every project or that an experimental policy is the default.
 
 ## Current working point
 
-Experiment 16 isolated separate first stopping points in the frozen Timer and Python tasks: Timer reached a legal edit but a browser verification profile could be chosen from an unrelated contract hash; Python did not pass its pre-mutation context/impact boundary in three attempts. See [the Experiment 16 report](../reports/experiment16/experiment16-report.md).
+Experiment 17's [completed report](../reports/experiment17/experiment17-report.md) retains the **opt-in** `field_scoped` browser classifier. It classified all measured Timer/game contracts correctly, and the two game tasks each reached Root verified in 3/3 fresh approved-contract runs. Timer reached Root verified in 0/3: correct classification and browser behavior did not close its later receipt/grounding failures.
 
-Experiment 17 adds an **opt-in** `field_scoped` browser profile policy. It classifies from goal, requirements, approved paths and verification target instead of arbitrary contract metadata. The existing `current` policy remains the default. [Frozen-contract checks](../reports/experiment17/classification-protocol.md) classify Timer correctly in 3/3 instances and both games correctly in 6/6; 27 identity-field perturbations preserve the new classification. Focused deterministic tests pass. Its nine fresh Worker runs, result report, and decision on promotion are still pending. This addresses the Timer classification boundary only; it does not claim to resolve the separate Python path.
+Experiment 18's [report](../reports/experiment18/experiment18-report.md) shows that the opt-in no-tool re-anchor moved Python into source inspection, but not into a context decision or legal mutation. Experiment 19's [report](../reports/experiment19/experiment19-report.md) found 0/3 Python context decisions in both comparison arms; its closure guard remains experimental and is not promoted to a default.
+
+The consolidation adds focused repairs for false source conflicts, provider/runtime context-schema drift, context-only false completion, negated browser requirements, nonzero replacement-count recovery, requirement-grounded creation impact targets, and honest batch exit status. It also repairs the deterministic self-test's independent-task fixture. Fresh measurements and their limitations are recorded in the [consolidation report](BRANCH_CONSOLIDATION.md); those repairs do not retroactively change any historical experiment percentage.
 
 ## Capabilities still needed for the intended complete architecture
 

@@ -509,6 +509,39 @@ Example upgrades:
         )
         self.assertEqual(mini.detect_explicit_conflicts(ledger), [])
 
+    def test_python_cli_conditions_and_prohibitions_are_compatible(self):
+        pairs = (
+            (
+                "Create greet.py using only the Python standard library.",
+                "Run the unit tests and finish only after they pass. "
+                "Do not create a web application or install packages.",
+            ),
+            (
+                "Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.",
+                "Running python greet.py without arguments prints exactly Hello, World! "
+                "followed by a newline.",
+            ),
+            (
+                "Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.",
+                'Expose a greet(name="World") function that returns the same greeting '
+                "without a newline.",
+            ),
+        )
+        for first, second in pairs:
+            with self.subTest(first=first, second=second):
+                self.assertEqual(
+                    mini.detect_explicit_conflicts(self.ledger_for(first, second)), [],
+                )
+
+    def test_coordinated_prohibitions_still_detect_a_conflicting_target(self):
+        ledger = self.ledger_for(
+            "Remove keyboard controls and touch controls.",
+            "Keyboard controls must remain unchanged.",
+        )
+        conflicts = mini.detect_explicit_conflicts(ledger)
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["type"], "opposite_polarity")
+
     def test_true_conflicts_have_structured_evidence_and_blocking_questions(self):
         cases = (
             (

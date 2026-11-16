@@ -2997,7 +2997,7 @@ def _advice_local_intent(text, start, end, actions=None):
     return candidate[2] if candidate is not None else "UNKNOWN"
 
 
-def _advice_path_references(text, contract=None):
+def code_location_references(text, contract=None):
     """Return classified path candidates with clause-local semantic intent."""
     source = str(text or "")
     actions = _advice_action_events(source)
@@ -3018,7 +3018,7 @@ def _advice_path_mutation_states(text, contract=None):
     """Preserve the legacy tuple shape for callers while using local intent."""
     return [
         (item["path"], item.get("intent") == "MUTATION")
-        for item in _advice_path_references(text, contract)
+        for item in code_location_references(text, contract)
         if item.get("classification") == "CODE_PATH"
     ]
 
@@ -3058,7 +3058,7 @@ def _advice_conflict_analysis(advice, contract):
                 continue
             mutation_matches = [match for match in _ADVICE_MUTATION_VERBS.finditer(text) if not _advice_negated(text, match.start())]
             if mutation_matches:
-                path_states = _advice_path_references(text, authority)
+                path_states = code_location_references(text, authority)
                 path_candidates.extend(path_states)
                 for reference in path_states:
                     if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
@@ -3099,7 +3099,7 @@ def _advice_conflict_analysis(advice, contract):
                         f"{field}: TEST_MUTATION advice cannot direct source implementation changes"
                     )
             else:
-                path_candidates.extend(_advice_path_references(text, authority))
+                path_candidates.extend(code_location_references(text, authority))
             for match in _ADVICE_DUPLICATE_STATE.finditer(text):
                 context_window = text[max(0, match.start() - 70):match.end() + 1]
                 if not _advice_negated(text, match.start()) and not _ADVICE_NEGATION.search(context_window):

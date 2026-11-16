@@ -1,6 +1,6 @@
 # Mini Hivo
 
-**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md).
+**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation and live validation](docs/BRANCH_CONSOLIDATION.md).
 
 Mini Hivo is a local coding-agent orchestrator pinned to one model:
 `gemma4:e4b`. Every model-backed role uses that exact model. Cross-model
@@ -17,6 +17,30 @@ At the workspace prompt, pressing Enter creates the next numbered project under
 `list/` (`project-1`, `project-2`, ...). Supplying an existing path uses that
 path directly. Legacy files that previously lived directly under `list/` are
 migrated once into `list/project-1`.
+
+For a noninteractive run, supply an existing workspace directory and a UTF-8
+prompt file:
+
+```powershell
+.\.venv\Scripts\python.exe mini.py --mode recursive --workspace D:\cases\new-project --prompt-file D:\cases\prompt.txt --no-bootstrap
+```
+
+Batch execution exits with `0` only for `done`, `1` for an unsuccessful or
+blocked task, and `2` for setup/preflight errors. Baseline batch runs also
+remain noninteractive; an unresolved clarification is not silently approved.
+`--no-bootstrap` disables automatic dependency installation.
+
+Run the deterministic regression and architecture checks without a live model:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+.\.venv\Scripts\python.exe mini.py --self-test --no-bootstrap
+```
+
+The [consolidation report](docs/BRANCH_CONSOLIDATION.md) distinguishes offline
+checks, historical experiments, fresh live attempts, and independent checks of
+generated output. A context authorization is not task completion, and model
+prose or generated tests alone are not independent acceptance evidence.
 
 ## Architecture
 

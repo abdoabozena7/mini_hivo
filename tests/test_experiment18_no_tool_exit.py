@@ -76,6 +76,18 @@ class NoToolExitGuardTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertNotEqual(result["failure_type"], mini.NO_EXECUTION_PROGRESS)
 
+    def test_explicit_reanchor_also_covers_a_new_project_without_approved_paths(self):
+        mini.RUN["worker_no_tool_policy"] = "bounded_reanchor"
+        with patch.object(mini, "ask_ollama", side_effect=[prose(), prose()]) as ask:
+            result = mini.execute_agent_task(
+                "Create a new Python greeting utility.", {}, task_id="ROOT",
+                context_sufficiency_enabled=True, max_steps=2,
+            )
+        self.assertEqual(ask.call_count, 2)
+        self.assertEqual(result["failure_type"], mini.NO_EXECUTION_PROGRESS)
+        self.assertFalse(result["mutation_authorized"])
+        self.assertEqual(mini.RUN["worker_no_tool_reanchors"], 1)
+
     def test_reanchor_is_inside_original_budget(self):
         result, seen = self.run_worker([prose()], max_steps=1)
         self.assertEqual(len(seen), 1)

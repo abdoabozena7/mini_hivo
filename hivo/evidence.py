@@ -80,7 +80,7 @@ def mutation_failure_record(tool: object, target: object, result: object, role: 
     )):
         category = "MISSING_TARGET"
     elif any(marker in lower for marker in (
-        "invalid line range", "exact replacement(s), found 0", "exact text not found",
+        "invalid line range", "exact replacement(s), found", "exact text not found",
         "stale target", "stale context", "context does not match", "patch context",
     )):
         category = "STALE_TARGET"

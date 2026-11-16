@@ -74,6 +74,55 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         self.assertEqual(result["lifecycle_state"], stage7.MUTATION_ALLOWED)
         self.assertEqual(provider_calls, [])
 
+    def test_provider_schema_and_runtime_agree_on_evidence_request_kinds(self):
+        parameters = next(
+            tool["function"]["parameters"] for tool in mini.TOOLS
+            if tool["function"]["name"] == "context_sufficiency_check"
+        )
+        kind_schema = parameters["properties"]["needed_evidence"]["items"]["properties"]["kind"]
+        for kind in ("contract", "callers", "tests", "workspace", "file"):
+            with self.subTest(kind=kind):
+                advertised = "enum" not in kind_schema or kind in kind_schema["enum"]
+                checked = stage7.validate_evidence_request({
+                    "kind": kind, "target": "greet.py output contract",
+                    "why": "Establish the expected greeting before implementing the CLI.",
+                })
+                self.assertEqual(advertised, checked["valid"])
+
+    def test_completed_context_decision_is_not_worker_completion(self):
+        responses = [
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "sufficient",
+                "reason": "The creation contract fully specifies the greeting.",
+            }),
+            {"role": "assistant", "content": "The context check is complete.", "tool_calls": []},
+            self._tool_response("write_file", {
+                "path": "greet.py", "content": 'print("Hello, World!")\n',
+            }),
+            self._tool_response("run_command", {"command": "python greet.py"}),
+            {"role": "assistant", "content": "Greeting implemented and verified.", "tool_calls": []},
+        ]
+        mutations = []
+
+        def run_tool(name, arguments, role="Builder"):
+            if name == "context_sufficiency_check":
+                return mini._context_sufficiency_tool(arguments, role=role, task_id="creation")
+            if name == "write_file":
+                mutations.append(arguments["path"])
+                return "wrote file"
+            return "[exit_code=0]\nHello, World!\n"
+
+        mini.RUN["project_mode"] = mini.NEW_PROJECT
+        with patch.object(mini, "ask_ollama", side_effect=responses), \
+                patch.object(mini, "run_tool", side_effect=run_tool):
+            result = mini.execute_agent_task(
+                "Create greet.py and verify its greeting.", {}, task_id="creation",
+                context_sufficiency_enabled=True, max_steps=5,
+            )
+        self.assertEqual(mutations, ["greet.py"])
+        self.assertEqual(result["status"], "done")
+        self.assertTrue(any(item["tool"] == "run_command" for item in result["tool_evidence"]))
+
     def test_missing_contract_is_completed_before_mutation(self):
         requests = []
         mutation_calls = []

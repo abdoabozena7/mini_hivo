@@ -220,6 +220,23 @@ class VerificationApplicabilityTests(unittest.TestCase):
             self.assertIsNone(route["target"])
             self.assertIn("VERIFIER_NOT_REQUIRED", route["reason_codes"])
 
+    def test_prohibited_web_creation_does_not_require_browser_verification(self):
+        self.write("greet.py", 'print("Hello, World!")\n')
+        self.write("test_greet.py", "import unittest\n")
+        for goal, required in (
+            ("Create a Python CLI. Do not create a web application or install packages.", False),
+            ("Create a Python CLI. Do not create a web application. "
+             "Verify the existing page in the browser.", True),
+        ):
+            with self.subTest(goal=goal):
+                artifact = mini.analyze_verification_applicability(
+                    self.task(goal=goal, scope=["greet.py", "test_greet.py"]),
+                    {"goal": goal}, self.snapshot(),
+                )
+                route = self.route(artifact, BROWSER)
+                self.assertEqual(route["required"], required)
+                self.assertEqual(route["applicable"], required)
+
     def test_test_files_are_focused_test_evidence_not_browser_evidence(self):
         self.write("src/module.js")
         self.write("tests/module.test.js", "test('module', () => {});\n")

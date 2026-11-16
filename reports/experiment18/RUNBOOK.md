@@ -7,6 +7,12 @@ prose-only or empty response receives one re-anchor inside the existing
 Once a tool is called, the existing context, impact, grounding, verification,
 and integration gates apply unchanged. The default remains `current`.
 
+The 2026-11-16 consolidation extends this same explicit opt-in to a new-project
+Builder without pre-approved mutation paths. It still permits only one
+re-anchor, consumes the existing round budget, and never authorizes mutation.
+The historical measurements below used approved contracts and their pinned
+original source; they are not rerun or relabeled by this extension.
+
 The Python A/B uses the same frozen approved contract and seed from Experiment
 12, model `gemma4:e4b`, strict evidence, evidence-bound mutation, and
 field-scoped verification classification. Each policy has three fresh runs.

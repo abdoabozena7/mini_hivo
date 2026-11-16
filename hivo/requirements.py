@@ -719,14 +719,22 @@ def _conflict_target_tokens(text):
     }
 
 
-def _negative_target_tokens(text):
-    """Return only the object of each explicit negative/action phrase."""
+def _negative_target_groups(text):
+    """Keep distinct prohibited targets and conditional contexts separate."""
     value = str(text or "").casefold()
-    targets = set()
+    groups = []
     for match in _CONFLICT_NEGATIVE_RE.finditer(value):
         clause = _CONFLICT_CLAUSE_BREAK_RE.split(value[match.end():], maxsplit=1)[0]
-        targets.update(_conflict_target_tokens(clause))
-    return targets
+        context = set()
+        if match.group(0) == "without":
+            context = _conflict_target_tokens(
+                _CONFLICT_CLAUSE_BREAK_RE.split(value[:match.start()])[-1],
+            )
+        for target in re.split(r"\b(?:and|or)\b", clause):
+            tokens = _conflict_target_tokens(target)
+            if tokens:
+                groups.append(tokens | context)
+    return groups
 
 
 def _positive_target_tokens(text):
@@ -754,10 +762,11 @@ def _conflict_evidence(left, right, left_text, right_text):
 
     left_positive = _positive_target_tokens(left_text)
     right_positive = _positive_target_tokens(right_text)
-    left_negative = _negative_target_tokens(left_text)
-    right_negative = _negative_target_tokens(right_text)
+    left_negative = _negative_target_groups(left_text)
+    right_negative = _negative_target_groups(right_text)
 
-    if left_positive & right_negative or right_positive & left_negative:
+    if (any(target <= left_positive for target in right_negative)
+            or any(target <= right_positive for target in left_negative)):
         left_effect = compact_text(left_text, 260)
         right_effect = compact_text(right_text, 260)
         return {

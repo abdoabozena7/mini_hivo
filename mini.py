@@ -970,7 +970,10 @@ TOOLS = [
         "description": "Replace one small exact text fragment in an existing file after reading it.",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"},
-            "expected_replacements": {"type": "integer", "minimum": 1, "maximum": 20}},
+            "expected_replacements": {
+                "type": "integer", "minimum": 1, "maximum": 20, "default": 1,
+                "description": "Expected exact match count; defaults to 1. Read current source before choosing another count.",
+            }},
             "required": ["path", "old", "new"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
@@ -2020,6 +2023,26 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
         "test_contract": effective.get("test_contract"),
         "global_do_not_touch": effective.get("global_do_not_touch", []),
     }
+    if mutation_required and not any(effective.get(key) for key in (
+        "allowed_mutation_paths", "expected_targets", "impact_targets",
+    )):
+        targets = {}
+        for requirement in [task["goal"], *list(task["done_when"] or [])]:
+            text = requirement.get("text", "") if isinstance(requirement, dict) else str(requirement)
+            for reference in stage4.code_location_references(text, effective):
+                if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
+                    continue
+                path = reference["path"]
+                targets.setdefault(path.casefold(), {
+                    "target": path, "path": path, "kind": "path",
+                    "provenance": [{
+                        "source_identity": "controller:task-contract",
+                        "location": str(task_id), "evidence_kind": "task_requirement",
+                        "excerpt": text,
+                    }],
+                })
+        if targets:
+            task["expected_targets"] = list(targets.values())
     return stage10_impact.build_pre_mutation_impact_contract(
         task,
         task_id=task_id,
@@ -14330,6 +14353,14 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             "and why it is needed. Never request broad repository or module context. Mutation tools are blocked "
             "by the runtime until the gate returns mutation_allowed=true."
         )
+        if RUN.get("project_mode") == NEW_PROJECT:
+            system_prompt += (
+                " This is a NEW_PROJECT: use the explicit creation requirements and bounded workspace "
+                "inspection to assess context. Files, definitions, and tests that this task asks you "
+                "to create are future outputs, not missing pre-existing dependencies. Do not request "
+                "their existing implementation as evidence. Still report any genuinely unresolved "
+                "requirement or external interface before mutation."
+            )
     if impact_required:
         system_prompt += (
             " PRE-MUTATION IMPACT CONTRACT (runtime-enforced): the controller has a bounded expected change surface, "
@@ -14541,8 +14572,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             break
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
-            if (no_tool_policy == "bounded_reanchor" and progress is not None
-                    and progress.tool_steps == 0 and not evidence):
+            if (no_tool_policy == "bounded_reanchor" and role == "Builder"
+                    and not evidence):
                 if no_tool_reanchors == 0 and _step + 1 < max(1, int(step_budget)):
                     no_tool_reanchors = 1
                     RUN["worker_no_tool_reanchors"] = RUN.get("worker_no_tool_reanchors", 0) + 1
@@ -14720,10 +14751,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             )
             if (
                 role in {"Builder", "Repairer"}
-                and not content.strip()
-                and isinstance(previous, dict)
-                and previous.get("role") == "tool"
                 and not last_tool_verified
+                and (
+                    last_evidence.get("tool") == _CONTEXT_COMPLETION_TOOL
+                    or (
+                        not content.strip()
+                        and isinstance(previous, dict)
+                        and previous.get("role") == "tool"
+                    )
+                )
             ):
                 messages.append({
                     "role": "user",
@@ -15308,11 +15344,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 break
 
             if context_tool_call:
-                if (progress is not None and progress_policy == "progress_constrained"
-                        and context_gate.mutation_allowed):
-                    # Keep the successful gate result in the current transcript
-                    # and require a fresh Worker response with the completed
-                    # gate tool removed from the offered schema.
+                if context_gate.mutation_allowed:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "The context gate passed; this authorizes implementation, not task completion. "
+                            "Continue with the scoped write_file/edit_file tools and executable verification. "
+                            "Do not repeat or describe the completed context decision as your final result."
+                        ),
+                    })
                     context_reanchor_after_tool = True
                     break
                 context_feedback = _context_evidence_feedback(context_tool_result)
@@ -27951,12 +27991,16 @@ def run_self_test(install_browser=False):
             remaining = MAX_TOTAL_TASKS - RUN["tasks_created"]
             if remaining < 2:
                 return []
-            specs = [{"goal": f"{task['goal']} part A", "done_when": ["A"], "scope_hint": []},
-                     {"goal": f"{task['goal']} part B", "done_when": ["B"], "scope_hint": []}]
             children=[]
-            for i,spec in enumerate(specs,1):
+            for i in (1, 2):
                 cid=str(i) if task['id']=='ROOT' else f"{task['id']}.{i}"
-                child=make_task(cid,spec['goal'],task['depth']+1,task['id'],spec['done_when'],[])
+                child=make_task(
+                    cid, f"Implement independent mock component {cid}",
+                    task['depth']+1, task['id'],
+                    [f"mock component {cid} passes its local contract"],
+                    [f"mock_{cid.replace('.', '_')}.py"],
+                )
+                child["verification_targets"] = [f"tests/test_mock_{cid.replace('.', '_')}.py"]
                 TASKS[cid]=child; task['children'].append(cid); RUN['tasks_created']+=1; children.append(child)
             return children
         globals()["decompose_task"] = fake_decompose
@@ -28828,15 +28872,15 @@ def run_self_test(install_browser=False):
             )
         }
         v191_safe_intent_checks = [
-            stage4._advice_path_references(
+            stage4.code_location_references(
                 "Read src/game.js to confirm the signature and effect of GameState.togglePause().",
                 v19_mutation_contract,
             ),
-            stage4._advice_path_references(
+            stage4.code_location_references(
                 "On Escape key press, call the existing GameState.togglePause() method (src/game.js).",
                 v19_mutation_contract,
             ),
-            stage4._advice_path_references(
+            stage4.code_location_references(
                 "Modify src/input.js after inspecting src/game.js.",
                 v19_mutation_contract,
             ),
@@ -29855,7 +29899,7 @@ def main():
         classification_kwargs = ({"verification_classification_policy": classification_policy}
                                  if classification_policy != "current" else {})
         if args.mode == "baseline":
-            result, memory = run_baseline_request(user_text, memory)
+            result, memory = run_baseline_request(user_text, memory, interactive=interactive)
         elif args.mode == "recursive":
             result, memory = run_recursive_request(
                 user_text, memory, interactive=interactive,
@@ -29884,10 +29928,13 @@ def main():
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)
         print("Agent>", result.get("summary", ""))
+        return result
 
     if args.prompt_file:
         path = Path(args.prompt_file).expanduser().resolve()
-        handle(path.read_text(encoding="utf-8"), interactive=False)
+        result = handle(path.read_text(encoding="utf-8"), interactive=False)
+        if result.get("status") != "done":
+            raise SystemExit(1)
         return
     while True:
         try:

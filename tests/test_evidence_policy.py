@@ -10,6 +10,8 @@ class EvidencePolicyTests(unittest.TestCase):
             ("error: JavaScript syntax validation failed: Unexpected token '}'", "SYNTAX_INVALID_MUTATION"),
             ("error: path is outside the workspace", "SAFETY_REJECTED_MUTATION"),
             ("error: expected 1 exact replacement(s), found 0; file was not changed", "STALE_TARGET"),
+            ("error: expected 2 exact replacement(s), found 1; file was not changed", "STALE_TARGET"),
+            ("error: expected 1 exact replacement(s), found 2; file was not changed", "STALE_TARGET"),
             ("error: file does not exist: app.js", "MISSING_TARGET"),
             ("error writing file: permission denied", "ENVIRONMENT_FAILURE"),
         ]

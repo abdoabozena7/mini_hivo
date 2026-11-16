@@ -325,7 +325,10 @@ def _references_from_text(text: str, candidates: list[str]) -> list[str]:
 def _positive_browser_text(text: str) -> str:
     """Remove explicit negative browser phrases before signal matching."""
     return re.sub(
-        r"\b(?:non[- ]browser|non[- ]web|no\s+(?:browser|web|html)(?:\s+(?:entrypoint|target|verification|check|testing))?|without\s+browser|not\s+(?:a\s+)?browser|(?:browser|web|ui)(?:\s+(?:verification|check|testing))?\s+(?:is\s+)?not\s+(?:required|needed|applicable))\b",
+        r"\b(?:"
+        r"(?:do\s+not|don't|never)\s+(?:create|build|add|use|implement)\s+(?:an?\s+)?"
+        r"(?:browser|web)(?:\s+(?:application|app|page))?|"
+        r"non[- ]browser|non[- ]web|no\s+(?:browser|web|html)(?:\s+(?:entrypoint|target|verification|check|testing))?|without\s+browser|not\s+(?:a\s+)?browser|(?:browser|web|ui)(?:\s+(?:verification|check|testing))?\s+(?:is\s+)?not\s+(?:required|needed|applicable))\b",
         " ", str(text or ""), flags=re.IGNORECASE,
     )
 
