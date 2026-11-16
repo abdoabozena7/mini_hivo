@@ -1,0 +1,632 @@
+{
+  "experiment": 18,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "fixed_stack": {
+    "mission_advice_policy": "contract_fallback",
+    "semantic_evidence_policy": "strict",
+    "mutation_grounding_policy": "evidence_bound",
+    "verification_classification_policy": "field_scoped"
+  },
+  "comparison_variable": "worker_no_tool_policy",
+  "summaries": {
+    "python_current": {
+      "first_builder_tool_call": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "context_decision": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "first_legal_mutation": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_executed": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_pass": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "child_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "root_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "repairer_calls": 0,
+      "first_reported_blockers": {
+        "CONTEXT_INSUFFICIENT": 3
+      },
+      "diagnostic_first_boundaries": {
+        "NO_TOOL_EXIT": 3
+      }
+    },
+    "python_bounded_reanchor": {
+      "first_builder_tool_call": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "context_decision": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "first_legal_mutation": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_executed": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_pass": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "child_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "root_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "no_tool_reanchors": 3,
+      "no_progress_exits": 0,
+      "repairer_calls": 0,
+      "first_reported_blockers": {
+        "CONTEXT_INSUFFICIENT": 3
+      },
+      "diagnostic_first_boundaries": {
+        "POST_INSPECTION_PRE_CONTEXT_DECISION": 3
+      }
+    },
+    "cross_domain_python": {
+      "first_builder_tool_call": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "context_decision": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "first_legal_mutation": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_executed": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "verification_pass": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "child_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "root_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "no_tool_reanchors": 3,
+      "no_progress_exits": 0,
+      "repairer_calls": 0,
+      "first_reported_blockers": {
+        "CONTEXT_INSUFFICIENT": 3
+      },
+      "diagnostic_first_boundaries": {
+        "POST_INSPECTION_PRE_CONTEXT_DECISION": 3
+      }
+    },
+    "cross_domain_timer": {
+      "first_builder_tool_call": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "context_decision": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "first_legal_mutation": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "verification_executed": {
+        "numerator": 1,
+        "denominator": 3,
+        "percent": 33.33
+      },
+      "verification_pass": {
+        "numerator": 1,
+        "denominator": 3,
+        "percent": 33.33
+      },
+      "child_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "root_verified": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      },
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "repairer_calls": 0,
+      "first_reported_blockers": {
+        "MUTATION_TARGET_UNRESOLVED": 2,
+        "CHILD_RECEIPT_INVALID": 1
+      },
+      "diagnostic_first_boundaries": {
+        "MUTATION_TARGET_UNRESOLVED": 2,
+        "CHILD_RECEIPT_INVALID": 1
+      }
+    }
+  },
+  "rows": [
+    {
+      "case_id": "python_clamp",
+      "repeat": 1,
+      "policy": "current",
+      "first_builder_tool_call": false,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 22.095,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "NO_TOOL_EXIT",
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-current-v1\\python_clamp\\evidence_bound-1"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 2,
+      "policy": "current",
+      "first_builder_tool_call": false,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 23.049,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "NO_TOOL_EXIT",
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-current-v1\\python_clamp\\evidence_bound-2"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 3,
+      "policy": "current",
+      "first_builder_tool_call": false,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 23.211,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "NO_TOOL_EXIT",
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-current-v1\\python_clamp\\evidence_bound-3"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 1,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 27.222,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-reanchor-v1\\python_clamp\\evidence_bound-1"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 2,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 26.532,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-reanchor-v1\\python_clamp\\evidence_bound-2"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 3,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 26.08,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\python-reanchor-v1\\python_clamp\\evidence_bound-3"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 1,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": true,
+      "first_legal_mutation": true,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 36.157,
+        "model_calls": 8,
+        "stage": "MUTATION_GROUNDING",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "diagnostic_first_boundary": "MUTATION_TARGET_UNRESOLVED",
+      "repairer_calls": 0,
+      "model_calls": 8,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\timer_pause\\evidence_bound-1"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 2,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": true,
+      "first_legal_mutation": true,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 76.546,
+        "model_calls": 24,
+        "stage": "MUTATION_GROUNDING",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "diagnostic_first_boundary": "MUTATION_TARGET_UNRESOLVED",
+      "repairer_calls": 0,
+      "model_calls": 24,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\timer_pause\\evidence_bound-2"
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 3,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": true,
+      "first_legal_mutation": true,
+      "no_tool_reanchors": 0,
+      "no_progress_exits": 0,
+      "verification_executed": true,
+      "verification_pass": true,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 168.674,
+        "model_calls": 45,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: child verification did not produce a verified receipt; semantic browser target has no bound claims/evidence"
+      },
+      "diagnostic_first_boundary": "CHILD_RECEIPT_INVALID",
+      "repairer_calls": 0,
+      "model_calls": 45,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\timer_pause\\evidence_bound-3"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 1,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 25.746,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\python_clamp\\evidence_bound-1"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 2,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 24.967,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\python_clamp\\evidence_bound-2"
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 3,
+      "policy": "bounded_reanchor",
+      "first_builder_tool_call": true,
+      "context_decision": false,
+      "first_legal_mutation": false,
+      "no_tool_reanchors": 1,
+      "no_progress_exits": 0,
+      "verification_executed": false,
+      "verification_pass": false,
+      "child_verified": false,
+      "root_verified": false,
+      "first_reported_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 26.525,
+        "model_calls": 5,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "diagnostic_first_boundary": "POST_INSPECTION_PRE_CONTEXT_DECISION",
+      "repairer_calls": 0,
+      "model_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment18\\cross-domain-v1\\python_clamp\\evidence_bound-3"
+    }
+  ],
+  "safety_counters": {
+    "mutation_scope_violations": 0,
+    "dnt_execution_violations": 0,
+    "execution_contract_scope_violations": 0,
+    "impact_preservation_violations": 0,
+    "invariant_violations_detected": 0,
+    "impact_out_of_scope_changes": 0
+  },
+  "production_default_changed": false,
+  "limits": "Frozen approved authority and three attempts per arm; no estimate for all Python/Timer tasks."
+}

@@ -71,6 +71,9 @@ def fresh_trial(suite, case, repeat):
     expected = "timer" if case["case_id"] == "timer_pause" else "game"
     profile_matches = [f"kind='{expected}'" in str(o.get("kwargs", {}).get("profile", ""))
                        for o in child_browser]
+    behavior_passes = [o.get("result", {}).get("passed") is True
+                       and all(c.get("passed") is True for c in o.get("result", {}).get("interaction_checks", []))
+                       for o in child_browser]
     if not all(profile_matches):
         raise RuntimeError(f"wrong child browser profile: {workspace}")
     grounds = run.get("mutation_grounding_runs", [])
@@ -82,6 +85,7 @@ def fresh_trial(suite, case, repeat):
         "profile_policy_pinned": True, "expected_profile": expected,
         "child_browser_checks": len(child_browser),
         "child_browser_profiles_correct": sum(profile_matches),
+        "child_browser_behavior_passes": sum(behavior_passes),
         "child_browser_environment_errors": sum(o.get("result", {}).get("environment_error") is True
                                                 for o in child_browser),
         "first_legal_mutation": bool(run.get("first_legal_mutation")),
@@ -124,6 +128,13 @@ def main():
             "grounding_terminal_failure": rate(sum(r["grounding_terminal_failure"] for r in rows), 3),
             "correct_child_profiles": rate(sum(r["child_browser_profiles_correct"] for r in rows),
                                            sum(r["child_browser_checks"] for r in rows)),
+            "child_browser_behavior_passes": rate(sum(r["child_browser_behavior_passes"] for r in rows),
+                                                  sum(r["child_browser_checks"] for r in rows)),
+            "first_reported_blockers": {reason: sum(
+                bool(r["first_reported_blocker"])
+                and r["first_reported_blocker"].get("reason") == reason for r in rows)
+                for reason in sorted({r["first_reported_blocker"].get("reason")
+                                      for r in rows if r["first_reported_blocker"]})},
         }
     data = {"experiment": 17, "model": manifest["model"], "worker_budget": 28,
             "fixed_semantic_policy": "strict", "fixed_grounding_policy": experiment.POLICY,
@@ -152,7 +163,11 @@ def main():
         lines.append(f"| {cid} | {pct(s['first_legal_mutation'])} | {pct(s['formal_child_verification'])} | {pct(s['child_verified'])} | {pct(s['root_verified'])} | {pct(s['grounding_terminal_failure'])} |")
     lines += ["", "Child browser profiles الصحيحة: " + ", ".join(
         f"{cid}={pct(summary[cid]['correct_child_profiles'])}" for cid in experiment.CASES),
-        f". Scope/preservation counters: {sum(safety.values())}. Protected tests unchanged: yes.",
+        "Child browser behavior PASS: " + ", ".join(
+            f"{cid}={pct(summary[cid]['child_browser_behavior_passes'])}" for cid in experiment.CASES),
+        "أول blocker معلن في Timer: " + str(summary["timer_pause"]["first_reported_blockers"]),
+        "Grounding terminal يشمل محاولات recovery اللاحقة؛ ليس بالضرورة أول blocker.",
+        f"Scope/preservation counters: {sum(safety.values())}. Protected tests unchanged: yes.",
         "أي فشل بعد اختيار profile صحيح يُسجل منفصلًا، ولا ينسب إلى classifier.",
         "", "## الحدود", "",
         "العقود معتمدة مسبقًا؛ التخطيط الحر غير مقاس. 3 محاولات لكل مهمة لا تقدّر reliability العامة.",
