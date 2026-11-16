@@ -14352,6 +14352,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             "return context_status='insufficient' with no more than three narrow requests, each naming one target "
             "and why it is needed. Never request broad repository or module context. Mutation tools are blocked "
             "by the runtime until the gate returns mutation_allowed=true."
+            " Use the native tool-calling interface, not a Python-style function call written in content. "
+            "A textual description of a tool call does not execute it or authorize mutation."
         )
         if RUN.get("project_mode") == NEW_PROJECT:
             system_prompt += (
@@ -14572,6 +14574,28 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             break
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
+            content = assistant_message.get("content", "") or ""
+            textual_call = re.match(
+                r"\s*(?:```(?:python|py)?\s*)?([A-Za-z_]\w*)\s*\(", content,
+            )
+            if (role in {"Builder", "Repairer"} and textual_call is not None
+                    and textual_call.group(1) in offered_names
+                    and no_tool_reanchors == 0 and _step + 1 < max(1, int(step_budget))):
+                no_tool_reanchors = 1
+                RUN["worker_tool_format_reanchors"] = RUN.get("worker_tool_format_reanchors", 0) + 1
+                record_run_event(
+                    "worker_tool_call_format_reanchored", role=role, task_id=task_id,
+                    tool=textual_call.group(1), step=int(_step) + 1,
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"You wrote {textual_call.group(1)}(...) as text; no tool was executed. "
+                        "Invoke the offered tool through the native tool-calling interface with JSON arguments. "
+                        "Do not print a Python call or describe it as completed. All runtime gates still apply."
+                    ),
+                })
+                continue
             if (no_tool_policy == "bounded_reanchor" and role == "Builder"
                     and not evidence):
                 if no_tool_reanchors == 0 and _step + 1 < max(1, int(step_budget)):
@@ -14629,7 +14653,6 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "a legal mutation after the context gate passed"
                 )
                 break
-            content = assistant_message.get("content", "") or ""
             completion_contract = (
                 recovery_completion_contract
                 if isinstance(recovery_completion_contract, dict)
@@ -15671,6 +15694,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         context_sufficiency_snapshot = context_gate.snapshot()
     if (impact_required and ACTIVE_IMPACT_CONTRACT is None and not no_progress_terminal
             and not context_decision_missing
+            and (context_gate is None or context_gate.mutation_allowed)
             and status not in {"provider_failure", "structured_response_failure"}):
         status = "failed"
         summary = "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"

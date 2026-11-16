@@ -115,6 +115,18 @@ call. مثلًا كان بيعتبر شرط التشغيل بـ arguments وشر
 المهمة لسه طالبة إنشاءه. ده ما بيفتحش الـ gate تلقائيًا: الموديل لسه لازم
 يقدم decision، وأي contradictory أو unresolved evidence تفضل blocking.
 
+الـ raw diagnostic capture كشف failure تانية مختلفة: الموديل كان ساعات
+بيرجع `context_sufficiency_check(...)` كنص عادي في `content`، مع إن الـ API
+مستنية native `tool_calls`. النص ده مش invocation، وما ينفعش نعمله `eval`
+أو نعتبره تصريح تنفيذ.
+
+اتوضحت الـ native-tool instructions، واتضاف protocol repair واحدة فقط
+للـ known offered tools جوه نفس round budget. الإصلاح بيطلب native call جديدة
+بـ JSON arguments؛ ما بينفذش النص ولا بياخد منه `sufficient` كدليل. لو الموديل
+كرر النص، المحاولة بتفشل من غير mutation authority. الـ tests بتثبت إن gate
+decision واحدة حقيقية لازمة قبل أول كتابة، وإن التكرار محدود. كمان failure
+بتاعة الـ context ما بقاش بيتكتب فوق سببها برسالة impact gate لسه ما اتجربتش.
+
 ### تصريح التنفيذ اتفهم على إنه اكتمال المهمة
 
 بعد نجاح الـ context check، كان ممكن الـ Worker يرد بوصف للـ check نفسها،
@@ -188,7 +200,7 @@ promotion لكل experiment policy. كل الـ existing policy defaults فضل�
 ## سجل الاختبارات والقياس
 
 الـ baseline offline suite شغّل **1703 tests: OK، مع 4 skipped**.
-بعد الدمج والإصلاحات، الـ complete suite شغّل **1724 tests: OK، مع 4 skipped**.
+بعد الدمج والإصلاحات، الـ complete suite شغّل **1726 tests: OK، مع 4 skipped**.
 الـ skips الأربعة دول legacy scheduler tests معلّمة أصلًا، مش tests جديدة
 اتشالت عشان الدمج يعدّي. الـ self-test العام اتشغّل من نفس CLI واتراجع منفصلًا.
 

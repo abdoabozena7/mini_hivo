@@ -123,6 +123,60 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         self.assertEqual(result["status"], "done")
         self.assertTrue(any(item["tool"] == "run_command" for item in result["tool_evidence"]))
 
+    def test_textual_context_call_requires_a_real_tool_invocation_before_mutation(self):
+        prose_call = {
+            "role": "assistant", "tool_calls": [],
+            "content": "context_sufficiency_check(context_status='sufficient', needed_evidence=[])",
+        }
+        responses = [
+            prose_call,
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "sufficient", "reason": "The creation contract is complete.",
+            }),
+            self._tool_response("write_file", {
+                "path": "greet.py", "content": 'print("Hello, World!")\n',
+            }),
+            self._tool_response("run_command", {"command": "python greet.py"}),
+            {"role": "assistant", "content": "Verified greeting.", "tool_calls": []},
+        ]
+        mutations = []
+
+        def run_tool(name, arguments, role="Builder"):
+            if name == "context_sufficiency_check":
+                return mini._context_sufficiency_tool(arguments, role=role, task_id="native")
+            if name == "write_file":
+                self.assertEqual(mini.RUN["context_sufficiency_checks"], 1)
+                mutations.append(arguments["path"])
+                return "wrote file"
+            return "[exit_code=0]\nHello, World!\n"
+
+        with patch.object(mini, "ask_ollama", side_effect=responses) as ask, \
+                patch.object(mini, "run_tool", side_effect=run_tool):
+            result = mini.execute_agent_task(
+                "Create greet.py and verify its greeting.", {}, task_id="native",
+                context_sufficiency_enabled=True, max_steps=5,
+            )
+        self.assertEqual(mutations, ["greet.py"])
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(ask.call_count, 5)
+        self.assertEqual(mini.RUN["context_sufficiency_checks"], 1)
+
+    def test_textual_tool_call_repair_is_bounded_and_never_grants_authority(self):
+        prose_call = {
+            "role": "assistant", "tool_calls": [],
+            "content": "context_sufficiency_check(context_status='sufficient')",
+        }
+        with patch.object(mini, "ask_ollama", side_effect=[prose_call, prose_call]) as ask:
+            result = mini.execute_agent_task(
+                "Create greet.py.", {}, task_id="native-invalid",
+                context_sufficiency_enabled=True, max_steps=4,
+            )
+        self.assertEqual(ask.call_count, 2)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["mutation_authorized"])
+        self.assertEqual(mini.RUN["context_sufficiency_checks"], 0)
+        self.assertIn("CONTEXT_SUFFICIENCY_REQUIRED", result["summary"])
+
     def test_missing_contract_is_completed_before_mutation(self):
         requests = []
         mutation_calls = []
