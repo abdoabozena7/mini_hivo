@@ -1,0 +1,1 @@
+Create hello.py that prints MERGE_OK followed by a newline when run with Python. Run the file to verify its output.

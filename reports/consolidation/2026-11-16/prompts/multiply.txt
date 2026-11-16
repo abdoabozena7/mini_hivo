@@ -1,0 +1,6 @@
+Create multiply.py, a standalone Python command-line utility.
+Requirements:
+- Use only the Python standard library and keep the implementation in multiply.py.
+- Accept exactly two integer command-line arguments and print their product followed by a newline.
+- Invalid or missing arguments must cause a nonzero exit status.
+- Run python multiply.py 6 7 and verify that it prints exactly 42.

@@ -1,0 +1,6 @@
+Modify numbers_api.py so clamp_number(value, lower, upper) returns the value constrained to the inclusive lower and upper bounds.
+Requirements:
+- Values below lower return lower, values above upper return upper, and in-range values are unchanged.
+- Preserve the existing function name, parameters, and standard-library-only implementation.
+- Keep test_numbers_api.py unchanged.
+- Run python -m unittest test_numbers_api.py and finish only after all tests pass.

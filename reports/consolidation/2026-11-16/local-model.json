@@ -1,0 +1,31 @@
+{
+  "base_url": "http://127.0.0.1:11434",
+  "model": {
+    "name": "gemma4:e4b",
+    "model": "gemma4:e4b",
+    "modified_at": "2026-06-24T00:34:26.5423927+03:00",
+    "size": 9608350718,
+    "digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "gemma4",
+      "families": [
+        "gemma4"
+      ],
+      "parameter_size": "8.0B",
+      "quantization_level": "Q4_K_M",
+      "context_length": 131072,
+      "embedding_length": 2560,
+      "runner": "ggml"
+    },
+    "capabilities": [
+      "completion",
+      "vision",
+      "audio",
+      "tools",
+      "thinking"
+    ]
+  },
+  "digest_matches_initial_observation": true
+}

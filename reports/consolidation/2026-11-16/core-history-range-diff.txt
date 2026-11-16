@@ -1,0 +1,69 @@
+ -:  ------- >  1:  a5dca3a Add bounded mutation recovery evidence
+ 1:  e47d940 !  2:  0339630 Add project-brain mission compilation
+ 2:  3b2d7e3 =  3:  f129bf7 Implement v16 requirement clarification layer
+ 3:  072b3a4 =  4:  eb6b923 Harden v16 clarification conflict detection
+ 4:  9998ce8 =  5:  a113af7 Preserve structured requirement enumerations
+ 5:  00ce23b =  6:  022c07e Align benchmark game bridge contract
+ 6:  1bee050 =  7:  cc52505 Implement v17 project understanding and task brain
+ 7:  d89c8fd =  8:  362392d Preserve compound source requirements deterministically
+ 8:  29dfeaf =  9:  47f8627 Implement task-grounded repository evidence
+ 9:  d0e5ecf = 10:  eb4b08e Implement evidence-grounded impact planning
+10:  51061e0 = 11:  0e4ec37 Ground Stage 3 impacts in canonical surfaces
+11:  65dca4d = 12:  2c52618 Implement surface-bound Stage 3 impact decisions
+12:  b906a27 = 13:  d768f1e Implement obligation-aware plan closure
+13:  5eb76f2 = 14:  39e9bd3 Implement obligation-conserving reconciliation
+14:  bc2d48d = 15:  8c1c1a6 feat: add approved plan execution contracts
+15:  4059034 = 16:  df9f74c feat: hydrate worker missions from execution contracts
+16:  b27d41e = 17:  b68d1ac fix: ground semantic scope validation in code-path evidence
+17:  738b4ae = 18:  e742721 feat: preserve authority in compact worker context
+18:  4f9902f = 19:  917c818 Add structural decomposition obligation
+19:  6421edc = 20:  36a8060 Fail closed on stale approved authority
+20:  0f8196a = 21:  6a783eb Make child scheduling failure-isolated by dependency
+21:  8c51881 ! 22:  3a82200 Implement deterministic verification applicability routing
+22:  ca407a0 ! 23:  811b262 Implement V21 verified-child integration gate
+23:  a10e030 ! 24:  b63f418 Implement V22 verified state promotion
+24:  a5e6eeb ! 25:  396fcf3 Implement V23 Stage 6A verified-state re-entry
+25:  06a6f8a = 26:  5ce8beb Fix evidence-grounded authority drift classification
+26:  b5a5212 ! 27:  44025b9 Implement V24 verified-state-aware planning
+27:  6a1cafe = 28:  0b92987 Close deterministic planning packet budgets
+28:  98a8cf8 = 29:  a94dfee Implement V24.2 canonical mandatory planning core
+29:  2ac3491 = 30:  fdea37b Add V24.3 authority-inherited impact decision frame
+30:  dfa60ca = 31:  e0aaa4b Implement V24.4 obligation-anchored impact coverage
+31:  201f41d = 32:  454e5c5 Restore V24.4 obligation planning compatibility
+32:  f26dc32 = 33:  4c10d2d Bind V24.4.2 current surfaces and preservation obligations
+33:  edd1499 = 34:  c46b097 Add decision-relevant impact choice projection
+34:  8d7ecae = 35:  5130b0b Close Challenger review projection packet budget
+35:  977ad34 = 36:  908ba1a Implement canonical final plan budget closure
+36:  66e640f = 37:  c128792 Repair live-equivalent canonical final-plan bound
+37:  878dcdc = 38:  45dac66 Implement V25 approval-bound execution authorization
+38:  bf06453 = 39:  2a567f9 Implement V25.1 approval-bound execution lifecycle
+39:  dc52d8b = 40:  ecd2956 Implement V25.2 deterministic Worker invariant projection
+40:  2813b00 = 41:  3e82b3e Implement V25.3 verification-obligation coverage gate
+41:  1108b9b = 42:  9654111 Implement V25.4 direct behavior verification plan revision
+42:  4f2664f = 43:  c8fa08e V25.4.1 propagate verification coverage artifact
+43:  9f5703b = 44:  55fd46d V25.4.2 close approved verification routing
+44:  3f4c47b ! 45:  2e8a890 Enforce execution invariants before mutation commit
+45:  b7674be = 46:  0aced0a Close execution verification authority before promotion
+46:  046229a = 47:  8e47bb8 Add authority-bounded autonomous recovery foundation
+47:  67c19d3 ! 48:  7291daa Add bounded recovery strategy diversification
+48:  d766396 = 49:  f963175 Add bounded V26.4 tool-contract recovery
+49:  294ad44 = 50:  1914980 V26.5: close pre-verification recovery eligibility
+50:  b20e3b6 ! 51:  e45d276 V26.6: close no-mutation recovery search stall
+51:  57d1bd4 = 52:  3a175d8 V26.6.2: bind mutation intent to active recovery schema
+52:  ece3c7a = 53:  ab949b5 V26.7: make completion recovery progress-aware
+53:  5912cd9 = 54:  11f1d32 feat: add reference brain and incremental repository map
+54:  ea0dabe = 55:  e951ec4 feat: add hybrid repo intelligence and task working sets
+55:  3357cb7 = 56:  8670e9a feat: add experimental evidence diagnostics
+56:  fbf4065 = 57:  8c8c7a3 feat: add multi-signal fault localization
+57:  1b3d613 = 58:  7a1c989 feat: add evidence-driven patch candidate search
+58:  311928d = 59:  3245651 feat: add contract-first incremental project builder
+59:  c6ffd5e = 60:  4359106 feat: integrate HIVO core intelligence pipeline
+60:  720ea26 = 61:  c8304ab fix: close pilot1 v3 core integration defect
+61:  6879dac = 62:  4044343 feat: bind Core Worker to structured model responses
+62:  8b8bd7e ! 63:  31e2f73 Add worker context sufficiency gate
+63:  fbcecb1 = 64:  c2cb1b9 Add semantic evidence completion resolver
+64:  53c1a28 = 65:  d089d50 Add bounded shared project world model
+65:  ef20672 = 66:  adafb22 feat: validate decompositions by semantic coupling
+66:  7ab68b8 ! 67:  ca361cc feat: enforce bounded pre-mutation impact contracts
+67:  8c8ff37 = 68:  6278b63 fix: align impact map planner contract
+ -:  ------- > 69:  7e96a37 test: align mutation recovery with current execution gates

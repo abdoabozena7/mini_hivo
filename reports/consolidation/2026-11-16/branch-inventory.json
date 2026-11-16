@@ -1,0 +1,1050 @@
+{
+  "baseline_main": "74752d3708578ea8efab2e59c0891d2ad50e2dbd",
+  "harrtest_version": "4.1.0",
+  "refs": [
+    {
+      "ref": "refs/heads/HIVO-v18-impact-map-adversarial-minimal-plan",
+      "sha": "d0e5ecf060a5eb9b1a7904b395723ff1e12e51d6",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 9
+    },
+    {
+      "ref": "refs/heads/HIVO-v18.1-canonical-impact-surfaces",
+      "sha": "51061e0bf5aa881a56f4c1b6700c7c0752f04815",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 10
+    },
+    {
+      "ref": "refs/heads/HIVO-v18.2-surface-bound-impact-decisions",
+      "sha": "65dca4d4443c97110c9c92ba243972254ae67b77",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 11
+    },
+    {
+      "ref": "refs/heads/codex/experiment1-decomposition-first",
+      "sha": "5d5659980ccfd15610cb2dbb21032735e127f3a8",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment10-child-verification-handoff",
+      "sha": "5c036942dd69eb5ee99108effdeb59856a627941",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment11-semantic-evidence-compatibility",
+      "sha": "9db69078739d0817d8914930a21538d84edf8935",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment12-generalization-reliability",
+      "sha": "19f6317783777ea95adae0a3429e623d9680178a",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment13-monotonic-compatibility",
+      "sha": "85a57f78f6fbee614b5b3b0df0b3e1d45e29e6a5",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment14-strict-aggregation",
+      "sha": "b61c474b8fc22ce0af2f4a6bc5ac478ebcb692a6",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment15-evidence-edit-binding",
+      "sha": "e768fdac31902e39cc313e52830aa22c22892585",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment16-first-blockers",
+      "sha": "6eeca6c35fc0cea886aac4073a4fc643af162f42",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment17-18-isolated",
+      "sha": "a855283e2fd2e04f5b35db24c2aba286558853f4",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 1
+    },
+    {
+      "ref": "refs/heads/codex/experiment17-field-scoped-classification",
+      "sha": "8f76212885d86a7ead99f805d33291f9360da2d5",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment18-no-tool-exit",
+      "sha": "9c7b51f359feb32c65811216bea8802a274fe2d1",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 2
+    },
+    {
+      "ref": "refs/heads/codex/experiment19-context-decision-closure",
+      "sha": "9ad7dafbdd8da29f215c1d0efed51a369f241cb1",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 3
+    },
+    {
+      "ref": "refs/heads/codex/experiment2-contract-mission-fallback",
+      "sha": "19e877f154c865208a993a2c38331f1b5ceea271",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment3-progress-constrained-worker",
+      "sha": "d83876e168310db6d5cfcc1669ce39aa558ce245",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment4-evidence-grounded-mutation",
+      "sha": "7f2f4d32769a69b1e4d329cb32f80451ef65c66d",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment5-evidence-directed-localization",
+      "sha": "fc21e38b8671bddbe94518a49a8f21aced021292",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment6-verification-environment-resolution",
+      "sha": "784904072760b063e065928ac9597af933ebcbc1",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment7-verification-surface-discovery",
+      "sha": "0859b8a5f929844037363b0d677332507828ef10",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment8-atomic-child-receipt",
+      "sha": "e31fe3613915387927e3767b144e4bdbe5edc85b",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/experiment9-integration-target-resolution",
+      "sha": "c367eae5188832a5281bf75cc99db79b0274e527",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-complete-linear-history",
+      "sha": "7e96a3708d1dd9f0570104f63d70264aa9935fd5",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core-integration-provider-free",
+      "sha": "c6ffd5e6536af6361f3b2b36e31d560958bae58d",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 59
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core1-reference-brain-repo-map",
+      "sha": "5912cd91da3571745aade6b1b134868a5d2437a2",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 53
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core2-hybrid-repo-intelligence",
+      "sha": "ea0dabee39bc564857e80d0f390e0641d5b537f8",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 54
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core3-experimental-evidence-engine",
+      "sha": "3357cb77a53177a37ed3f3469936c4561af241d3",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 55
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core4-fault-localization",
+      "sha": "fbf4065c0bae4815a819373c659f25775205c8f0",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 56
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core5-patch-candidate-search",
+      "sha": "1b3d613bceac4d7e049be8c0f9f09bc65f34067a",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 57
+    },
+    {
+      "ref": "refs/heads/codex/hivo-core6-large-project-incremental-builder",
+      "sha": "311928dab908f07600abaee63a133c5ab41d035c",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 58
+    },
+    {
+      "ref": "refs/heads/codex/hivo-pilot1-v3-1-structured-worker-contract",
+      "sha": "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 67
+    },
+    {
+      "ref": "refs/heads/codex/hivo-pilot1-v3-integration-defect-closure",
+      "sha": "720ea264877c9bf18f9fe83445c35bb1bed636bf",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 60
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v10-recovery-exhaustion-guard",
+      "sha": "a1afd8ce41dbdbbf2da8afbf95330c82c104916b",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v11-failure-evidence-precedence",
+      "sha": "269aedf12972ea8f65f0a7edc6a61b539fa82ab9",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v12-scope-evidence-provenance",
+      "sha": "586eacc6b6ec20b5414a1617546c589aaa1952fa",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v13-mutation-failure-evidence",
+      "sha": "5961fc511a27b742a34784a3092dc3b356799279",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v14-host-preflight-qualification",
+      "sha": "654f415d08aec97cb4eab062e4bde0516c95ef0b",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v15-evidence-guided-mutation-recovery",
+      "sha": "a5dca3a7dc3c713d4c697d93d1c89f8a4a181d1b",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v15-project-brain-mission-compilation",
+      "sha": "e47d940727f917b03d35431b028d19320679f9f1",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 1
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v16-1-evidence-grounded-clarification",
+      "sha": "072b3a41554abfc26f7d287f5fdc3449750cb222",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 3
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v16-2-structured-requirement-extraction",
+      "sha": "9998ce81360b50f47ec9103d372fd2ab42ec6757",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 4
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v16-3-benchmark-contract-alignment",
+      "sha": "00ce23b369cde8efc7bcfee6a9423ab97ab8c42a",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 5
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v16-requirement-clarification-layer",
+      "sha": "3b2d7e3e3c39a6178bc24cae7157f0b16caee15b",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 2
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v17-1-compound-source-requirement-preservation",
+      "sha": "d89c8fd495a91697bd77450da2dfe7cb248186f7",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 7
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v17-2-task-grounded-repository-evidence",
+      "sha": "29dfeaffbc5c262353dfea970620b55a3fc1adf7",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 8
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v17-project-understanding-task-brain",
+      "sha": "1bee050345f826d75d414bf2936f6f489b8a8455",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 6
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v18-1-canonical-impact-surfaces",
+      "sha": "51061e0bf5aa881a56f4c1b6700c7c0752f04815",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 10
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v18-2-surface-bound-impact-decisions",
+      "sha": "65dca4d4443c97110c9c92ba243972254ae67b77",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 11
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v18-3-obligation-aware-plan-closure",
+      "sha": "b906a27bacd6cbb4180f3dc7e7ac3dd9075998e8",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 12
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v18-4-obligation-conserving-reconciliation",
+      "sha": "5eb76f22f56511ab55f86073e4d82e3ad490d6a6",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 13
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v18-impact-map-adversarial-minimal-plan",
+      "sha": "d0e5ecf060a5eb9b1a7904b395723ff1e12e51d6",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 9
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-1-contract-hydrated-worker-missions",
+      "sha": "4059034258c0e965e246b17176f5cba18febd72f",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 15
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-2-evidence-grounded-semantic-scope-validation",
+      "sha": "b27d41ed09cd5b3cac9447564d9c33285dcb0704",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 16
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-3-authority-preserving-worker-context-projection",
+      "sha": "738b4ae418959ffcb1cb50277476c6700e6cf258",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 17
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-4-1-stale-authority-fail-closed",
+      "sha": "6421edc7e804ea00d78af3f69153203c27ea5305",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 19
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-4-structural-decomposition-obligation",
+      "sha": "4f9902fdff495a52543030635736e11c9ff29e97",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 18
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-5-dependency-aware-failure-isolated-child-scheduling",
+      "sha": "0f8196ad7cd13f8c43119447a0a4d8ab815c6706",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 20
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v19-approved-plan-execution-contracts",
+      "sha": "bc2d48d5bab622f36aabde46c7ef3e860edb7c38",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 14
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v20-verification-applicability-routing",
+      "sha": "8c518815171f6f2acf4fef10c9ada98feb5c05b6",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 21
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v21-verified-child-integration-gate",
+      "sha": "ca407a01ede035354656ef9af0db91ef51aeea29",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 22
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v22-verified-state-promotion",
+      "sha": "a10e0302fdc20ac22c40b6d034471321b373ae3c",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 23
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v23-1-evidence-grounded-authority-drift",
+      "sha": "06a6f8aaece3e56b89b2938a1109d854772e12e4",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 25
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v23-verified-state-reentry",
+      "sha": "a5e6eeb391d9668f4605ad081b2f02b9bcfb9ab5",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 24
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-1-planning-packet-budget-closure",
+      "sha": "6a1cafe7248c9fb3bdde489b663068a928b038bc",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 27
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-2-canonical-mandatory-planning-core",
+      "sha": "98a8cf8fdbf1174437bc0b4b9db0022fc8a549d9",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 28
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-3-authority-inherited-impact-decision-frame",
+      "sha": "2ac3491cbf38c592cbd1769a1e39eee8bcff816a",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 29
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-1-obligation-coverage-compatibility",
+      "sha": "201f41d9be16492f6480eba4a494539e19b68ca0",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 31
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-2-current-surface-preservation-binding",
+      "sha": "f26dc32f6d93654264ed067320323d2802282a28",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 32
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-3-decision-relevant-impact-choice-projection",
+      "sha": "edd1499e0ee76e0fdac8b9c509218539834d1e7d",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 33
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-4-challenger-review-relevant-projection",
+      "sha": "8d7ecaef97ae45723216ae33416742f3036d5c3c",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 34
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-5-canonical-final-plan-budget-closure",
+      "sha": "977ad34eba812afab213e0a45b68cdede616c752",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 35
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-6-live-equivalent-final-plan-bound-closure",
+      "sha": "66e640f0bc31ec65eec488bfbce9db570fe83d2f",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 36
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-4-obligation-anchored-impact-coverage",
+      "sha": "dfa60ca5e63ebd6c79c6c0bf307a3242ddbaf513",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 30
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v24-verified-state-aware-planning",
+      "sha": "b5a5212fc10d01fba2549138706c6bece0fcbfc5",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 26
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-1-approval-bound-execution-lifecycle",
+      "sha": "bf0645351579a68467cbf17aa80050307756c1ec",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 38
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-2-worker-execution-invariant-projection",
+      "sha": "dc52d8b44312cc238c3286e0ec865f3d48bd0a56",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 39
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-3-verification-obligation-coverage-gate",
+      "sha": "2813b00bf605d9fd5529fd25eec2d8ba87a1583d",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 40
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-4-1-verification-coverage-artifact-propagation",
+      "sha": "4f2664fb7b942a8eabbc2a17fc2e7f4b2f62060f",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 42
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-4-2-approved-verification-exact-routing",
+      "sha": "9f5703b241c8f3bd991d5979f7f746a36cdcc792",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 43
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-4-verification-complete-plan-revision",
+      "sha": "1108b9bdec7ba42962c29b955c0be589b31cbb1c",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 41
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-5-precommit-execution-invariant-enforcement",
+      "sha": "3f4c47b8141253bcf3a9f02fca7a433a7ea01e51",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 44
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-6-execution-verification-authority-closure",
+      "sha": "b7674bea35f128e10f9d53a5e6405cc1a0e7ef9f",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 45
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v25-approval-bound-execution-authorization",
+      "sha": "878dcdc7cc2475fe3a490bdd79222d193958ca74",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 37
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-3-bounded-recovery-strategy-diversification",
+      "sha": "67c19d3e3be68622b6e7acb96d01715b696afcb5",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 47
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-4-bounded-tool-contract-recovery",
+      "sha": "d766396cde588caa51e04dc474f7972ce4c8a7f1",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 48
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-5-pre-verification-recovery-eligibility",
+      "sha": "294ad44b430ea2a938f06ea684c88c25bfa89506",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 49
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-6-2-active-schema-mutation-intent-reset",
+      "sha": "57d1bd4c9b880c80fec3f519eb0efb20d10570dc",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 51
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-6-no-mutation-recovery-search-closure",
+      "sha": "b20e3b699fc0f278e4b2eadd768e326d3de02eaa",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 50
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-7-progress-aware-completion-recovery",
+      "sha": "ece3c7a209664df5d06fe04dd812090a4671aad1",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 52
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v26-authority-bounded-autonomous-recovery",
+      "sha": "046229aef9bf48ac771f8a25b06742fdf268f282",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 46
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v3-decomposition-backtracking",
+      "sha": "8444bf3517101e7922e03ac7668056e3832c761d",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v4-adaptive-integration-granularity",
+      "sha": "778d6aafd511931482ce7650c25414902b4f5d0e",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v5-bounded-strategy-search",
+      "sha": "f92c88b2da944908dd1807447dca9f0e7d9d90b4",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v6-budget-aware-failure-routing",
+      "sha": "cf6f5f4f2003a01a9e78e0ced5c33217816489d0",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v7-diagnosis-driven-recovery",
+      "sha": "7f459caaa81861a890c5e498c02172689dac1c34",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v8-verification-target-normalization",
+      "sha": "1b9979b3a325b7eb71c45fd051871c92ceb07959",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/codex/hivo-v9-verification-gate-ordering",
+      "sha": "6a8c40ad55179098b87101e578e46c213470a314",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "74752d3708578ea8efab2e59c0891d2ad50e2dbd",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/heads/tasneem",
+      "sha": "4d1760b292d0ba9021b5e957a870053407bbee5c",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/remotes/origin/HEAD",
+      "sha": "74752d3708578ea8efab2e59c0891d2ad50e2dbd",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/remotes/origin/codex/hivo-pilot1-v3-1-structured-worker-contract",
+      "sha": "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+      "already_ancestor_of_main": false,
+      "covered_by_frontier": [
+        "8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ],
+      "commits_not_on_main": 67
+    },
+    {
+      "ref": "refs/remotes/origin/main",
+      "sha": "74752d3708578ea8efab2e59c0891d2ad50e2dbd",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [],
+      "commits_not_on_main": 0
+    },
+    {
+      "ref": "refs/remotes/origin/tasneem",
+      "sha": "4d1760b292d0ba9021b5e957a870053407bbee5c",
+      "already_ancestor_of_main": true,
+      "covered_by_frontier": [],
+      "commits_not_on_main": 0
+    }
+  ],
+  "frontier": [
+    "8c8ff37f43246f225dbae67ea97a38276a93ecea",
+    "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+  ],
+  "patch_comparison": {
+    "8c8ff37f43246f225dbae67ea97a38276a93ecea": {
+      "equivalent": 57,
+      "unique": [
+        "8c518815171f6f2acf4fef10c9ada98feb5c05b6",
+        "ca407a01ede035354656ef9af0db91ef51aeea29",
+        "a10e0302fdc20ac22c40b6d034471321b373ae3c",
+        "a5e6eeb391d9668f4605ad081b2f02b9bcfb9ab5",
+        "b5a5212fc10d01fba2549138706c6bece0fcbfc5",
+        "3f4c47b8141253bcf3a9f02fca7a433a7ea01e51",
+        "67c19d3e3be68622b6e7acb96d01715b696afcb5",
+        "b20e3b699fc0f278e4b2eadd768e326d3de02eaa",
+        "8b8bd7e06cbbf90bc3eaabf08d726bdec99f019d",
+        "7ab68b8307f0426e607e681268fa7f8f35859267"
+      ],
+      "all": [
+        "- e47d940727f917b03d35431b028d19320679f9f1",
+        "- 3b2d7e3e3c39a6178bc24cae7157f0b16caee15b",
+        "- 072b3a41554abfc26f7d287f5fdc3449750cb222",
+        "- 9998ce81360b50f47ec9103d372fd2ab42ec6757",
+        "- 00ce23b369cde8efc7bcfee6a9423ab97ab8c42a",
+        "- 1bee050345f826d75d414bf2936f6f489b8a8455",
+        "- d89c8fd495a91697bd77450da2dfe7cb248186f7",
+        "- 29dfeaffbc5c262353dfea970620b55a3fc1adf7",
+        "- d0e5ecf060a5eb9b1a7904b395723ff1e12e51d6",
+        "- 51061e0bf5aa881a56f4c1b6700c7c0752f04815",
+        "- 65dca4d4443c97110c9c92ba243972254ae67b77",
+        "- b906a27bacd6cbb4180f3dc7e7ac3dd9075998e8",
+        "- 5eb76f22f56511ab55f86073e4d82e3ad490d6a6",
+        "- bc2d48d5bab622f36aabde46c7ef3e860edb7c38",
+        "- 4059034258c0e965e246b17176f5cba18febd72f",
+        "- b27d41ed09cd5b3cac9447564d9c33285dcb0704",
+        "- 738b4ae418959ffcb1cb50277476c6700e6cf258",
+        "- 4f9902fdff495a52543030635736e11c9ff29e97",
+        "- 6421edc7e804ea00d78af3f69153203c27ea5305",
+        "- 0f8196ad7cd13f8c43119447a0a4d8ab815c6706",
+        "+ 8c518815171f6f2acf4fef10c9ada98feb5c05b6",
+        "+ ca407a01ede035354656ef9af0db91ef51aeea29",
+        "+ a10e0302fdc20ac22c40b6d034471321b373ae3c",
+        "+ a5e6eeb391d9668f4605ad081b2f02b9bcfb9ab5",
+        "- 06a6f8aaece3e56b89b2938a1109d854772e12e4",
+        "+ b5a5212fc10d01fba2549138706c6bece0fcbfc5",
+        "- 6a1cafe7248c9fb3bdde489b663068a928b038bc",
+        "- 98a8cf8fdbf1174437bc0b4b9db0022fc8a549d9",
+        "- 2ac3491cbf38c592cbd1769a1e39eee8bcff816a",
+        "- dfa60ca5e63ebd6c79c6c0bf307a3242ddbaf513",
+        "- 201f41d9be16492f6480eba4a494539e19b68ca0",
+        "- f26dc32f6d93654264ed067320323d2802282a28",
+        "- edd1499e0ee76e0fdac8b9c509218539834d1e7d",
+        "- 8d7ecaef97ae45723216ae33416742f3036d5c3c",
+        "- 977ad34eba812afab213e0a45b68cdede616c752",
+        "- 66e640f0bc31ec65eec488bfbce9db570fe83d2f",
+        "- 878dcdc7cc2475fe3a490bdd79222d193958ca74",
+        "- bf0645351579a68467cbf17aa80050307756c1ec",
+        "- dc52d8b44312cc238c3286e0ec865f3d48bd0a56",
+        "- 2813b00bf605d9fd5529fd25eec2d8ba87a1583d",
+        "- 1108b9bdec7ba42962c29b955c0be589b31cbb1c",
+        "- 4f2664fb7b942a8eabbc2a17fc2e7f4b2f62060f",
+        "- 9f5703b241c8f3bd991d5979f7f746a36cdcc792",
+        "+ 3f4c47b8141253bcf3a9f02fca7a433a7ea01e51",
+        "- b7674bea35f128e10f9d53a5e6405cc1a0e7ef9f",
+        "- 046229aef9bf48ac771f8a25b06742fdf268f282",
+        "+ 67c19d3e3be68622b6e7acb96d01715b696afcb5",
+        "- d766396cde588caa51e04dc474f7972ce4c8a7f1",
+        "- 294ad44b430ea2a938f06ea684c88c25bfa89506",
+        "+ b20e3b699fc0f278e4b2eadd768e326d3de02eaa",
+        "- 57d1bd4c9b880c80fec3f519eb0efb20d10570dc",
+        "- ece3c7a209664df5d06fe04dd812090a4671aad1",
+        "- 5912cd91da3571745aade6b1b134868a5d2437a2",
+        "- ea0dabee39bc564857e80d0f390e0641d5b537f8",
+        "- 3357cb77a53177a37ed3f3469936c4561af241d3",
+        "- fbf4065c0bae4815a819373c659f25775205c8f0",
+        "- 1b3d613bceac4d7e049be8c0f9f09bc65f34067a",
+        "- 311928dab908f07600abaee63a133c5ab41d035c",
+        "- c6ffd5e6536af6361f3b2b36e31d560958bae58d",
+        "- 720ea264877c9bf18f9fe83445c35bb1bed636bf",
+        "- 6879dac3917ff48abff45cf58e7da8549aafaabb",
+        "+ 8b8bd7e06cbbf90bc3eaabf08d726bdec99f019d",
+        "- fbcecb12ec9f654399b317edac014099a71032ae",
+        "- 53c1a286a765302c4f119c9433378dea65bd1ff0",
+        "- ef2067290b06f599b407625470a98ea8c1f487f6",
+        "+ 7ab68b8307f0426e607e681268fa7f8f35859267",
+        "- 8c8ff37f43246f225dbae67ea97a38276a93ecea"
+      ]
+    },
+    "9ad7dafbdd8da29f215c1d0efed51a369f241cb1": {
+      "equivalent": 0,
+      "unique": [
+        "a855283e2fd2e04f5b35db24c2aba286558853f4",
+        "9c7b51f359feb32c65811216bea8802a274fe2d1",
+        "9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ],
+      "all": [
+        "+ a855283e2fd2e04f5b35db24c2aba286558853f4",
+        "+ 9c7b51f359feb32c65811216bea8802a274fe2d1",
+        "+ 9ad7dafbdd8da29f215c1d0efed51a369f241cb1"
+      ]
+    }
+  },
+  "worktrees": "worktree D:/projects/Ai/mini_hivo\nHEAD 74752d3708578ea8efab2e59c0891d2ad50e2dbd\nbranch refs/heads/main\n\nworktree C:/Users/A-plus/.codex/worktrees/experiment17-18/mini_hivo\nHEAD 9ad7dafbdd8da29f215c1d0efed51a369f241cb1\nbranch refs/heads/codex/experiment19-context-decision-closure",
+  "stash_refs": "27a5404109fec03ef15e7ea82c027255edd26ab9\tstash@{0}\tOn tasneem: !!GitHub_Desktop<tasneem>",
+  "remote_heads": "8c8ff37f43246f225dbae67ea97a38276a93ecea\trefs/heads/codex/hivo-pilot1-v3-1-structured-worker-contract\n74752d3708578ea8efab2e59c0891d2ad50e2dbd\trefs/heads/main\n4d1760b292d0ba9021b5e957a870053407bbee5c\trefs/heads/tasneem"
+}

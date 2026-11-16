@@ -1,0 +1,61 @@
+======================================================================
+FAIL: test_python_cli_conditions_and_prohibitions_are_compatible (test_requirement_clarification.RequirementClarificationTests.test_python_cli_conditions_and_prohibitions_are_compatible) (first='Create greet.py using only the Python standard library.', second='Run the unit tests and finish only after they pass. Do not create a web application or install packages.')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_requirement_clarification.py", line 532, in test_python_cli_conditions_and_prohibitions_are_compatible
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        mini.detect_explicit_conflicts(self.ledger_for(first, second)), [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: Lists differ: [{'conflict_id': 'CONFLICT-001', 'requirem[504 chars]r.'}] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+{'conflict_id': 'CONFLICT-001', 'requirement_ids': ['REQ-001', 'REQ-002'], 'relationship': 'CONFLICT', 'type': 'opposite_polarity', 'incompatibility': 'The requirements explicitly prescribe opposite behavior for the same target.', 'choice_a_effect': 'Create greet.py using only the Python standard library.', 'choice_b_effect': 'Run the unit tests and finish only after they pass. Do not create a web application or install packages.', 'can_satisfy_both': False, 'summary': 'Two explicit source requirements require mutually incompatible behavior.'}
+
+Diff is 661 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_python_cli_conditions_and_prohibitions_are_compatible (test_requirement_clarification.RequirementClarificationTests.test_python_cli_conditions_and_prohibitions_are_compatible) (first='Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.', second='Running python greet.py without arguments prints exactly Hello, World! followed by a newline.')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_requirement_clarification.py", line 532, in test_python_cli_conditions_and_prohibitions_are_compatible
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        mini.detect_explicit_conflicts(self.ledger_for(first, second)), [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: Lists differ: [{'conflict_id': 'CONFLICT-001', 'requirem[515 chars]r.'}] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+{'conflict_id': 'CONFLICT-001', 'requirement_ids': ['REQ-001', 'REQ-002'], 'relationship': 'CONFLICT', 'type': 'opposite_polarity', 'incompatibility': 'The requirements explicitly prescribe opposite behavior for the same target.', 'choice_a_effect': 'Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.', 'choice_b_effect': 'Running python greet.py without arguments prints exactly Hello, World! followed by a newline.', 'can_satisfy_both': False, 'summary': 'Two explicit source requirements require mutually incompatible behavior.'}
+
+Diff is 698 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_python_cli_conditions_and_prohibitions_are_compatible (test_requirement_clarification.RequirementClarificationTests.test_python_cli_conditions_and_prohibitions_are_compatible) (first='Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.', second='Expose a greet(name="World") function that returns the same greeting without a newline.')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_requirement_clarification.py", line 532, in test_python_cli_conditions_and_prohibitions_are_compatible
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        mini.detect_explicit_conflicts(self.ledger_for(first, second)), [],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: Lists differ: [{'conflict_id': 'CONFLICT-001', 'requirem[509 chars]r.'}] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+{'conflict_id': 'CONFLICT-001', 'requirement_ids': ['REQ-001', 'REQ-002'], 'relationship': 'CONFLICT', 'type': 'opposite_polarity', 'incompatibility': 'The requirements explicitly prescribe opposite behavior for the same target.', 'choice_a_effect': 'Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.', 'choice_b_effect': 'Expose a greet(name="World") function that returns the same greeting without a newline.', 'can_satisfy_both': False, 'summary': 'Two explicit source requirements require mutually incompatible behavior.'}
+
+Diff is 692 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 52 tests in 10.424s
+
+FAILED (failures=3)

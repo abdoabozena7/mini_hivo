@@ -1,0 +1,22 @@
+======================================================================
+FAIL: test_explicit_new_outputs_need_creation_contracts_not_existing_definitions (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_explicit_new_outputs_need_creation_contracts_not_existing_definitions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 205, in test_explicit_new_outputs_need_creation_contracts_not_existing_definitions
+    self.assertTrue(result["evidence"])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true
+
+======================================================================
+FAIL: test_unproven_not_applicable_provider_claim_does_not_authorize_mutation (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_unproven_not_applicable_provider_claim_does_not_authorize_mutation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 261, in test_unproven_not_applicable_provider_claim_does_not_authorize_mutation
+    self.assertFalse(result["mutation_allowed"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.025s
+
+FAILED (failures=2)

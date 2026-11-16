@@ -1,0 +1,22 @@
+======================================================================
+FAIL: test_lower_bound (test_numbers_api.ClampContractTests.test_lower_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\A-plus\.copilot\session-state\bda4c8bf-f75c-4981-9621-e887ce81a049\files\live-clamp-01\workspace\test_numbers_api.py", line 8, in test_lower_bound
+    self.assertEqual(clamp_number(-2, 0, 5), 0)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: -2 != 0
+
+======================================================================
+FAIL: test_upper_bound (test_numbers_api.ClampContractTests.test_upper_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\A-plus\.copilot\session-state\bda4c8bf-f75c-4981-9621-e887ce81a049\files\live-clamp-01\workspace\test_numbers_api.py", line 11, in test_upper_bound
+    self.assertEqual(clamp_number(9, 0, 5), 5)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 9 != 5
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (failures=2)

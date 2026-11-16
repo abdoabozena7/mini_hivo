@@ -1,0 +1,371 @@
+[SELF TEST]
+[BUILDER] self-test-a executing
+[BUILDER] self-test-b executing
+[ROOT] Build hard mock
+[FIT ROOT] SPLIT
+[TASK 1] Implement independent mock component 1
+[FIT 1] SPLIT
+[TASK 1.1] Implement independent mock component 1.1
+[FIT 1.1] EXECUTE
+[DONE 1.1]
+[TASK 1.2] Implement independent mock component 1.2
+[FIT 1.2] EXECUTE
+[DONE 1.2]
+[DONE 1]
+[TASK 2] Implement independent mock component 2
+[FIT 2] SPLIT
+[TASK 2.1] Implement independent mock component 2.1
+[FIT 2.1] EXECUTE
+[DONE 2.1]
+[TASK 2.2] Implement independent mock component 2.2
+[FIT 2.2] SPLIT
+[TASK 2.2.1] Implement independent mock component 2.2.1
+[FIT 2.2.1] EXECUTE
+[DONE 2.2.1]
+[TASK 2.2.2] Implement independent mock component 2.2.2
+[FIT 2.2.2] EXECUTE
+[DONE 2.2.2]
+[DONE 2.2]
+[DONE 2]
+[DONE ROOT]
+[BUILDER] v19.3-projection-probe executing
+[TASK A] self-test A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] self-test B
+[FIT B] EXECUTE
+[DONE B]
+[TASK C] self-test C
+[FIT C] EXECUTE
+[DONE C]
+[TASK A] self-test A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] self-test B
+[FIT B] EXECUTE
+[DONE B]
+[TASK A] self-test A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK D] self-test D
+[FIT D] EXECUTE
+[DONE D]
+v19.5 independent siblings continue PASS
+v19.5 explicit dependency blocks PASS
+v19.5 transitive dependency blocks PASS
+v19.5 strict parent failure PASS
+v19.5 no model calls     PASS
+v20.5A non-browser optional skip PASS
+v20.5A focused test route PASS
+v20.5A browser required but missing PASS
+v20.5A browser required and present PASS
+v20.5A no evidence fails closed PASS
+v20.5A zero model calls  PASS
+v21.5B partial tree not ready PASS
+v21.5B all fresh ready   PASS
+v21.5B stale evidence not ready PASS
+v21.5B integration pass creates parent receipt PASS
+v21.5B integration fail stays unverified PASS
+v21.5B skip is not pass  PASS
+v21.5B zero model calls  PASS
+v22.5C parent_receipt_verified PASS
+v22.5C promotion_succeeded PASS
+v22.5C zero_model_calls  PASS
+v22.5C browser_not_promoted PASS
+v22.5C idempotent        PASS
+v22.5C unverified_parent_denied PASS
+v22.5C tampered_receipt_denied PASS
+v22.5C conflict_denied_without_authority PASS
+v22.5C stale_subject_denied PASS
+v22.5C no_html_fixture   PASS
+v22.5C exception_free    PASS
+v23.6A fresh_ready       PASS
+v23.6A fresh_state_current PASS
+v23.6A fresh_task_is_new PASS
+v23.6A fresh_relevance_excludes_unrelated PASS
+v23.6A fresh_zero_model  PASS
+v23.6A fresh_no_execution PASS
+v23.6A fresh_brain_read_only PASS
+v23.6A unchanged_no_unsupported_drift PASS
+v23.6A unknown_conformance_not_fake_drift PASS
+v23.6A unrelated_does_not_stale_state PASS
+v23.6A comment_only_state_bound_stale PASS
+v23.6A comment_only_no_semantic_drift PASS
+v23.6A stale_ready       PASS
+v23.6A stale_excluded_from_current PASS
+v23.6A stale_warning_retained PASS
+v23.6A stale_no_reverification PASS
+v23.6A relevant_change_changes_hash PASS
+v23.6A new_requirement_conflict PASS
+v23.6A conflict_preserves_state PASS
+v23.6A structured_consistency_confirmed PASS
+v23.6A structured_drift_confirmed_once PASS
+v23.6A structured_drift_keeps_authority_immutable PASS
+v23.6A structured_unknown_not_evaluable PASS
+v23.6A cross_project_excluded PASS
+v23.6A exception_free    PASS
+v24.6B compiler_zero_model PASS
+v24.6B context_compiled  PASS
+v24.6B context_hash_deterministic PASS
+v24.6B readiness_current_evidence PASS
+v24.6B valid_plan_reaches_approval_boundary PASS
+v24.6B true_structured_drift_retained PASS
+v24.6B unknown_evidence_not_conflict PASS
+v24.6B stale_evidence_plan_blocked PASS
+v24.6B live_packet_fits_exact_limit PASS
+v24.6B live_packet_mandatory_drops_zero PASS
+v24.6B live_packet_provider_boundary_reachable PASS
+v24.6B canonical_mandatory_core_valid PASS
+v24.6B canonical_mandatory_core_zero_model PASS
+v24.6B canonical_mandatory_core_hash_deterministic PASS
+v24.6B canonical_mandatory_core_coverage_complete PASS
+v24.6B canonical_mandatory_core_fan_in_provenance PASS
+v24.6B current_vs_desired_structured_audit PASS
+v24.6B live_packet_exact_render_is_audited_input PASS
+v24.6B verified_planning_context_unchanged_by_packet_compilation PASS
+v24.6B optional_overflow_trims_to_complete PASS
+v24.6B mandatory_overflow_fails_closed PASS
+v24.6B stale_warning_not_promoted PASS
+v24.6B confirmed_drift_retained_in_packet PASS
+v24.6B impact_decision_frame_architecture PASS
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+v25.1 authorization_ready_reached_worker PASS
+v25.1 worker_callback_once PASS
+v25.1 stage5a_verified   PASS
+v25.1 promotion_reached  PASS
+v25.1 post_promotion_reentry_ready PASS
+v25.1 provider_calls_zero PASS
+v25.1 historical_brain_unchanged PASS
+v25.1 historical_subject_unchanged PASS
+v25.1 working_brain_promoted PASS
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+v25.2 invariant_valid    PASS
+v25.2 invariant_hash_bound_authorization PASS
+v25.2 invariant_hash_bound_contract PASS
+v25.2 worker_packet_contains_invariants PASS
+v25.2 worker_packet_identity_matches PASS
+v25.2 worker_packet_within_budget PASS
+v25.2 mandatory_invariants_retained PASS
+v25.2 authorized_worker_once PASS
+v25.2 positive_legacy_verification PASS
+v25.2 additive_fixture_mutation PASS
+v25.2 dnt_subject_unchanged PASS
+v25.2 historical_brain_unchanged PASS
+v25.2 historical_subject_unchanged PASS
+v25.2 working_brain_promoted PASS
+v25.2 provider_calls_zero PASS
+v25.3 historical_receipt_valid PASS
+v25.3 path_a_invariants_valid PASS
+v25.3 path_a_coverage_uncovered PASS
+v25.3 path_a_exact_uncovered_id PASS
+v25.3 path_a_authorization_binds_coverage PASS
+v25.3 path_a_blocks_before_worker PASS
+v25.3 path_a_no_subject_mutation PASS
+v25.3 path_b_complete    PASS
+v25.3 path_b_authorization_ready PASS
+v25.3 path_b_stage4_bound PASS
+v25.3 path_b_worker_not_dispatched PASS
+v25.3 worker_packet_bounded PASS
+v25.3 worker_packet_has_no_coverage_matrix PASS
+v25.3 model_calls_zero   PASS
+v25.3 worker_calls_zero  PASS
+v25.3 historical_brain_unchanged PASS
+v25.3 historical_subject_unchanged PASS
+v25.4 old_plan_identity_preserved PASS
+v25.4 exact_persisted_live_approval_bound PASS
+v25.4 old_coverage_has_one_uncovered_behavior PASS
+v25.4 proposal_valid     PASS
+v25.4 revised_plan_valid PASS
+v25.4 revised_authority_valid PASS
+v25.4 revised_plan_complete PASS
+v25.4 four_verification_contracts PASS
+v25.4 old_verification_contracts_unchanged PASS
+v25.4 revised_verification_digest_differs PASS
+v25.4 coverage_is_four_of_four PASS
+v25.4 contractability_passes_but_is_ineligible PASS
+v25.4 coverage_bound_contract_is_ready PASS
+v25.4 worker_packet_contains_new_authority PASS
+v25.4 worker_projection_valid PASS
+v25.4 legacy_invariants_explicit PASS
+v25.4 oracle_not_worker_mutable PASS
+v25.4 worker_packet_budget_is_bounded PASS
+v25.4 approval_summary_is_compact_and_immutable PASS
+v25.4 positive_oracle_passes PASS
+v25.4 negative_oracles_fail PASS
+v25.4 revised_request_is_ready PASS
+v25.4 old_receipt_remains_valid_alone PASS
+v25.4 old_receipt_matches_old_request PASS
+v25.4 old_receipt_rejected_for_revised_request PASS
+v25.4 no_revised_approval_or_authorization PASS
+v25.4 zero_model_and_worker_calls PASS
+v25.4 historical_brain_unchanged PASS
+v25.4 historical_subject_unchanged PASS
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+v25.4.1 persisted_plan_identity PASS
+v25.4.1 receipt_valid    PASS
+v25.4.1 authorization_valid_with_exact_coverage PASS
+v25.4.1 invariant_set_valid PASS
+v25.4.1 coverage_valid_and_ready PASS
+v25.4.1 old_missing_artifact_blocker_reproduced PASS
+v25.4.1 exact_artifact_closes_last_moment_blocker PASS
+v25.4.1 start_receipt_coverage_bound PASS
+v25.4.1 provider_free_callback_reached_once PASS
+v25.4.1 final_gate_passed_before_callback PASS
+v25.4.1 execution_start_receipt_reached PASS
+v25.4.1 execution_start_receipt_has_exact_coverage PASS
+v25.4.1 compiled_contract_identity_preserved PASS
+v25.4.1 no_subject_mutation_in_self_test PASS
+v25.4.1 worker_packet_bounded PASS
+v25.4.1 worker_packet_audit_non_regression PASS
+v25.4.1 historical_brain_unchanged PASS
+v25.4.1 failed_live_subject_unchanged PASS
+v25.4.1 model_and_worker_provider_calls_zero PASS
+v25.4.2 pre_fix_null_route_reproduced PASS
+v25.4.2 pre_fix_origin_is_lossy_authority_projection PASS
+v25.4.2 historical_live_route_contains_phantom PASS
+v25.4.2 corrected_route_validation PASS
+v25.4.2 corrected_required_targets_exact PASS
+v25.4.2 no_required_phantom_route PASS
+v25.4.2 exact_authorities_have_no_unsupported_ambiguity PASS
+v25.4.2 all_mandatory_routes_have_authority PASS
+v25.4.2 direct_oracle_is_exact_and_separate PASS
+v25.4.2 system_syntax_route_exact_and_resolved PASS
+v25.4.2 legacy_verification_commands_pass PASS
+v25.4.2 direct_oracle_passes PASS
+v25.4.2 execution_verification_closure_passes PASS
+v25.4.2 execution_time_obligation_closure_passes PASS
+v25.4.2 verified_child_readiness_ready PASS
+v25.4.2 stage5b_not_blocked_by_old_route PASS
+v25.4.2 integration_boundary_passes PASS
+v25.4.2 temporary_promotion_preconditions_ready PASS
+v25.4.2 historical_promotion_not_attempted PASS
+v25.4.2 temporary_reentry_boundary_passes PASS
+v25.4.2 temporary_subject_unchanged PASS
+v25.4.2 plan_identity_unchanged PASS
+v25.4.2 verification_digest_unchanged PASS
+v25.4.2 coverage_hash_unchanged PASS
+v25.4.2 oracle_hash_unchanged PASS
+v25.4.2 approval_receipt_integrity_preserved PASS
+v25.4.2 worker_packet_unchanged PASS
+v25.4.2 historical_brain_unchanged PASS
+v25.4.2 historical_subject_unchanged PASS
+v25.4.2 historical_approval_files_unchanged PASS
+v25.4.2 no_provider_or_worker_calls PASS
+v25.4.2 historical_live_remains_unpromoted PASS
+deep recursion           PASS
+more than old eight      PASS
+hard depth budget        PASS
+hard task budget         PASS
+recon bounded            PASS
+node packet bounded      PASS
+project brain core       PASS
+verified state separate  PASS
+brain projection bounded and relevant PASS
+mission compilation mocked PASS
+fresh worker context     PASS
+goal anchor preserved    PASS
+summaries bounded        PASS
+falsifier read only      PASS
+host preflight mocked    PASS
+host preflight marker    PASS
+host preflight no app files PASS
+source ledger stable and immutable PASS
+compound source extraction PASS
+source provenance separated PASS
+clarifier compatible pair PASS
+clarifier specialization pair PASS
+inline enumeration retention PASS
+exact identifier preservation PASS
+source contract bridge   PASS
+verification bridge      PASS
+clarifier true contradiction PASS
+clarifier blocking path  PASS
+recommended terminal option PASS
+other free-text path     PASS
+noninteractive optional behavior PASS
+lossless brain handoff   PASS
+v17 new project          PASS
+v17 existing project     PASS
+v17 semantic repository evidence PASS
+v17 repo conflict        PASS
+v17 context hygiene      PASS
+v18 valid existing plan  PASS
+v18 unnecessary mutation PASS
+v18 duplicate ownership  PASS
+v18 test gap             PASS
+v18 noninteractive approval PASS
+v18.1 canonical surface registry PASS
+v18.1 canonical hydration PASS
+v18.1 hallucination rejected PASS
+v18.1 self-conflict normalization PASS
+v18.1 canonical noninteractive approval PASS
+v18.2 complete planning packet PASS
+v18.2 seed-bound decision PASS
+v18.2 optional bad interface PASS
+v18.2 partial validation PASS
+v18.2 challenger complete PASS
+v18.3 behavior gap detected PASS
+v18.3 unique behavior anchor PASS
+v18.3 stale challenge closure PASS
+v18.3 structured preservation PASS
+v18.3 task goal integrity PASS
+v18.3 valid noninteractive plan PASS
+v18.4 nonapplicable challenge PASS
+v18.4 behavior closure   PASS
+v18.4 omitted preservation PASS
+v18.4 omitted test       PASS
+v18.4 exact task goal    PASS
+v18.4 final valid approval PASS
+v19 approved plan snapshot PASS
+v19 deterministic minimal contracts PASS
+v19 reuse preservation protection PASS
+v19 contract scope and child guard PASS
+v19 clean bounded context PASS
+v19 approval and staleness gates PASS
+v19.2 slash language     PASS
+v19.2 strong path evidence PASS
+v19.2 local semantic intent PASS
+v19.2 semantic conflict regressions PASS
+v19.2 exact live advice  PASS
+v19.1 live mission regression PASS
+v19.1 worker handoff     PASS
+v19.1 clean authority    PASS
+v19.1 semantic conflict block PASS
+v19.1 test contract authority PASS
+v19.1 mission observability PASS
+v19.3 full mission bound PASS
+v19.3 compact projection PASS
+v19.3 authority hydration PASS
+v19.3 advice budgeting   PASS
+v19.3 projection exclusions PASS
+v19.3 projection hash    PASS
+v19.3 authority overflow PASS
+v19.3 test projection    PASS
+v19.3 mock Worker reachable PASS
+v19.3 projection metrics PASS
+v19.4 structural simple  PASS
+v19.4 structural ambiguous PASS
+v19.4 structural broad   PASS
+v19.4 structural zero model PASS
+v19.4.1 stale authority terminal PASS
+v19.5 scheduler self-test PASS
+v20.5A verification applicability self-test PASS
+v21.5B verified-child integration self-test PASS
+v22.5C verified-state promotion self-test PASS
+v23.6A verified-state re-entry self-test PASS
+v24.6B verified-state-aware planning self-test PASS
+v25.1 approval-bound execution self-test PASS
+v25.2 execution-invariant self-test PASS
+v25.3 verification-coverage self-test PASS
+v25.4 verification-complete-plan self-test PASS
+v25.4.1 coverage-propagation self-test PASS
+v25.4.2 exact-routing self-test PASS

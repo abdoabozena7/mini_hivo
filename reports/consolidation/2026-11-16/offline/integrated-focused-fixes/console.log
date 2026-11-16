@@ -1,0 +1,50 @@
+[BUILDER] legacy executing
+[BUILDER] contract executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file src/auth.py
+[TOOL] run_command python -m unittest
+[BUILDER] blocked executing
+[TOOL] edit_file src/auth.py
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> ok
+HIVO HOST PREFLIGHT: FAIL
+
+Selected model: gemma4:e4b
+Failure: OLLAMA_UNAVAILABLE
+Failure stage: ollama
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Recommended action: inspect host/model stability before retrying.
+terminal: HOST_PREFLIGHT_FAILED
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> verification failed
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> verification failed
+----------------------------------------------------------------------
+Ran 83 tests in 12.340s
+
+OK

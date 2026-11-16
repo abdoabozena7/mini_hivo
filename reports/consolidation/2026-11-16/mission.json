@@ -1,0 +1,20 @@
+{
+  "mission": "mini-hivo-history-preserving-consolidation-2026-11-16",
+  "harrtest_version": "4.1.0",
+  "original_request": "عاوزك بالطريقة الذكية تـ merge كل الـ branches دي، تمام؟ ااا بحيث إن كل الـ data اللي فيهم تفضل موجودة برضو كـ commits، فاهمني؟ يعني لو حبينا نـ trace أي حاجة قديمة، نقدر نـ traceها عادي، بس في نفس الوقت ال- في الآخر يبقى موجود branch واحد، فاهمني؟ اللي هو الـ main، وكمان يكون شغال، يعني أي مشاكل تكون في أي branch من الـ branchات اللي فاتت، ااا كلها إيه؟ تحاول تحلها، تاخد الحلول من اللي شغال وتسيب المشاكل في اللي مش شغال، فاهمني؟ بحيث إن في الآخر البرانش اللي يطلع ده يبقى هو شغال ما فيهوش مشاكل، فاهمني؟ بلايف تيستنج بقى، يعني أنت هتعتمد على التيستنج بحيث إنك إيه؟ تجرب كل شوية اللايف تيست تشوف إيه اللي بيحصل، فاهمني؟ معاك لوكال موديل اللي هو ااا اللي هو جيم فور هتلاقيه على او لاما ممكن تجربه عادي فاهمني بس او لو تقدر ااا اللي هو جيم فور هتلاقيه على او لاما، ممكن تجربه عادي، فاهمني؟ بس ااا ولو تقدر ت- تست اوف لاين اعمل كده عادي، بس طبعا مش في كله، لازم في الاخر يبقى ايه طالع من لايف تست، اللي هو نكتب برومت، نستنى يطلع نتيجة، هو ده اللي يبقى الناتج، فاهمني؟ ااا فأنا عايزك تعمل كده، بس بذكاء بقى، فاهمني؟ طبعا أنا هسيبه اوك- اوتوبايلوت، فأنت ما تسألنيش على حاجة، اللي هو بس أنا زي ما قلت لك هم حاجتين أساسيين، يطلع شغال وكل المعلومات تفضل موجودة عشان نعمل لها tracing لو حبينا، وبرضه المعلومات بتاعت الmerging يتعمل لها tracing برضه، يعني تت- تعمل لها documentation بنفس ال- الverbosity بتاعت اللي قبلها.",
+  "acceptance": [
+    "Every inventoried local and remote branch tip remains an ancestor of final local main with its original commit identity.",
+    "Genuinely new source and experiment results are integrated; transplanted historical implementations do not overwrite newer fixes.",
+    "Only local main remains a branch after safe retirement; an existing secondary worktree retains its exact files and commit.",
+    "Existing deterministic regressions run before and after integration; directly related failures are reproduced and repaired.",
+    "Real prompts run through the public CLI against the installed local gemma4:e4b model and resulting artifacts are independently executed.",
+    "Detailed committed provenance records source tips, merge parents, resolutions, policies, exact commands, successes, failures, and limitations."
+  ],
+  "safety_boundaries": [
+    "No commit rewriting, squashing, force pushes, discarded user changes, or broad filesystem/process cleanup.",
+    "Preserve the existing stash and secondary worktree.",
+    "No remote push or remote branch deletion without explicit publication authorization.",
+    "Do not interrupt or reconfigure shared Ollama services.",
+    "Keep offline, live, replay, and historical evidence distinct; do not claim universal model reliability."
+  ]
+}

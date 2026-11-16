@@ -1,0 +1,96 @@
+{
+  "passed": false,
+  "workspace": "D:\\projects\\Ai\\mini_hivo\\reports\\consolidation\\2026-11-16\\cases\\clamp\\before",
+  "source_sha256": "94f5937bc5dd47ea53efc4ff9c581df765a07d697c8517913c7b22b7e7d2ecb4",
+  "protected_tests_sha256_before": "3f56c6f0c400b32dc52fb5a3d9488c0f6823c9fd5674268a3466eb9634873b2a",
+  "protected_tests_sha256_after": "3f56c6f0c400b32dc52fb5a3d9488c0f6823c9fd5674268a3466eb9634873b2a",
+  "protected_tests_unchanged": true,
+  "signature_preserved": true,
+  "independent_cases": [
+    {
+      "input": [
+        -5,
+        0,
+        10
+      ],
+      "expected": 0,
+      "actual": -5,
+      "passed": false
+    },
+    {
+      "input": [
+        15,
+        0,
+        10
+      ],
+      "expected": 10,
+      "actual": 15,
+      "passed": false
+    },
+    {
+      "input": [
+        3,
+        0,
+        10
+      ],
+      "expected": 3,
+      "actual": 3,
+      "passed": true
+    },
+    {
+      "input": [
+        0,
+        0,
+        10
+      ],
+      "expected": 0,
+      "actual": 0,
+      "passed": true
+    },
+    {
+      "input": [
+        10,
+        0,
+        10
+      ],
+      "expected": 10,
+      "actual": 10,
+      "passed": true
+    },
+    {
+      "input": [
+        -1,
+        -5,
+        -2
+      ],
+      "expected": -2,
+      "actual": -1,
+      "passed": false
+    },
+    {
+      "input": [
+        -9,
+        -5,
+        -2
+      ],
+      "expected": -5,
+      "actual": -9,
+      "passed": false
+    },
+    {
+      "input": [
+        2.5,
+        1.0,
+        2.0
+      ],
+      "expected": 2.0,
+      "actual": 2.5,
+      "passed": false
+    }
+  ],
+  "unittest": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "======================================================================\nFAIL: test_lower_bound (test_numbers_api.ClampContractTests.test_lower_bound)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"D:\\projects\\Ai\\mini_hivo\\reports\\consolidation\\2026-11-16\\cases\\clamp\\before\\test_numbers_api.py\", line 8, in test_lower_bound\n    self.assertEqual(clamp_number(-2, 0, 5), 0)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: -2 != 0\n\n======================================================================\nFAIL: test_upper_bound (test_numbers_api.ClampContractTests.test_upper_bound)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"D:\\projects\\Ai\\mini_hivo\\reports\\consolidation\\2026-11-16\\cases\\clamp\\before\\test_numbers_api.py\", line 11, in test_upper_bound\n    self.assertEqual(clamp_number(9, 0, 5), 5)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 9 != 5\n\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nFAILED (failures=2)\n"
+  }
+}

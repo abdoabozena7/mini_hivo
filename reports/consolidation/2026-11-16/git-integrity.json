@@ -1,0 +1,16 @@
+{
+  "command": [
+    "git",
+    "fsck",
+    "--full",
+    "--no-reflogs"
+  ],
+  "exit_code": 0,
+  "reported_lines": 216,
+  "kinds": {
+    "dangling blob": 176,
+    "dangling commit": 14,
+    "dangling tree": 26
+  },
+  "objects_removed": false
+}

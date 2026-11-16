@@ -1,0 +1,6 @@
+Create a small Python command-line utility and its focused tests.
+Requirements:
+- Create hello.py using only the Python standard library.
+- Running python hello.py must print exactly MERGE_OK followed by a newline.
+- Create test_hello.py with unittest tests that execute hello.py and check its exact stdout and zero exit status.
+- Run python -m unittest test_hello.py and finish only after the tests pass.

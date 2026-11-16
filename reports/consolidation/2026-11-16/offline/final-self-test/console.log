@@ -1,0 +1,41 @@
+[SELF TEST]
+[BUILDER] self-test-a executing
+[BUILDER] self-test-b executing
+[ROOT] Build hard mock
+[FIT ROOT] SPLIT
+[TASK 1] Implement independent mock component 1
+[FIT 1] SPLIT
+[TASK 1.1] Implement independent mock component 1.1
+[FIT 1.1] EXECUTE
+[DONE 1.1]
+[TASK 1.2] Implement independent mock component 1.2
+[FIT 1.2] EXECUTE
+[DONE 1.2]
+[DONE 1]
+[TASK 2] Implement independent mock component 2
+[FIT 2] SPLIT
+[TASK 2.1] Implement independent mock component 2.1
+[FIT 2.1] EXECUTE
+[DONE 2.1]
+[TASK 2.2] Implement independent mock component 2.2
+[FIT 2.2] SPLIT
+[TASK 2.2.1] Implement independent mock component 2.2.1
+[FIT 2.2.1] EXECUTE
+[DONE 2.2.1]
+[TASK 2.2.2] Implement independent mock component 2.2.2
+[FIT 2.2.2] EXECUTE
+[DONE 2.2.2]
+[DONE 2.2]
+[DONE 2]
+[DONE ROOT]
+[BUILDER] v19.3-projection-probe executing
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\mini.py", line 29951, in <module>
+    main()
+    ~~~~^^
+  File "D:\projects\Ai\mini_hivo\mini.py", line 29828, in main
+    ok = run_self_test(install_browser=args.install_browser)
+  File "D:\projects\Ai\mini_hivo\mini.py", line 28875, in run_self_test
+    stage4._advice_path_references(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'hivo.execution_contracts' has no attribute '_advice_path_references'

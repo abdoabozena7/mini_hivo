@@ -2,6 +2,13 @@
 
 تاريخ المهمة: 2026-11-16. الـ validation workflow المستخدم هو HarrTest 4.1.0
 المثبت محليًا؛ مفيش تحديث للـ skill أو تغيير للموديل أثناء المهمة.
+آخر live runs اكتملت بعد منتصف الليل يوم 2026-11-17 بالتوقيت المحلي.
+
+**النتيجة المختصرة:** فضل local branch واحد هو `main`، وكل الـ original
+branch tips بقت reachable منه. الـ regression suite والـ public self-test
+ناجحين، وفيه إصلاح Python حقيقي نجح مرتين بالـ local model واتراجع مستقلًا.
+لكن الـ greenfield و`auto` لسه ليهم إخفاقات محفوظة تحت؛ النتيجة مش شهادة
+إن الـ prototype بقى خاليًا من المشاكل في كل أنواع الطلبات.
 
 المطلوب كان حاجتين مع بعض: يبقى فيه `main` واحد نشتغل عليه، وفي نفس الوقت
 نقدر نرجع لأي شغل قديم بنفس الـ commit الأصلي، ونعرف ليه قرار الدمج اتاخد.
@@ -85,6 +92,24 @@ parents:
 بعد الـ merge التاني، اتراجع كل SHA في الـ inventory:
 **104/104 refs كانوا ancestors لـ `main`**. ده بيحفظ كل commit وراء أي branch
 منهم، مش بس محتوى آخر ملف فيه.
+
+بعد اكتمال القياس، اتشالت **99 local branch names** باستخدام `git branch -d`
+فقط، وفضل `main`. الـ secondary worktree اتفصلت عن اسم branch عند نفس
+`9ad7daf`؛ fingerprint للـ **248 tracked files** قبل وبعد الفصل كان مطابقًا،
+والمجلد نفسه فضل موجود. الـ stash الأصلي `27a5404` فضل زي ما هو.
+التفاصيل في [ancestry and retirement proof](../reports/consolidation/2026-11-16/ancestry-and-retirement.json)
+و[سجل أسماء الفروع المحذوفة](../reports/consolidation/2026-11-16/retired-branches.txt).
+
+إصلاحات التكامل اتسجلت في commits منفصلة بعد الـ merges:
+
+| Commit | المسؤولية |
+|---|---|
+| `0fe01be` | correctness fixes، الـ batch exit status، والـ self-test fixture |
+| `7f7dcee` | bounded native-tool format recovery وحفظ أول context failure |
+| `92aee80` | source-qualified new-artifact context، من غير إعفاء dependencies مجهولة |
+
+الـ live acceptance النهائية اتعملت على `92aee80321e6ee241b9885e266501a73b78491bd`.
+أي commit توثيق بعدها لا يغير ملفات تشغيل المنتج اللي اتقاس.
 
 ## قصة الـ live testing والإصلاحات
 
@@ -225,9 +250,121 @@ mutation count recovery، creation impact binding، وapproved-scope negative co
 أول tool message هي mutation feedback؛ بعد الاحتفاظ بالـ context transcript
 اتحدث عشان يختار `edit_file` message بالاسم بدل ترتيب الرسائل.
 
-**LIVE_ACCEPTANCE_PENDING:** سجل المحاولات النهائي ونتيجة فحص الناتج المستقل
-بيتكملوا قبل إغلاق المهمة. وجود offline PASS هنا مش claim إن live acceptance
-خلصت، ولا إن أي successful generated test يعتبر independent oracle.
+### كل الـ live attempts، مش بس آخر محاولة ناجحة
+
+السجل الكامل فيه **18 محاولة: 2 انتهوا `done` و16 فشلوا أو وقفوا**.
+دي مهام وrevisions وdiagnostic variants مختلفة؛ العدد ده **مش** reliability
+benchmark ولا مقارنة عادلة بين model policies. الـ two successful runs
+بس هما إعادة مستقلة لنفس existing-code case على نفس source revision النهائية.
+
+| المحاولة | المسار / النتيجة الفعلية |
+|---|---|
+| Greeting baseline قبل الإصلاح | clarification false conflicts؛ صفر task model calls، والـ exit القديم كان 0 رغم التوقف |
+| Greeting direct 01 | invalid context request kinds؛ التوقف قبل mutation، والـ exit القديم كان 0 |
+| Greeting direct 02 | context-only completion وبعدها browser route غلط؛ exit 1 بعد إصلاح الـ CLI |
+| Greeting direct 03 | ملفات اتولدت، tests كشفت bug، ومحاولات exact/range repair فشلت واتبعتها rollback |
+| Greeting direct 04 | behavior tests نجحت، لكن impact audit رفض targets غير مربوطة بالـ source requirements |
+| Greeting direct 05 | Worker رجع tool call كنص؛ مفيش gate authorization |
+| Greeting recursive 01 | تقسيم متكرر؛ child context/impact failures، من غير Root verified |
+| Multiply auto 01 | default route اختار recursive وقسّم مهمة صغيرة؛ مفيش ناتج مكتمل |
+| Multiply baseline 01 | prose-only context call؛ مفيش mutation authority |
+| Multiply capture diagnostic 01 | نفس الفشل مع observational native request/response capture |
+| Multiply baseline 02 | native-format repair اتنفذ، لكن Worker طلب ملفات/knowledge كـ missing evidence |
+| Multiply thinking diagnostic 01 | Builder thinking override ما حلّش التوقف؛ مش production acceptance |
+| Multiply tool-description diagnostic 01 | توضيح locked tools في offered description ما حلّش التوقف؛ مش production acceptance |
+| Hello runtime baseline 01 | الملف اتكتب وطلع `MERGE_OK` فعلًا، لكن routing مفيهاش applicable focused-test route فأُرجع التغيير |
+| Hello with tests 01 | Worker طلب تعريف الملفات الجديدة قبل إنشائها؛ bounded context failure |
+| Hello with tests 02 | الـ new-file requests اتصنفت `not_applicable` بدليل مصدر، لكن طلب `unittest execution` فضل unresolved |
+| Clamp repair 01 | `done`، process exit 0، Root verified، و8/8 independent cases PASS |
+| Clamp repair 02 | fresh identical fixture؛ نفس النتيجة، والاختبارات المحمية ما اتغيرتش |
+
+[validation-summary.json](../reports/consolidation/2026-11-16/validation-summary.json)
+فيه الـ run IDs، source revisions/fingerprints، commands، task model/tool call
+counts، exit codes، والـ elapsed times. ملفات كل محاولة تحت
+[live evidence](../reports/consolidation/2026-11-16/live/).
+الـ diagnostic overrides متعلّمة صراحة، وما دخلتش بدل تجربة public CLI ناجحة.
+
+أول baseline اتشغل قبل إضافة الـ execution recorder؛ الـ run metrics واللوج
+والـ process exit الملاحظ محفوظين، لكن الـ overall elapsed time والـ full
+execution metadata مش متاحة له، ومتعلّمة `null` بدل تخمين قيم.
+
+الـ console logs القديمة اللي كانت UTF-16 اتحفظت للقراءة كـ UTF-8، واتسجل hash
+للأصل وللنسخة. باقي الأدلة متحفظة bytes زي ما هي، وlocal `.gitattributes`
+بتمنع تغيير line endings للـ evidence. الملفات الكاملة اللي failed transaction
+مسحتها بالـ rollback مش بيتدّعي إننا احتفظنا بنسخة كاملة منها؛ المحفوظ هو
+tool results، runtime failures، metrics، events، والـ raw captures المتاحة.
+
+### النتيجة اللي اتنفذت واتراجعت فعلًا
+
+حالة القبول الناجحة بدأت بملف Python موجود فيه bug:
+
+```python
+def clamp_number(value, lower, upper):
+    return value
+```
+
+الـ fixed unit tests اتكتبت قبل الموديل، وشغّلناها على الأصل: فشل اختبارا
+lower وupper زي المتوقع. الـ prompt طلب إصلاح نفس الدالة، والحفاظ على الـ API
+وعلى test file من غير تعديل. ده existing-code repair case، مش إنشاء project
+كبير ولا fixture approved-plan replay.
+
+الاتنين اتشغلوا من الـ public entrypoint من غير monkey-patching:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -u mini.py --mode baseline --workspace <fresh-clamp-workspace> --prompt-file <clamp-prompt.txt> --no-bootstrap
+```
+
+| Run ID | Source | Task model calls | Task tool calls | Wall time شامل preflight | النتيجة |
+|---|---|---:|---:|---:|---|
+| `20261117T000140-0ab9c94a` | `92aee80` | 11 | 8 | 51.266s | `done` / exit 0 / Root verified |
+| `20261117T000516-1b8a1282` | `92aee80` | 10 | 7 | 43.027s | `done` / exit 0 / Root verified |
+
+كل الأدوار استخدمت `gemma4:e4b`. الـ task model-call counts لا تشمل 3
+host-preflight canary calls لكل محاولة. مفيش model fallback أو paid provider.
+
+الموديل غيّر الـ implementation إلى:
+
+```python
+def clamp_number(value, lower, upper):
+    return max(lower, min(value, upper))
+```
+
+بعدها [independent oracle](../reports/consolidation/2026-11-16/cases/clamp/verify_clamp.py)
+شغّل 8 حالات محددة سلفًا: تحت الحد، فوق الحد، داخل النطاق، الحدين نفسيهما،
+negative bounds، وfloat داخل عقد الأرقام. الاتنين نجحوا 8/8، والـ 3 original
+unit tests نجحوا، والـ function signature فضلت كما هي.
+
+SHA-256 لملف الاختبارات قبل وبعد كل محاولة كان:
+
+```text
+3f56c6f0c400b32dc52fb5a3d9488c0f6823c9fd5674268a3466eb9634873b2a
+```
+
+الـ oracle نفسها اتجربت على الأصل المعيوب: رفضته في 5/8 independent cases
+وفي 2/3 unit tests. فإحنا مش معتمدين على إن الـ controller قال `done` أو على
+tests كتبها الموديل لنفسه. النتائج موجودة في
+[clamp 01](../reports/consolidation/2026-11-16/independent/clamp-01.json)،
+[clamp 02](../reports/consolidation/2026-11-16/independent/clamp-02.json)،
+و[negative control](../reports/consolidation/2026-11-16/independent/clamp-negative-control.json).
+
+الـ [input fixture](../reports/consolidation/2026-11-16/cases/clamp/before/)،
+[prompt](../reports/consolidation/2026-11-16/prompts/clamp.txt)، والناتج في كل
+run موجودين عشان التجربة تبقى قابلة للفحص وإعادة التشغيل، مش مجرد screenshot
+أو جملة نجاح.
+
+### إيه اللي لسه مش متحقق؟
+
+- الـ default `auto` والـ greenfield generation مش مثبت إنهم موثوقين؛ فيه
+  over-decomposition وWorker requests غير مفيدة لسه بتوقف التنفيذ.
+- نجاح تشغيل CLI بسيط من غير test file مش كفاية في الـ current route
+  aggregator؛ حالة Hello اتنفذت لكن ما اتقبلتش. ما اتعملش fake test PASS عشان
+  نلف حوالين الـ gate.
+- browser families وplanning/approval/promotion end-to-end ما اتقاسوش fresh
+  في المهمة دي. تقاريرهم التاريخية محفوظة من غير تغيير النسب أو إعادة تسميتها.
+
+إذن اللي نقدر نثبته: الدمج والتاريخ والتنظيف المحلي ناجحين، الـ deterministic
+regressions ناجحة، وفيه supported live existing-code path شغال فعلًا.
+الشرط الأقوى «كل أنواع الطلبات شغالة من غير أي مشاكل» **لسه مش متحقق**.
 
 ## إزاي نعمل tracing بعد ما branch name تتشال؟
 
@@ -251,9 +388,9 @@ git log --first-parent --oneline main
 
 ## حدود الأمان والنشر
 
-حذف الـ local branches مش بيتم إلا بعد إثبات ancestry لكل الـ tips. الـ stash
-القديم محفوظ، والـ secondary worktree ما بتتمسحش ولا بيتغير محتواها: فصلها عن
-اسم branch بيحافظ على نفس commit ونفس الملفات بدل حذفها.
+حذف الـ local branches اتعمل بعد إثبات ancestry لكل الـ tips. الـ stash
+القديم محفوظ، والـ secondary worktree ما اتمسحتش ولا اتغير محتواها: فصلها عن
+اسم branch حافظ على نفس commit ونفس الملفات بدل حذفها.
 
 ما حصلش `push` أو حذف branches من GitHub. الطلب فوّض الدمج والتنظيف المحلي،
 لكن مفيش تصريح صريح بالنشر؛ الـ remote branches الثلاثة تفضل محفوظة لحد ما
@@ -264,6 +401,11 @@ git log --first-parent --oneline main
 normal non-force push لـ `main`. حذف remote names ييجي فقط بعد إثبات إن
 نفس tips بقت reachable من الـ remote `main` المنشورة. مفيش force push
 أو تخطي hooks ضمن الخطة.
+
+`git fsck --full --no-reflogs` رجع exit 0. أبلغ عن dangling objects، من غير
+corruption errors؛ ما اتمسحش أي object، وما اتعملش prune أو garbage collection.
+الـ [integrity record](../reports/consolidation/2026-11-16/git-integrity.json)
+بيفصل نتيجة الأمر عن وجود refs أو worktree إضافية.
 
 المهمة ما غيرتش إعدادات خدمة Ollama المشتركة، وما شغلتش موديل خارجي مدفوع،
 وما حذفتش user workspace أو runtime history قديم. نجاح sample جديدة لا

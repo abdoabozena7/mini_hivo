@@ -1,0 +1,4 @@
+ mini.py                             | 283 +++++++++++++++++++++++++++++++++++-
+ tests/test_adaptive_architecture.py |  74 ++++++++++
+ tests/test_mini.py                  | 155 ++++++++++++++++++++
+ 3 files changed, 506 insertions(+), 6 deletions(-)

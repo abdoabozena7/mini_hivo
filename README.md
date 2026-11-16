@@ -41,6 +41,10 @@ The [consolidation report](docs/BRANCH_CONSOLIDATION.md) distinguishes offline
 checks, historical experiments, fresh live attempts, and independent checks of
 generated output. A context authorization is not task completion, and model
 prose or generated tests alone are not independent acceptance evidence.
+Two focused existing-code Python repairs were validated through
+`--mode baseline`; the default `auto` and greenfield paths still have recorded
+completion failures. Keep those measured limits distinct from a passing
+deterministic suite.
 
 ## Architecture
 

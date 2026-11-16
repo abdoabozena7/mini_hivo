@@ -1,0 +1,8 @@
+Create a small Python command-line greeting utility in this empty workspace.
+Requirements:
+- Create greet.py using only the Python standard library.
+- Running python greet.py Ada prints exactly Hello, Ada! followed by a newline.
+- Running python greet.py without arguments prints exactly Hello, World! followed by a newline.
+- Expose a greet(name="World") function that returns the same greeting without a newline.
+- Create test_greet.py with unittest tests for the default and named greetings.
+- Run the unit tests and finish only after they pass. Do not create a web application or install packages.

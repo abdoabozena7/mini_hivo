@@ -1,0 +1,31 @@
+[BUILDER] creation executing
+[TOOL] context_sufficiency_check -
+======================================================================
+FAIL: test_completed_context_decision_is_not_worker_completion (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_completed_context_decision_is_not_worker_completion)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 122, in test_completed_context_decision_is_not_worker_completion
+    self.assertEqual(mutations, ["greet.py"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != ['greet.py']
+
+Second list contains 1 additional elements.
+First extra element 0:
+'greet.py'
+
+- []
++ ['greet.py']
+
+======================================================================
+FAIL: test_prohibited_web_creation_does_not_require_browser_verification (test_verification_applicability.VerificationApplicabilityTests.test_prohibited_web_creation_does_not_require_browser_verification) (goal='Create a Python CLI. Do not create a web application or install packages.')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_verification_applicability.py", line 237, in test_prohibited_web_creation_does_not_require_browser_verification
+    self.assertEqual(route["required"], required)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True != False
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.349s
+
+FAILED (failures=2)

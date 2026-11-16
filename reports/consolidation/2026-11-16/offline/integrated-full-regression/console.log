@@ -1,0 +1,1366 @@
+[MODE] baseline
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (2 conflict(s))
+[TASK I.1] Resolve the duplicate declaration of formatValue; preserve one canonical definition and current callers.
+[FIT I.1] EXECUTE
+[VERIFY I.1] PASS
+[DONE I.1]
+[TASK I.2] Resolve the duplicate HTML id settings; preserve the intended control and its consumers.
+[FIT I.2] EXECUTE
+[VERIFY I.2] PASS
+[DONE I.2]
+[ROOT VERIFIED] PASS
+[TASK 1] Implement one focused behavior
+[FIT 1] EXECUTE
+[STRATEGY A 1] execute state_transition
+[STRATEGY B 1] execute boundary_wrapper
+[FAILED 1]
+[STRATEGY A 1] execute state_transition
+[TASK terminal] Implement collision reset in updateCollision()
+[FIT terminal] EXECUTE
+[DEPTH LIMIT terminal] unknown -> collect_more_failure_evidence
+[FAILED terminal]
+[STRATEGY A bounded-after-backtrack] execute state_transition
+[STRATEGY A diagnosis-router] execute state_transition
+[TASK syntax-strategy] Define one focused executable behavior
+[FIT syntax-strategy] EXECUTE
+[DEPTH LIMIT syntax-strategy] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A syntax-strategy] execute state_transition
+[DONE syntax-strategy]
+[TASK diagnosis-route-ab] Implement one focused behavior
+[FIT diagnosis-route-ab] EXECUTE
+[STRATEGY A diagnosis-route-ab] execute state_transition
+[STRATEGY B diagnosis-route-ab] execute boundary_wrapper
+[DONE diagnosis-route-ab]
+[TASK diagnosis-route] Set up the basic HTML structure, canvas element, and initialize the game loop and core game state.
+[FIT diagnosis-route] EXECUTE
+[STRATEGY A diagnosis-route] execute state_transition
+[DONE diagnosis-route]
+[TASK diagnosis-route-budget-origin] Implement one focused behavior
+[STRUCTURED RETRY] task-fit fallback | 'decision'
+[FIT diagnosis-route-budget-origin] EXECUTE
+[STRATEGY A diagnosis-route-budget-origin] execute state_transition
+[DONE diagnosis-route-budget-origin]
+[BUILDER] budget executing
+[TOOL] run_command pytest
+[TOOL] run_command pytest
+[FALSIFY ROOT]
+[VERIFY ROOT] FAIL
+[REPAIR ROOT]
+[ROOT VERIFIED] PASS (fresh)
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] SPLIT
+[TASK 1] Build a difficult single-file browser application milestone 1
+[FIT 1] SPLIT
+[TASK 1.1] Build a difficult single-file browser application milestone 1 milestone 1
+[FIT 1.1] SPLIT
+[TASK 1.1.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1
+[FIT 1.1.1] SPLIT
+[TASK 1.1.1.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1 milestone 1
+[FIT 1.1.1.1] EXECUTE
+[DONE 1.1.1.1]
+[TASK 1.1.1.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1 milestone 2
+[FIT 1.1.1.2] EXECUTE
+[DONE 1.1.1.2]
+[DONE 1.1.1]
+[TASK 1.1.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2
+[FIT 1.1.2] SPLIT
+[TASK 1.1.2.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2 milestone 1
+[FIT 1.1.2.1] EXECUTE
+[DONE 1.1.2.1]
+[TASK 1.1.2.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2 milestone 2
+[FIT 1.1.2.2] EXECUTE
+[DONE 1.1.2.2]
+[DONE 1.1.2]
+[DONE 1.1]
+[TASK 1.2] Build a difficult single-file browser application milestone 1 milestone 2
+[FIT 1.2] SPLIT
+[TASK 1.2.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1
+[FIT 1.2.1] SPLIT
+[TASK 1.2.1.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1 milestone 1
+[FIT 1.2.1.1] EXECUTE
+[DONE 1.2.1.1]
+[TASK 1.2.1.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1 milestone 2
+[FIT 1.2.1.2] EXECUTE
+[DONE 1.2.1.2]
+[DONE 1.2.1]
+[TASK 1.2.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2
+[FIT 1.2.2] SPLIT
+[TASK 1.2.2.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2 milestone 1
+[FIT 1.2.2.1] EXECUTE
+[DONE 1.2.2.1]
+[TASK 1.2.2.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2 milestone 2
+[FIT 1.2.2.2] EXECUTE
+[DONE 1.2.2.2]
+[DONE 1.2.2]
+[DONE 1.2]
+[DONE 1]
+[TASK 2] Build a difficult single-file browser application milestone 2
+[FIT 2] SPLIT
+[TASK 2.1] Build a difficult single-file browser application milestone 2 milestone 1
+[FIT 2.1] SPLIT
+[TASK 2.1.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1
+[FIT 2.1.1] SPLIT
+[TASK 2.1.1.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1 milestone 1
+[FIT 2.1.1.1] EXECUTE
+[DONE 2.1.1.1]
+[TASK 2.1.1.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1 milestone 2
+[FIT 2.1.1.2] EXECUTE
+[DONE 2.1.1.2]
+[DONE 2.1.1]
+[TASK 2.1.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2
+[FIT 2.1.2] SPLIT
+[TASK 2.1.2.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2 milestone 1
+[FIT 2.1.2.1] EXECUTE
+[DONE 2.1.2.1]
+[TASK 2.1.2.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2 milestone 2
+[FIT 2.1.2.2] EXECUTE
+[DONE 2.1.2.2]
+[DONE 2.1.2]
+[DONE 2.1]
+[TASK 2.2] Build a difficult single-file browser application milestone 2 milestone 2
+[FIT 2.2] SPLIT
+[TASK 2.2.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1
+[FIT 2.2.1] SPLIT
+[TASK 2.2.1.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1 milestone 1
+[FIT 2.2.1.1] EXECUTE
+[DONE 2.2.1.1]
+[TASK 2.2.1.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1 milestone 2
+[FIT 2.2.1.2] EXECUTE
+[DONE 2.2.1.2]
+[DONE 2.2.1]
+[TASK 2.2.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2
+[FIT 2.2.2] SPLIT
+[TASK 2.2.2.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2 milestone 1
+[FIT 2.2.2.1] EXECUTE
+[DONE 2.2.2.1]
+[TASK 2.2.2.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2 milestone 2
+[FIT 2.2.2.2] EXECUTE
+[DONE 2.2.2.2]
+[DONE 2.2.2]
+[DONE 2.2]
+[DONE 2]
+[DONE ROOT]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[FAILED ROOT]
+[INTEGRATION MILESTONE ROOT] normalize_shared_state
+[INTEGRATION MILESTONE ROOT] resolve_conflicts
+[INTEGRATION MILESTONE ROOT] connect_behaviors
+[INTEGRATION MILESTONE ROOT] syntax_build
+[INTEGRATION MILESTONE ROOT] behavioral_verification
+[TASK I.1] Resolve one integration conflict
+[FIT I.1] EXECUTE
+[FAILED I.1]
+[TASK I.1] Resolve the duplicate declaration of first; preserve one canonical definition and current callers.
+[FIT I.1] EXECUTE
+[VERIFY I.1] PASS
+[DONE I.1]
+[TASK I.2] Resolve the duplicate declaration of second; preserve one canonical definition and current callers.
+[FIT I.2] EXECUTE
+[VERIFY I.2] PASS
+[DONE I.2]
+[TASK I.1] Normalize persistence ownership
+[FIT I.1] EXECUTE
+[RE-SPLIT I.1] INTEGRATION_TOO_BROAD -> smaller granularity
+[TASK I.1.1] Make the canonical owner for PERSIST_KEY explicit and remove only the conflicting definition.
+[FIT I.1.1] EXECUTE
+[DONE I.1.1]
+[TASK I.1.2] Reconnect the affected consumers of PERSIST_KEY to the canonical owner and verify the focused behavior.
+[FIT I.1.2] EXECUTE
+[DONE I.1.2]
+[DONE I.1]
+[ROOT] Build a difficult single-file browser application
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT ROOT] SPLIT
+[TASK 1] first
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] second
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 2] EXECUTE
+[DONE 2]
+[TASK 3] third
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 3] EXECUTE
+[DONE 3]
+[TASK 4] all requested behavior has executable evidence
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 4] EXECUTE
+[DONE 4]
+[DONE ROOT]
+[FINAL] done
+[TASK 1.2.2.4.1.1] Implement collision reset for one existing function.
+[FIT 1.2.2.4.1.1] EXECUTE
+[DEPTH LIMIT 1.2.2.4.1.1] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A 1.2.2.4.1.1] execute state_transition
+[DONE 1.2.2.4.1.1]
+[TASK budget-strategy] Implement collision reset in updateCollision()
+[FIT budget-strategy] EXECUTE
+[STRATEGY A budget-strategy] execute state_transition
+[DONE budget-strategy]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[RE-SPLIT ROOT] EXECUTION_BUDGET_EXHAUSTED -> smaller granularity
+[FIT ROOT] SPLIT (forced after EXECUTION_BUDGET_EXHAUSTED)
+[TASK ROOT.1] focused child 1
+[FIT ROOT.1] EXECUTE
+[DONE ROOT.1]
+[TASK ROOT.2] focused child 2
+[FIT ROOT.2] EXECUTE
+[DONE ROOT.2]
+[DONE ROOT]
+[TASK strategy-floor] Implement one focused behavior
+[FIT strategy-floor] EXECUTE
+[STRATEGY A strategy-floor] execute state_transition
+[STRATEGY B strategy-floor] execute boundary_wrapper
+[FAILED strategy-floor]
+[TASK budget-environment_failure] Implement one focused behavior
+[FIT budget-environment_failure] EXECUTE
+[FAILED budget-environment_failure]
+[TASK budget-dependency_error] Implement one focused behavior
+[FIT budget-dependency_error] EXECUTE
+[FAILED budget-dependency_error]
+[TASK budget-verifier_builder_mismatch] Implement one focused behavior
+[FIT budget-verifier_builder_mismatch] EXECUTE
+[FAILED budget-verifier_builder_mismatch]
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[ROOT VERIFIED] PASS
+[ROOT] Build a difficult single-file browser application
+[FAILED ROOT] provider/environment error; no decomposition
+[VERIFY hud] PASS
+[FINAL] done
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (1 conflict(s))
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] small child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] small child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (1 conflict(s))
+[ROOT VERIFIED] PASS
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] focused child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] focused child 2
+[FIT 2] EXECUTE
+[FAILED 2]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] focused child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] focused child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] SPLIT
+[TASK 1] establish shell
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] add behavior
+[FIT 2] EXECUTE
+[DONE 2]
+[TASK 3] finish verification
+[FIT 3] EXECUTE
+[DONE 3]
+[DONE ROOT]
+[STRATEGY A 1] execute state_transition
+[BUILDER] 1 executing
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file app.py
+[TOOL] edit_file app.py
+[TOOL] run_command python app.py
+[VERIFY 1] PASS
+[STRATEGY B 1] execute boundary_wrapper
+[BUILDER] 1 executing
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file app.py
+[TOOL] edit_file app.py
+[TOOL] run_command python app.py
+[VERIFY 1] PASS
+[STRATEGY A 1] execute state_transition
+[STRATEGY B 1] execute boundary_wrapper
+[STRATEGY A 1] execute state_transition
+[TASK mutation-strategy] Implement one focused behavior
+[FIT mutation-strategy] EXECUTE
+[DEPTH LIMIT mutation-strategy] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A mutation-strategy] execute state_transition
+[DONE mutation-strategy]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[RE-SPLIT ROOT] TASK_TOO_BROAD -> smaller granularity
+[FIT ROOT] SPLIT (forced after TASK_TOO_BROAD)
+[TASK 1] small child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] small child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[TASK 3.1.3.1.1.1] Finish combat behavior
+[FIT 3.1.3.1.1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.1]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #1
+[TASK 3.1.3.1.1.alt1.1] Observe enemy position
+[FIT 3.1.3.1.1.alt1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt1.1]
+[TASK 3.1.3.1.1.alt1.2] Observe spawn count
+[FIT 3.1.3.1.1.alt1.2] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt1.2] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt1.2]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #2
+[TASK 3.1.3.1.1.alt2.1] Apply one collision state transition
+[FIT 3.1.3.1.1.alt2.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt2.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt2.1]
+[TASK 3.1.3.1.1.alt2.2] Verify one reset outcome
+[FIT 3.1.3.1.1.alt2.2] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt2.2] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt2.2]
+[TASK 3.1.3.1.1.1] Finish combat behavior
+[FIT 3.1.3.1.1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.1]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #1
+[TASK 3.1.3.1.1.alt1.1] Track one enemy position
+[FIT 3.1.3.1.1.alt1.1] EXECUTE
+[DONE 3.1.3.1.1.alt1.1]
+[TASK 3.1.3.1.1.alt1.2] Spawn one enemy outside the viewport
+[FIT 3.1.3.1.1.alt1.2] EXECUTE
+[DONE 3.1.3.1.1.alt1.2]
+[DONE 3.1.3.1.1]
+[TASK builder-too-broad] Implement one focused behavior
+[FIT builder-too-broad] EXECUTE
+[STRATEGY A builder-too-broad] execute state_transition
+[DONE builder-too-broad]
+[STRATEGY A 1] execute state_transition
+[ROOT] create a new project
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[ROOT] Add the approved behavior while preserving current ownership.
+[GOAL] understanding before routing
+[PROJECT MODE] EXISTING_PROJECT | recon=None evidence=0
+
+[RESPLIT METRICS]
+failed_nodes_resplit: 0
+resplit_nodes_with_any_verified_child: 0
+resplit_nodes_fully_recovered: 0
+granularity_rescue_rate: 0%
+
+[DECOMPOSITION / STRATEGY SEARCH METRICS]
+terminal_too_broad_nodes: 0
+decomposition_backtracks: 0
+alternative_decompositions: 0
+alternative_decomposition_rescues: 0
+strategy_searches: 0
+strategy_generation_failures: 0
+alternate_strategies_attempted: 0
+strategy_rescues: 0
+strategy_search_failures: 0
+capability_floor_nodes: 0
+capability_floor_guard_blocks: 0
+capability_floor_routed_to_strategy: 0
+execution_budget_exhaustions: 0
+budget_exhaustion_routed_to_scope: 0
+budget_exhaustion_routed_to_strategy: 0
+budget_exhaustion_routed_to_dependency: 0
+budget_exhaustion_routed_to_other: 0
+mutation_failures_recorded: 0
+mutation_recovery_packets_emitted: 0
+decomposition_backtrack_rescue_rate: N/A
+strategy_rescue_rate: N/A
+
+[INTEGRATION METRICS]
+parent_integrations_attempted: 0
+parent_integrations_passed: 0
+parent_integrations_failed: 0
+parent_integrations_recovered: 0
+integration_preflight_conflicts: 0
+integration_conflicts_resolved: 0
+invariant_violations_detected: 0
+integration_milestone_runs: 0
+integration_tasks_created: 0
+integration_splits: 0
+integration_resplits: 0
+integration_verified_nodes: 0
+integration_too_broad_nodes: 0
+integration_granularity_rescues: 0
+preflight_blocking_conflicts_detected: 0
+preflight_blocking_conflicts_resolved: 0
+integration_success_rate: 0%
+integration_conflict_resolution: 0/0 (N/A)
+
+[RUN METRICS]
+run_id: 20261116T222416-9e76fd93
+source_sha256: eefbeaa34fed84f97ce4bdd7f1b7d2cb8e52817bd3929ddd89d10f4a371e51d7
+mutation_grounding_source_sha256: 99e755cbd4b08306095337d33fb85b97087eb2bd8206907ef9fd9920d0822061
+target_locator_source_sha256: 25f109f79a30b50de7016db95d6fd5aa2c0111f8b2d113318e8429c912c26bbc
+worker_progress_source_sha256: c1b4c90c8ec37b8dfd4799027b729814fa275745c9c47a3b88f91b18be9dcacb
+mode: auto
+model: gemma4:e4b
+model_capabilities: []
+role_models: {'coordinator': 'gemma4:e4b', 'predictor': 'gemma4:e4b', 'builder': 'gemma4:e4b', 'challenger': 'gemma4:e4b', 'falsifier': 'gemma4:e4b', 'quality': 'gemma4:e4b', 'repairer': 'gemma4:e4b', 'visual': 'gemma4:e4b', 'specifier': 'gemma4:e4b', 'mission_compiler': 'gemma4:e4b', 'clarifier': 'gemma4:e4b', 'requirement_extractor': 'gemma4:e4b', 'recon_agent': 'gemma4:e4b', 'task_brain_compiler': 'gemma4:e4b', 'impact_planner': 'gemma4:e4b', 'impact_challenger': 'gemma4:e4b', 'impact_plan_reviser': 'gemma4:e4b'}
+host_preflight_status: None
+host_preflight_id: None
+host_preflight_duration_seconds: None
+host_preflight_report_path: None
+clarification_questions: 0
+source_requirements_extracted: 0
+source_requirements_retained: 0
+source_requirements_mapped: 0
+source_requirements_unmapped: 0
+source_requirement_retention_numerator: 0
+source_requirement_retention_denominator: 0
+source_requirement_retention_rate_numerator: 0
+source_requirement_retention_rate_denominator: 0
+source_requirement_retention_rate: 1.0
+source_requirement_items_truncated: 0
+user_clarification_rounds: 0
+user_clarification_questions: 0
+user_clarification_answers: 0
+user_confirmed_requirements: 0
+optional_clarifications_skipped: 0
+blocking_clarifications_required: 0
+requirement_extractor_calls: 0
+clarifier_calls: 0
+clarification_terminal_state: None
+project_mode_new: 0
+project_mode_existing: 0
+repository_reconnaissance_runs: 0
+repository_reconnaissance_skipped: 0
+repository_searches: 0
+repository_files_considered: 0
+repository_files_inspected: 0
+repository_evidence_records: 0
+repository_evidence_candidates: 0
+repository_evidence_validated: 0
+repository_evidence_deduplicated: 0
+repository_evidence_selected: 0
+repository_evidence_rejected: 0
+repository_evidence_rejected_duplicates: 0
+repository_evidence_truncated_valid: 0
+repo_grounded_clarification_questions: 0
+task_brains_created: 0
+task_brain_creation_failures: 0
+recon_agent_calls: 0
+task_brain_compiler_calls: 0
+impact_maps_created: 0
+impact_map_failures: 0
+impact_candidates: 0
+impact_supported: 0
+impact_preservation_only: 0
+impact_unknown_surface_references: 0
+impact_unknown_impact_seed_references: 0
+impact_surface_evidence_mismatches: 0
+impact_invented_existing_paths_rejected: 0
+impact_invented_interfaces_rejected: 0
+impact_invalid_optional_fields_rejected: 0
+impact_invalid_requirement_references_rejected: 0
+impact_seed_surface_binding_conflicts: 0
+impact_planning_surfaces_selected: 0
+impact_planning_surfaces_serialized: 0
+impact_planning_surfaces_dropped: 0
+impact_seed_decisions_received: 0
+impact_seed_decisions_validated: 0
+impact_seed_decisions_rejected: 0
+impact_planning_context_incomplete: 0
+impact_challenger_context_incomplete: 0
+planning_role_packets_built: 0
+planning_role_packets_complete: 0
+planning_role_packets_optional_trimmed: 0
+planning_role_packets_mandatory_overflow: 0
+planning_role_optional_items_dropped: 0
+planning_role_mandatory_items_dropped: 0
+planning_role_max_rendered_chars: 0
+planning_role_provider_calls_blocked_by_budget: 0
+mandatory_planning_records_input: 0
+mandatory_semantic_units: 0
+mandatory_semantic_units_deduplicated: 0
+mandatory_provenance_refs: 0
+mandatory_model_chars_before_normalization: 0
+mandatory_model_chars_after_normalization: 0
+mandatory_semantic_coverage: 1.0
+planning_core_builds: 0
+planning_core_model_calls: 0
+impact_decision_frames_created: 0
+impact_decision_frame_incomplete: 0
+impact_decision_slots_required: 0
+impact_choice_projection_builds: 0
+impact_frame_slots_total: 0
+impact_model_choice_slots_required: 0
+impact_slots_inherited_only: 0
+impact_slots_evidence_only: 0
+impact_choice_projection_chars: 0
+impact_choice_projection_semantic_coverage: 1.0
+impact_decision_choices_received: 0
+impact_decision_duplicate_slots: 0
+impact_decision_missing_slots: 0
+impact_decision_unknown_slots: 0
+impact_decision_invalid_choices: 0
+impact_maps_compiled_from_choices: 0
+impact_map_compile_failures: 0
+impact_obligations_total: 0
+impact_behavior_change_obligations: 0
+impact_frame_covered_obligations: 0
+impact_frame_uncovered_obligations: 0
+impact_choice_covered_obligations: 0
+impact_choice_uncovered_obligations: 0
+impact_frame_capability_gaps: 0
+impact_choice_requirement_gaps: 0
+impact_requirements_assigned: 0
+impact_challenges: 0
+impact_challenges_validated: 0
+impact_challenges_rejected: 0
+impact_challenges_applicable: 0
+impact_challenges_non_applicable: 0
+challenge_effects_applied: 0
+challenge_effects_suppressed: 0
+change_plans_created: 0
+change_plan_gate_failures: 0
+plan_nodes: 0
+plan_requirements_covered: 0
+plan_requirements_unassigned: 0
+requirement_obligations_created: 0
+behavior_obligations: 0
+behavior_obligations_covered: 0
+behavior_obligations_uncovered: 0
+deterministic_behavior_anchor_promotions: 0
+obligation_impacts_synthesized: 0
+preservation_obligations_closed: 0
+reuse_obligations_closed: 0
+test_obligations_closed: 0
+prohibition_obligations_closed: 0
+challenges_resolved_post_reconciliation: 0
+challenges_remaining_open: 0
+plan_approval_required: 1
+plan_approval_granted: 0
+plan_approval_rejected: 0
+unapproved_scope_expansions: 0
+approval_requests_created: 0
+approval_receipts_recorded: 0
+approval_validation_failures: 0
+preexecution_revalidations: 0
+reapproval_required: 0
+execution_authorizations_ready: 0
+approval_contract_binding_failures: 0
+precommit_invariant_gate_calls: 0
+precommit_invariant_gate_rejections: 0
+precommit_invariant_audits: []
+impact_planner_calls: 0
+impact_challenger_calls: 0
+impact_plan_revision_calls: 0
+approval_bound_executions_started: 0
+worker_authorization_blocks: 0
+approved_worker_calls: 0
+mutation_scope_violations: 0
+dnt_execution_violations: 0
+verified_executions: 0
+verified_execution_promotions: 0
+challenger_review_projection_builds: 0
+challenger_impacts_total: 0
+challenger_primary_impacts: 0
+challenger_fixed_context_units: 0
+challenger_evidence_support_units: 0
+challenger_projection_chars: 0
+challenger_review_semantic_coverage: 1.0
+plan_approval_requests: 0
+approved_plan_snapshots_validated: 0
+approved_plan_snapshot_failures: 1
+execution_contracts_created: 0
+execution_contract_failures: 0
+execution_contract_mutation: 0
+execution_contract_test: 0
+execution_contract_verify_only: 0
+execution_graphs_created: 0
+execution_graph_failures: 0
+execution_contract_scope_violations: 0
+execution_contract_stale_blocks: 1
+execution_dependency_blocks: 0
+authority_fail_closed_blocks: 1
+child_scheduler_nodes_considered: 0
+child_scheduler_independent_after_failure: 0
+child_scheduler_dependency_blocks: 0
+child_scheduler_continued_after_failure: 0
+child_scheduler_terminal_failures: 0
+structural_fit_analyzer_calls: 0
+structural_fit_calls: 0
+structural_fit_direct_allowed: 0
+structural_fit_ambiguous: 0
+structural_fit_decomposition_required: 0
+structural_decomposition_obligations: 0
+structural_fit_failures: 0
+structural_fit_model_overrides_blocked: 0
+structural_fit_artifacts_created: 0
+contract_decompositions: 0
+contract_child_scope_rejections: 0
+worker_contract_contexts_created: 0
+worker_context_projections_created: 0
+worker_context_projection_failures: 0
+worker_context_required_chars: 0
+worker_context_optional_chars: 0
+worker_context_rendered_chars: 0
+worker_context_optional_items_dropped: 0
+worker_context_authority_items_dropped: 0
+worker_context_authority_overflows: 0
+context_sufficiency_initial_packets: 0
+context_sufficiency_checks: 0
+context_completion_rounds: 0
+context_evidence_requests: 0
+context_evidence_items: 0
+context_sufficiency_blocks: 0
+context_mutation_authorizations: 0
+context_contradictions: 0
+semantic_evidence_requests: 0
+semantic_evidence_resolved: 0
+semantic_evidence_partial: 0
+semantic_evidence_unresolved: 0
+semantic_evidence_conflicts: 0
+semantic_evidence_candidates: 0
+semantic_evidence_items: 0
+semantic_evidence_hops: 0
+world_model_facts_stored: 0
+world_model_facts_reused: 0
+world_model_fact_invalidations: 0
+world_model_facts_stale: 0
+world_model_revalidations: 0
+world_model_rejected_facts: 0
+world_model_conflicts: 0
+world_model_projections: 0
+world_model_projection_facts: 0
+world_model_source_scans: 0
+world_model_project_identity: workspace:03d4d3e3cf6ccc417d411c51
+semantic_coupling_analyses: 0
+semantic_coupling_independent: 0
+semantic_coupling_groups: 0
+semantic_coupling_merge_required: 0
+semantic_coupling_conflicts: 0
+semantic_coupling_partial: 0
+semantic_coupling_replans: 0
+semantic_group_verification_attempts: 0
+semantic_group_verification_passes: 0
+semantic_group_verification_failures: 0
+semantic_group_recovery_required: 0
+impact_contracts_created: 0
+impact_contracts_validated: 0
+impact_contracts_rejected: 0
+impact_contract_mutation_blocks: 0
+impact_contract_authorizations: 0
+impact_contract_comparisons: 0
+impact_expected_targets: 0
+impact_missing_targets: 0
+impact_unexpected_related: 0
+impact_out_of_scope_changes: 0
+impact_preservation_violations: 0
+impact_unresolved_obligations: 0
+impact_conflicts: 0
+impact_contract_revisions: 0
+impact_group_verification_attempts: 0
+impact_group_verification_failures: 0
+mission_contract_failures: 0
+mission_contract_validation_failures: 0
+mission_advice_received: 0
+mission_advice_validated: 0
+mission_advice_rejected: 0
+mission_advice_fallbacks: 0
+mission_advice_fallback_failures: 0
+worker_progress_runs: []
+first_legal_mutation: None
+mutation_grounding_runs: []
+target_locator_runs: []
+worker_read_spans: []
+mission_non_authoritative_fields_rejected: 0
+mission_semantic_conflicts: 0
+semantic_path_candidates: 0
+semantic_path_candidates_rejected: 0
+semantic_path_false_positive_avoided: 0
+semantic_mutation_conflicts: 0
+hydrated_worker_missions_created: 0
+hydrated_worker_mission_failures: 0
+control_flow: []
+specification_expansions: 0
+specification_expansion_failures: 0
+brain_projections_created: 0
+mission_compilations: 0
+mission_compilation_failures: 0
+worker_missions_executed: 0
+tasks_created: 0
+leaf_tasks: 0
+splits: 0
+re_splits: 0
+max_depth: 0
+failed_nodes_resplit: 0
+resplit_nodes_with_any_verified_child: 0
+resplit_nodes_fully_recovered: 0
+granularity_rescue_rate: 0.0
+terminal_too_broad_nodes: 0
+decomposition_backtracks: 0
+alternative_decompositions: 0
+alternative_decomposition_rescues: 0
+decomposition_backtrack_rescue_rate: None
+strategy_searches: 0
+strategy_generation_failures: 0
+alternate_strategies_attempted: 0
+strategy_rescues: 0
+strategy_search_failures: 0
+strategy_rescue_rate: None
+capability_floor_nodes: 0
+capability_floor_guard_blocks: 0
+capability_floor_routed_to_strategy: 0
+execution_budget_exhaustions: 0
+budget_exhaustion_routed_to_scope: 0
+budget_exhaustion_routed_to_strategy: 0
+budget_exhaustion_routed_to_dependency: 0
+budget_exhaustion_routed_to_other: 0
+root_verified: False
+verified_nodes: 0
+failed_nodes: 0
+integration_failures: 0
+max_depth_failures: 0
+failure_diagnosis_counts: {}
+project_invariants: []
+integration_preflight_checks: 0
+integration_preflight_failures: 0
+integration_conflicts_detected: 0
+integration_conflicts_resolved: 0
+parent_integrations_attempted: 0
+parent_integrations_passed: 0
+parent_integrations_failed: 0
+parent_integrations_recovered: 0
+integration_preflight_conflicts: 0
+invariant_violations_detected: 0
+integration_success_rate: 0.0
+integration_milestone_runs: 0
+integration_milestone_steps: 0
+integration_tasks_created: 0
+integration_splits: 0
+integration_resplits: 0
+integration_verified_nodes: 0
+integration_too_broad_nodes: 0
+integration_granularity_rescues: 0
+preflight_blocking_conflicts_detected: 0
+preflight_blocking_conflicts_resolved: 0
+integration_conflict_resolution: None
+repairer_calls: 0
+falsifier_calls: 0
+falsifier_detected_failures: 0
+planner_structured_retries: 0
+model_calls: 0
+tool_calls: 0
+builder_calls: 0
+predictor_calls: 0
+challenger_calls: 0
+quality_reviews: 0
+invalid_tool_calls: 0
+stage_continuations: 0
+coherent_rewrite_recoveries: 0
+browser_checks: 0
+browser_entrypoint_resolutions: 0
+browser_entrypoint_resolution_failures: 0
+browser_checks_skipped_for_syntax_failure: 0
+verification_applicability_checks: 0
+verification_routes_created: 0
+verification_routes_required: 0
+verification_routes_not_applicable: 0
+verification_required_targets_unresolved: 0
+verification_optional_targets_skipped: 0
+verification_evidence_unavailable: 0
+browser_verifier_calls_avoided: 0
+verification_applicability_artifacts: []
+verified_child_receipts_created: 0
+verified_child_receipts_stale: 0
+integration_readiness_checks: 0
+integration_ready: 0
+integration_not_ready_child_failure: 0
+integration_not_ready_stale_evidence: 0
+integration_routes_created: 0
+integration_verification_attempts: 0
+integration_verification_passes: 0
+integration_verification_failures: 0
+integration_evidence_unavailable: 0
+parent_verification_receipts_created: 0
+verification_applicability_analyzer_calls: 0
+verification_applicability_analyzer_model_calls: 0
+verification_obligation_coverage_checks: 0
+verification_obligation_coverage_ready: 0
+verification_obligation_coverage_blocks: 0
+verification_obligation_coverage_model_calls: 0
+verification_gap_remediation_proposals: 0
+verification_gap_remediation_valid: 0
+verification_gap_plan_revisions: 0
+direct_behavior_oracle_runs: 0
+verification_gap_model_calls: 0
+verification_gap_worker_calls: 0
+verification_gap_brain_writes: 0
+integration_readiness_model_calls: 0
+integration_executor_model_calls: 0
+integration_executor_calls: 0
+stage5b_enabled: False
+stage5c_enabled: False
+promotion_eligibility_checks: 0
+promotion_candidates_created: 0
+promotion_candidates_rejected: 0
+verified_facts_promoted: 0
+verified_facts_deduplicated: 0
+verified_facts_superseded: 0
+promotion_conflicts: 0
+promotion_stale_blocks: 0
+project_brain_promotions: 0
+project_brain_promotion_noops: 0
+task_brain_compactions: 0
+promotion_model_calls: 0
+task_brain_compaction_model_calls: 0
+promotion_status: None
+promotion_receipt: None
+task_brain_completion: None
+child_receipts: {}
+verified_reentry_attempts: 0
+project_brain_records_considered: 0
+project_brain_records_current: 0
+project_brain_records_stale: 0
+project_brain_records_superseded: 0
+project_brain_records_relevant: 0
+project_brain_records_excluded: 0
+reentry_conflicts: 0
+authority_drift_checks: 0
+authority_drift_confirmed: 0
+authority_drift_consistent: 0
+authority_drift_not_evaluable: 0
+authority_drift_conflicts_emitted: 0
+authority_drift_duplicate_conflicts_suppressed: 0
+task_brain_bootstraps: 0
+reentry_model_calls: 0
+freshness_model_calls: 0
+relevance_model_calls: 0
+task_brain_bootstrap_model_calls: 0
+automatic_reverification_attempts: 0
+verified_planning_contexts_created: 0
+verified_planning_context_ready: 0
+verified_planning_context_insufficient: 0
+verified_planning_context_invalid: 0
+verified_planning_context_stale: 0
+planning_current_verified_items: 0
+planning_stale_items_excluded: 0
+planning_confirmed_conflicts: 0
+planning_not_evaluable_audits: 0
+planning_authority_change_blocks: 0
+planning_stale_evidence_blocks: 0
+planning_mandatory_authority_drops: 0
+verified_reentry_planning_calls: 0
+planning_context_compiler_model_calls: 0
+planning_readiness_model_calls: 0
+verified_planning_model_calls: 0
+planning_mode: None
+verified_planning_context: None
+verified_planning_context_validation: None
+verification_failures: 0
+task_too_broad_count: 0
+mutation_failures_recorded: 0
+mutation_recovery_packets_emitted: 0
+provider_cpu_fallbacks: 0
+provider_execution: gpu_or_auto
+ollama_http_200: 0
+ollama_tool_call_responses: 0
+ollama_thinking_responses: 0
+ollama_terminal_empty_responses: 0
+ollama_incomplete_responses: 0
+ollama_retry_count: 0
+ollama_transport_failures: 0
+ollama_worker_failures: 0
+ollama_timeout_failures: 0
+ollama_malformed_responses: 0
+peak_estimated_context_tokens: 0
+peak_leaf_context_tokens: 0
+average_leaf_context_tokens: 0.0
+elapsed_seconds: 0.13
+status: blocked
+source_contract: {'status': 'ready', 'goal': 'Add the approved behavior while preserving current ownership.', 'original_goal': 'Add the approved behavior while preserving current ownership.', 'source_contract': {'root_goal': 'Add the approved behavior while preserving current ownership.'}, 'requirements': ['the approved behavior is implemented'], 'constraints': ['preserve current ownership'], 'success_criteria': ['the focused verification passes']}
+project_mode: EXISTING_PROJECT
+impact_planning_required: True
+approved_change_plan: {'plan_id': 'PLAN-STALE-AUTO-001', 'plan_hash': 'stored-plan-hash', 'task_goal': 'Add the approved behavior while preserving current ownership.', 'approved_change_nodes': []}
+plan_approval: {'approval_status': 'APPROVED', 'approval_source': 'USER_CONFIRMED', 'plan_id': 'PLAN-STALE-AUTO-001', 'plan_hash': 'stored-plan-hash'}
+execution_contract_status: APPROVED_PLAN_STALE
+orchestration_failure: APPROVED_PLAN_STALE
+authority_fail_closed_last: {'execution_mode': 'AUTHORITY_BOUND', 'authority_status': 'STALE', 'terminal_reason': 'APPROVED_PLAN_STALE', 'fallback_allowed': False, 'task_id': None}
+node_diagnosis: []
+[ROOT] unbound legacy task
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[ROOT] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT ROOT] SPLIT
+[BUILDER] legacy executing
+[BUILDER] contract executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file src/auth.py
+[TOOL] run_command python -m unittest
+[BUILDER] blocked executing
+[TOOL] edit_file src/auth.py
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Integrate Escape detection through the current InputManager.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-002] evaluate one approved responsibility
+[TASK EXEC-002] Connect Escape handling to GameState.togglePause without duplicate state.
+[FIT EXEC-002] EXECUTE
+[DONE EXEC-002]
+[CONTRACT FIT EXEC-003] evaluate one approved responsibility
+[TASK EXEC-003] Update or add focused coverage at the verified test boundary.
+[FIT EXEC-003] EXECUTE
+[DONE EXEC-003]
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK C] run C
+[FIT C] EXECUTE
+[DONE C]
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] run B
+[FIT B] EXECUTE
+[DONE B]
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] run B
+[FIT B] EXECUTE
+[DONE B]
+[TASK C] run C
+[FIT C] EXECUTE
+[DONE C]
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] run B
+[FIT B] EXECUTE
+[DONE B]
+[TASK C] run C
+[FIT C] EXECUTE
+[DONE C]
+[TASK A] run A
+[FIT A] EXECUTE
+[DONE A]
+[TASK B] run B
+[FIT B] EXECUTE
+[FAILED B]
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK B] run B
+[FIT B] EXECUTE
+[DONE B]
+[TASK C] run C
+[FIT C] EXECUTE
+[DONE C]
+[TASK A] run A
+[FIT A] EXECUTE
+[DONE A]
+[TASK B] run B
+[FIT B] EXECUTE
+[DONE B]
+[TASK C] run C
+[FIT C] EXECUTE
+[DONE C]
+[DONE P]
+[TASK A] run A
+[FIT A] EXECUTE
+[FAILED A]
+[TASK D] run D
+[FIT D] EXECUTE
+[DONE D]
+[TASK EXEC-001.1] run EXEC-001.1
+[FIT EXEC-001.1] EXECUTE
+[FAILED EXEC-001.1]
+[TASK EXEC-001.2] run EXEC-001.2
+[FIT EXEC-001.2] EXECUTE
+[DONE EXEC-001.2]
+[TASK EXEC-001.3] run EXEC-001.3
+[FIT EXEC-001.3] EXECUTE
+[DONE EXEC-001.3]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Extend verified existing owner InputManager for Escape pause/resume support. (REQ-001), reusing canonical interfaces.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-002] evaluate one approved responsibility
+[TASK EXEC-002] Update or add focused coverage at the verified test boundary.
+[FIT EXEC-002] EXECUTE
+[DONE EXEC-002]
+[BUILDER] EXEC-001 executing
+preregistered 5 tasks; 30 fresh trials
+[BUILDER] child executing
+[TOOL] read_file index.html
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[TOOL] read_file index.html
+[TOOL] edit_file index.html
+[BUILDER] child executing
+[TOOL] read_file index.html
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[TOOL] read_file index.html
+[TOOL] edit_file index.html
+[TOOL] run_command echo verified
+[BUILDER] EXEC-001 executing
+[BUILDER] EXEC-001 executing
+[BUILDER] EXEC-001 executing
+[BUILDER] EXEC-001 executing
+[TOOL] context_sufficiency_check -
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[TOOL] context_sufficiency_check -
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[BUILDER] EXEC-001 executing
+[TOOL] read_file numbers_api.py
+[TOOL] context_sufficiency_check -
+[BUILDER] child executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[BUILDER] child executing
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[BUILDER] child executing
+[TOOL] read_file index.html
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[TOOL] read_file_range index.html
+[TOOL] edit_file index.html
+[TOOL] run_command echo verified
+[BUILDER] child executing
+[TOOL] read_file index.html
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[TOOL] run_command echo verified
+[BUILDER] child executing
+[TOOL] read_file index.html
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file index.html
+[TOOL] read_file_range index.html
+[TOOL] edit_file index.html
+[BUILDER] child executing
+[TOOL] context_sufficiency_check -
+[TOOL] read_candidate_span index.html
+[TOOL] edit_file index.html
+[TOOL] run_command echo verified
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> ok
+HIVO HOST PREFLIGHT: FAIL
+
+Selected model: gemma4:e4b
+Failure: OLLAMA_UNAVAILABLE
+Failure stage: ollama
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Recommended action: inspect host/model stability before retrying.
+terminal: HOST_PREFLIGHT_FAILED
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> verification failed
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: UNKNOWN
+Completed canary calls: 0/3
+System RAM: total UNKNOWN; available before UNKNOWN
+GPU: UNKNOWN | VRAM free UNKNOWN | temperature UNKNOWN C
+Warnings: none
+Starting HIVO...
+Agent> verification failed
+IMPACT_MAP_CONTRACT_BENCHMARK {"canonical_valid": 5, "cases": 10, "correctly_rejected": 4, "normalized_valid": 3, "parse_failures": 1}
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[ROOT] Add Escape pause support without changing current ownership.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[BUILDER] T executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 13}
+[TOOL] write_file probe.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 17}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 21}
+[TOOL] run_file probe.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 17}
+[BUILDER] T executing
+[TOOL] edit_file app.js
+[BUILDER] T executing
+[TOOL] write_file app.js
+[TOOL] verify_web_app index.html
+[TOOL] edit_file app.js
+[TOOL] verify_web_app index.html
+[BUILDER] 4.4 executing
+[TOOL] edit_file_range app.js
+[TOOL] verify_web_app app.js
+[REPAIRER] 4.4 executing
+[TOOL] edit_file_range app.js
+[TOOL] verify_web_app app.js
+[BUILDER] T executing
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[BUILDER] history executing
+[TOOL] edit_file app.js
+[TOOL] verify_web_app index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[STRUCTURED RETRY] task-fit fallback | invalid
+[BUILDER] missing executing
+[TOOL] edit_file missing.js
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": false, "done_reason": null, "has_error": false, "body_chars": 12}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": false, "done_reason": null, "has_error": false, "body_chars": 12}
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[FALSIFY ROOT]
+[ROOT VERIFIED] PASS
+[AGGREGATE ROOT]
+[BUILDER] builder executing
+[TOOL] edit_file builder.js
+[REPAIRER] repairer executing
+[TOOL] edit_file repairer.js
+[REPAIRER] repair executing
+[TOOL] edit_file_range app.js
+[BUILDER] stale executing
+[TOOL] edit_file app.js
+[TOOL] edit_file app.js
+[BUILDER] T executing
+[TOOL] verify_web_app index.html
+[BUILDER] syntax executing
+[TOOL] edit_file_range app.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "thinking", "tool_calls"], "content_chars": 0, "thinking_chars": 17, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[BUILDER] T executing
+[TOOL] verify_web_app index.html
+[TOOL] verify_web_app index.html
+[TOOL] verify_web_app index.html
+IMPACT_BENCHMARK {"accepted_pre_mutation": 12, "average_contract_revisions": 0.08, "average_expected_targets_per_contract": 1.25, "bounded": true, "contracts_evaluated": 13, "contracts_rejected_incomplete": 1, "expected_impacts_correctly_predicted": 4, "false_negative_unexpected_mutations": 0, "false_positive_out_of_scope_detections": 0, "incorrect_successful_mutations_allowed": 0, "legitimate_related_expansions_accepted": 1, "missing_impacts_detected": 5, "preservation_violations_caught": 1, "scenario_count": 13, "semantic_mismatches_detected": 1, "unexpected_behavior_differences_detected": 1, "unrelated_mutations_detected": 2, "unresolved_required_obligations": 1}
+workspace created: C:\Users\A-plus\AppData\Local\Temp\tmp_hx3l13e\list\project-1
+
+[MODE] baseline
+[ROOT] Change pause keyboard behavior.
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+WORLD_MODEL_BENCHMARK {"average_projected_evidence_items": 2.6, "cold_repository_scans": 5, "incorrect_cached_facts_returned": 0, "semantic_request_count": 5, "warm_repository_scans": 1, "warm_reused_verified_facts": 4}
+COUPLING_BENCHMARK {"average_group_size": 2.25, "candidate_decompositions": 7, "correctly_independent_children": 4, "false_positive_groups": 0, "group_verification_failures_caught": 1, "merge_required_cases_detected": 1, "missed_known_couplings": 0, "semantic_groups_detected": 4, "total_group_members": 9}
+[TASK a] change a
+[FIT a] EXECUTE
+[DONE a]
+[TASK b] change b
+[FIT b] EXECUTE
+[DONE b]
+[TASK a] change a
+[FIT a] EXECUTE
+[DONE a]
+[TASK b] change b
+[FIT b] EXECUTE
+[DONE b]
+[DONE P]
+[TASK a] change first half of same function; complete the inseparable semantic portion also owned by b
+[FIT a] EXECUTE
+[DONE a]
+[DONE P]
+SEMANTIC_BENCHMARK {"average_evidence_items": 0.857, "correctly_classified_requests": 7, "correctly_resolved_requests": 5, "incorrect_semantic_resolutions": 0, "partial_requests": 1, "semantic_request_count": 7, "unresolved_requests": 1}
+[TASK EXEC-STRUCT-001] Approved responsibility
+[FIT EXEC-STRUCT-001] EXECUTE
+[DONE EXEC-STRUCT-001]
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT EXEC-001] SPLIT
+[FAILED EXEC-001] required decomposition produced no child set
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT EXEC-001] SPLIT
+[FAILED EXEC-001] required decomposition produced no child set
+[TASK EXEC-STRUCT-001] Approved responsibility
+[FIT EXEC-STRUCT-001] EXECUTE
+[DONE EXEC-STRUCT-001]
+[TASK legacy] legacy node
+[FIT legacy] EXECUTE
+[DONE legacy]
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT EXEC-001] SPLIT
+[FAILED EXEC-001] required decomposition produced no child set
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT EXEC-001] SPLIT
+[FAILED EXEC-001] required decomposition produced no child set
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FIT EXEC-001] SPLIT
+[FAILED EXEC-001] required decomposition produced no child set
+[TASK EXEC-001] Add the approved behavior across the existing input, view, and test architecture while preserving the sole pause owner.
+[FAILED EXEC-001] structural decomposition required
+[BUILDER] STRUCTURED-T1 executing
+[BUILDER] STRUCTURED-T1 executing
+[STRUCTURED RETRY] generation-response 1/2 | Expecting value: line 1 column 1 (char 0)
+[STRUCTURED RETRY] generation-response 2/2 | Expecting value: line 1 column 1 (char 0)
+[BUILDER] STRUCTURED-T1 executing
+[STRUCTURED RETRY] generation-response 1/2 | Expecting value: line 1 column 1 (char 0)
+[BUILDER] STRUCTURED-T1 executing
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[FAILED EXEC-001]
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Apply the approved implementation change through the verified current surface.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[BUILDER] RECOVERY-EXEC-TEST-R1 executing
+[TOOL] edit_file_range src/status_view.js
+[TOOL] edit_file src/status_view.js
+[BUILDER] RECOVERY-EXEC-V264-TEST-R1 executing
+[TOOL] edit_file src/status_view.js
+[TOOL] edit_file src/status_view.js
+[TOOL] edit_file_range src/status_view.js
+[TOOL] edit_file_range src/status_view.js
+[TOOL] edit_file src/status_view.js
+[BUILDER] RECOVERY-EXEC-V264-TEST-R1 executing
+[TOOL] read_file src/status_view.js
+[BUILDER] RECOVERY-EXEC-V266-TEST-R1 executing
+[TOOL] list_files -
+[TOOL] list_files -
+[TOOL] read_file src/status_view.js
+[TOOL] read_file src/status_view.js
+[TOOL] edit_file src/status_view.js
+[BUILDER] RECOVERY-EXEC-V267-TEST-R1 executing
+[TOOL] edit_file src/status_view.js
+----------------------------------------------------------------------
+Ran 1718 tests in 165.890s
+
+OK (skipped=4)

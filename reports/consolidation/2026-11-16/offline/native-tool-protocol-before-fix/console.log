@@ -1,0 +1,31 @@
+[BUILDER] native executing
+[BUILDER] native-invalid executing
+======================================================================
+FAIL: test_textual_context_call_requires_a_real_tool_invocation_before_mutation (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_textual_context_call_requires_a_real_tool_invocation_before_mutation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 159, in test_textual_context_call_requires_a_real_tool_invocation_before_mutation
+    self.assertEqual(mutations, ["greet.py"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != ['greet.py']
+
+Second list contains 1 additional elements.
+First extra element 0:
+'greet.py'
+
+- []
++ ['greet.py']
+
+======================================================================
+FAIL: test_textual_tool_call_repair_is_bounded_and_never_grants_authority (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_textual_tool_call_repair_is_bounded_and_never_grants_authority)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 174, in test_textual_tool_call_repair_is_bounded_and_never_grants_authority
+    self.assertEqual(ask.call_count, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 2
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.343s
+
+FAILED (failures=2)
