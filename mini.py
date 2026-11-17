@@ -23,7 +23,7 @@ from typing import Any
 
 from hivo.browser_checks import run_profile_interactions
 from hivo.python_checks import check_call as check_python_call
-from hivo.python_checks import check_source_assertion, source_assertions, source_exit_expectation
+from hivo.python_checks import check_source_assertion, runtime_documentation, source_assertions, source_exit_expectation
 from hivo.context import compact_messages
 from hivo.evidence import evidence_for_review
 from hivo.evidence import MUTATION_TOOLS
@@ -3081,11 +3081,33 @@ def _provide_targeted_context_evidence(request, context):
     creation_evidence = _new_artifact_context_evidence(request)
     if creation_evidence is not None:
         return creation_evidence
+    if RUN.get("project_mode") == NEW_PROJECT:
+        runtime_evidence = runtime_documentation(request)
+        if runtime_evidence is not None:
+            record_run_event(
+                "python_runtime_context_evidence", target=request["target"],
+                resolution_status=runtime_evidence["resolution_status"],
+            )
+            return runtime_evidence
     if request["kind"] in {"contract", "authoritative_contract", "tests", "test_expectation"}:
         records = ledger_requirements(RUN.get("source_requirement_ledger"))
         target_key = re.sub(r"[^a-z0-9]", "", request["target"].casefold())
         texts = []
-        if target_key in {"rootcontract", "sourcecontract", "goalcontract", "taskcontract"}:
+        requested_text = " ".join(request["target"].split()).casefold().rstrip(".")
+        matching_records = [
+            item for item in records
+            if item.get("provenance") in {USER_STATED, USER_CONFIRMED}
+            and requested_text in {
+                str(item["requirement_id"]).casefold(),
+                " ".join(str(item["text"]).split()).casefold().rstrip("."),
+            }
+        ]
+        if matching_records:
+            texts = [
+                f"{item['requirement_id']} [{item['provenance']}]: {item['text']}"
+                for item in matching_records
+            ]
+        elif target_key in {"rootcontract", "sourcecontract", "goalcontract", "taskcontract"}:
             texts = [
                 f"{item['requirement_id']} [{item['provenance']}]: {item['text']}" for item in records
                 if item.get("provenance") in {USER_STATED, USER_CONFIRMED}

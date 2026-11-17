@@ -431,6 +431,7 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         for kind, target in (
             ("authoritative_contract", "ROOT CONTRACT"),
             ("contract", "display.py"), ("tests", "display.py:16"),
+            ("test_expectation", "Running python display.py Guest prints exactly Welcome! followed by a newline."),
         ):
             with self.subTest(kind=kind, target=target):
                 result = mini._provide_targeted_context_evidence({
@@ -444,6 +445,18 @@ class ContextSufficiencyGateTests(unittest.TestCase):
                     and "does not claim" in item["purpose"]
                     for item in result["evidence"]
                 ))
+
+    def test_builtin_api_context_uses_documentation_not_private_runtime_values(self):
+        mini.RUN["project_mode"] = mini.NEW_PROJECT
+        with patch("sys.argv", ["PRIVATE_ARGUMENT_MUST_NOT_ENTER_EVIDENCE"]):
+            result = mini._provide_targeted_context_evidence({
+                "kind": "definition", "target": "sys.argv",
+                "why": "Need the installed Python argument-list API before implementing the CLI.",
+            }, {})
+        self.assertEqual(result["resolution_status"], "resolved")
+        self.assertEqual(result["evidence"][0]["source_kind"], "PYTHON_RUNTIME_DOCUMENTATION")
+        self.assertNotIn("PRIVATE_ARGUMENT_MUST_NOT_ENTER_EVIDENCE", json.dumps(result))
+        self.assertIn("argument", result["evidence"][0]["excerpt"].casefold())
 
     def test_terminal_context_failure_stops_without_consuming_the_worker_budget(self):
         decision = self._tool_response("context_sufficiency_check", {

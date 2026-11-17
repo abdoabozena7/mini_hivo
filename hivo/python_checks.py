@@ -27,6 +27,39 @@ _SAME_RETURN = re.compile(
 )
 
 
+def runtime_documentation(request):
+    match = re.fullmatch(r"([A-Za-z]\w*)\.([A-Za-z]\w*)", str(request.get("target", "")))
+    if not match or match.group(1) not in sys.builtin_module_names:
+        return None
+    module = sys.modules.get(match.group(1))
+    if module is None or match.group(2) not in vars(module):
+        return None
+    attribute = match.group(2)
+    lines = str(module.__doc__ or "").splitlines()
+    matching = [
+        line.strip() for line in lines
+        if re.search(r"\b" + re.escape(attribute) + r"\b", line)
+    ]
+    member = vars(module)[attribute]
+    text = "\n".join(matching)
+    if callable(member) and isinstance(member.__doc__, str):
+        text = member.__doc__
+    if not text:
+        return None
+    return {
+        "request_kind": request["kind"], "target": request["target"],
+        "resolution_status": "resolved" if len(text) <= 650 else "partial",
+        "facts_established": [text[:650]],
+        "evidence": [{
+            "kind": request["kind"], "target": request["target"],
+            "source_identity": "python-runtime:" + request["target"],
+            "source_kind": "PYTHON_RUNTIME_DOCUMENTATION", "authoritative": True,
+            "excerpt": text[:650], "interpreter_version": sys.version.split()[0],
+        }],
+        "resolver": "PYTHON_RUNTIME_DOCUMENTATION", "source_scan_performed": False,
+    }
+
+
 def source_exit_expectation(requirements, command_parts):
     """Recognize source-required rejection of malformed fixed-arity integer CLI input."""
     if (len(command_parts) < 2 or Path(command_parts[0]).stem.casefold() not in {"python", "python3", "py"}
