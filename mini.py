@@ -23,7 +23,7 @@ from typing import Any
 
 from hivo.browser_checks import run_profile_interactions
 from hivo.python_checks import check_call as check_python_call
-from hivo.python_checks import check_source_assertion, source_assertions
+from hivo.python_checks import check_source_assertion, source_assertions, source_exit_expectation
 from hivo.context import compact_messages
 from hivo.evidence import evidence_for_review
 from hivo.evidence import MUTATION_TOOLS
@@ -1029,7 +1029,8 @@ TOOLS = [
         "name": "run_command", "description": (
             "Run an allowlisted verification command. For a contract requiring rejection of invalid input, "
             "provide expected_exit_code='nonzero' (or an exact integer). Optional expected_stdout asserts exact "
-            "stdout including newlines. Without these fields, a nonzero exit is a failure."
+            "stdout including newlines. A nonzero exit is a failure unless the source explicitly requires rejection "
+            "of that fixed-arity integer CLI input."
         ),
         "parameters": {"type": "object", "properties": {
             "command": {"type": "string"},
@@ -1873,7 +1874,17 @@ def run_command(command, *, expected_exit_code=None, expected_stdout=None):
     parts, error = _validated_command_parts(command)
     if error:
         return f"error: command refused: {error}"
-    if is_focused_test_command(parts) and (
+    source_expectation = source_exit_expectation(
+        ledger_requirements(RUN.get("source_requirement_ledger")), parts,
+    )
+    if source_expectation:
+        if expected_exit_code not in (None, "nonzero"):
+            return (
+                "error: tool assertion rejected: the source requires a nonzero exit for these invalid arguments. "
+                "Use expected_exit_code='nonzero' or omit the expectation for source-derived validation."
+            )
+        expected_exit_code = "nonzero"
+    if not source_expectation and is_focused_test_command(parts) and (
         expected_stdout is not None or expected_exit_code not in (None, 0)
     ):
         return (
@@ -1915,6 +1926,7 @@ def run_command(command, *, expected_exit_code=None, expected_stdout=None):
                 "exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
                 "expected_exit_code": 0 if expected_exit_code is None else expected_exit_code,
                 "expected_stdout": expected_stdout,
+                **({"source_exit_expectation": source_expectation} if source_expectation else {}),
             }, ensure_ascii=False)
         output = (result.stdout + result.stderr).strip()
         return f"[exit_code={result.returncode}]\n{output or '(no output)'}"
@@ -1956,7 +1968,10 @@ def tools_for_role(role, tool_policy=None, recovery_strategy=None):
                 definition["description"] = "Run a saved application or test file; use the unittest file to check Python functions."
                 definition["parameters"]["properties"] = {"path": {"type": "string"}}
             elif definition["name"] == "run_command":
-                definition["description"] = "Run existing tests or an allowlisted CLI verification command. A nonzero exit is a failure."
+                definition["description"] = (
+                    "Run existing tests or an allowlisted CLI command. Source-required rejection of invalid integer "
+                    "arguments is checked by the controller; otherwise a nonzero exit is a failure."
+                )
                 definition["parameters"]["properties"] = {"command": {"type": "string"}}
     if isinstance(recovery_strategy, dict):
         strategy = recovery_strategy.get("current_strategy")
@@ -3063,6 +3078,9 @@ def _provide_targeted_context_evidence(request, context):
             }],
             "resolver": "RUNTIME_TOOL_CONTRACT", "source_scan_performed": False,
         }
+    creation_evidence = _new_artifact_context_evidence(request)
+    if creation_evidence is not None:
+        return creation_evidence
     if request["kind"] in {"contract", "authoritative_contract", "tests", "test_expectation"}:
         records = ledger_requirements(RUN.get("source_requirement_ledger"))
         target_key = re.sub(r"[^a-z0-9]", "", request["target"].casefold())
@@ -3074,6 +3092,10 @@ def _provide_targeted_context_evidence(request, context):
             ]
         else:
             target_path = re.sub(r":\d+(?:-\d+)?$", "", request["target"]).replace("\\", "/")
+            if target_path.casefold().startswith(("python ", "python3 ", "py ")):
+                command_parts, command_error = _validated_command_parts(request["target"])
+                if command_error is None and len(command_parts) >= 2:
+                    target_path = command_parts[1].replace("\\", "/")
             try:
                 cases = source_assertions(records)
             except (ValueError, SyntaxError) as exc:
@@ -3091,6 +3113,14 @@ def _provide_targeted_context_evidence(request, context):
                 f"expects {json.dumps(case['expected'])}"
                 for case in cases if case["path"].casefold() == target_path.casefold()
             ]
+            if not texts and any(
+                path.replace("\\", "/").casefold() == target_path.casefold()
+                for path, _requirement in _source_creation_requirements()
+            ):
+                texts = [
+                    f"{item['requirement_id']} [{item['provenance']}]: {item['text']}" for item in records
+                    if item.get("provenance") in {USER_STATED, USER_CONFIRMED}
+                ]
         if texts:
             chunks = [""]
             complete = True
@@ -3118,9 +3148,6 @@ def _provide_targeted_context_evidence(request, context):
                 "resolution_status": status, "facts_established": texts[:2], "evidence": evidence,
                 "resolver": "SOURCE_REQUIREMENT_LEDGER", "source_scan_performed": False,
             }
-    creation_evidence = _new_artifact_context_evidence(checked["request"])
-    if creation_evidence is not None:
-        return creation_evidence
     repository_map = RUN.get("repository_map") if isinstance(RUN, dict) else None
     world_model = _world_model_for_workspace(WORKSPACE, repository_map=repository_map)
     result = stage7_semantic.resolve_targeted_evidence(

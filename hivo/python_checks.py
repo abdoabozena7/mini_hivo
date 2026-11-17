@@ -27,6 +27,57 @@ _SAME_RETURN = re.compile(
 )
 
 
+def source_exit_expectation(requirements, command_parts):
+    """Recognize source-required rejection of malformed fixed-arity integer CLI input."""
+    if (len(command_parts) < 2 or Path(command_parts[0]).stem.casefold() not in {"python", "python3", "py"}
+            or Path(command_parts[1]).suffix.casefold() != ".py"):
+        return None
+    records = [
+        item for item in requirements
+        if item.get("provenance") in {"USER_STATED", "USER_CONFIRMED"}
+    ]
+    words = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+             "five": 5, "six": 6, "seven": 7, "eight": 8}
+    counts = {}
+    rejections = []
+    paths = set()
+    for record in records:
+        text = str(record.get("text", ""))
+        match = re.search(
+            r"\bexactly\s+(\d+|zero|one|two|three|four|five|six|seven|eight)"
+            r"\s+integer\s+command[- ]line\s+arguments?\b", text, re.IGNORECASE,
+        )
+        if match:
+            count_text = match.group(1).casefold()
+            count = int(count_text) if count_text.isdecimal() else words[count_text]
+            counts.setdefault(count, []).append(record["requirement_id"])
+        if (re.search(r"\b(?:invalid|missing)\b.*\bnon[- ]?zero\b", text, re.IGNORECASE)
+                and not re.search(r"\b(?:not|never)\b.{0,40}\bnon[- ]?zero\b", text, re.IGNORECASE)):
+            rejections.append(record["requirement_id"])
+        paths.update(
+            match.group(0).replace("\\", "/").removeprefix("./").casefold()
+            for match in re.finditer(r"\b[A-Za-z0-9_./\\-]+\.py\b", text)
+        )
+    script = command_parts[1].replace("\\", "/").removeprefix("./").casefold()
+    if len(counts) != 1 or paths != {script} or not rejections:
+        return None
+    count = next(iter(counts))
+    invalid = len(command_parts[2:]) != count
+    if not invalid:
+        try:
+            for argument in command_parts[2:]:
+                int(argument)
+        except ValueError:
+            invalid = True
+    if not invalid:
+        return None
+    return {
+        "expected_exit_code": "nonzero", "script": script,
+        "required_argument_count": count,
+        "requirement_ids": [*counts[count], *rejections],
+    }
+
+
 def source_assertions(requirements):
     """Compile literal CLI examples and explicit CLI/return equality only."""
     examples = []

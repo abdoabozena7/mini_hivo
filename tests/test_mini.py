@@ -85,6 +85,33 @@ class MiniAgentRegressionTests(unittest.TestCase):
                 self.assertTrue(mini.result_is_tool_rejection(refused))
                 self.assertIn("only the command field", refused)
 
+    def test_source_required_invalid_input_rejection_is_not_an_application_failure(self):
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a numeric utility.\n"
+            "- Keep the implementation in numeric.py.\n"
+            "- Accept exactly two integer command-line arguments and print their product.\n"
+            "- Invalid or missing arguments must cause a nonzero exit status.",
+            use_model=False,
+        )
+        path = mini.WORKSPACE / "numeric.py"
+        path.write_text(
+            "import sys\n"
+            "if len(sys.argv) != 3:\n    sys.exit(2)\n"
+            "try:\n    values = [int(value) for value in sys.argv[1:]]\n"
+            "except ValueError:\n    sys.exit(2)\n"
+            "print(values[0] * values[1])\n", encoding="utf-8",
+        )
+        for arguments in ("6", "6 invalid", "6 7 8"):
+            result = json.loads(mini.run_command("python numeric.py " + arguments))
+            self.assertTrue(result["passed"])
+            self.assertEqual(result["source_exit_expectation"]["expected_exit_code"], "nonzero")
+        self.assertIn("[exit_code=0]", mini.run_command("python numeric.py 6 7"))
+        path.write_text('print("unexpected acceptance")\n', encoding="utf-8")
+        self.assertFalse(json.loads(mini.run_command("python numeric.py 6"))["passed"])
+        mini.RUN.pop("source_requirement_ledger")
+        path.write_text("raise SystemExit(2)\n", encoding="utf-8")
+        self.assertTrue(mini.tool_result_failed(mini.run_command("python numeric.py 6")))
+
     def test_python_function_assertions_reject_source_code_and_preserve_distinct_cases(self):
         (mini.WORKSPACE / "labels.py").write_text(
             'def label(value):\n    return value + "!"\n', encoding="utf-8",
