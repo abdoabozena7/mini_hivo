@@ -1,0 +1,12 @@
+{
+  "discovered": 1703,
+  "excluded": [
+    "test_requirement_clarification.RequirementClarificationTests.test_root_brain_prompt_compacts_large_source_side_channel_without_dropping_ids"
+  ],
+  "tests_run": 1361,
+  "failures": 24,
+  "errors": 18,
+  "skipped": 10,
+  "successful": false,
+  "elapsed_seconds": 35.85
+}

@@ -1,0 +1,33 @@
+{
+  "source": "Run-010 SQLite event10; read-only original payload; goals from stored tasks",
+  "original_payload_sha256": "3a6741d8df6b2108fdd7aaf382f73ae2dd68dc552922a0d97174ba1fb0aaeb96",
+  "original_profile": {
+    "kind": "game",
+    "require_title": true,
+    "require_canvas": true,
+    "require_game_bridge": true,
+    "required_interactions": [
+      "keyboard_movement",
+      "collection_updates_state"
+    ]
+  },
+  "goal_only_baseline_profile": {
+    "kind": "game",
+    "require_title": true,
+    "require_canvas": true,
+    "require_game_bridge": true,
+    "required_interactions": [
+      "keyboard_movement",
+      "collection_updates_state"
+    ]
+  },
+  "controlled_foundation_profile": {
+    "kind": "game",
+    "require_title": true,
+    "require_canvas": true,
+    "require_game_bridge": false,
+    "required_interactions": []
+  },
+  "controlled_foundation_snapshot_passed": true,
+  "warning": "The child done_when conditions are declared controlled fixtures; the original full assignment is unavailable. This conditional snapshot replay is not original child acceptance or browser execution."
+}

@@ -1,0 +1,293 @@
+{
+  "experiment": 19,
+  "boundary": "offline pure-module paired protocol",
+  "model_calls": 0,
+  "browser_calls": 0,
+  "full_e2e": false,
+  "fixture_sha256": "db012f330314aaeaf4fcc77b0cdcb45488e169964d794aba33a65790f9b7af6b",
+  "baseline": "2a8b94590734cec3375047a18e0dc71df2476f85",
+  "treatment": "f8bf65ece895f70c1b572b59df229314de09afbe",
+  "arms": {
+    "baseline": {
+      "source_sha256": {
+        "routing": "24ab4bde363451265bc9543a2dfedf5a733bb9483807eaa31083ff454ba54909",
+        "evidence": "99ab1cc91210b65f69aac2391e289094cf3e94ffeae8a6aa7d03118330b5f6c2"
+      },
+      "cases": [
+        {
+          "case_id": "run010_long_failed_json",
+          "input_sha256": "66029c01387f33bd1738266457ad53bcd7bcc85c7c448d8e0318aa885b6e7dd3",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "valid_structured_pass",
+          "input_sha256": "315d3f981dba185c38a5a946e2d0bf934421ad0d0de09f86b1587d3d6a442346",
+          "expected_passed": true,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": true
+        },
+        {
+          "case_id": "malformed_structured_pass",
+          "input_sha256": "90b8898c0db38b3846d390e471f2fd4e3eb74c95983e1b92156e057da65f4e15",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "missing_required_evidence",
+          "input_sha256": "acfbebc9b117ee98e5118f1506a67ec21a88aa609c6d755244d929cacc76e5a4",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        },
+        {
+          "case_id": "wrong_target_pass",
+          "input_sha256": "f47ea9a572bd209cc4b105501a309118c4ebdef9638e8701a3ddbe804e1ed708",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "cached_pass_without_proof",
+          "input_sha256": "46e88e7a5e4a32572894b182e7ede199f3b63f836612cff92470157a96596d2d",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "controller_fail_vs_basic_pass",
+          "input_sha256": "d5043dc46b2e943412a977afd629f4545f0fad2ca4520ee0816ed3aeebdb94ae",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "controller_fail_vs_old_pass",
+          "input_sha256": "f7c634260ca02949d7d40a955b540a173c34568a46c6425fb51b72ecc5a8a2c7",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "failure_then_null",
+          "input_sha256": "d46cacb325c5ba8c3f92d077fc581b7902fd82622fa0d83c0242c53b68d37c89",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_unavailable",
+          "input_sha256": "fc1e6aeba1538792216546f8425c902e6d2ebf7a42f897dc160f41c65329e013",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_valid_matching_pass",
+          "input_sha256": "78e28924c1ab2a1608ccee579a4034eb9c27e8732f3c411f8d1cfc698d90a838",
+          "expected_passed": true,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": false
+        },
+        {
+          "case_id": "failure_then_weaker_pass",
+          "input_sha256": "d2e0a28cc6a283b06b17f7a503868efa32767cb9a4183742655c8f84bb05796d",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_other_role_pass",
+          "input_sha256": "c026ccc2660f1aec4ee4d691876997bec40644b98cb68ed88cabf7957cc658ee",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "new_failure_after_pass",
+          "input_sha256": "e126ab716109d4e0129ff059f6355f05c858962334b5b47abab701d283b512d9",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "conflicting_explicit_status",
+          "input_sha256": "4dd8c9d19276925e5c5d2f2e930a9d5b00fdd959e02f185f7a05b08a0516702b",
+          "expected_passed": false,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": false
+        },
+        {
+          "case_id": "unavailable_only",
+          "input_sha256": "1c5cc3c36e93eb6784bf60966bc2ea7d9b72098d95bea7cf4de0e8e56b7a64bd",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        }
+      ],
+      "case_count": 16,
+      "matching_expected": 8,
+      "false_passes": 7,
+      "false_rejections": 1
+    },
+    "treatment": {
+      "source_sha256": {
+        "routing": "7d61c011469bb1b87f884e16bc3cefe64161696d69ab12f6681f95faaaa4eaa8",
+        "evidence": "01540e10b5a8ecc271eada58901f90ba56eeec5818a77f32feda5d26a4073702"
+      },
+      "cases": [
+        {
+          "case_id": "run010_long_failed_json",
+          "input_sha256": "66029c01387f33bd1738266457ad53bcd7bcc85c7c448d8e0318aa885b6e7dd3",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "valid_structured_pass",
+          "input_sha256": "315d3f981dba185c38a5a946e2d0bf934421ad0d0de09f86b1587d3d6a442346",
+          "expected_passed": true,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": true
+        },
+        {
+          "case_id": "malformed_structured_pass",
+          "input_sha256": "90b8898c0db38b3846d390e471f2fd4e3eb74c95983e1b92156e057da65f4e15",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        },
+        {
+          "case_id": "missing_required_evidence",
+          "input_sha256": "acfbebc9b117ee98e5118f1506a67ec21a88aa609c6d755244d929cacc76e5a4",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        },
+        {
+          "case_id": "wrong_target_pass",
+          "input_sha256": "f47ea9a572bd209cc4b105501a309118c4ebdef9638e8701a3ddbe804e1ed708",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        },
+        {
+          "case_id": "cached_pass_without_proof",
+          "input_sha256": "46e88e7a5e4a32572894b182e7ede199f3b63f836612cff92470157a96596d2d",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        },
+        {
+          "case_id": "controller_fail_vs_basic_pass",
+          "input_sha256": "d5043dc46b2e943412a977afd629f4545f0fad2ca4520ee0816ed3aeebdb94ae",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "controller_fail_vs_old_pass",
+          "input_sha256": "f7c634260ca02949d7d40a955b540a173c34568a46c6425fb51b72ecc5a8a2c7",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_null",
+          "input_sha256": "d46cacb325c5ba8c3f92d077fc581b7902fd82622fa0d83c0242c53b68d37c89",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_unavailable",
+          "input_sha256": "fc1e6aeba1538792216546f8425c902e6d2ebf7a42f897dc160f41c65329e013",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_valid_matching_pass",
+          "input_sha256": "78e28924c1ab2a1608ccee579a4034eb9c27e8732f3c411f8d1cfc698d90a838",
+          "expected_passed": true,
+          "actual_passed": true,
+          "route_result": "PASS",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_weaker_pass",
+          "input_sha256": "d2e0a28cc6a283b06b17f7a503868efa32767cb9a4183742655c8f84bb05796d",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "failure_then_other_role_pass",
+          "input_sha256": "c026ccc2660f1aec4ee4d691876997bec40644b98cb68ed88cabf7957cc658ee",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "new_failure_after_pass",
+          "input_sha256": "e126ab716109d4e0129ff059f6355f05c858962334b5b47abab701d283b512d9",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "conflicting_explicit_status",
+          "input_sha256": "4dd8c9d19276925e5c5d2f2e930a9d5b00fdd959e02f185f7a05b08a0516702b",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "FAIL",
+          "matches_expected": true
+        },
+        {
+          "case_id": "unavailable_only",
+          "input_sha256": "1c5cc3c36e93eb6784bf60966bc2ea7d9b72098d95bea7cf4de0e8e56b7a64bd",
+          "expected_passed": false,
+          "actual_passed": false,
+          "route_result": "PENDING",
+          "matches_expected": true
+        }
+      ],
+      "case_count": 16,
+      "matching_expected": 16,
+      "false_passes": 0,
+      "false_rejections": 0
+    }
+  },
+  "same_input_hashes": true
+}

@@ -1,11 +1,68 @@
 """Deterministic interpretation of tool evidence."""
 
+import hashlib
 import json
 import re
 
 
 VERIFICATION_TOOLS = frozenset({"run_file", "run_command", "verify_web_app"})
 MUTATION_TOOLS = frozenset({"write_file", "edit_file", "edit_file_range"})
+
+
+def project_tool_evidence_result(tool: str, result: object, limit: int = 1600) -> str:
+    """Bound display text without turning clipped verification JSON into proof.
+
+    Outcome, profile and identity fields are retained exactly or explicitly
+    unavailable. Full tool output remains in the tool transcript/event store.
+    """
+    if tool not in VERIFICATION_TOOLS:
+        return str(result)[:limit]
+    text = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
+    try:
+        payload = result if isinstance(result, dict) else json.loads(text)
+    except (TypeError, ValueError):
+        payload = None
+    if len(text) <= limit:
+        return text
+    summary = {"evidence_summary": True,
+               "source_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    if isinstance(payload, dict):
+        # No shortened identifiers, targets or required-interaction sets.
+        for key in (
+            "passed", "verification_status", "status", "environment_error", "syntax_failure",
+            "resolved_entrypoint", "entry_path", "requested_from_node", "verification_profile",
+            "interaction_checks", "authority_id", "verification_id", "oracle_id", "oracle_hash",
+            "receipt_identity", "receipt_channel", "execution_channel", "route_type",
+            "authority_type", "plan_id", "plan_hash", "coverage_hash", "subject_hash",
+        ):
+            if key in payload:
+                summary[key] = payload[key]
+        if isinstance(payload.get("result"), (str, bool, int)):
+            summary["result"] = payload["result"]
+        if isinstance(payload.get("failures"), list):
+            summary["failures"] = [
+                {"code": f.get("code"), "evidence": str(f.get("evidence", ""))[:160]}
+                for f in payload["failures"] if isinstance(f, dict)
+            ]
+    else:
+        # Only an explicit command exit receipt can certify long plain output.
+        receipt = re.match(r"^\[exit_code=(\d+)\]", text.strip(), re.I)
+        if receipt:
+            summary["passed"] = int(receipt.group(1)) == 0 and not result_failed(text)
+            summary["exit_code"] = int(receipt.group(1))
+        else:
+            summary.update(verification_status="NOT_RUN", evidence_error="UNSTRUCTURED_VERIFICATION_OUTPUT")
+    encoded = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded) <= limit:
+        return encoded
+    # Oversized proof is not made weaker until it passes. Keep failure, or
+    # declare unavailable rather than dropping required facts from a pass.
+    fallback = {"verification_status": "NOT_RUN", "evidence_error": "VERIFICATION_EVIDENCE_OVERFLOW",
+                "source_sha256": summary["source_sha256"]}
+    if isinstance(payload, dict) and (payload.get("passed") is False
+            or str(payload.get("verification_status") or payload.get("status")).upper() in {"FAIL", "FAILED", "FAILURE"}):
+        fallback.update(passed=False, verification_status="FAIL")
+    return json.dumps(fallback, separators=(",", ":"))
 
 
 def result_not_applicable(result: object) -> bool:

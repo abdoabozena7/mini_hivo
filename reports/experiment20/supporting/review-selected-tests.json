@@ -1,0 +1,119 @@
+[
+  {
+    "pattern": "test_experiment20_child_scope.py",
+    "tests": 34,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_experiment17_field_scoped_profile.py",
+    "tests": 5,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_verified_child_integration.py",
+    "tests": 22,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_experiment9_integration_targets.py",
+    "tests": 12,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_verification_outcome_integrity.py",
+    "tests": 30,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_evidence_policy.py",
+    "tests": 9,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_verification_applicability.py",
+    "tests": 15,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_experiment11_evidence_compatibility.py",
+    "tests": 10,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_experiment13_monotonic.py",
+    "tests": 9,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_experiment18a_schema_feedback.py",
+    "tests": 9,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_context_sufficiency_gate.py",
+    "tests": 9,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_greenfield_context_progress.py",
+    "tests": 9,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  },
+  {
+    "pattern": "test_repair_impact_anchor.py",
+    "tests": 3,
+    "exit_code": 0,
+    "summary": [
+      "OK"
+    ],
+    "matches_declared_cohort": true
+  }
+]

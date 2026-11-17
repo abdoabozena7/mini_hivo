@@ -1,0 +1,124 @@
+{
+  "experiment": 20,
+  "baseline": "d15b6068f78dd5b9e46daacd81f5543af5c2cf89",
+  "treatment": "a91062551c9b346a35eb4abb5f18a6f64f95a72b",
+  "boundary": "controlled fixtures, production routes/gates, scripted verifier observations",
+  "model_calls": 0,
+  "browser_calls": 0,
+  "live_e2e": false,
+  "fixture_sha256": "71f5b5aea86fb8019ef366e75d479a9c61d39a02c85a38d693099f878408a988",
+  "arms": {
+    "baseline": {
+      "label": "baseline",
+      "methods": 12,
+      "failures": 8,
+      "errors": 0,
+      "cases": [
+        {
+          "case_id": "foundation_controller_does_not_require_later_movement_collection",
+          "passed": false
+        },
+        {
+          "case_id": "foundation_worker_tool_uses_same_scope",
+          "passed": false
+        },
+        {
+          "case_id": "movement_child_requires_movement_not_product_name_collection",
+          "passed": false
+        },
+        {
+          "case_id": "mechanics_child_requires_collection_and_collision",
+          "passed": false
+        },
+        {
+          "case_id": "flow_child_keeps_restart_and_persistence",
+          "passed": false
+        },
+        {
+          "case_id": "missing_or_unknown_assignment_does_not_opt_out",
+          "passed": true
+        },
+        {
+          "case_id": "single_full_task_keeps_legacy_game_requirements",
+          "passed": false
+        },
+        {
+          "case_id": "complete_parent_profile_accepts_all_checks",
+          "passed": false
+        },
+        {
+          "case_id": "parent_cannot_forget_unassigned_touch_or_win",
+          "passed": false
+        },
+        {
+          "case_id": "explicit_bridge_assignment_is_not_removed",
+          "passed": true
+        },
+        {
+          "case_id": "approved_execution_contract_does_not_get_narrowed",
+          "passed": true
+        },
+        {
+          "case_id": "plain_profile_api_retains_existing_behavior",
+          "passed": true
+        }
+      ]
+    },
+    "treatment": {
+      "label": "treatment",
+      "methods": 12,
+      "failures": 0,
+      "errors": 0,
+      "cases": [
+        {
+          "case_id": "foundation_controller_does_not_require_later_movement_collection",
+          "passed": true
+        },
+        {
+          "case_id": "foundation_worker_tool_uses_same_scope",
+          "passed": true
+        },
+        {
+          "case_id": "movement_child_requires_movement_not_product_name_collection",
+          "passed": true
+        },
+        {
+          "case_id": "mechanics_child_requires_collection_and_collision",
+          "passed": true
+        },
+        {
+          "case_id": "flow_child_keeps_restart_and_persistence",
+          "passed": true
+        },
+        {
+          "case_id": "missing_or_unknown_assignment_does_not_opt_out",
+          "passed": true
+        },
+        {
+          "case_id": "single_full_task_keeps_legacy_game_requirements",
+          "passed": true
+        },
+        {
+          "case_id": "complete_parent_profile_accepts_all_checks",
+          "passed": true
+        },
+        {
+          "case_id": "parent_cannot_forget_unassigned_touch_or_win",
+          "passed": true
+        },
+        {
+          "case_id": "explicit_bridge_assignment_is_not_removed",
+          "passed": true
+        },
+        {
+          "case_id": "approved_execution_contract_does_not_get_narrowed",
+          "passed": true
+        },
+        {
+          "case_id": "plain_profile_api_retains_existing_behavior",
+          "passed": true
+        }
+      ]
+    }
+  }
+}

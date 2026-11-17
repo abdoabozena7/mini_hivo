@@ -1,0 +1,453 @@
+test_baseline_and_recursive_call_the_same_leaf_engine (test_adaptive_architecture.AdaptiveArchitectureTests.test_baseline_and_recursive_call_the_same_leaf_engine) ... ok
+test_behavioral_failure_after_repair_does_not_become_scope_from_budget (test_adaptive_architecture.AdaptiveArchitectureTests.test_behavioral_failure_after_repair_does_not_become_scope_from_budget) ... ok
+test_blocking_preflight_conflicts_create_sequential_integration_tasks (test_adaptive_architecture.AdaptiveArchitectureTests.test_blocking_preflight_conflicts_create_sequential_integration_tasks) ... ok
+test_both_strategy_failures_record_capability_floor_without_resplit (test_adaptive_architecture.AdaptiveArchitectureTests.test_both_strategy_failures_record_capability_floor_without_resplit) ... ok
+test_bounded_implementation_failure_triggers_strategy_rescue_before_resplit (test_adaptive_architecture.AdaptiveArchitectureTests.test_bounded_implementation_failure_triggers_strategy_rescue_before_resplit) ... ok
+test_brain_projection_selects_relevant_invariants_and_excludes_unrelated_sections (test_adaptive_architecture.AdaptiveArchitectureTests.test_brain_projection_selects_relevant_invariants_and_excludes_unrelated_sections) ... ok
+test_budget_neutral_terminal_leaf_is_not_capability_floor_without_strategy_search (test_adaptive_architecture.AdaptiveArchitectureTests.test_budget_neutral_terminal_leaf_is_not_capability_floor_without_strategy_search) ... ok
+test_budget_observation_alone_does_not_diagnose_scope (test_adaptive_architecture.AdaptiveArchitectureTests.test_budget_observation_alone_does_not_diagnose_scope) ... ok
+test_budget_outcome_does_not_override_integration_preflight_failure (test_adaptive_architecture.AdaptiveArchitectureTests.test_budget_outcome_does_not_override_integration_preflight_failure) ... ok
+test_capability_floor_guard_blocks_bounded_failure_before_strategy_search (test_adaptive_architecture.AdaptiveArchitectureTests.test_capability_floor_guard_blocks_bounded_failure_before_strategy_search) ... ok
+test_child_planning_packet_uses_task_projection_not_full_brain (test_adaptive_architecture.AdaptiveArchitectureTests.test_child_planning_packet_uses_task_projection_not_full_brain) ... ok
+test_concrete_falsifier_command_failure_blocks_but_narrative_does_not (test_adaptive_architecture.AdaptiveArchitectureTests.test_concrete_falsifier_command_failure_blocks_but_narrative_does_not) ... ok
+test_conflict_disappearance_is_resolved_once (test_adaptive_architecture.AdaptiveArchitectureTests.test_conflict_disappearance_is_resolved_once) ... ok
+test_decomposition_exhaustion_does_not_skip_strategy_for_bounded_node (test_adaptive_architecture.AdaptiveArchitectureTests.test_decomposition_exhaustion_does_not_skip_strategy_for_bounded_node) ... ok
+test_depth_repair_limit_and_syntax_are_not_scope_evidence (test_adaptive_architecture.AdaptiveArchitectureTests.test_depth_repair_limit_and_syntax_are_not_scope_evidence) ... ok
+test_diagnosis_router_uses_final_category_and_blocks_exclusions_and_double_trigger (test_adaptive_architecture.AdaptiveArchitectureTests.test_diagnosis_router_uses_final_category_and_blocks_exclusions_and_double_trigger) ... ok
+test_duplicate_strategy_pair_gets_one_bounded_replacement (test_adaptive_architecture.AdaptiveArchitectureTests.test_duplicate_strategy_pair_gets_one_bounded_replacement) ... ok
+test_execute_failure_reaches_existing_strategy_search_after_evidence_precedence (test_adaptive_architecture.AdaptiveArchitectureTests.test_execute_failure_reaches_existing_strategy_search_after_evidence_precedence) ... ok
+test_explicit_split_fit_still_permits_scope_diagnosis (test_adaptive_architecture.AdaptiveArchitectureTests.test_explicit_split_fit_still_permits_scope_diagnosis) ... ok
+test_final_diagnosis_route_preserves_existing_strategy_a_then_b_order (test_adaptive_architecture.AdaptiveArchitectureTests.test_final_diagnosis_route_preserves_existing_strategy_a_then_b_order) ... ok
+test_final_implementation_diagnosis_routes_after_repair_limit_without_budget_exhaustion (test_adaptive_architecture.AdaptiveArchitectureTests.test_final_implementation_diagnosis_routes_after_repair_limit_without_budget_exhaustion) ... ok
+test_final_strategy_diagnosis_routes_budget_origin_without_repair_history (test_adaptive_architecture.AdaptiveArchitectureTests.test_final_strategy_diagnosis_routes_budget_origin_without_repair_history) ... ok
+test_focused_tool_budget_exhaustion_is_neutral_not_task_too_broad (test_adaptive_architecture.AdaptiveArchitectureTests.test_focused_tool_budget_exhaustion_is_neutral_not_task_too_broad) ... ok
+test_fresh_fit_reassessment_is_positive_scope_evidence (test_adaptive_architecture.AdaptiveArchitectureTests.test_fresh_fit_reassessment_is_positive_scope_evidence) ... ok
+test_fresh_repair_verification_does_not_reuse_stale_builder_failure (test_adaptive_architecture.AdaptiveArchitectureTests.test_fresh_repair_verification_does_not_reuse_stale_builder_failure) ... ok
+test_hard_mock_reaches_depth_four_and_exceeds_old_eight_task_limit (test_adaptive_architecture.AdaptiveArchitectureTests.test_hard_mock_reaches_depth_four_and_exceeds_old_eight_task_limit) ... ok
+test_implementation_failure_does_not_force_split_when_fit_rejects_granularity_rescue (test_adaptive_architecture.AdaptiveArchitectureTests.test_implementation_failure_does_not_force_split_when_fit_rejects_granularity_rescue) ... ok
+test_integration_conflict_resolution_reports_na_when_no_conflicts_exist (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_conflict_resolution_reports_na_when_no_conflicts_exist) ... ok
+test_integration_fit_uses_milestones_only_for_corruption_boundary (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_fit_uses_milestones_only_for_corruption_boundary) ... ok
+test_integration_milestone_path_records_bounded_repair_evidence (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_milestone_path_records_bounded_repair_evidence) ... ok
+test_integration_node_packet_contains_only_bounded_relevant_context (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_node_packet_contains_only_bounded_relevant_context) ... ok
+test_integration_preflight_catches_obvious_composition_conflicts (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_preflight_catches_obvious_composition_conflicts) ... ok
+test_integration_preflight_failure_is_a_deterministic_gate (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_preflight_failure_is_a_deterministic_gate) ... ok
+test_integration_provider_failure_does_not_trigger_decomposition (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_provider_failure_does_not_trigger_decomposition) ... ok
+test_integration_tasks_are_sequential_and_share_verified_workspace_state (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_tasks_are_sequential_and_share_verified_workspace_state) ... ok
+test_integration_too_broad_resplits_through_same_solve_task_path (test_adaptive_architecture.AdaptiveArchitectureTests.test_integration_too_broad_resplits_through_same_solve_task_path) ... ok
+test_invalid_strategy_generation_is_unavailable_without_fallback_or_execution (test_adaptive_architecture.AdaptiveArchitectureTests.test_invalid_strategy_generation_is_unavailable_without_fallback_or_execution) ... ok
+test_malformed_task_fit_falls_back_without_killing_recursive_run (test_adaptive_architecture.AdaptiveArchitectureTests.test_malformed_task_fit_falls_back_without_killing_recursive_run) ... ok
+test_max_depth_failure_is_diagnosed_without_automatic_resplit (test_adaptive_architecture.AdaptiveArchitectureTests.test_max_depth_failure_is_diagnosed_without_automatic_resplit) ... ok
+test_mission_compilation_failure_is_orchestration_failure_before_worker (test_adaptive_architecture.AdaptiveArchitectureTests.test_mission_compilation_failure_is_orchestration_failure_before_worker) ... ok
+test_mission_compiler_receives_one_bounded_node_and_verified_dependencies (test_adaptive_architecture.AdaptiveArchitectureTests.test_mission_compiler_receives_one_bounded_node_and_verified_dependencies) ... ok
+test_neutral_bounded_failure_routes_to_existing_strategy_search (test_adaptive_architecture.AdaptiveArchitectureTests.test_neutral_bounded_failure_routes_to_existing_strategy_search) ... ok
+test_neutral_broad_failure_routes_to_existing_decomposition (test_adaptive_architecture.AdaptiveArchitectureTests.test_neutral_broad_failure_routes_to_existing_decomposition) ... ok
+test_neutral_failure_with_two_failed_strategies_can_reach_capability_floor (test_adaptive_architecture.AdaptiveArchitectureTests.test_neutral_failure_with_two_failed_strategies_can_reach_capability_floor) ... ok
+test_neutral_provider_dependency_and_verifier_failures_do_not_route_to_search (test_adaptive_architecture.AdaptiveArchitectureTests.test_neutral_provider_dependency_and_verifier_failures_do_not_route_to_search) ... ok
+test_new_explicit_scope_evidence_can_overturn_execute_fit (test_adaptive_architecture.AdaptiveArchitectureTests.test_new_explicit_scope_evidence_can_overturn_execute_fit) ... ok
+test_node_packet_contains_only_bounded_contract_and_verified_projections (test_adaptive_architecture.AdaptiveArchitectureTests.test_node_packet_contains_only_bounded_contract_and_verified_projections) ... ok
+test_paraphrased_pair_and_invalid_replacement_fail_without_false_rescue (test_adaptive_architecture.AdaptiveArchitectureTests.test_paraphrased_pair_and_invalid_replacement_fail_without_false_rescue) ... ok
+test_parent_integration_metrics_track_recovery_and_success_rate (test_adaptive_architecture.AdaptiveArchitectureTests.test_parent_integration_metrics_track_recovery_and_success_rate) ... ok
+test_parent_too_broad_is_not_reclassified_as_scope_failure (test_adaptive_architecture.AdaptiveArchitectureTests.test_parent_too_broad_is_not_reclassified_as_scope_failure) ... ok
+test_parent_without_blocking_preflight_conflicts_uses_normal_integration (test_adaptive_architecture.AdaptiveArchitectureTests.test_parent_without_blocking_preflight_conflicts_uses_normal_integration) ... ok
+test_persistence_preflight_uses_generic_ownership_patterns (test_adaptive_architecture.AdaptiveArchitectureTests.test_persistence_preflight_uses_generic_ownership_patterns) ... ok
+test_preflight_sequence_a_b_c_then_b_c_then_c_resolves_two_unique_conflicts (test_adaptive_architecture.AdaptiveArchitectureTests.test_preflight_sequence_a_b_c_then_b_c_then_c_resolves_two_unique_conflicts) ... ok
+test_project_brain_core_and_verified_state_are_separate (test_adaptive_architecture.AdaptiveArchitectureTests.test_project_brain_core_and_verified_state_are_separate) ... ok
+test_provenanced_task_too_broad_marker_counts_as_scope_evidence (test_adaptive_architecture.AdaptiveArchitectureTests.test_provenanced_task_too_broad_marker_counts_as_scope_evidence) ... ok
+test_provider_failure_is_reported_without_recursive_decomposition (test_adaptive_architecture.AdaptiveArchitectureTests.test_provider_failure_is_reported_without_recursive_decomposition) ... ok
+test_reappearing_conflict_is_not_new_and_is_finally_unresolved (test_adaptive_architecture.AdaptiveArchitectureTests.test_reappearing_conflict_is_not_new_and_is_finally_unresolved) ... ok
+test_reconnaissance_is_bounded_without_reading_source_contents (test_adaptive_architecture.AdaptiveArchitectureTests.test_reconnaissance_is_bounded_without_reading_source_contents) ... ok
+test_recursive_leaf_compiles_and_injects_structured_mission (test_adaptive_architecture.AdaptiveArchitectureTests.test_recursive_leaf_compiles_and_injects_structured_mission) ... ok
+test_recursive_request_expands_raw_prompt_before_tree_execution (test_adaptive_architecture.AdaptiveArchitectureTests.test_recursive_request_expands_raw_prompt_before_tree_execution) ... ok
+test_remaining_blocking_conflict_prevents_parent_verified (test_adaptive_architecture.AdaptiveArchitectureTests.test_remaining_blocking_conflict_prevents_parent_verified) ... ok
+test_repeated_deterministic_leaf_failure_can_probe_smaller_granularity (test_adaptive_architecture.AdaptiveArchitectureTests.test_repeated_deterministic_leaf_failure_can_probe_smaller_granularity) ... ok
+test_resolved_blocking_conflicts_allow_parent_verification (test_adaptive_architecture.AdaptiveArchitectureTests.test_resolved_blocking_conflicts_allow_parent_verification) ... ok
+test_resplit_metrics_count_partial_child_rescue_separately_from_full_recovery (test_adaptive_architecture.AdaptiveArchitectureTests.test_resplit_metrics_count_partial_child_rescue_separately_from_full_recovery) ... ok
+test_resplit_metrics_preserve_failed_attempt_and_count_full_recovery (test_adaptive_architecture.AdaptiveArchitectureTests.test_resplit_metrics_preserve_failed_attempt_and_count_full_recovery) ... ok
+test_root_decomposition_prompt_consumes_expanded_project_brain (test_adaptive_architecture.AdaptiveArchitectureTests.test_root_decomposition_prompt_consumes_expanded_project_brain) ... ok
+test_same_blocking_conflict_in_three_preflights_counts_once (test_adaptive_architecture.AdaptiveArchitectureTests.test_same_blocking_conflict_in_three_preflights_counts_once) ... ok
+test_short_prompt_expansion_is_bounded_and_non_mutating (test_adaptive_architecture.AdaptiveArchitectureTests.test_short_prompt_expansion_is_bounded_and_non_mutating) ... ok
+test_single_file_hard_work_is_allowed_to_split_into_sequential_milestones (test_adaptive_architecture.AdaptiveArchitectureTests.test_single_file_hard_work_is_allowed_to_split_into_sequential_milestones) ... ok
+test_strategy_a_and_b_receive_the_shared_mutation_recovery_packet (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_a_and_b_receive_the_shared_mutation_recovery_packet) ... ok
+test_strategy_a_failure_rolls_back_before_b_and_preserves_verified_dependencies (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_a_failure_rolls_back_before_b_and_preserves_verified_dependencies) ... ok
+test_strategy_attempt_uses_normal_leaf_engine_with_active_strategy_packet (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_attempt_uses_normal_leaf_engine_with_active_strategy_packet) ... ok
+test_strategy_generation_is_non_mutating_and_has_bounded_packet (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_generation_is_non_mutating_and_has_bounded_packet) ... ok
+test_strategy_rescue_rate_is_na_when_no_strategy_search_started (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_rescue_rate_is_na_when_no_strategy_search_started) ... ok
+test_strategy_search_is_bounded_and_uses_fixed_a_then_b_order (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_search_is_bounded_and_uses_fixed_a_then_b_order) ... ok
+test_strategy_trigger_excludes_non_strategy_failure_diagnoses (test_adaptive_architecture.AdaptiveArchitectureTests.test_strategy_trigger_excludes_non_strategy_failure_diagnoses) ... ok
+test_structured_mutation_evidence_reaches_existing_strategy_search (test_adaptive_architecture.AdaptiveArchitectureTests.test_structured_mutation_evidence_reaches_existing_strategy_search) ... ok
+test_task_too_broad_forces_smaller_children_even_if_second_fit_is_optimistic (test_adaptive_architecture.AdaptiveArchitectureTests.test_task_too_broad_forces_smaller_children_even_if_second_fit_is_optimistic) ... ok
+test_task_too_broad_requires_scope_assessment_provenance (test_adaptive_architecture.AdaptiveArchitectureTests.test_task_too_broad_requires_scope_assessment_provenance) ... ok
+test_terminal_backtracking_is_bounded_and_records_capability_floor_candidate (test_adaptive_architecture.AdaptiveArchitectureTests.test_terminal_backtracking_is_bounded_and_records_capability_floor_candidate) ... ok
+test_terminal_too_broad_backtracks_to_a_materially_different_decomposition (test_adaptive_architecture.AdaptiveArchitectureTests.test_terminal_too_broad_backtracks_to_a_materially_different_decomposition) ... ok
+test_tree_persistence_has_no_model_messages_or_hidden_reasoning (test_adaptive_architecture.AdaptiveArchitectureTests.test_tree_persistence_has_no_model_messages_or_hidden_reasoning) ... ok
+test_two_structurally_different_conflicts_count_twice (test_adaptive_architecture.AdaptiveArchitectureTests.test_two_structurally_different_conflicts_count_twice) ... ok
+test_unavailable_strategy_generation_blocks_capability_floor (test_adaptive_architecture.AdaptiveArchitectureTests.test_unavailable_strategy_generation_blocks_capability_floor) ... ok
+test_unproven_builder_task_too_broad_reaches_implementation_strategy_route (test_adaptive_architecture.AdaptiveArchitectureTests.test_unproven_builder_task_too_broad_reaches_implementation_strategy_route) ... ok
+test_v10_shape_persistent_syntax_failure_outweighs_budget_and_depth (test_adaptive_architecture.AdaptiveArchitectureTests.test_v10_shape_persistent_syntax_failure_outweighs_budget_and_depth) ... ok
+test_v12_shape_preserves_repeated_mutation_evidence_at_max_depth (test_adaptive_architecture.AdaptiveArchitectureTests.test_v12_shape_preserves_repeated_mutation_evidence_at_max_depth) ... ok
+test_valid_replacement_strategies_execute_normally (test_adaptive_architecture.AdaptiveArchitectureTests.test_valid_replacement_strategies_execute_normally) ... ok
+test_verified_child_exposes_bounded_integration_manifest_to_parent (test_adaptive_architecture.AdaptiveArchitectureTests.test_verified_child_exposes_bounded_integration_manifest_to_parent) ... ok
+test_verified_manifests_update_only_brain_verified_state (test_adaptive_architecture.AdaptiveArchitectureTests.test_verified_manifests_update_only_brain_verified_state) ... ok
+
+----------------------------------------------------------------------
+Ran 90 tests in 5.404s
+
+OK
+[MODE] baseline
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[DONE ROOT]
+[FINAL] done
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (2 conflict(s))
+[TASK I.1] Resolve the duplicate declaration of formatValue; preserve one canonical definition and current callers.
+[FIT I.1] EXECUTE
+[VERIFY I.1] PASS
+[DONE I.1]
+[TASK I.2] Resolve the duplicate HTML id settings; preserve the intended control and its consumers.
+[FIT I.2] EXECUTE
+[VERIFY I.2] PASS
+[DONE I.2]
+[ROOT VERIFIED] PASS
+[TASK 1] Implement one focused behavior
+[FIT 1] EXECUTE
+[STRATEGY A 1] execute state_transition
+[STRATEGY B 1] execute boundary_wrapper
+[FAILED 1]
+[STRATEGY A 1] execute state_transition
+[TASK terminal] Implement collision reset in updateCollision()
+[FIT terminal] EXECUTE
+[DEPTH LIMIT terminal] unknown -> collect_more_failure_evidence
+[FAILED terminal]
+[STRATEGY A bounded-after-backtrack] execute state_transition
+[STRATEGY A diagnosis-router] execute state_transition
+[TASK syntax-strategy] Define one focused executable behavior
+[FIT syntax-strategy] EXECUTE
+[DEPTH LIMIT syntax-strategy] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A syntax-strategy] execute state_transition
+[DONE syntax-strategy]
+[TASK diagnosis-route-ab] Implement one focused behavior
+[FIT diagnosis-route-ab] EXECUTE
+[STRATEGY A diagnosis-route-ab] execute state_transition
+[STRATEGY B diagnosis-route-ab] execute boundary_wrapper
+[DONE diagnosis-route-ab]
+[TASK diagnosis-route] Set up the basic HTML structure, canvas element, and initialize the game loop and core game state.
+[FIT diagnosis-route] EXECUTE
+[STRATEGY A diagnosis-route] execute state_transition
+[DONE diagnosis-route]
+[TASK diagnosis-route-budget-origin] Implement one focused behavior
+[STRUCTURED RETRY] task-fit fallback | 'decision'
+[FIT diagnosis-route-budget-origin] EXECUTE
+[STRATEGY A diagnosis-route-budget-origin] execute state_transition
+[DONE diagnosis-route-budget-origin]
+[BUILDER] budget executing
+[TOOL] run_command pytest
+[TOOL] run_command pytest
+[FALSIFY ROOT]
+[VERIFY ROOT] FAIL
+[REPAIR ROOT]
+[ROOT VERIFIED] PASS (fresh)
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] SPLIT
+[TASK 1] Build a difficult single-file browser application milestone 1
+[FIT 1] SPLIT
+[TASK 1.1] Build a difficult single-file browser application milestone 1 milestone 1
+[FIT 1.1] SPLIT
+[TASK 1.1.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1
+[FIT 1.1.1] SPLIT
+[TASK 1.1.1.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1 milestone 1
+[FIT 1.1.1.1] EXECUTE
+[DONE 1.1.1.1]
+[TASK 1.1.1.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 1 milestone 2
+[FIT 1.1.1.2] EXECUTE
+[DONE 1.1.1.2]
+[DONE 1.1.1]
+[TASK 1.1.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2
+[FIT 1.1.2] SPLIT
+[TASK 1.1.2.1] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2 milestone 1
+[FIT 1.1.2.1] EXECUTE
+[DONE 1.1.2.1]
+[TASK 1.1.2.2] Build a difficult single-file browser application milestone 1 milestone 1 milestone 2 milestone 2
+[FIT 1.1.2.2] EXECUTE
+[DONE 1.1.2.2]
+[DONE 1.1.2]
+[DONE 1.1]
+[TASK 1.2] Build a difficult single-file browser application milestone 1 milestone 2
+[FIT 1.2] SPLIT
+[TASK 1.2.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1
+[FIT 1.2.1] SPLIT
+[TASK 1.2.1.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1 milestone 1
+[FIT 1.2.1.1] EXECUTE
+[DONE 1.2.1.1]
+[TASK 1.2.1.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 1 milestone 2
+[FIT 1.2.1.2] EXECUTE
+[DONE 1.2.1.2]
+[DONE 1.2.1]
+[TASK 1.2.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2
+[FIT 1.2.2] SPLIT
+[TASK 1.2.2.1] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2 milestone 1
+[FIT 1.2.2.1] EXECUTE
+[DONE 1.2.2.1]
+[TASK 1.2.2.2] Build a difficult single-file browser application milestone 1 milestone 2 milestone 2 milestone 2
+[FIT 1.2.2.2] EXECUTE
+[DONE 1.2.2.2]
+[DONE 1.2.2]
+[DONE 1.2]
+[DONE 1]
+[TASK 2] Build a difficult single-file browser application milestone 2
+[FIT 2] SPLIT
+[TASK 2.1] Build a difficult single-file browser application milestone 2 milestone 1
+[FIT 2.1] SPLIT
+[TASK 2.1.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1
+[FIT 2.1.1] SPLIT
+[TASK 2.1.1.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1 milestone 1
+[FIT 2.1.1.1] EXECUTE
+[DONE 2.1.1.1]
+[TASK 2.1.1.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 1 milestone 2
+[FIT 2.1.1.2] EXECUTE
+[DONE 2.1.1.2]
+[DONE 2.1.1]
+[TASK 2.1.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2
+[FIT 2.1.2] SPLIT
+[TASK 2.1.2.1] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2 milestone 1
+[FIT 2.1.2.1] EXECUTE
+[DONE 2.1.2.1]
+[TASK 2.1.2.2] Build a difficult single-file browser application milestone 2 milestone 1 milestone 2 milestone 2
+[FIT 2.1.2.2] EXECUTE
+[DONE 2.1.2.2]
+[DONE 2.1.2]
+[DONE 2.1]
+[TASK 2.2] Build a difficult single-file browser application milestone 2 milestone 2
+[FIT 2.2] SPLIT
+[TASK 2.2.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1
+[FIT 2.2.1] SPLIT
+[TASK 2.2.1.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1 milestone 1
+[FIT 2.2.1.1] EXECUTE
+[DONE 2.2.1.1]
+[TASK 2.2.1.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 1 milestone 2
+[FIT 2.2.1.2] EXECUTE
+[DONE 2.2.1.2]
+[DONE 2.2.1]
+[TASK 2.2.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2
+[FIT 2.2.2] SPLIT
+[TASK 2.2.2.1] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2 milestone 1
+[FIT 2.2.2.1] EXECUTE
+[DONE 2.2.2.1]
+[TASK 2.2.2.2] Build a difficult single-file browser application milestone 2 milestone 2 milestone 2 milestone 2
+[FIT 2.2.2.2] EXECUTE
+[DONE 2.2.2.2]
+[DONE 2.2.2]
+[DONE 2.2]
+[DONE 2]
+[DONE ROOT]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[FAILED ROOT]
+[INTEGRATION MILESTONE ROOT] normalize_shared_state
+[INTEGRATION MILESTONE ROOT] resolve_conflicts
+[INTEGRATION MILESTONE ROOT] connect_behaviors
+[INTEGRATION MILESTONE ROOT] syntax_build
+[INTEGRATION MILESTONE ROOT] behavioral_verification
+[TASK I.1] Resolve one integration conflict
+[FIT I.1] EXECUTE
+[FAILED I.1]
+[TASK I.1] Resolve the duplicate declaration of first; preserve one canonical definition and current callers.
+[FIT I.1] EXECUTE
+[VERIFY I.1] PASS
+[DONE I.1]
+[TASK I.2] Resolve the duplicate declaration of second; preserve one canonical definition and current callers.
+[FIT I.2] EXECUTE
+[VERIFY I.2] PASS
+[DONE I.2]
+[TASK I.1] Normalize persistence ownership
+[FIT I.1] EXECUTE
+[RE-SPLIT I.1] INTEGRATION_TOO_BROAD -> smaller granularity
+[TASK I.1.1] Make the canonical owner for PERSIST_KEY explicit and remove only the conflicting definition.
+[FIT I.1.1] EXECUTE
+[DONE I.1.1]
+[TASK I.1.2] Reconnect the affected consumers of PERSIST_KEY to the canonical owner and verify the focused behavior.
+[FIT I.1.2] EXECUTE
+[DONE I.1.2]
+[DONE I.1]
+[ROOT] Build a difficult single-file browser application
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT ROOT] SPLIT
+[TASK 1] first
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] second
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 2] EXECUTE
+[DONE 2]
+[TASK 3] third
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 3] EXECUTE
+[DONE 3]
+[TASK 4] all requested behavior has executable evidence
+[STRUCTURED RETRY] task-fit fallback | bad JSON
+[FIT 4] EXECUTE
+[DONE 4]
+[DONE ROOT]
+[FINAL] done
+[TASK 1.2.2.4.1.1] Implement collision reset for one existing function.
+[FIT 1.2.2.4.1.1] EXECUTE
+[DEPTH LIMIT 1.2.2.4.1.1] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A 1.2.2.4.1.1] execute state_transition
+[DONE 1.2.2.4.1.1]
+[TASK budget-strategy] Implement collision reset in updateCollision()
+[FIT budget-strategy] EXECUTE
+[STRATEGY A budget-strategy] execute state_transition
+[DONE budget-strategy]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[RE-SPLIT ROOT] EXECUTION_BUDGET_EXHAUSTED -> smaller granularity
+[FIT ROOT] SPLIT (forced after EXECUTION_BUDGET_EXHAUSTED)
+[TASK ROOT.1] focused child 1
+[FIT ROOT.1] EXECUTE
+[DONE ROOT.1]
+[TASK ROOT.2] focused child 2
+[FIT ROOT.2] EXECUTE
+[DONE ROOT.2]
+[DONE ROOT]
+[TASK strategy-floor] Implement one focused behavior
+[FIT strategy-floor] EXECUTE
+[STRATEGY A strategy-floor] execute state_transition
+[STRATEGY B strategy-floor] execute boundary_wrapper
+[FAILED strategy-floor]
+[TASK budget-environment_failure] Implement one focused behavior
+[FIT budget-environment_failure] EXECUTE
+[FAILED budget-environment_failure]
+[TASK budget-dependency_error] Implement one focused behavior
+[FIT budget-dependency_error] EXECUTE
+[FAILED budget-dependency_error]
+[TASK budget-verifier_builder_mismatch] Implement one focused behavior
+[FIT budget-verifier_builder_mismatch] EXECUTE
+[FAILED budget-verifier_builder_mismatch]
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[ROOT VERIFIED] PASS
+[ROOT] Build a difficult single-file browser application
+[FAILED ROOT] provider/environment error; no decomposition
+[VERIFY hud] PASS
+[FINAL] done
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (1 conflict(s))
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] small child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] small child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] FAIL (1 conflict(s))
+[ROOT VERIFIED] PASS
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] focused child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] focused child 2
+[FIT 2] EXECUTE
+[FAILED 2]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[CAPACITY PROBE ROOT] deterministic failure -> evaluate smaller granularity
+[TASK 1] focused child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] focused child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] SPLIT
+[TASK 1] establish shell
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] add behavior
+[FIT 2] EXECUTE
+[DONE 2]
+[TASK 3] finish verification
+[FIT 3] EXECUTE
+[DONE 3]
+[DONE ROOT]
+[STRATEGY A 1] execute state_transition
+[BUILDER] 1 executing
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file app.py
+[TOOL] edit_file app.py
+[TOOL] run_command python app.py
+[VERIFY 1] PASS
+[STRATEGY B 1] execute boundary_wrapper
+[BUILDER] 1 executing
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file app.py
+[TOOL] edit_file app.py
+[TOOL] run_command python app.py
+[VERIFY 1] PASS
+[STRATEGY A 1] execute state_transition
+[STRATEGY B 1] execute boundary_wrapper
+[STRATEGY A 1] execute state_transition
+[TASK mutation-strategy] Implement one focused behavior
+[FIT mutation-strategy] EXECUTE
+[DEPTH LIMIT mutation-strategy] implementation_strategy_wrong -> search_or_mutate
+[STRATEGY A mutation-strategy] execute state_transition
+[DONE mutation-strategy]
+[ROOT] Build a difficult single-file browser application
+[FIT ROOT] EXECUTE
+[RE-SPLIT ROOT] TASK_TOO_BROAD -> smaller granularity
+[FIT ROOT] SPLIT (forced after TASK_TOO_BROAD)
+[TASK 1] small child 1
+[FIT 1] EXECUTE
+[DONE 1]
+[TASK 2] small child 2
+[FIT 2] EXECUTE
+[DONE 2]
+[DONE ROOT]
+[TASK 3.1.3.1.1.1] Finish combat behavior
+[FIT 3.1.3.1.1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.1]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #1
+[TASK 3.1.3.1.1.alt1.1] Observe enemy position
+[FIT 3.1.3.1.1.alt1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt1.1]
+[TASK 3.1.3.1.1.alt1.2] Observe spawn count
+[FIT 3.1.3.1.1.alt1.2] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt1.2] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt1.2]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #2
+[TASK 3.1.3.1.1.alt2.1] Apply one collision state transition
+[FIT 3.1.3.1.1.alt2.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt2.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt2.1]
+[TASK 3.1.3.1.1.alt2.2] Verify one reset outcome
+[FIT 3.1.3.1.1.alt2.2] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.alt2.2] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.alt2.2]
+[TASK 3.1.3.1.1.1] Finish combat behavior
+[FIT 3.1.3.1.1.1] EXECUTE
+[DEPTH LIMIT 3.1.3.1.1.1] scope_too_broad -> backtrack_decomposition
+[FAILED 3.1.3.1.1.1]
+[BACKTRACK 3.1.3.1.1] terminal TASK_TOO_BROAD -> alternative decomposition #1
+[TASK 3.1.3.1.1.alt1.1] Track one enemy position
+[FIT 3.1.3.1.1.alt1.1] EXECUTE
+[DONE 3.1.3.1.1.alt1.1]
+[TASK 3.1.3.1.1.alt1.2] Spawn one enemy outside the viewport
+[FIT 3.1.3.1.1.alt1.2] EXECUTE
+[DONE 3.1.3.1.1.alt1.2]
+[DONE 3.1.3.1.1]
+[TASK builder-too-broad] Implement one focused behavior
+[FIT builder-too-broad] EXECUTE
+[STRATEGY A builder-too-broad] execute state_transition
+[DONE builder-too-broad]
+[STRATEGY A 1] execute state_transition

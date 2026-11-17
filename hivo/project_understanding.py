@@ -132,6 +132,17 @@ _MODIFICATION_RE = re.compile(
 _GREENFIELD_RE = re.compile(
     r"\b(?:from scratch|greenfield|brand[- ]new project|new project)\b", re.IGNORECASE,
 )
+# New construction must be tied to an explicit empty location; an incidental
+# report/cache request must not erase a later existing-project instruction.
+_EMPTY_BUILD_RE = re.compile(
+    r"\b(?:build|create|develop|implement)\b[^.!?;\n]{0,180}"
+    r"\b(?:empty|blank)\s+(?:workspace|directory|folder)\b", re.IGNORECASE,
+)
+_EXISTING_TARGET_RE = re.compile(
+    r"\b(?:existing|legacy)\s+\w+|"
+    r"\b(?:fix|modify|refactor|migrate|update|change)\s+(?:the\s+)?current\s+\w+",
+    re.IGNORECASE,
+)
 _DECLARATION_RE = re.compile(
     r"(?:\bclass\s+([A-Za-z_$][\w$]*)|\bdef\s+([A-Za-z_$][\w$]*)\s*\(|"
     r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\binterface\s+([A-Za-z_$][\w$]*)|"
@@ -362,7 +373,7 @@ def classify_project_mode(raw_goal, inventory=None):
     if has_project:
         reason = "meaningful project files are present"
         mode = EXISTING_PROJECT
-    elif _GREENFIELD_RE.search(text):
+    elif _GREENFIELD_RE.search(text) or (_EMPTY_BUILD_RE.search(text) and not _EXISTING_TARGET_RE.search(text)):
         reason = "the workspace is empty and the request is explicitly greenfield"
         mode = NEW_PROJECT
     elif _MODIFICATION_RE.search(text):

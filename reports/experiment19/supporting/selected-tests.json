@@ -1,0 +1,77 @@
+{
+  "boundary": "Selected offline regression cohort; model calls blocked; not independent experimental cases",
+  "suites": [
+    {
+      "pattern": "test_verification_outcome_integrity.py",
+      "tests": 30,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_evidence_policy.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_verification_applicability.py",
+      "tests": 15,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_experiment11_evidence_compatibility.py",
+      "tests": 10,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_experiment13_monotonic.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_experiment18a_schema_feedback.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_context_sufficiency_gate.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_greenfield_context_progress.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_repair_impact_anchor.py",
+      "tests": 3,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    }
+  ]
+}

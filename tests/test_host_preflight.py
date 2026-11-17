@@ -101,10 +101,19 @@ class HostPreflightTests(unittest.TestCase):
             )
 
         self.assertEqual(response["status_code"], 200)
+        self.assertEqual(captured["timeout"], 180.0)
         self.assertEqual(captured["payload"]["model"], "gemma4:e4b")
         self.assertEqual(captured["payload"]["messages"], [{"role": "user", "content": preflight.CANARY_PROMPT}])
         self.assertEqual(captured["payload"]["options"]["temperature"], 0)
         self.assertEqual(captured["payload"]["options"]["num_predict"], 32)
+
+    def test_extended_timeout_keeps_all_canaries_and_cooldowns(self):
+        result = self.run_preflight()
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["report"]["canary_calls_completed"], 3)
+        self.assertEqual([call[2] for call in result["test_calls"]], [180.0] * 3)
+        self.assertEqual(self.sleep_calls, [2.0, 2.0, 2.0])
 
     def test_first_canary_failure_stops_with_zero_completed(self):
         calls = []

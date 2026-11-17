@@ -1,0 +1,14 @@
+{
+  "provenance": "Historical recorded test results; not rerun by this copy. Machine-specific argv/log paths omitted.",
+  "original_file_sha256": "9e85dacadcfd78b259daba24c63c319ef7273a61d8c9b7e7db78b3e33d14e767",
+  "suites": [
+    {
+      "pattern": "test_verification_outcome_integrity.py",
+      "tests": 30,
+      "exit_code": 1,
+      "summary": [
+        "FAILED (failures=4)"
+      ]
+    }
+  ]
+}

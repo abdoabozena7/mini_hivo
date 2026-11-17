@@ -1,0 +1,211 @@
+{
+  "run_id": "20261021T220853-7d601075",
+  "original_goal": "Create a text file named test_level_1.txt containing exactly:Hello Mini Hivo",
+  "trace_records_inspected": 141,
+  "recorded_tools": [
+    {
+      "event_id": 1,
+      "role": "Builder",
+      "tool": "context_sufficiency_check",
+      "target": "",
+      "status": "succeeded"
+    },
+    {
+      "event_id": 2,
+      "role": "Builder",
+      "tool": "write_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "event_id": 3,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 4,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "echo test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 5,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 6,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "ls -l test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 7,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "type test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 8,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 9,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 10,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 11,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 12,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 13,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 14,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 15,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 16,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 17,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 18,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 19,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 20,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 21,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 22,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 23,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 24,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 25,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 26,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "event_id": 27,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    }
+  ],
+  "source_sha256": "07f08e30def31b9c05ca3574ee21d2582a88f82a612da9c35e6f6862c64f1401",
+  "impact_target_count": 11,
+  "rejected_shell_commands": 25,
+  "current_file_exists": false,
+  "rollback_recorded": true,
+  "original_written_bytes": "unavailable after rollback; success message is not independent byte proof",
+  "expected_utf8_hex": "48656c6c6f204d696e69204869766f",
+  "original_artifact_hashes": {
+    ".agent_experiment.jsonl": "aad4603c6adace33af121ff90f6ca7345f7c235194c6f5b81512cba375b6ce61",
+    ".agent_host_preflight.json": "a9029827b60a672c5879dcbb3e2c2b67a7e9414a1396bb84d1aa84afbb70508f",
+    ".agent_runs/20261021T220853-7d601075.jsonl": "38db8d9c99db507b7068b8e694ad92f49577f2f4bb39920a8fc23c436c40fe75",
+    ".hivo/memory.sqlite3": "e0b05102b01422e06b9c8f2221fe2503a8fb4e5ee93591a38318b38471f3daf6",
+    ".hivo/memory.sqlite3-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+    ".hivo/memory.sqlite3-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

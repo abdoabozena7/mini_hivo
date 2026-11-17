@@ -1,0 +1,42 @@
+test_colon_literal_variants_preserve_exact_multiword_bytes (test_level1_native_verification.Level1NativeVerificationTests.test_colon_literal_variants_preserve_exact_multiword_bytes) ... ok
+test_compound_or_multiline_source_does_not_gain_literal_scope (test_level1_native_verification.Level1NativeVerificationTests.test_compound_or_multiline_source_does_not_gain_literal_scope) ... ok
+test_ignoring_native_guidance_stops_before_budget_exhaustion (test_level1_native_verification.Level1NativeVerificationTests.test_ignoring_native_guidance_stops_before_budget_exhaustion) ... ok
+test_literal_and_refusal_evidence_do_not_invent_executable_tests (test_level1_native_verification.Level1NativeVerificationTests.test_literal_and_refusal_evidence_do_not_invent_executable_tests) ... ok
+test_native_literal_proof_still_rejects_wrong_bytes (test_level1_native_verification.Level1NativeVerificationTests.test_native_literal_proof_still_rejects_wrong_bytes) ... ok
+test_repeated_rejected_commands_recover_through_real_leaf_and_falsifier (test_level1_native_verification.Level1NativeVerificationTests.test_repeated_rejected_commands_recover_through_real_leaf_and_falsifier) ... ok
+test_shell_security_is_unchanged (test_level1_native_verification.Level1NativeVerificationTests.test_shell_security_is_unchanged) ... ok
+test_source_compiles_to_native_route_authority (test_level1_native_verification.Level1NativeVerificationTests.test_source_compiles_to_native_route_authority) ... ok
+test_unaccepted_or_tampered_authority_cannot_offer_literal_guidance (test_level1_native_verification.Level1NativeVerificationTests.test_unaccepted_or_tampered_authority_cannot_offer_literal_guidance) ... ok
+test_wrong_bytes_still_fail_independent_post_state (test_level1_native_verification.Level1NativeVerificationTests.test_wrong_bytes_still_fail_independent_post_state) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.568s
+
+OK
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file test_level_1.txt
+[TOOL] run_file test_level_1.txt
+[MODE] baseline
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[TOOL] run_command echo test_level_1.txt
+[TOOL] run_file test_level_1.txt
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[TOOL] run_file test_level_1.txt
+[ROOT VERIFIED] PASS
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[TOOL] run_command echo test_level_1.txt
+[TOOL] run_file test_level_1.txt

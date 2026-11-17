@@ -960,7 +960,7 @@ Requirements:
         self.assertEqual(mini.RUN["browser_checks_skipped_for_syntax_failure"], 1)
         self.assertEqual(len(blocked["syntax_validation_failures"]), 1)
         self.assertIn("JavaScript syntax validation failed", blocked["syntax_validation_failures"][0]["error"])
-        self.assertIn('"syntax_failure": true', blocked["tool_evidence"][-1]["result"])
+        self.assertIs(json.loads(blocked["tool_evidence"][-1]["result"])["syntax_failure"], True)
 
         valid_edit = {
             "role": "assistant", "content": "", "tool_calls": [{

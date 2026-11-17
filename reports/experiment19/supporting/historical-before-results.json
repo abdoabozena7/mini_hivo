@@ -1,0 +1,86 @@
+{
+  "provenance": "Historical recorded test results; not rerun by this copy. Machine-specific argv/log paths omitted.",
+  "original_file_sha256": "8c9bd1dcf23e88cba0eb1f141e0937bd5f37af3417d28f7652a27047ae2e5bd3",
+  "suites": [
+    {
+      "pattern": "test_verification_outcome_integrity.py",
+      "tests": 20,
+      "exit_code": 1,
+      "summary": [
+        "FAILED (failures=15, errors=9)"
+      ]
+    },
+    {
+      "pattern": "test_evidence_policy.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_verification_applicability.py",
+      "tests": 15,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_experiment11_evidence_compatibility.py",
+      "tests": 10,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_experiment13_monotonic.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_v25_6_execution_verification_authority_closure.py",
+      "tests": 0,
+      "exit_code": 1,
+      "summary": [
+        "FAILED (errors=1)"
+      ]
+    },
+    {
+      "pattern": "test_experiment18a_schema_feedback.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_context_sufficiency_gate.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_greenfield_context_progress.py",
+      "tests": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    },
+    {
+      "pattern": "test_repair_impact_anchor.py",
+      "tests": 3,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ]
+    }
+  ]
+}

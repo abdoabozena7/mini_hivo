@@ -1,2 +1,11 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Curated publication artifacts have canonical LF bytes across platforms.
+evidence/impact-lifecycle-publication/** text eol=lf
+
+# Level 1 curated evidence and workflow documentation use canonical LF bytes.
+evidence/level1-native-verification/** text eol=lf
+AGENTS.md text eol=lf
+updates/UPDATE_TEMPLATE.md text eol=lf
+updates/R_UPDATE_002.md text eol=lf

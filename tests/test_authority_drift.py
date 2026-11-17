@@ -1,6 +1,8 @@
 import copy
 import unittest
 
+from hivo.integration_gate import canonical_hash
+
 from hivo.reentry import (
     AUTHORITY_IMPLEMENTATION_DRIFT,
     CONFIRMED_CONSISTENT,
@@ -37,6 +39,18 @@ def _evidence(
 
 
 class AuthorityDriftClassificationTests(unittest.TestCase):
+    def test_conflict_identity_keeps_canonical_digest_and_prefix(self):
+        result = classify_authority_repository_drift(
+            [_authority()], [_evidence(relation="owner(PAUSE_STATE) = StatusView")],
+        )
+        conflict = result["conflicts"][0]
+        expected_digest = canonical_hash({
+            "kind": AUTHORITY_IMPLEMENTATION_DRIFT,
+            "drift_conflict_key": conflict["drift_conflict_key"],
+        })[:16]
+        self.assertEqual(conflict["conflict_id"], "REENTRY-CONFLICT-" + expected_digest)
+        self.assertEqual(result["model_calls"], 0)
+
     def test_direct_structured_contradiction_is_confirmed_drift(self):
         authority = _authority()
         before = copy.deepcopy(authority)

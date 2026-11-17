@@ -1,384 +1,63 @@
 {
   "experiment": 19,
-  "comparison_variable": "worker_context_decision_policy",
-  "model": "gemma4:e4b",
-  "worker_budget": 28,
-  "fixed_worker_no_tool_policy": "bounded_reanchor",
-  "summary": {
-    "current_guard": {
-      "first_tool_call": {
-        "numerator": 3,
-        "denominator": 3,
-        "percent": 100.0
-      },
-      "context_decision_submitted": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "context_mutation_authorized": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "first_legal_mutation": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "verification_executed": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "verification_pass": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "child_verified": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "root_verified": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "context_decision_reanchors": 0,
-      "context_decision_missing_exits": 0,
-      "unsupported_sufficient_authorizations": 0,
-      "decision_statuses": {},
-      "missing_sources": {},
-      "filtered_empty_builder_responses": 0,
-      "model_calls_total": 15,
-      "elapsed_seconds_total": 78.46,
-      "repairer_calls": 0,
-      "first_reported_blockers": {
-        "CONTEXT_INSUFFICIENT": 3
-      }
+  "status": "Offline validation complete for declared matrix; no live E2E validation",
+  "baseline": "2a8b94590734cec3375047a18e0dc71df2476f85",
+  "treatment": "f8bf65ece895f70c1b572b59df229314de09afbe",
+  "protocol": {
+    "cases_per_arm": 16,
+    "negative_cases": 14,
+    "positive_cases": 2,
+    "baseline": {
+      "matching_expected": 8,
+      "false_passes": 7,
+      "false_rejections": 1
     },
-    "bounded_closure": {
-      "first_tool_call": {
-        "numerator": 3,
-        "denominator": 3,
-        "percent": 100.0
-      },
-      "context_decision_submitted": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "context_mutation_authorized": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "first_legal_mutation": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "verification_executed": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "verification_pass": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "child_verified": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "root_verified": {
-        "numerator": 0,
-        "denominator": 3,
-        "percent": 0.0
-      },
-      "context_decision_reanchors": 3,
-      "context_decision_missing_exits": 3,
-      "unsupported_sufficient_authorizations": 0,
-      "decision_statuses": {},
-      "missing_sources": {
-        "empty_model_response_after_reanchor": 3
-      },
-      "filtered_empty_builder_responses": 9,
-      "model_calls_total": 27,
-      "elapsed_seconds_total": 465.55,
-      "repairer_calls": 0,
-      "first_reported_blockers": {
-        "CONTEXT_DECISION_MISSING": 3
-      }
-    }
+    "treatment": {
+      "matching_expected": 16,
+      "false_passes": 0,
+      "false_rejections": 0
+    },
+    "same_input_hashes": true,
+    "model_calls": 0,
+    "browser_calls": 0
   },
-  "rows": [
-    {
-      "repeat": 1,
-      "policy": "current",
-      "first_tool_call": true,
-      "inspection_reads": 2,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 0,
-      "context_decision_missing_exits": 0,
-      "context_decision_missing_source": null,
-      "filtered_empty_builder_responses": 0,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 27.149,
-        "model_calls": 5,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_INSUFFICIENT",
-        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
-      },
-      "repairer_calls": 0,
-      "model_calls": 5,
-      "elapsed_seconds": 27.16,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-current-v2\\python_clamp\\evidence_bound-1"
-    },
-    {
-      "repeat": 2,
-      "policy": "current",
-      "first_tool_call": true,
-      "inspection_reads": 2,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 0,
-      "context_decision_missing_exits": 0,
-      "context_decision_missing_source": null,
-      "filtered_empty_builder_responses": 0,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 25.221,
-        "model_calls": 5,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_INSUFFICIENT",
-        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
-      },
-      "repairer_calls": 0,
-      "model_calls": 5,
-      "elapsed_seconds": 25.24,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-current-v2\\python_clamp\\evidence_bound-2"
-    },
-    {
-      "repeat": 3,
-      "policy": "current",
-      "first_tool_call": true,
-      "inspection_reads": 2,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 0,
-      "context_decision_missing_exits": 0,
-      "context_decision_missing_source": null,
-      "filtered_empty_builder_responses": 0,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 26.042,
-        "model_calls": 5,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_INSUFFICIENT",
-        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
-      },
-      "repairer_calls": 0,
-      "model_calls": 5,
-      "elapsed_seconds": 26.06,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-current-v2\\python_clamp\\evidence_bound-3"
-    },
-    {
-      "repeat": 1,
-      "policy": "bounded_closure",
-      "first_tool_call": true,
-      "inspection_reads": 3,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 1,
-      "context_decision_missing_exits": 1,
-      "context_decision_missing_source": "empty_model_response_after_reanchor",
-      "filtered_empty_builder_responses": 3,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 159.399,
-        "model_calls": 9,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_DECISION_MISSING",
-        "detail": "CONTEXT_DECISION_MISSING: Worker returned no decision after inspection and one re-anchor"
-      },
-      "repairer_calls": 0,
-      "model_calls": 9,
-      "elapsed_seconds": 159.41,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-closure-v2\\python_clamp\\evidence_bound-1"
-    },
-    {
-      "repeat": 2,
-      "policy": "bounded_closure",
-      "first_tool_call": true,
-      "inspection_reads": 3,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 1,
-      "context_decision_missing_exits": 1,
-      "context_decision_missing_source": "empty_model_response_after_reanchor",
-      "filtered_empty_builder_responses": 3,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 164.784,
-        "model_calls": 9,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_DECISION_MISSING",
-        "detail": "CONTEXT_DECISION_MISSING: Worker returned no decision after inspection and one re-anchor"
-      },
-      "repairer_calls": 0,
-      "model_calls": 9,
-      "elapsed_seconds": 164.8,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-closure-v2\\python_clamp\\evidence_bound-2"
-    },
-    {
-      "repeat": 3,
-      "policy": "bounded_closure",
-      "first_tool_call": true,
-      "inspection_reads": 3,
-      "unique_inspection_evidence": 2,
-      "context_decision_submitted": false,
-      "context_decision_count": 0,
-      "context_decision_statuses": [],
-      "context_mutation_authorized": false,
-      "context_decision_reanchors": 1,
-      "context_decision_missing_exits": 1,
-      "context_decision_missing_source": "empty_model_response_after_reanchor",
-      "filtered_empty_builder_responses": 3,
-      "unsupported_sufficient_authorizations": 0,
-      "first_legal_mutation": false,
-      "verification_executed": false,
-      "verification_pass": false,
-      "child_verified": false,
-      "root_verified": false,
-      "first_reported_blocker": {
-        "kind": "BLOCKED",
-        "elapsed_seconds": 141.323,
-        "model_calls": 9,
-        "stage": "CHILD_VERIFICATION",
-        "reason": "CONTEXT_DECISION_MISSING",
-        "detail": "CONTEXT_DECISION_MISSING: Worker returned no decision after inspection and one re-anchor"
-      },
-      "repairer_calls": 0,
-      "model_calls": 9,
-      "elapsed_seconds": 141.34,
-      "safety_counters": {
-        "mutation_scope_violations": 0,
-        "dnt_execution_violations": 0,
-        "execution_contract_scope_violations": 0,
-        "impact_preservation_violations": 0,
-        "invariant_violations_detected": 0,
-        "impact_out_of_scope_changes": 0
-      },
-      "protected_tests_unchanged": true,
-      "workspace": "D:\\projects\\Ai\\mini_hivo_experiment19\\python-closure-v2\\python_clamp\\evidence_bound-3"
-    }
+  "selected_regressions": {
+    "suites": 9,
+    "methods": 103,
+    "experiment19_methods": 30,
+    "existing_methods": 73,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "not_a_full_suite": true
+  },
+  "historical_run010_replay": {
+    "input": "Read-only existing Run010 native line118 routes + SQLite tool events1-14 and failed event10 browser payload",
+    "baseline_passed": true,
+    "patched_passed": false,
+    "baseline_browser": [
+      "PASS"
+    ],
+    "patched_browser": [
+      "FAIL"
+    ],
+    "historical_inputs_modified": false
+  },
+  "checks": {
+    "lf_normalized_source_matches_treatment": true,
+    "unchanged_final_gate_ast": true,
+    "authority_closure_fixture_available": false
+  },
+  "limits": [
+    "No live E2E treatment run",
+    "Chronological receipt order is not independent artifact freshness",
+    "Missing historical closure fixture",
+    "Retrospective finite protocol matrix"
   ],
-  "safety_counters": {
-    "mutation_scope_violations": 0,
-    "dnt_execution_violations": 0,
-    "execution_contract_scope_violations": 0,
-    "impact_preservation_violations": 0,
-    "invariant_violations_detected": 0,
-    "impact_out_of_scope_changes": 0
-  },
-  "production_default_changed": false,
-  "safety_metric_limit": "Unsupported sufficient authorization checks empty evidence, contradictions, and unresolved semantic statuses. It does not independently prove semantic sufficiency when behavior verification is absent.",
-  "scope_limit": "Frozen approved Python contract, three fresh runs per arm. Planning cost and other domains excluded."
+  "local_only_pilots": [
+    "protocol-v1: curated fixture did not retain overflow-causing metadata",
+    "protocol-v2: overflow also affected intended non-overflow controls; isolated those in final v3"
+  ],
+  "date": "2026-10-28",
+  "publication_normalization": "Supporting JSON uses LF via scoped attributes; v4 has the same per-case outcomes as v3."
 }

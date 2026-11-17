@@ -1,0 +1,33 @@
+[
+  {
+    "workspace": "live-auto-final",
+    "process_exit": 0,
+    "preflight_status": "PASS",
+    "preflight_failure": null,
+    "run_id": "20261019T065255-5928c8e3",
+    "task_status": "failed",
+    "model_calls": 2,
+    "tool_calls": 0,
+    "root_verified": false,
+    "artifact_exists": false,
+    "requested_roles": [
+      "Clarifier",
+      "Specifier"
+    ],
+    "timeout_role": "Specifier"
+  },
+  {
+    "workspace": "live-baseline",
+    "process_exit": 2,
+    "preflight_status": "FAIL",
+    "preflight_failure": "CRITICAL_MEMORY_HEADROOM",
+    "run_id": null,
+    "task_status": null,
+    "model_calls": null,
+    "tool_calls": null,
+    "root_verified": null,
+    "artifact_exists": false,
+    "requested_roles": [],
+    "timeout_role": null
+  }
+]

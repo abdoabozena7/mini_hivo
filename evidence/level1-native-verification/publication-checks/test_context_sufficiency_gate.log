@@ -1,0 +1,22 @@
+test_completion_budget_is_bounded_and_fails_closed (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_completion_budget_is_bounded_and_fails_closed) ... ok
+test_contradictory_evidence_requires_authoritative_resolution (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_contradictory_evidence_requires_authoritative_resolution) ... ok
+test_evidence_completion_replaces_slots_and_stays_bounded (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_evidence_completion_replaces_slots_and_stays_bounded) ... ok
+test_gate_disabled_preserves_existing_worker_tool_projection (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_gate_disabled_preserves_existing_worker_tool_projection) ... ok
+test_goal_anchor_survives_completion (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_goal_anchor_survives_completion) ... ok
+test_missing_caller_expectation_requests_narrow_reasoned_evidence (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_missing_caller_expectation_requests_narrow_reasoned_evidence) ... ok
+test_missing_contract_is_completed_before_mutation (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_missing_contract_is_completed_before_mutation) ... ok
+test_runtime_rejects_mutation_attempt_before_gate (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_runtime_rejects_mutation_attempt_before_gate) ... ok
+test_sufficient_initial_packet_is_cheap_and_authorizes_mutation (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_sufficient_initial_packet_is_cheap_and_authorizes_mutation) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.216s
+
+OK
+[BUILDER] legacy executing
+[BUILDER] contract executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file src/auth.py
+[TOOL] run_command python -m unittest
+[BUILDER] blocked executing
+[TOOL] edit_file src/auth.py

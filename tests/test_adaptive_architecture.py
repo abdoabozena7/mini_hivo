@@ -2222,9 +2222,18 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             )
 
         for call_index in (2, 7):
+            # Successful context feedback now survives reanchoring. Check the
+            # edit result by identity instead of assuming it is the first tool.
+            context_message = next(
+                message for message in ask.call_args_list[call_index].args[0]
+                if message.get("role") == "tool"
+                and message.get("tool_name") == "context_sufficiency_check"
+            )
+            self.assertTrue(json.loads(context_message["content"])["mutation_allowed"])
             tool_message = next(
                 message for message in ask.call_args_list[call_index].args[0]
-                if message.get("role") == "tool" and message.get("tool_name") == "edit_file"
+                if message.get("role") == "tool"
+                and message.get("tool_name") == "edit_file"
             )
             self.assertIn("MUTATION_RECOVERY", tool_message["content"])
         self.assertEqual(result_a["status"], "done", result_a)
@@ -2444,6 +2453,43 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertTrue(packet.startswith("CURRENT SOURCE ACCEPTANCE MISMATCHES"))
         self.assertIn('"expected": "complete!"', packet[:700])
         self.assertIn('"actual": "complete"', packet[:700])
+
+    def test_source_mismatch_allows_focused_repair_of_a_new_unverified_draft(self):
+        mini.RUN.update(
+            project_mode=mini.NEW_PROJECT,
+            source_requirement_ledger=mini.extract_source_requirement_ledger(
+                "Create program.py.", use_model=False,
+            ),
+        )
+        task = mini.make_task("ROOT", "Create program.py.", done_when=["marker returns complete!"])
+        contract = dict(self.contract(), goal=task["goal"], original_goal=task["goal"])
+        mini.begin_transaction("ROOT")
+        mini.write_file("program.py", "def marker():\n    return 'complete'\n", role="Builder")
+        case = {
+            "kind": "function", "path": "program.py", "function": "marker",
+            "arguments": [], "expected": "complete!",
+        }
+        mismatch = mini.check_source_assertion(mini.WORKSPACE, case)
+        self.assertFalse(mismatch["passed"])
+        task["source_acceptance_failures"] = [mismatch]
+        replies = [
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {
+                "name": "context_sufficiency_check", "arguments": {
+                    "context_status": "sufficient", "reason": "The actual and source-expected return values are supplied.",
+                },
+            }}]},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {
+                "name": "edit_file", "arguments": {
+                    "path": "program.py", "old": "return 'complete'", "new": "return 'complete!'",
+                },
+            }}]},
+            {"role": "assistant", "content": "Corrected the demonstrated mismatch.", "tool_calls": []},
+        ]
+        with patch.object(mini, "ask_ollama", side_effect=replies):
+            result = mini.repair_task(task, contract, [], {}, "")
+        self.assertEqual(result["status"], "done", result)
+        self.assertEqual(mini.RUN["invalid_tool_calls"], 0)
+        self.assertTrue(mini.check_source_assertion(mini.WORKSPACE, case)["passed"])
 
     def test_reconnaissance_is_bounded_without_reading_source_contents(self):
         for index in range(100):

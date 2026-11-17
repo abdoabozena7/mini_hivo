@@ -1,0 +1,71 @@
+{
+  "audit_date": "2026-10-21",
+  "tested_commit": "00c163f37070dede2e6208f8fb029e6da5cda4b2",
+  "current_production_matches_historical_replay_pins": {
+    "mini.py": true,
+    "hivo/requirements.py": true,
+    "hivo/pre_mutation_impact.py": true,
+    "hivo/verification_routing.py": true
+  },
+  "fresh_suites": [
+    {
+      "suite_pattern": "test_greenfield_impact_lifecycle.py",
+      "tests_run": 17,
+      "seconds": 1.096,
+      "observed_summary": "OK",
+      "evidence": "fresh/lifecycle.log",
+      "classification": "functional controller tests with scripted model responses"
+    },
+    {
+      "suite_pattern": "test_pre_mutation_impact.py",
+      "tests_run": 27,
+      "seconds": 0.329,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_pre_mutation_impact.log",
+      "classification": "additional regression suite"
+    },
+    {
+      "suite_pattern": "test_context_sufficiency_gate.py",
+      "tests_run": 9,
+      "seconds": 0.226,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_context_sufficiency_gate.log",
+      "classification": "additional regression suite"
+    },
+    {
+      "suite_pattern": "test_authority*.py",
+      "tests_run": 23,
+      "seconds": 0.648,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_authorityall.log",
+      "classification": "additional regression suite"
+    },
+    {
+      "suite_pattern": "test_project_understanding.py",
+      "tests_run": 32,
+      "seconds": 0.864,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_project_understanding.log",
+      "classification": "additional regression suite"
+    },
+    {
+      "suite_pattern": "test_experiment*.py",
+      "tests_run": 122,
+      "seconds": 4.98,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_experimentall.log",
+      "classification": "additional regression suite"
+    },
+    {
+      "suite_pattern": "test_adaptive_architecture.py",
+      "tests_run": 90,
+      "seconds": 4.801,
+      "observed_summary": "OK",
+      "evidence": "fresh/test_adaptive_architecture.log",
+      "classification": "additional regression suite"
+    }
+  ],
+  "new_tests_run_by_publication_preparation": false,
+  "live_model_completion": "unverified",
+  "broad_regression": "historical failed run; not rerun after final routing refinements"
+}

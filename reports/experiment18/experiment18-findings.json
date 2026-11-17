@@ -1,0 +1,197 @@
+{
+  "experiment": 18,
+  "status": "partial_diagnostic_and_controlled_verification_replay",
+  "date": "2026-10-11",
+  "repository_revision": "4d1760b292d0ba9021b5e957a870053407bbee5c",
+  "case_id": "timer_pause",
+  "frozen": {
+    "seed_sha256": "84fa3f7e5ef89445b6628a5d1b4f37501e7f68cfe318c5ea3d28dd5ac67a371d",
+    "plan_hash": "cff3a6c590011c02d59aa6a0c6043e66713672c43029023af7ae842894c8d51a",
+    "contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae",
+    "worker_tool_budget": 28,
+    "mutation_grounding_policy": "evidence_bound",
+    "semantic_evidence_policy": "strict"
+  },
+  "experiment15_positive_control": {
+    "task_id": "arena_q_restart",
+    "environment": "Google Colab, NVIDIA Tesla T4",
+    "host_preflight": "PASS",
+    "context_authorization": "PASS",
+    "first_legal_mutation_step": 3,
+    "child_behavioral_verification": "4/4 PASS",
+    "root_behavioral_verification": "4/4 PASS",
+    "root_verified": true,
+    "repairer_calls": 0,
+    "worker_status": "done",
+    "note": "Proves the tested Colab environment executes complete tasks end-to-end to Root verification."
+  },
+  "experiment16_timer": {
+    "completed_trials": 3,
+    "context_sufficient": 3,
+    "first_legal_mutation": 3,
+    "formal_child_verification_started": 2,
+    "child_verified": 0,
+    "note": "Both formal child browser calls selected Game for Timer; one trial first blocked elsewhere."
+  },
+  "experiment17_deterministic_protocol": {
+    "timer_total": 3,
+    "current_timer_classified_timer": 0,
+    "field_scoped_timer_classified_timer": 3,
+    "game_total": 6,
+    "field_scoped_game_classified_game": 6,
+    "identity_perturbations_invariant": 27,
+    "identity_perturbations_total": 27,
+    "fresh_worker_results_in_public_protocol": false
+  },
+  "experiment18a_windows": {
+    "complete_timer_trials": 2,
+    "context_gate_passed": 0,
+    "first_legal_mutation": 0,
+    "observed_invalid_evidence_kinds": [
+      "code_snippet",
+      "function_signature",
+      "variable_scope"
+    ],
+    "schema_validator_mismatch_confirmed": true,
+    "true_evidence_deficit_proven": false,
+    "model_digest": "a3d2b95350da03ff9b1943a753bb6617c49a3ee462b632a758518ec817743986",
+    "model_size_bytes": 9609530651,
+    "model_parameter_size_reported": "8.0B"
+  },
+  "experiment18b_colab": {
+    "model_digest": "dc35e8d9c6061baa6f0fa870975ab6932e2542b579b13ea0f199fa4bb7300c9c",
+    "model_size_bytes": 6583656505,
+    "model_parameter_size_reported": "7.5B",
+    "ollama_version": "0.40.2",
+    "gpu": "NVIDIA Tesla T4",
+    "num_ctx": 12288,
+    "same_weights_as_18a": false,
+    "current_live": {
+      "preflight": "PASS",
+      "context_mutation_authorizations": 1,
+      "first_legal_mutation_step": 3,
+      "mutation_applied_count": 1,
+      "formal_child_browser_calls": 1,
+      "browser_profile": "game",
+      "first_blocker": "CHILD_VERIFICATION/VERIFIER_UNAVAILABLE",
+      "root_verified": false
+    },
+    "field_scoped_initial_preflight": {
+      "preflight": "FAIL",
+      "failure_stage": "canary",
+      "failure_reason": "CANARY_PROVIDER_FAILURE",
+      "summary": "timed out while model was loading",
+      "worker_started": false
+    },
+    "field_scoped_live_retry": {
+      "preflight": "PASS",
+      "context_mutation_authorizations": 1,
+      "first_legal_mutation_step": 3,
+      "mutation_attempts": 3,
+      "mutation_applied_count": 1,
+      "mutation_rejected_count": 2,
+      "bounded_refreshes": 0,
+      "first_blocker": "MUTATION_GROUNDING/MUTATION_TARGET_UNRESOLVED",
+      "formal_child_browser_calls": 0,
+      "root_verified": false,
+      "target_locator_policy": "evidence_directed",
+      "offered_tools": ["read_file", "read_candidate_span"],
+      "unavailable_tools": ["read_file_range"],
+      "controller_instructed_tool": "read_file_range",
+      "tool_contract_mismatch_confirmed": true
+    },
+    "deterministic_grounding_controls": {
+      "without_refresh": {
+        "mutation_attempts": 3,
+        "applied": 1,
+        "rejected": 2,
+        "refreshes": 0,
+        "terminal_reason": "MUTATION_TARGET_UNRESOLVED",
+        "passed": false
+      },
+      "with_read_file_range_refresh": {
+        "mutation_attempts": 3,
+        "applied": 2,
+        "rejected": 1,
+        "refreshes": 1,
+        "terminal_reason": null,
+        "passed": true
+      },
+      "with_read_file_refresh": {
+        "fixture_lines": 17,
+        "mutation_attempts": 3,
+        "applied": 2,
+        "rejected": 1,
+        "refreshes": 1,
+        "terminal_reason": null,
+        "passed": true
+      }
+    },
+    "verification_replay_1": {
+      "environment_valid": false,
+      "reason": "Playwright sync API invoked inside notebook asyncio event loop",
+      "exclude_from_controlled_comparison": true
+    },
+    "verification_replay_2": {
+      "environment_valid": true,
+      "identical_source_sha256": "b18903dd1d6d13bfeb33ed012fa2a728f7c31a5899baf5efe3ac28ab58a8161e",
+      "production_verifier": "mini.verify_browser_application",
+      "current": {
+        "profile": "game",
+        "environment_error": false,
+        "passed": false
+      },
+      "field_scoped": {
+        "profile": "timer",
+        "environment_error": false,
+        "passed": true,
+        "timer_start_changes_visible_time": true,
+        "timer_pause_freezes_visible_time": true,
+        "timer_reset_restores_visible_time": true
+      }
+    },
+    "independent_manual_acceptance": {
+      "source_sha256": "b18903dd1d6d13bfeb33ed012fa2a728f7c31a5899baf5efe3ac28ab58a8161e",
+      "initial_start": true,
+      "pause_freezes": true,
+      "resume_after_pause": false,
+      "reset_restores": true,
+      "machine_readable_raw_test_output_saved": false
+    }
+  },
+  "conclusions": {
+    "classifier_fix_verified_at_browser_boundary": true,
+    "full_worker_success_verified": false,
+    "18a_true_insufficient_context_proven": false,
+    "hardware_caused_18a_vs_18b_difference_proven": false,
+    "second_edit_rejected_due_to_stale_source": true,
+    "tool_contract_mismatch_confirmed": true,
+    "tool_contract_mismatch_sole_cause_proven": false,
+    "grounding_recovery_proven_with_source_refresh": true,
+    "verification_coverage_gap_observed": true
+  },
+  "unresolved_hypotheses": {
+    "H1": "The context schema does not communicate the validator's allowed evidence request kinds precisely enough.",
+    "H2": "The Worker incorrectly reports insufficient context despite receiving adequate evidence.",
+    "H3": "Relevant semantic evidence is available but represented poorly in the Worker context packet.",
+    "H4": "The Worker fails to follow recovery instructions after rejected mutations.",
+    "H5": "Mutation-grounding refresh rules are appropriate, but the controller does not reliably guide the Worker through recovery.",
+    "H6": "Bounded refresh and retry budgets prematurely terminate recoverable workflows.",
+    "H7": "The Worker may misunderstand source-state freshness following successful edits.",
+    "H8": "The browser verification contract lacks important state-transition tests.",
+    "H9": "Differences in model artifacts or inference behavior influence Worker decisions.",
+    "H10": "Context sufficiency, mutation grounding, and verification sufficiency are insufficiently distinguished at the system level."
+  },
+  "raw_data_uploaded_to_github": false,
+  "limitations": [
+    "This synthesis is not a substitute for raw archived trials.",
+    "Windows and Colab used different model artifacts.",
+    "Two complete Windows Timer trials, one complete cloud trial per policy, and one valid controlled browser replay do not estimate general reliability.",
+    "The independent manual resume test needs separately saved raw output for repeatability."
+  ],
+  "related_documents": [
+    "reports/experiment18/EXPERIMENT18B_HANDOFF.md",
+    "reports/experiment18/RESEARCH_HISTORY.md",
+    "reports/experiment18/experiment18-report.md"
+  ]
+}

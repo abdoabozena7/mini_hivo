@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "native_proof_accepted": true,
+    "observed_file_hash_current": true,
+    "generic_pass_rejected": true,
+    "missing_actual_sha256_rejected": true,
+    "missing_passed_rejected": true,
+    "foreign_contract_rejected": true,
+    "wrong_digest_rejected": true,
+    "contradictory_boolean_rejected": true,
+    "contradictory_status_rejected": true,
+    "wrong_target_rejected": true,
+    "wrong_tool_rejected": true
+  },
+  "all_passed": true,
+  "routing_source_sha256": "dbed610dcb219e9ca3aa3458aee73496388019c108024aef2bb3ebcef830f1ce",
+  "proof_origin": "actual Builder run_file result read from controlled replay SQLite events in read-only mode"
+}

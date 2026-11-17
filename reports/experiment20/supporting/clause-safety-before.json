@@ -1,0 +1,10 @@
+[
+  {
+    "pattern": "test_experiment20_child_scope.py",
+    "tests": 31,
+    "exit_code": 1,
+    "summary": [
+      "FAILED (failures=2)"
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[MODE] baseline
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file test_level_1.txt
+[TOOL] run_command cat test_level_1.txt
+[TOOL] run_command echo test_level_1.txt
+[TOOL] run_file test_level_1.txt
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[TOOL] run_file test_level_1.txt
+[ROOT VERIFIED] PASS
+{
+  "status": "done",
+  "root_verified": true,
+  "file_exists": true,
+  "exact_bytes": true,
+  "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+  "falsifier_native_readbacks": 1
+}

@@ -1,0 +1,327 @@
+{
+  "follow_up": "Experiment 3, Tasneem greenfield feedback/progress corrections",
+  "measurement_status": "Retrospective extraction; no tests or live runs executed for publication",
+  "baseline": "1e233845b3e9d26b10bb66238ec13a00f108356e",
+  "published_treatment": "5e66d34db1827b814abf98f56b0b77b5ef6f8ee5",
+  "branch": "fix/greenfield-worker-context-progress",
+  "intermediate_versions": "Uncommitted original comparison states; no separate immutable commit",
+  "python": "3.11.9",
+  "source_files": {
+    "mini.py": "e62f775d1021aeb0d985973f432ecaf9933f2998ac997288d4a6c89a704fe909",
+    "tests/test_greenfield_context_progress.py": "50fd17af70d3b93911f52379df6985270347cffc0ce0c92e788ca55f0ba5687b"
+  },
+  "original_protocol": [
+    {
+      "source_file": "baseline-tests.txt",
+      "source_sha256": "e4f2af88658020cc32e2e5d8c4475ade2c1a70fc6723748702fc98477708782d",
+      "availability": "LOCAL-ONLY"
+    },
+    {
+      "source_file": "two-case-regression-snapshot.py",
+      "source_sha256": "94579da843c13d893af09ba6047f70a7e3291eb95f56eddba4e25cde05b6d106",
+      "availability": "LOCAL-ONLY"
+    }
+  ],
+  "recorded_ledgers": [
+    {
+      "source_file": "feedback-only-results.json",
+      "source_sha256": "8c75fe84fe73a543d33df46cd72819d18014b34955d3f0894aed1aa7eb8eb063",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "exit_code": 1,
+          "tests": 2,
+          "log": "feedback-only-01-test_greenfield_context_progress.py.log",
+          "summary": [
+            "FAILED (failures=1)"
+          ],
+          "diagnostics": [
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": true,
+              "status": "budget_exhausted",
+              "failure_type": "EXECUTION_BUDGET_EXHAUSTED",
+              "tool_steps": 28,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_file": "targeted-fixes-results.json",
+      "source_sha256": "80e3688bbedecfb0849cae52af5872439a7435e577740f8736d5cb81cb4c2b86",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "exit_code": 0,
+          "tests": 2,
+          "log": "targeted-fixes-01-test_greenfield_context_progress.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": [
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": true,
+              "status": "failed",
+              "failure_type": "WORKER_NO_MUTATION_PROGRESS",
+              "tool_steps": 4,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_file": "final-focused-results.json",
+      "source_sha256": "60570b0bb942545841bbcb68689afaae80d8c0ae244e4e1d3dc49238da7e645e",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "exit_code": 0,
+          "tests": 9,
+          "log": "final-focused-01-test_greenfield_context_progress.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": [
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": true,
+              "status": "failed",
+              "failure_type": "WORKER_NO_MUTATION_PROGRESS",
+              "tool_steps": 4,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "failed",
+              "failure_type": "CONTEXT_INSUFFICIENT",
+              "tool_steps": 2,
+              "impact_authorized": false,
+              "feedback_visible_after_first_check": false,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 8,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": true,
+              "status": "failed",
+              "failure_type": "WORKER_NO_MUTATION_PROGRESS",
+              "tool_steps": 4,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "failed",
+              "failure_type": "IMPACT_CONTRACT_INVALID",
+              "tool_steps": 2,
+              "impact_authorized": false,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            },
+            {
+              "repeat": false,
+              "status": "done",
+              "failure_type": null,
+              "tool_steps": 2,
+              "impact_authorized": true,
+              "feedback_visible_after_first_check": true,
+              "initial_user_chars": 10297,
+              "progress_wrapper": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_file": "mechanism-regressions-results.json",
+      "source_sha256": "463f8a009295fcfa49d870c75167c699e24b61fe52a722eb2efc2ba95240a8c8",
+      "availability": "LOCAL-ONLY original ledger; curated fields below",
+      "records": [
+        {
+          "exit_code": 0,
+          "tests": 9,
+          "log": "mechanism-regressions-01-test_context_sufficiency_gate.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 27,
+          "log": "mechanism-regressions-02-test_pre_mutation_impact.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 4,
+          "log": "mechanism-regressions-03-test_experiment3_worker_progress.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 9,
+          "log": "mechanism-regressions-04-test_experiment4_mutation_grounding.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 9,
+          "log": "mechanism-regressions-05-test_experiment15_evidence_edit.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 3,
+          "log": "mechanism-regressions-06-test_context_policy.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 36,
+          "log": "mechanism-regressions-07-test_execution_contracts.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        },
+        {
+          "exit_code": 0,
+          "tests": 32,
+          "log": "mechanism-regressions-08-test_project_understanding.py.log",
+          "summary": [
+            "OK"
+          ],
+          "diagnostics": []
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Controlled provider/mission seams, not live model causality",
+    "No full historical Run-006 model-visible requests",
+    "138 selected methods, not full-suite certification",
+    "Historical raw intermediate replay material remains local-only"
+  ],
+  "git_status_at_preparation": {
+    "team_main": "f842fb8fb6e63e3064891d26ee0b24981e55c847",
+    "fork_main": "7e96a3708d1dd9f0570104f63d70264aa9935fd5",
+    "fixes_are_ancestors_of_neither_main": true,
+    "checked_live_refs_and_pr_states": true,
+    "team_pr7": {
+      "state": "open",
+      "merged": false,
+      "head": "2a8b94590734cec3375047a18e0dc71df2476f85"
+    },
+    "team_pr9": {
+      "state": "open",
+      "merged": false,
+      "head": "d15b6068f78dd5b9e46daacd81f5543af5c2cf89"
+    },
+    "team_pr10": {
+      "state": "open",
+      "merged": false,
+      "head": "6ec3bda16e88af764f63ea9fc7319096ffd25cbe"
+    },
+    "note": "Status snapshot before follow-up publication, not a future integration guarantee"
+  },
+  "run010_report": {
+    "source_file": "Run-010/REPORT.md",
+    "source_sha256": "b0bd376db4a76e342196d63af2ae4e72c019215419efa6b94dedd515f5934b07",
+    "availability": "LOCAL-ONLY original report",
+    "implementation": "2a8b94590734cec3375047a18e0dc71df2476f85",
+    "builder_context_checks": 1,
+    "repairer_context_checks": 2,
+    "unsupported_kind_errors_observed": 0,
+    "candidate_bytes": 13012,
+    "final_transaction_acceptance": false,
+    "outcome": "Manually stopped; partial game, required verification failed"
+  }
+}

@@ -13,6 +13,16 @@ attributable.
 .\.venv\Scripts\python.exe mini.py
 ```
 
+To pin all roles to GPT-OSS 20B through Ollama Cloud instead:
+
+```powershell
+ollama pull gpt-oss:20b-cloud
+.\.venv\Scripts\python.exe mini.py --model gpt-oss:20b-cloud
+```
+
+This option requires Ollama Cloud authentication. Each run still uses one
+model for every role, with no cross-model fallback.
+
 At the workspace prompt, pressing Enter creates the next numbered project under
 `list/` (`project-1`, `project-2`, ...). Supplying an existing path uses that
 path directly. Legacy files that previously lived directly under `list/` are

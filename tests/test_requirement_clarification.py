@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import mini
 
@@ -429,7 +430,8 @@ Example upgrades:
         raw = "Build a tool.\n" + "\n".join(
             f"- explicit requirement {index} " + ("detail " * 20) for index in range(1, 65)
         )
-        contract = mini.get_goal_contract(raw, interactive=False)
+        with patch.object(mini, "structured_model_call", return_value={"questions": []}):
+            contract = mini.get_goal_contract(raw, interactive=False)
         brain = mini.build_project_brain(contract, self.specification(contract["goal"]), {"files": []})
         compact = mini.compact_project_brain(brain)
         self.assertLessEqual(len(compact), mini.MAX_PROJECT_BRAIN_CHARS)

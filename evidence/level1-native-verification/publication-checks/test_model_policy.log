@@ -1,0 +1,9 @@
+test_any_other_requested_model_is_rejected (test_model_policy.SingleModelPolicyTests.test_any_other_requested_model_is_rejected) ... ok
+test_every_role_is_pinned_to_gemma (test_model_policy.SingleModelPolicyTests.test_every_role_is_pinned_to_gemma) ... ok
+test_staged_builder_uses_twelve_k_context_not_the_model_maximum (test_model_policy.SingleModelPolicyTests.test_staged_builder_uses_twelve_k_context_not_the_model_maximum) ... ok
+test_weak_model_sampling_is_low_variance_and_role_specific (test_model_policy.SingleModelPolicyTests.test_weak_model_sampling_is_low_variance_and_role_specific) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.346s
+
+OK

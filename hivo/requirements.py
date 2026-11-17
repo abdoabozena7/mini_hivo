@@ -384,8 +384,66 @@ def _append_candidate_text(candidate, text):
     candidate["_raw_text"] = f"{current} {text}".strip()
 
 
+def literal_file_request(text):
+    """Recognize an explicit single-file request; never guess executable code or paths."""
+    text = str(text or "").strip()
+    if "\r" in text or "\n" in text:
+        return None
+    token = r"(?:`[^`\n]*`|'[^'\n]*'|\"[^\"\n]*\"|[^\s'\"`]+)"
+    prefix = (rf"\s*(?:create|make|write)\s+"
+              rf"(?P<descriptor>(?:a\s+)?(?:(?:text|txt)\s+)?file\s+(?:(?:named|called)\s+)?)?"
+              rf"(?P<name>{token})\s+containing\s+")
+
+    def filename(match):
+        name = match["name"]
+        name = name[1:-1] if name[:1] in {"'", '"', '`'} else name.rstrip(".")
+        if not match["descriptor"] and not re.search(r"\.[a-z0-9]+$", name, re.IGNORECASE):
+            return ""
+        return name
+    # Explicit delimiters take precedence: the generic token grammar would
+    # otherwise consume `exactly:Hello` itself as the requested file content.
+    # Match empty payloads too so malformed colon syntax cannot fall through.
+    match = re.fullmatch(
+        prefix + r"exactly\s*:\s*(?P<content>[^\r\n]*)", text, re.IGNORECASE,
+    )
+    if match:
+        # A colon explicitly delimits a single-line literal payload, including
+        # spaces. Keep this separate from arbitrary unquoted prose requests.
+        content = match['content'].strip()
+        if not content or re.search(
+                r"(?:[.!?;]\s+|\s+)(?:also|then|and\s+(?:create|make|write|change|delete|run))\b",
+                content, re.IGNORECASE):
+            return None
+        if content[0] in {"'", '"', '`'}:
+            quote = content[0]
+            quoted = re.fullmatch(rf"{re.escape(quote)}([^\r\n{re.escape(quote)}]*){re.escape(quote)}\.?", content)
+            if not quoted:
+                return None
+            content = quoted[1]
+        elif any(quote in content for quote in ("'", '"', '`')):
+            return None
+        name = filename(match)
+        return {"name": name, "content": content, "kind": "text"} if name else None
+    match = re.fullmatch(
+        prefix + rf"(?:exactly\s+)?(?:the\s+text\s+)?(?P<content>{token})\s*\.?\s*",
+        text, re.IGNORECASE,
+    )
+    if not match:
+        return None
+    def literal(value):
+        return value[1:-1] if value[:1] in {"'", '"', '`'} else value.rstrip('.')
+    name, content = filename(match), literal(match['content'])
+    return {"name": name, "content": content, "kind": "text"} if name else None
+
+
 def deterministic_requirement_candidates(segment_text, source_segment):
     """Extract obvious explicit statements without pretending to understand everything."""
+    artifact = literal_file_request(segment_text)
+    if artifact:
+        return [{"text": text, "category": "functional", "source_segment": source_segment}
+                for text in ("Create a text file.",
+                             f"The file name must be {artifact['name']!r}.",
+                             f"The content of the file must be exactly {artifact['content']!r}.")]
     raw_lines = [line for line in str(segment_text or "").splitlines() if line.strip()]
     lines = [(line.strip(), len(line) - len(line.lstrip())) for line in raw_lines]
     has_bullets = any(_BULLET_RE.match(line) for line, _indent in lines)
@@ -755,18 +813,70 @@ def _lifecycle_kinds(text):
     return kinds
 
 
+def _scoped_requirement_actions(text):
+    """Extract bounded action/object/polarity assertions, not noun overlap.
+
+    Predicates are open vocabulary: explicit negation of an unfamiliar verb
+    still conflicts with the same affirmative verb. Unknown prose is left to
+    semantic clarification rather than promoted to a certain contradiction.
+    """
+    assertions = []
+    for clause in re.split(r"[.!?;\n]|\bbut\b", str(text or "").casefold()):
+        clause = clause.strip(" ,:-")
+        if not clause:
+            continue
+        modal = re.search(r"\b(?:must|shall|should|can|may|cannot)\s+(not\s+)?", clause)
+        subject = clause[:modal.start()] if modal else ""
+        negative = bool(modal and (modal.group(1) or modal.group(0).startswith("cannot")))
+        predicate = clause[modal.end():] if modal else clause
+        prefix = re.match(r"(?:do\s+not|does\s+not|never|don['’]t)\s+", predicate)
+        if prefix:
+            negative = True
+            predicate = predicate[prefix.end():]
+        predicate = re.sub(r"^(?:always|also)\s+", "", predicate)
+        match = re.match(r"([a-z]+)\s+(.+)", predicate)
+        if not match:
+            continue
+        action, body = match.groups()
+        # Preserve exact conditions; a ban before confirmation is not a ban
+        # after confirmation. An unconditional assertion overlaps either.
+        scope = re.search(r"\b(?:if|when|after|before|until|unless|without)\b", body)
+        condition = " ".join(body[scope.start():].split()) if scope else ""
+        objects = body[:scope.start()] if scope else body
+        if action in {"remain", "remains", "stay", "stays"} and "unchanged" in objects:
+            action, objects = "preserve", subject
+        present = {"preserve", "preserves", "keep", "keeps", "retain", "retains", "support", "supports", "include", "includes", "enable", "enables"}
+        absent = {"remove", "removes", "delete", "deletes", "discard", "discards", "disable", "disables", "exclude", "excludes"}
+        if action in present | absent:
+            negative = negative != (action in absent)
+            action = "presence"
+        for object_text in re.split(r"\b(?:and|or)\b", objects):
+            targets = frozenset(_conflict_target_tokens(object_text))
+            if targets:
+                assertions.append((action, targets, negative, condition))
+    return assertions
+
+
+def _has_opposed_scoped_actions(left_text, right_text):
+    for la, lo, ln, lc in _scoped_requirement_actions(left_text):
+        for ra, ro, rn, rc in _scoped_requirement_actions(right_text):
+            if la == ra and lo == ro and ln != rn and (not lc or not rc or lc == rc):
+                return True
+    return False
+
+
+def _affirmative_requirement_clauses(text):
+    # Reset/persistence rules must not promote a prohibited reset to an action.
+    return ". ".join(clause for clause in re.split(r"[.!?;\n]", str(text or ""))
+                     if not re.search(r"\b(?:not|never|cannot)\b", clause, re.IGNORECASE))
+
+
 def _conflict_evidence(left, right, left_text, right_text):
     """Return bounded positive contradiction evidence, or None when uncertain."""
     if _is_conflict_heading(left_text) or _is_conflict_heading(right_text):
         return None
 
-    left_positive = _positive_target_tokens(left_text)
-    right_positive = _positive_target_tokens(right_text)
-    left_negative = _negative_target_groups(left_text)
-    right_negative = _negative_target_groups(right_text)
-
-    if (any(target <= left_positive for target in right_negative)
-            or any(target <= right_positive for target in left_negative)):
+    if _has_opposed_scoped_actions(left_text, right_text):
         left_effect = compact_text(left_text, 260)
         right_effect = compact_text(right_text, 260)
         return {
@@ -778,10 +888,12 @@ def _conflict_evidence(left, right, left_text, right_text):
             "can_satisfy_both": False,
         }
 
-    left_global_reset = bool(_RESET_SCOPE_RE.search(left_text))
-    right_global_reset = bool(_RESET_SCOPE_RE.search(right_text))
-    left_full_reset = bool(_RESET_FULL_SCOPE_RE.search(left_text))
-    right_full_reset = bool(_RESET_FULL_SCOPE_RE.search(right_text))
+    left_affirmative = _affirmative_requirement_clauses(left_text)
+    right_affirmative = _affirmative_requirement_clauses(right_text)
+    left_global_reset = bool(_RESET_SCOPE_RE.search(left_affirmative))
+    right_global_reset = bool(_RESET_SCOPE_RE.search(right_affirmative))
+    left_full_reset = bool(_RESET_FULL_SCOPE_RE.search(left_affirmative))
+    right_full_reset = bool(_RESET_FULL_SCOPE_RE.search(right_affirmative))
     left_persistence = bool(_PERSISTENCE_RE.search(left_text))
     right_persistence = bool(_PERSISTENCE_RE.search(right_text))
     same_lifecycle = bool(_lifecycle_kinds(left_text) & _lifecycle_kinds(right_text))
@@ -1011,11 +1123,17 @@ def specification_coverage(ledger, specification):
             fields[field] = [str(item) for item in value]
         elif isinstance(value, str):
             fields[field] = [value]
+    def coverage_tokens(value):
+        # A filename assertion and "a file named X" express the same surface.
+        # Keep the actual identifier tokens, so a different filename cannot map.
+        normalized = re.sub(r"\bfilename\b", "file name", str(value), flags=re.IGNORECASE)
+        normalized = re.sub(r"\bnamed\b", "name", normalized, flags=re.IGNORECASE)
+        return _overlap_tokens(normalized, normalized)[0]
     result = []
     for record in ledger_requirements(ledger):
         text = str(record.get("text", ""))
         key = _requirement_key(text)
-        tokens, _ = _overlap_tokens(text, text)
+        tokens = coverage_tokens(text)
         matched_fields = []
         for field, values in fields.items():
             for value in values:
@@ -1023,7 +1141,7 @@ def specification_coverage(ledger, specification):
                 if key and (key in value_key or value_key in key):
                     matched_fields.append(field)
                     break
-                value_tokens, _ = _overlap_tokens(value, value)
+                value_tokens = coverage_tokens(value)
                 needed = max(2, math.ceil(len(tokens) * 0.7)) if tokens else 99
                 if len(tokens & value_tokens) >= needed:
                     matched_fields.append(field)

@@ -1094,6 +1094,14 @@ def feedback_for_result(result: Mapping[str, Any] | None) -> str:
     """Render a small model-facing feedback message without source blobs."""
     value = result if isinstance(result, Mapping) else {}
     status = value.get("context_status")
+    if value.get("decision_valid") is False:
+        return _text(
+            "CONTEXT_DECISION_INVALID: submitted decision rejected; context gate state "
+            "and authorization are unchanged. Resubmit using the advertised schema. "
+            f"state={value.get('lifecycle_state')}; mutation_allowed={bool(value.get('mutation_allowed'))}. "
+            + "; ".join(str(error) for error in value.get("errors", [])),
+            900,
+        )
     if value.get("mutation_allowed"):
         return "CONTEXT_SUFFICIENT: the bounded context gate passed. Mutation tools are now authorized for the current task."
     if value.get("failure_code"):

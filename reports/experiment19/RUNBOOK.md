@@ -1,29 +1,75 @@
-# Experiment 19 — Mandatory Context Decision Closure
+# Experiment 19 — Offline Reproduction
 
-The optional `worker_context_decision_policy=bounded_closure` applies to an
-approved mutation Builder after it has obtained new relevant source evidence
-but has not submitted `context_sufficiency_check`. A prose or empty stop gets
-one re-anchor within the existing 28-round budget. If the Worker still omits
-the decision, the controller records `CONTEXT_DECISION_MISSING`. The same
-classification applies when the provider filters repeated empty model
-responses after that one re-anchor. Actual transport/provider errors retain
-their existing path. The default remains `current`.
+**Recorded live campaign:** production observations lead the [report](experiment19-report.md). See [live results](supporting/live-results-20261107.json), [protocol](supporting/live-protocol-20261107.json) and [evidence](supporting/live-evidence-20261107.json). Raw harnesses remain local-only; this is not a portable live runner. No new execution was performed for this update.
 
-The A/B comparison holds the Experiment 18 no-tool guard, field-scoped browser
-classification, strict semantic evidence, evidence-bound mutation, model
-`gemma4:e4b`, approved Python contract, and seed fixed. Each arm has three
-fresh runs. The only runtime variant is `worker_context_decision_policy`.
+**Historical commands below:** require their original pinned source/test revision. Updated parent recognition/tests intentionally fail historical pin/count checks; do not relax those checks or relabel results. Future historical reproduction requires its immutable revision in a separately approved isolated checkout; current-revision checks need a separately defined cohort. None were run for this preparation.
 
-An initial diagnostic batch (`v1`) showed the provider retrying three empty
-responses after the context re-anchor, then raising an incomplete-response
-error before the controller could classify the missing decision. The final
-`v2` batch includes the bounded classification for that exact provider signal
-and uses newly pinned, identical production source in both arms. Only `v2`
-contributes to the reported A/B rates.
+## Prerequisites and fixed boundary
 
-The existing context gate still decides whether evidence is sufficient.
-Controller tests prove an `insufficient` decision remains valid and a
-`sufficient` claim against contradictory evidence cannot authorize mutation.
-The run audit also counts authorizations with empty evidence, contradictions,
-or unresolved semantic status. That count is a safety screen; it does not
-replace independent behavior verification.
+Use Python 3.11 or a supported later version, existing Mini Hivo test dependencies,
+and this submission checkout. No package/model/browser installation is required.
+Git must contain baseline `2a8b94590734cec3375047a18e0dc71df2476f85` and
+treatment `f8bf65ece895f70c1b572b59df229314de09afbe`. The probe loads those immutable
+pure modules without checking out either revision. It requires the committed
+curated fixture, not the private SQLite database.
+The local `.gitattributes` preserves supporting JSON bytes across checkouts so
+the recorded fixture SHA-256 remains reproducible on Windows and other hosts.
+
+The regression runner tests the current checkout. Its production source must
+match treatment; [manifest.json](manifest.json) provides canonical Git-blob
+hashes. Normal CRLF checkout conversion is not a production change. The fresh
+results here used Python 3.11.9 with the three treatment source files unchanged.
+
+## Paired protocol
+
+From repository root, choose a NEW output directory outside the repository:
+
+```powershell
+python -B scripts/experiment19_probe.py --output-dir <fresh-protocol-output-directory>
+```
+
+The directory must not exist. `comparison.json` contains each case's input hash,
+expected/actual result, route status and arm totals. The final recorded matrix
+is [supporting/comparison.json](supporting/comparison.json). There are 16 cases
+per arm, not 32 independent software tasks. A nonzero exit signals a treatment
+expectation mismatch or unequal inputs; baseline defects are measured rather
+than required to pass.
+
+## Selected regression cohort
+
+```powershell
+python -B scripts/experiment19_validate.py --output-dir <fresh-selected-test-output-directory>
+```
+
+This runs the nine named suites in separate processes, with a 180-second cap per
+suite. Unexpected `mini.ask_ollama` and `mini.structured_model_call` calls raise
+instead of reaching a provider. Test-specific deterministic providers exercise
+the real selected Worker/gate/file-tool paths. No browser/E2E runner is invoked.
+Each suite log and `results.json` stay in the fresh output directory. Temporary
+test files use its own `tmp` subdirectory. Full argv is visible in the runner;
+the logical per-suite command is:
+
+```text
+python -B -m unittest discover -s tests -p <suite-filename> -v
+```
+
+The extra bootstrap is necessary to prevent accidental live provider calls.
+Tests import inherited regression helpers, including the greenfield fixture
+already present at the PR #7 baseline. Do not copy only this test into an older
+checkout and call missing-helper failures a treatment regression.
+
+## Review checks and interpretation
+
+```text
+git diff --check
+git diff 2a8b94590734cec3375047a18e0dc71df2476f85 --name-only
+```
+
+The intended review boundary is the unmerged PR #7 head, not current team main.
+The historical preparation proposed a stacked base. PR #9 was subsequently published cumulatively against team main by explicit approval; the dependency-relative Experiment 19 boundary remains unchanged. This local preparation does not alter its target or history.
+
+Read the [report](experiment19-report.md) before interpreting denominators.
+Protocol decisions, unit methods, Worker progress, final transaction acceptance
+and live E2E success are different measures. These commands do not establish
+live application success. Missing historical authority fixtures remain a stated
+validation gap; do not invent them or relax gates to make a suite green.

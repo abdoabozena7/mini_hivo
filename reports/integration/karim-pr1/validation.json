@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "scope": "Karim PR #1 local content integration and live acceptance before terminal UI changes",
+  "base_main": "6887d0bfeda237d841ba6a3ac842d184b5ad55b8",
+  "pull_request": "https://github.com/abdoabozena7/mini_hivo/pull/1",
+  "incoming_head": "34a972a0b2feb80a31e06d0b93d6c22ca2961bc8",
+  "incoming_commits": 36,
+  "history_policy": "Two-parent merge; no squash, rebase or history rewriting",
+  "final_implementation_fingerprint": "51d6004ca2e5fe225a517a3e12362224cfb7c5da446638b80923bc18515ae67f",
+  "fingerprint_method": "SHA-256 of UTF-8 json.dumps(sorted relative mini.py and hivo/*.py SHA-256 mapping, sort_keys=True), captured before each command",
+  "model": "gemma4:e4b",
+  "model_digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+  "live_attempts": [
+    {
+      "id": "live-literal-01",
+      "outcome": "interrupted diagnostic, not accepted",
+      "process_exit_code": null,
+      "observation": "Correct bytes were created, but model-selected read_file did not establish the typed native verification route.",
+      "response": "Added independent controller readback using accepted source-bound literal authority."
+    },
+    {
+      "id": "live-literal-02",
+      "source_fingerprint": "6a8ac5cb82f2edea5799232872c1983c14aa599f5881355de2f412c5ea3f4a59",
+      "exit_code": 1,
+      "elapsed_seconds": 381.749,
+      "outcome": "failed and rolled back",
+      "observation": "The original compact filename syntax and outer prompt-file newline did not enter the literal parser; generic authorization had no literal digest.",
+      "response": "Recognize explicit filename/file forms and strip only outer source whitespace; retain rejection of compound or internally multiline requests."
+    },
+    {
+      "id": "live-literal-03",
+      "source_fingerprint": "dba0ee77071d458f43b89e6e92accb408bf51944a5d5cc5e6556b2871b32e494",
+      "exit_code": 0,
+      "elapsed_seconds": 61.274,
+      "prompt": "Create proof.txt containing exactly:MERGE_READY\n",
+      "expected_relative_path": "proof.txt",
+      "expected_utf8_hex": "4d455247455f5245414459",
+      "actual_utf8_hex": "4d455247455f5245414459",
+      "independent_exact_byte_check": true,
+      "outcome": "accepted"
+    },
+    {
+      "id": "live-greeting-01",
+      "source_fingerprint": "dba0ee77071d458f43b89e6e92accb408bf51944a5d5cc5e6556b2871b32e494",
+      "exit_code": 1,
+      "elapsed_seconds": 238.276,
+      "outcome": "failed and rolled back; independent product oracle also failed",
+      "observation": "Source acceptance correctly rejected a missing exclamation mark even after generated tests were changed to agree. The whole-draft-only repair policy then refused focused repairs.",
+      "response": "Use the existing focused Repairer for source-observed expected/actual mismatches; keep coherent whole-draft creation policy unchanged."
+    },
+    {
+      "id": "live-greeting-02",
+      "source_fingerprint": "51d6004ca2e5fe225a517a3e12362224cfb7c5da446638b80923bc18515ae67f",
+      "exit_code": 0,
+      "elapsed_seconds": 99.661,
+      "outcome": "accepted",
+      "independent_checks": [
+        {"input": "python greet.py", "stdout": "Hello, World!\n", "exit_code": 0},
+        {"input": "python greet.py Ada", "stdout": "Hello, Ada!\n", "exit_code": 0},
+        {"input": "python greet.py Bob", "stdout": "Hello, Bob!\n", "exit_code": 0},
+        {"input": "greet(), greet('Ada'), greet('Bob')", "values": ["Hello, World!", "Hello, Ada!", "Hello, Bob!"]},
+        {"input": "python -m unittest test_greet.py -q", "tests_run": 2, "exit_code": 0}
+      ],
+      "product_sha256": {
+        "greet.py": "1de0a8ce9b5a329a5cf20ded07ddb995a1814ac2fc43625f734754c3fe29fcab",
+        "test_greet.py": "92695f9ff153189740273eefd5f860c5b45223e3c6519e18a1ab837e03e86c67"
+      }
+    }
+  ],
+  "regression": [
+    {"id": "merged-final-regression", "command": "python -X utf8 -m unittest discover -s tests -q", "tests_run": 1901, "skipped": 4, "exit_code": 0, "elapsed_seconds": 151.519, "browser_opt_in": true},
+    {"id": "merged-final-self-test", "command": "python -X utf8 mini.py --self-test --no-bootstrap", "exit_code": 0, "elapsed_seconds": 5.864, "source_fingerprint": "51d6004ca2e5fe225a517a3e12362224cfb7c5da446638b80923bc18515ae67f"},
+    {"id": "source-mismatch-focused-repair", "tests_run": 157, "skipped": 0, "exit_code": 0, "elapsed_seconds": 21.955},
+    {"id": "literal-source-pipeline-proof", "tests_run": 144, "skipped": 0, "exit_code": 0, "elapsed_seconds": 16.874},
+    {"id": "contributor-real-browser", "tests_run": 5, "skipped": 0, "exit_code": 0, "elapsed_seconds": 18.774},
+    {"id": "merged-self-test-03", "command": "python -X utf8 mini.py --self-test --no-bootstrap", "exit_code": 0, "elapsed_seconds": 16.34, "source_fingerprint": "dba0ee77071d458f43b89e6e92accb408bf51944a5d5cc5e6556b2871b32e494"}
+  ],
+  "evidence_boundary": "Sanitized derivative of private original command records, transcripts, SQLite receipts and independent product checks. Local host inventories, personal absolute paths and raw runtime databases are intentionally omitted. A final merge commit hash and remote PR merged state are recorded only after the actual publication.",
+  "ui_scope": "Not implemented or claimed by this checkpoint"
+}

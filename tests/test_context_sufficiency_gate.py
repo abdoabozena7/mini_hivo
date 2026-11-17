@@ -646,7 +646,7 @@ class ContextSufficiencyGateTests(unittest.TestCase):
             )
 
         self.assertEqual(mutation_calls, [])
-        self.assertEqual(result["failure_type"], stage7.CONTEXT_INSUFFICIENT_FAILURE)
+        self.assertEqual(result["failure_type"], "CONTEXT_SUFFICIENCY_REQUIRED")
         self.assertFalse(result["mutation_authorized"])
 
     def test_evidence_completion_replaces_slots_and_stays_bounded(self):

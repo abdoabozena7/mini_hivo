@@ -1,0 +1,54 @@
+{
+  "experiment": 20,
+  "status": "Offline-validated bounded greenfield-game implementation; live E2E pending",
+  "baseline": "d15b6068f78dd5b9e46daacd81f5543af5c2cf89",
+  "treatment": "a91062551c9b346a35eb4abb5f18a6f64f95a72b",
+  "paired_protocol": {
+    "cases_per_arm": 12,
+    "baseline_passed": 4,
+    "baseline_failures": 8,
+    "baseline_errors": 0,
+    "treatment_passed": 12,
+    "treatment_failures": 0,
+    "treatment_errors": 0
+  },
+  "selected_regressions": {
+    "suite_count": 13,
+    "test_methods": 176,
+    "new": 34,
+    "existing": 142,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  },
+  "existing_baseline_control": {
+    "test_methods": 142,
+    "passed": 142
+  },
+  "model_calls": 0,
+  "browser_calls": 0,
+  "full_e2e_runs": 0,
+  "publication": "LOCAL ONLY",
+  "validation_gaps": [
+    "Original child done_when not preserved",
+    "Closed structural forms and bounded English behavior families",
+    "No new behavioral oracles for exact detailed acceptance",
+    "Historical fixture-dependent suites remain uncertified",
+    "Committed-obligation registry is per run and target, not persistent across process restart"
+  ],
+  "retained_pilots": [
+    "guarded edit assertion stopped before writing mini.py",
+    "two expanded fixture assumptions corrected without changing gates",
+    "invalid-scope generic-web fallback corrected",
+    "explicit Game Over mapping omission corrected",
+    "permissive mixed clauses and terminal freeze misassignment corrected with full-clause matching"
+  ],
+  "methodology_review": {
+    "production_treatment_unchanged": true,
+    "paired": "supporting/review-comparison.json",
+    "selected": "supporting/review-selected-tests.json",
+    "existing_baseline": "supporting/review-baseline-existing.json",
+    "provenance": "supporting/review-provenance.json",
+    "counts_are_repeat_measurements_not_additional_cases": true
+  }
+}

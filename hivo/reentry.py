@@ -1186,10 +1186,10 @@ def classify_authority_repository_drift(
         )
         # The identity is based on the contradiction itself, not on which
         # projection or duplicate authority record happened to be selected.
-        conflict["conflict_id"] = f"REENTRY-CONFLICT-{canonical_hash({
+        conflict["conflict_id"] = "REENTRY-CONFLICT-" + canonical_hash({
             "kind": AUTHORITY_IMPLEMENTATION_DRIFT,
             "drift_conflict_key": stable_key,
-        })[:16]}"
+        })[:16]
         conflicts.append(conflict)
         for authority_id in authority_ids:
             audit = audit_by_record_id.get(authority_id)

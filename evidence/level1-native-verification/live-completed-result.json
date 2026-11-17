@@ -1,0 +1,221 @@
+{
+  "verification_class": "REAL_LOCAL_OLLAMA_END_TO_END_COMPLETED",
+  "level": "Level 1",
+  "level_result": "PASS_FOR_THIS_RUN",
+  "workspace": "list/project-9",
+  "request": "Create a text file named test_level_1.txt containing exactly:Hello Mini Hivo",
+  "launch_command_reported_by_user": ".\\.venv\\Scripts\\python.exe -B -X utf8 mini.py --no-bootstrap",
+  "command_provenance": "User-reported interactive invocation; exact shell argv not independently recorded by these artifacts. Request, workspace, model and outcomes independently corroborated.",
+  "metrics": {
+    "run_id": "20261021T224333-21e91d97",
+    "model": "gemma4:e4b",
+    "mode": "auto",
+    "status": "done",
+    "root_verified": true,
+    "verified_nodes": 1,
+    "failed_nodes": 0,
+    "falsifier_calls": 1,
+    "execution_budget_exhaustions": 0,
+    "model_calls": 13,
+    "tool_calls": 8,
+    "elapsed_seconds": 375.51,
+    "impact_contracts_created": 1,
+    "impact_contracts_validated": 1,
+    "impact_contract_authorizations": 1
+  },
+  "recorded_mini_py_sha256": "2f1823505464543ead724168163f8158364aee9b7fcb08c27205378c77df7862",
+  "current_mini_py_matches_recorded_source": true,
+  "preflight": {
+    "status": "PASS",
+    "terminal_state": "HOST_PREFLIGHT_PASSED",
+    "canary_calls_completed": 3,
+    "canary_calls_requested": 3
+  },
+  "trace_records_inspected": 73,
+  "file_readback": {
+    "relative_path": "test_level_1.txt",
+    "exists": true,
+    "byte_length": 15,
+    "actual_hex": "48656c6c6f204d696e69204869766f",
+    "expected_hex": "48656c6c6f204d696e69204869766f",
+    "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+    "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+    "exact_match": true,
+    "trailing_newline": false
+  },
+  "tool_events": [
+    {
+      "id": 1,
+      "role": "Builder",
+      "tool": "context_sufficiency_check",
+      "target": "",
+      "status": "succeeded"
+    },
+    {
+      "id": 2,
+      "role": "Builder",
+      "tool": "write_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 3,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "id": 4,
+      "role": "Builder",
+      "tool": "run_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 5,
+      "role": "Builder",
+      "tool": "context_sufficiency_check",
+      "target": "",
+      "status": "succeeded"
+    },
+    {
+      "id": 6,
+      "role": "Builder",
+      "tool": "write_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 7,
+      "role": "Builder",
+      "tool": "run_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 8,
+      "role": "Falsifier",
+      "tool": "read_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    }
+  ],
+  "builder_native_proofs": [
+    {
+      "verification_kind": "LITERAL_ARTIFACT",
+      "path": "test_level_1.txt",
+      "status": "PASS",
+      "passed": true,
+      "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+    },
+    {
+      "verification_kind": "LITERAL_ARTIFACT",
+      "path": "test_level_1.txt",
+      "status": "PASS",
+      "passed": true,
+      "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+    }
+  ],
+  "falsifier": {
+    "tool": "read_file",
+    "target": "test_level_1.txt",
+    "observed_content": "Hello Mini Hivo",
+    "native_run_file_used": false
+  },
+  "verification_aggregation": {
+    "time": "2026-10-21T22:49:49.134",
+    "run_id": "20261021T224333-21e91d97",
+    "kind": "verification_evidence_aggregated",
+    "child_id": "ROOT",
+    "passed": true,
+    "actual_passes": [
+      {
+        "kind": "LITERAL_ARTIFACT",
+        "required": true,
+        "applicable": true,
+        "target": "test_level_1.txt",
+        "reason_codes": [
+          "SOURCE_BOUND_LITERAL_POST_STATE"
+        ],
+        "evidence_refs": [
+          "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+        ],
+        "result": "PASS",
+        "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+        "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+      }
+    ],
+    "actual_failures": [],
+    "skipped_not_applicable": [
+      {
+        "kind": "SYNTAX_STATIC_GATE",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer"
+      },
+      {
+        "kind": "BROWSER",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED",
+          "NO_SUPPORTED_BROWSER_TARGET"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "requested_from_node": null,
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer",
+        "actual_result": "SKIPPED_NOT_APPLICABLE"
+      }
+    ],
+    "failure_codes": []
+  },
+  "impact_poststate_comparison": {
+    "time": "2026-10-21T22:49:49.142",
+    "run_id": "20261021T224333-21e91d97",
+    "kind": "impact_contract_compared",
+    "task_id": "ROOT",
+    "status": "IMPACT_CONTRACT_PASSED",
+    "changed_paths": [
+      "test_level_1.txt"
+    ],
+    "missing": 0,
+    "unexpected_related": 0,
+    "out_of_scope": 0,
+    "preservation_violations": 0,
+    "mutation_authorized": true
+  },
+  "transaction_commit_recorded": true,
+  "sqlite_run_status": "done",
+  "inefficiencies": {
+    "refused_shell_commands": 1,
+    "builder_writes": 2,
+    "builder_native_readbacks": 2,
+    "elapsed_seconds": 375.51,
+    "elapsed_scope": "Saved run metrics; not asserted to include host preflight."
+  },
+  "limitations": [
+    "One completed literal-file run; not a reliability rate or complex-application verification.",
+    "Earlier failed/interrupted runs remain separate evidence; not reclassified.",
+    "Falsifier used read_file; typed literal proofs came from Builder and final aggregation/post-state checking.",
+    "Run records mini.py identity; these records do not independently pin every imported module."
+  ]
+}

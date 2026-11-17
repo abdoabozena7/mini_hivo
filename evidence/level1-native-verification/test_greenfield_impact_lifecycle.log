@@ -1,0 +1,60 @@
+test_a_simple_greenfield_file_verified_through_leaf (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_a_simple_greenfield_file_verified_through_leaf) ... ok
+test_b_lifecycle_precedes_mutation (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_b_lifecycle_precedes_mutation) ... ok
+test_c_missing_invalid_rejected_and_out_of_scope_cannot_write (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_c_missing_invalid_rejected_and_out_of_scope_cannot_write) ... ok
+test_d_requirement_ids_trace_to_source_brain_impact_and_worker (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_d_requirement_ids_trace_to_source_brain_impact_and_worker) ... ok
+test_e_existing_project_still_requires_plan_approval (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_e_existing_project_still_requires_plan_approval) ... ok
+test_f_unsubmitted_context_is_not_reported_as_rejected_impact (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_f_unsubmitted_context_is_not_reported_as_rejected_impact) ... ok
+test_filename_mapping_requires_the_same_literal_name (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_filename_mapping_requires_the_same_literal_name) ... ok
+test_legacy_goal_interpretation_populates_source_ledger_before_task_brain (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_legacy_goal_interpretation_populates_source_ledger_before_task_brain) ... ok
+test_literal_route_rejects_generic_or_foreign_proof (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_literal_route_rejects_generic_or_foreign_proof) ... ok
+test_literal_text_with_code_suffix_is_verified_without_execution (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_literal_text_with_code_suffix_is_verified_without_execution) ... ok
+test_other_names_and_extensions_are_not_hardcoded (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_other_names_and_extensions_are_not_hardcoded) ... ok
+test_rejected_candidate_is_diagnosed_and_stops_before_write (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_rejected_candidate_is_diagnosed_and_stops_before_write) ... ok
+test_rejection_is_not_generic_missing_context_diagnosis (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_rejection_is_not_generic_missing_context_diagnosis) ... ok
+test_resolved_path_is_mandatory_and_scope_errors_name_it (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_resolved_path_is_mandatory_and_scope_errors_name_it) ... ok
+test_reusing_candidate_after_creation_preserves_resolved_scope (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_reusing_candidate_after_creation_preserves_resolved_scope) ... ok
+test_unsafe_named_paths_never_authorize_creation (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_unsafe_named_paths_never_authorize_creation) ... ok
+test_wrong_content_cannot_pass_post_state_even_with_claimed_verification (test_greenfield_impact_lifecycle.GreenfieldImpactLifecycleTests.test_wrong_content_cannot_pass_post_state_even_with_claimed_verification) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.971s
+
+OK
+[MODE] baseline
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[TOOL] run_file welcone.txt
+[ROOT VERIFIED] PASS
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt
+[BUILDER] ROOT executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file welcone.txt
+[TOOL] run_file welcone.txt

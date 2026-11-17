@@ -1,0 +1,91 @@
+{
+  "provenance": {
+    "run": "010",
+    "stored_child_goals": {
+      "ROOT": "Build Coin Courier, a complete standalone browser game in this empty workspace. Deliver index.html with any local CSS/JavaScript files needed. It must work by opening index.html directly, without a server, build step, downloaded assets, packages, or external services.",
+      "1": "Establish the basic HTML structure, canvas setup, and initial game state management for Coin Courier.",
+      "2": "Implement player movement, arena boundaries, and input handling.",
+      "3": "Implement game mechanics: coin collection, scoring, and obstacle collision detection.",
+      "4": "Implement game flow control: Start, Game Over, Restart, and High Score persistence."
+    },
+    "original_child_done_when": "Unavailable. Conditions below are declared controlled fixtures, not recovered historical missions."
+  },
+  "source_contract": {
+    "goal": "Build Coin Courier, a complete standalone browser game in this empty workspace. Deliver index.html with any local CSS/JavaScript files needed. It must work by opening index.html directly, without a server, build step, downloaded assets, packages, or external services.",
+    "original_goal": "Build Coin Courier, a complete standalone browser game in this empty workspace. Deliver index.html with any local CSS/JavaScript files needed. It must work by opening index.html directly, without a server, build step, downloaded assets, packages, or external services.\n\nRequirements:\n1. Show a titled start screen with clear instructions, a Start button, a canvas play area, current score, and best score. Start begins a fresh playable round.\n2. The player is a courier on a visible bounded arena. Arrow keys and WASD move the player in four directions. Prevent game keys from scrolling the page. Keep the player inside the arena.\n3. Place a collectible coin away from the player and obstacles. Collecting it adds exactly 10 points, updates the visible score, and places another reachable coin at a valid position. A coin cannot award points repeatedly without another collection.\n4. Include clearly visible obstacles. Collision with an obstacle ends the round, displays Game Over and the final score, and stops player movement and further scoring until restart.\n5. A visible Restart button and the R key restart after game over. Restart resets score and player position, clears the terminal state, and makes the game playable again. Repeated restart must not accumulate event handlers or animation loops.\n6. Preserve the highest score in localStorage across restart and page reload. A lower-scoring round must not replace the best score. If storage is unavailable, keep the game playable and report the limitation.\n7. Provide responsive layout and visible touch direction buttons using the same movement logic. The game, HUD, and restart control must remain usable at a 390 by 844 viewport.\n8. Support Mini Hivo's browser-game verification contract: expose the global AGENT_GAME object with getState(), start(), restart(), move(direction), forceCollision(), forceCollect(), and forceWin(). Return a serializable state snapshot. These adapters must call real gameplay logic; collision and collection adapters must exercise the same transitions as normal play.\n9. Collecting 10 coins (100 points) completes the delivery round: display You Win, stop further movement and scoring, and allow the same Restart button or R key to begin a fresh round. forceWin() must exercise this real terminal transition.\n\nImplement the application through the normal tools. Verify actual browser behavior, including collection, collision, restart, keyboard and touch controls, score persistence, and repeated restarts. Report the entry point, files created, checks performed, and any behavior not verified. Modify only this application workspace. Do not install packages or access remote services.\n",
+    "requirements": [
+      "Build Coin Courier, a complete standalone browser game in this empty workspace.",
+      "It must work by opening index.html directly, without a server, build step, downloaded assets, packages, or external services.",
+      "Show a titled start screen with clear instructions, a Start button, a canvas play area, current score, and best score. Start begins a fresh playable round.",
+      "The player is a courier on a visible bounded arena. Arrow keys and WASD move the player in four directions. Prevent game keys from scrolling the page. Keep the player inside the arena.",
+      "Place a collectible coin away from the player and obstacles. Collecting it adds exactly 10 points, updates the visible score, and places another reachable coin at a valid position. A coin cannot award points repeatedly without another collection.",
+      "Include clearly visible obstacles. Collision with an obstacle ends the round, displays Game Over and the final score, and stops player movement and further scoring until restart.",
+      "A visible Restart button and the R key restart after game over. Restart resets score and player position, clears the terminal state, and makes the game playable again. Repeated restart must not accumulate event handlers or animation loops.",
+      "Preserve the highest score in localStorage across restart and page reload. A lower-scoring round must not replace the best score. If storage is unavailable, keep the game playable and report the limitation.",
+      "Provide responsive layout and visible touch direction buttons using the same movement logic. The game, HUD, and restart control must remain usable at a 390 by 844 viewport.",
+      "Support Mini Hivo's browser-game verification contract: expose the global AGENT_GAME object with getState(), start(), restart(), move(direction), forceCollision(), forceCollect(), and forceWin(). Return a serializable state snapshot. These adapters must call real gameplay logic; collision and collection adapters must exercise the same transitions as normal play.",
+      "Collecting 10 coins (100 points) completes the delivery round: display You Win, stop further movement and scoring, and allow the same Restart button or R key to begin a fresh round. forceWin() must exercise this real terminal transition.",
+      "Implement the application through the normal tools.",
+      "Verify actual browser behavior, including collection, collision, restart, keyboard and touch controls, score persistence, and repeated restarts.",
+      "Report the entry point, files created, checks performed, and any behavior not verified.",
+      "Modify only this application workspace.",
+      "Do not install packages or access remote services."
+    ],
+    "constraints": [
+      "The player is a courier on a visible bounded arena. Arrow keys and WASD move the player in four directions. Prevent game keys from scrolling the page. Keep the player inside the arena.",
+      "A visible Restart button and the R key restart after game over. Restart resets score and player position, clears the terminal state, and makes the game playable again. Repeated restart must not accumulate event handlers or animation loops.",
+      "Preserve the highest score in localStorage across restart and page reload. A lower-scoring round must not replace the best score. If storage is unavailable, keep the game playable and report the limitation.",
+      "Modify only this application workspace.",
+      "Do not install packages or access remote services."
+    ]
+  },
+  "children": [
+    {
+      "id": "1",
+      "parent_id": "ROOT",
+      "goal": "Establish the basic HTML structure, canvas setup, and initial game state management for Coin Courier.",
+      "done_when": [
+        "The page has a title and canvas.",
+        "The standalone page loads without browser errors."
+      ],
+      "scope_hint": [
+        "index.html"
+      ]
+    },
+    {
+      "id": "2",
+      "parent_id": "ROOT",
+      "goal": "Implement player movement, arena boundaries, and input handling.",
+      "done_when": [
+        "Keyboard movement works inside arena bounds."
+      ],
+      "scope_hint": [
+        "index.html"
+      ]
+    },
+    {
+      "id": "3",
+      "parent_id": "ROOT",
+      "goal": "Implement game mechanics: coin collection, scoring, and obstacle collision detection.",
+      "done_when": [
+        "Collecting coins updates score.",
+        "Obstacle collision causes game over."
+      ],
+      "scope_hint": [
+        "index.html"
+      ]
+    },
+    {
+      "id": "4",
+      "parent_id": "ROOT",
+      "goal": "Implement game flow control: Start, Game Over, Restart, and High Score persistence.",
+      "done_when": [
+        "Restart resets the round.",
+        "Best score persists across reload."
+      ],
+      "scope_hint": [
+        "index.html"
+      ]
+    }
+  ]
+}

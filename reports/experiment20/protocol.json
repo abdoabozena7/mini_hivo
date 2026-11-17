@@ -1,0 +1,32 @@
+{
+  "experiment": 20,
+  "design": "Retrospective controlled offline comparison; not preregistered",
+  "unit": "named unittest method; may contain multiple positive and negative assertions",
+  "fixture": "tests/fixtures/experiment20_scope.json",
+  "fixture_provenance": "Recorded Run-010 goals and root requirements; explicitly synthetic child done_when clauses",
+  "fixed_conditions": {
+    "project_mode": "NEW_PROJECT except declared exclusion controls",
+    "classification_policy": "field_scoped",
+    "target": "index.html in a fresh private test workspace",
+    "model": "not invoked; scripted provider boundaries",
+    "browser": "not invoked; controlled snapshots evaluated by production verifier",
+    "arm_difference": "baseline mini.py versus treatment controller/scope implementation; inherited dependencies and fixture identical"
+  },
+  "cases": [
+    {"case_id": "foundation_controller_does_not_require_later_movement_collection", "expectation": "Controller accepts structurally valid foundation without later movement/collection; canvas remains required", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "foundation_worker_tool_uses_same_scope", "expectation": "Worker verify_web_app uses the same foundation scope as controller", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "movement_child_requires_movement_not_product_name_collection", "expectation": "Missing movement fails; movement plus bridge passes; product name cannot introduce collection", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "mechanics_child_requires_collection_and_collision", "expectation": "Collection alone fails; collection plus collision and bridge passes", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "flow_child_keeps_restart_and_persistence", "expectation": "Restart alone fails; retain restart, persistence, terminal and keyboard lifecycle duties", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "missing_or_unknown_assignment_does_not_opt_out", "expectation": "Empty and unknown assignments conservatively require full-source game checks and bridge", "baseline_assertion_passed": true, "treatment_assertion_passed": true},
+    {"case_id": "single_full_task_keeps_legacy_game_requirements", "expectation": "Partial movement/collection cannot satisfy root; require all seven configured families", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "complete_parent_profile_accepts_all_checks", "expectation": "Complete declared root snapshot with all seven families and bridge passes", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "parent_cannot_forget_unassigned_touch_or_win", "expectation": "Root missing touch/win fails even when all children are listed", "baseline_assertion_passed": false, "treatment_assertion_passed": true},
+    {"case_id": "explicit_bridge_assignment_is_not_removed", "expectation": "An explicit AGENT_GAME assignment still fails without bridge", "baseline_assertion_passed": true, "treatment_assertion_passed": true},
+    {"case_id": "approved_execution_contract_does_not_get_narrowed", "expectation": "Approved execution-contract route retains original full checks", "baseline_assertion_passed": true, "treatment_assertion_passed": true},
+    {"case_id": "plain_profile_api_retains_existing_behavior", "expectation": "Public legacy infer_web_profile API remains scope-blind and unchanged", "baseline_assertion_passed": true, "treatment_assertion_passed": true}
+  ],
+  "success": "All 12 treatment assertions pass, zero errors, and selected related regressions pass; inherited controls remain protected",
+  "failure": "Any treatment expectation mismatch, input drift, gate weakening or unrelated regression",
+  "inconclusive": "Missing original child acceptance prevents claims about that exact historical mission; live behavior and full task acceptance not measured"
+}

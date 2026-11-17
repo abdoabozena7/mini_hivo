@@ -1,0 +1,138 @@
+{
+  "kind": "sanitized publication derivatives; originals preserved locally",
+  "limitations": "Original hashes identify inputs, not independent execution or cryptographic attestation. Embedded original contract/source hashes are historical identities; JSON derivatives are not runtime authorization artifacts.",
+  "files": [
+    {
+      "original_path": "audit_runs/20261019-impact-fix/before-reproduction.json",
+      "original_sha256": "78871f03e5650563cbab9517c003fe9a337302cfa9e744e69c1b84b980ace1d1",
+      "publication_path": "historical/before-reproduction.json",
+      "publication_sha256": "c6a353325b3076441afd5f89349db272c24ae1125a13484bb941a184937cfe1c",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/controlled-final-result.json",
+      "original_sha256": "ef1c7df15e5390f236c34d3e4501e5be244236d4924566d4381993e77abf3776",
+      "publication_path": "historical/controlled-final-result.json",
+      "publication_sha256": "5a99ed9397c3038302101b7b1618b65df58f76925eb7fdff1f99f7d46381faf5",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/native-proof-recheck.json",
+      "original_sha256": "3899fdc38b6bfb17b9c218404eb9ed0729bb16ff16d63fd616dd89f1e4267f3c",
+      "publication_path": "historical/native-proof-recheck.json",
+      "publication_sha256": "fa1118f69fb698e79b6c9c8430b8ef4471171152e1c59bdbd5d4daf9ee7b8376",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/raw-source-check.json",
+      "original_sha256": "33082fed911aebc582a4764d989a663cd133f852d7add215a02c61666fa1c31d",
+      "publication_path": "historical/raw-source-check.json",
+      "publication_sha256": "d95e44b3f6242b49a2755fa2f711daa549da72c0321f60e06b0626490d67e160",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/full-regression-result.json",
+      "original_sha256": "a365b12a252bc7caa04a10251bcf49a581c73982d8e167ab84a68ac1cd9d0273",
+      "publication_path": "historical/full-regression-result.json",
+      "publication_sha256": "3ba2ef193986225b378985a6f2fdf200bdf76fb564c00849b5343b264de73313",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/regression-comparison.json",
+      "original_sha256": "b92f8b54327692b50a59ffd5dafb295d448fdd722ba9703338d582ebe65db114",
+      "publication_path": "historical/regression-comparison.json",
+      "publication_sha256": "86ffbfeae6216dd5f31e76bc4e10c91ffc16561ca19ebab330cd37906f676db2",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/live-results-summary.json",
+      "original_sha256": "058b124b31f94d9e330bf9231900a0b950d55b08654dbfd99de9342b3c744097",
+      "publication_path": "historical/live-results-summary.json",
+      "publication_sha256": "6f9f97fa1e5d9254ea695ee4a0f76770a12c73c1c0e466b405fa7e630cb99c3c",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/test-results-final.json",
+      "original_sha256": "b4350ab583671ed3e1f7d0462bfef4e2edfa46fe7c71fdaf222dfae3e916982a",
+      "publication_path": "historical/test-results-final.json",
+      "publication_sha256": "5ffcf1fc4e1d7481075b9b95d3cba853204f0fdc524efc87e3f04c62937765dd",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-impact-fix/greenfield-routing-complete.log",
+      "original_sha256": "ef722a5aa43e4a80de12d70a11b7b3113cc8954bb31944074181780d267c0cb4",
+      "publication_path": "historical/greenfield-routing-complete.log",
+      "publication_sha256": "1282a84644da4033abab0269af8a4f2f1b4a7727a6dff33e1ef7f008c5179946",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261019-phase2/regression-result.json",
+      "original_sha256": "b6c0b4257064e2f8afec76c05e1f2c2d57f25a069995a30dad48b3c0867fc60d",
+      "publication_path": "historical/phase2-regression-result.json",
+      "publication_sha256": "d72e992138e18a605cce24514f307d5d8d742d8d7eb3c1db3bf9ad6f6b642eb1",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261019-phase2/pilot-audit.json",
+      "original_sha256": "dc6b8156b925dcd4ee59840c5af33394c888148967a154d42e39b14773962818",
+      "publication_path": "historical/phase2-pilot-audit.json",
+      "publication_sha256": "42dd5ee43a926aee2e8b2fe612db80a41a224fa72ed9f00cebe73b73f7dcbfea",
+      "transform": "recursive JSON key omission/path substitution and reserialization"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/lifecycle.log",
+      "original_sha256": "edb2711241e9d1b993fb6849a3d19247cd65210aac146d6b9eb66e46964093ff",
+      "publication_path": "fresh/lifecycle.log",
+      "publication_sha256": "f1887ee542554a2fa76e03c6e8ebf1f565726b03fbaf7e6818d158658798edb1",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_adaptive_architecture.log",
+      "original_sha256": "6f39bc9cddd11fb544d7eb489d2c5747b425605f5672ae94a54ade2f8a1f0d6a",
+      "publication_path": "fresh/test_adaptive_architecture.log",
+      "publication_sha256": "6b502108444ce834d7976c85167eca2e4a6a6481632c0fc186d7de11fbd6c16a",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_authorityall.log",
+      "original_sha256": "8a7117faf66b455dd99938d588e81eafad0310b0c91d8a8b1be6497422d778d3",
+      "publication_path": "fresh/test_authorityall.log",
+      "publication_sha256": "775be8ebbe222ba1d306e579bda722da3cd0ad2b03caa307839704df2c6ea80c",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_context_sufficiency_gate.log",
+      "original_sha256": "97eb3641ebb1a91529fc79e64b0d477a800d666dfdf0e915edb5696a63d1e25c",
+      "publication_path": "fresh/test_context_sufficiency_gate.log",
+      "publication_sha256": "74b9dbc57a5afb36fe6406f32e2c98ca0259940816ac09cc196f5b238b19a7b0",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_experimentall.log",
+      "original_sha256": "1406abe0cba693c3ee0b8eb147d9f9e6a74f2ed1577c357de8fbd5a63d586300",
+      "publication_path": "fresh/test_experimentall.log",
+      "publication_sha256": "24e64adb0d1fd88bf737ec748cb64cb83c8ae407a4b4b06775f7c8ff18448b56",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_pre_mutation_impact.log",
+      "original_sha256": "409d1f80977553263bca39d2a7766807dfdf2cad5ab88cdfc5324bcde4a659c8",
+      "publication_path": "fresh/test_pre_mutation_impact.log",
+      "publication_sha256": "4c42825dacea3174e96720fedd4870b5c797a0aa8ef15363a199aa352751ce76",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/test_project_understanding.log",
+      "original_sha256": "07a4bc5b62ddf760026858c7a717d6753f236816a602ba5aba4a9a3e9b87f7c8",
+      "publication_path": "fresh/test_project_understanding.log",
+      "publication_sha256": "4068c80e673cc9c6cc882515cae1b3a2bd3cd43b9524fdb37f49bd21624d6e4e",
+      "transform": "UTF-8 text path substitution; no test-result editing; CRLF normalized to canonical LF in sanitized derivative only"
+    }
+  ],
+  "hash_policy": {
+    "original_sha256": "SHA-256 of preserved original local source bytes, including original line endings",
+    "publication_sha256": "SHA-256 of canonical LF sanitized derivative bytes; must equal actual Git blob bytes",
+    "git_attributes": "evidence/impact-lifecycle-publication/** text eol=lf",
+    "original_evidence_modified": false
+  }
+}
