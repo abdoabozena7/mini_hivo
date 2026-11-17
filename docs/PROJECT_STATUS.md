@@ -35,6 +35,10 @@ Three.js game; its [actual failure](MANUAL_RUN_ANALYSIS.md) is diagnosed separat
 The [selected research direction](RESEARCH_DIRECTION.md) is evidence-licensed
 decomposition, explicitly proposed rather than a completed experimental result.
 The paragraphs below retain the earlier experiment/live checkpoints as history.
+The [publication addendum](../reports/integration/karim-pr1/publication.json)
+subsequently verifies GitHub PR #1 as merged, all 104 original inventoried
+tips and 36 Karim commits as reachable, a sole local `main` branch, and fresh
+full regression/self-test/live TUI output on the original final-main checkout.
 
 Experiment 17's [completed report](../reports/experiment17/experiment17-report.md) retains the **opt-in** `field_scoped` browser classifier. It classified all measured Timer/game contracts correctly, and the two game tasks each reached Root verified in 3/3 fresh approved-contract runs. Timer reached Root verified in 0/3: correct classification and browser behavior did not close its later receipt/grounding failures.
 

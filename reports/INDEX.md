@@ -39,7 +39,9 @@ the historical Experiment 1–19 results.
 The actual [Karim PR integration](../updates/R_UPDATE_003.md) preserves all 36
 incoming commits and both independently numbered report workstreams. Its
 [validation record](integration/karim-pr1/validation.json) retains successful
-and failed live integration attempts.
+and failed live integration attempts. The later
+[publication addendum](integration/karim-pr1/publication.json) verifies the
+actual closed/merged GitHub state and repeats validation on the delivered main.
 
 The [quiet-terminal update](../updates/R_UPDATE_004.md) adds actual Windows
 ConPTY session/navigation/native-decision and local-model request acceptance.

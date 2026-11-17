@@ -5,6 +5,8 @@
 Latest: [quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md),
 [manual Three.js run diagnosis](docs/MANUAL_RUN_ANALYSIS.md), and
 [one selected research contribution](docs/RESEARCH_DIRECTION.md).
+The [publication addendum](reports/integration/karim-pr1/publication.json)
+records the actual merged GitHub PR, preserved ancestry and final-main replay.
 
 Mini Hivo is a local coding-agent orchestrator pinned to one model:
 `gemma4:e4b`. Every model-backed role uses that exact model. Cross-model

@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "scope": "Observed publication and final original-main delivery after Karim integration and terminal acceptance",
+  "repository": "abdoabozena7/mini_hivo",
+  "pull_request": {
+    "url": "https://github.com/abdoabozena7/mini_hivo/pull/1",
+    "number": 1,
+    "head": "34a972a0b2feb80a31e06d0b93d6c22ca2961bc8",
+    "original_commits": 36,
+    "verified_github_state": "closed",
+    "verified_github_merged": true,
+    "merged_at_utc": "2026-11-17T19:40:29Z",
+    "verification": "Actual GitHub pull_request_read get response after normal Git push; not inferred from local ancestry"
+  },
+  "history": {
+    "previous_main": "6887d0bfeda237d841ba6a3ac842d184b5ad55b8",
+    "true_merge": "14fffa5f1e995b5eb5da10d3860abea8a9752fe3",
+    "merge_parents": [
+      "6887d0bfeda237d841ba6a3ac842d184b5ad55b8",
+      "34a972a0b2feb80a31e06d0b93d6c22ca2961bc8"
+    ],
+    "terminal_and_verifier_delivery_commit": "151b7a05a91eef19099889d947c73dbe8f6c3999",
+    "verified_remote_main_at_publication_observation": "151b7a05a91eef19099889d947c73dbe8f6c3999",
+    "push_mode": "Normal non-force main fast-forward",
+    "original_inventoried_refs_reachable": 104,
+    "original_inventoried_refs_total": 104,
+    "karim_original_commits_reachable": 36,
+    "history_rewritten_or_squashed": false
+  },
+  "final_main_checkout": {
+    "tested_code_commit": "151b7a05a91eef19099889d947c73dbe8f6c3999",
+    "raw_implementation_fingerprint": "160be8cd3c6822ab02ea350bdabbbe2f6ee7101b3bc9df2fbc0ac5ea4e08da48",
+    "lf_normalized_implementation_fingerprint": "909e06cf96243a54bef11a2f20fd1c63688ba5fcd83bc925e8ac5844f6aca714",
+    "integration_qa_raw_fingerprint": "eb6deae1f335854c0077474108f3d06d438ef94efb3553a750339e9716bbec2f",
+    "source_files_compared": 74,
+    "all_sources_equal_after_explicit_lf_normalization": true,
+    "raw_differences_are_line_endings_only_in": [
+      "hivo/browser_checks.py",
+      "hivo/context.py",
+      "hivo/http_client.py",
+      "hivo/playbooks.py",
+      "hivo/projects.py"
+    ],
+    "all_tested_sources_match_committed_content_after_declared_normalization": true,
+    "regression": {
+      "id": "final-main-regression",
+      "tests_run": 1950,
+      "skipped": 4,
+      "exit_code": 0,
+      "elapsed_seconds": 141.214,
+      "five_opt_in_browser_cases_actually_executed": true
+    },
+    "self_test": {
+      "id": "final-main-self-test",
+      "exit_code": 0,
+      "elapsed_seconds": 5.694
+    },
+    "additional_live_tui_replay": {
+      "id": "final-main-live",
+      "entrypoint": "Actual original-checkout mini.py, default auto, real Windows ConPTY and local Gemma",
+      "prompt": "Create proof.txt containing exactly:MERGE_READY",
+      "run_id": "20261117T213841-b02b73f3",
+      "status": "completed",
+      "started_at_utc": "2026-11-17T19:38:26.876889+00:00",
+      "finished_at_utc": "2026-11-17T19:39:21.331386+00:00",
+      "actual_artifact_utf8_hex": "4d455247455f5245414459",
+      "artifact_sha256": "7046c074dbba4ec74ad46f975f928ae029a8e5491cc3c10e9751c3975dfd6f3b",
+      "independent_exact_byte_check": true,
+      "durable_completed_turn_and_run_id": true,
+      "diagnostic_log_bytes": 104157,
+      "complete_metrics_and_transport_shapes_in_log_not_terminal": true
+    }
+  },
+  "preservation": {
+    "local_branches": ["main"],
+    "temporary_integration_branch_deleted_only_after_full_merge": true,
+    "historical_detached_worktree_preserved": true,
+    "historical_detached_head": "9ad7dafbdd8da29f215c1d0efed51a369f241cb1",
+    "integration_evidence_worktree_preserved_detached": true,
+    "original_stash_preserved": "27a5404109fec03ef15e7ea82c027255edd26ab9",
+    "original_user_workspace_files_unchanged_against_reconciled_snapshot": 5,
+    "original_user_untracked_work_intentionally_preserved": true,
+    "initial_manual_run_snapshot_reconciliation": "The original user process finished after the initial snapshot; the original log bytes remain an exact prefix. Its later legitimate log/database completion was preserved, never restored to obsolete state."
+  },
+  "publication_record_boundary": "This addendum records verified events and the already published code commit. Its own later documentation-only containing commit is discoverable in Git history, not guessed here.",
+  "limits": [
+    "Formal Codex-only HarrTest parent provenance and stale failed-owner repair handoff remain unverified, independently of the actual passing runtime acceptance.",
+    "No fresh successful complete Three.js game or evaluated research-treatment claim is made.",
+    "New raw transcripts, local host paths, runtime databases and screenshots remain private."
+  ]
+}
