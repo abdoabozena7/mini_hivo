@@ -102,20 +102,25 @@ def check_call(workspace, path, function, arguments, expected):
     root = Path(workspace).resolve()
     target = (root / path).resolve()
     if not target.is_relative_to(root) or target.suffix != ".py" or not target.is_file():
-        return {"passed": False, "error": "Python-call target must be an existing workspace .py file"}
+        return {"passed": False, "invalid_assertion": True,
+                "error": "Python-call target must be an existing workspace .py file"}
     if not isinstance(function, str) or not re.fullmatch(r"[A-Za-z]\w*", function):
-        return {"passed": False, "error": "function must be one public Python identifier, not source code"}
+        return {"passed": False, "invalid_assertion": True,
+                "error": "function must be one public Python identifier, not source code"}
     if not isinstance(arguments, list) or len(arguments) > 16:
-        return {"passed": False, "error": "arguments must be a JSON array with at most 16 items"}
+        return {"passed": False, "invalid_assertion": True,
+                "error": "arguments must be a JSON array with at most 16 items"}
     try:
         request = json.dumps(arguments, allow_nan=False)
         expected_json = json.dumps(expected, allow_nan=False, sort_keys=True)
     except (TypeError, ValueError) as exc:
-        return {"passed": False, "error": f"Python-call inputs must be JSON values: {exc}"}
+        return {"passed": False, "invalid_assertion": True,
+                "error": f"Python-call inputs must be JSON values: {exc}"}
     if len(request) + len(expected_json) > 4096:
-        return {"passed": False, "error": "Python-call arguments and expected value exceed 4096 characters"}
-    source_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        return {"passed": False, "invalid_assertion": True,
+                "error": "Python-call arguments and expected value exceed 4096 characters"}
     try:
+        source_hash = hashlib.sha256(target.read_bytes()).hexdigest()
         completed = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), str(target), function],
             input=request, cwd=root, capture_output=True, text=True, encoding="utf-8",
@@ -139,7 +144,10 @@ def check_call(workspace, path, function, arguments, expected):
         actual_json = json.dumps(observed["actual"], allow_nan=False, sort_keys=True)
     except (ValueError, KeyError, TypeError) as exc:
         return {"passed": False, "error": f"Invalid Python-call assertion result: {exc}"}
-    unchanged = hashlib.sha256(target.read_bytes()).hexdigest() == source_hash
+    try:
+        unchanged = hashlib.sha256(target.read_bytes()).hexdigest() == source_hash
+    except OSError as exc:
+        return {"passed": False, "error": f"Python-call source became unreadable: {exc}"}
     return {
         "passed": actual_json == expected_json and unchanged,
         "path": target.relative_to(root).as_posix(), "function": function,

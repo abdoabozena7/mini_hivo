@@ -1778,10 +1778,10 @@ def run_file(path, *, function=None, arguments=None, expected=None):
     if not target.exists():
         return f"error: file does not exist: {target}"
     if function is not None:
-        return json.dumps(
-            check_python_call(WORKSPACE, path, function, arguments, expected),
-            ensure_ascii=False,
-        )
+        observation = check_python_call(WORKSPACE, path, function, arguments, expected)
+        if observation.get("invalid_assertion"):
+            return "error: tool assertion rejected: " + observation["error"] + ". No assertion was executed."
+        return json.dumps(observation, ensure_ascii=False)
     ext = target.suffix.lower()
     try:
         if ext == ".py":

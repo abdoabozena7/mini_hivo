@@ -89,11 +89,18 @@ class MiniAgentRegressionTests(unittest.TestCase):
         (mini.WORKSPACE / "labels.py").write_text(
             'def label(value):\n    return value + "!"\n', encoding="utf-8",
         )
-        invalid = json.loads(mini.run_tool("run_file", {
+        invalid = mini.run_tool("run_file", {
             "path": "labels.py", "function": '__import__("os")',
             "arguments": [], "expected": None,
-        }, role="Falsifier"))
-        self.assertFalse(invalid["passed"])
+        }, role="Falsifier")
+        self.assertTrue(mini.result_is_tool_rejection(invalid))
+        self.assertIn("No assertion was executed", invalid)
+        builder = {"status": "done", "tool_evidence": [{
+            "tool": "run_command", "target": "python labels.py", "result": "[exit_code=0]",
+        }]}
+        self.assertTrue(mini.evidence_gate(builder, {
+            "status": "failed", "tool_evidence": [{"tool": "run_file", "target": "labels.py", "result": invalid}],
+        })["passed"])
         responses = [{
             "role": "assistant", "content": "", "tool_calls": [{
                 "function": {"name": "run_file", "arguments": {
