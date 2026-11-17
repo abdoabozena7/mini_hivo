@@ -1,0 +1,773 @@
+{
+  "baseline_revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+  "current_revision": "df7720643860a5c5b3a7e1b840df023aac700d50",
+  "harrtest_version": "4.1.0",
+  "live_attempts": [
+    {
+      "attempt": "e2e-greeting-direct-01",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-01\\workspace",
+      "run_id": "20261117T011149-d950a776",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "0be6ec23b0f172344330b7fea57327c970aa1ddd996140dbac190390af632a89",
+      "process_exit_code": 1,
+      "elapsed_seconds": 65.184,
+      "model": "gemma4:e4b",
+      "task_model_calls": 6,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-02",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-02\\workspace",
+      "run_id": "20261117T011443-b9bfd6b1",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "0122e992653ba5a7bd22f17e175921aed05234d5da6ba52b1cf3cb24377f069a",
+      "process_exit_code": 1,
+      "elapsed_seconds": 173.703,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-03",
+      "status": "done",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-03\\workspace",
+      "run_id": "20261117T012040-7b5bd1d7",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "f3ac544536caf454da4889593bc93f9fc27c246cd980b85bdafa938b577de962",
+      "process_exit_code": 0,
+      "elapsed_seconds": 98.438,
+      "model": "gemma4:e4b",
+      "task_model_calls": 10,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": false,
+      "independent_check_count": 5,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "greet.py": "ec8e58e956c2686ff4fc0567f7673bff87e5219e1ceb28e74ad237ea89d554ad",
+        "test_greet.py": "b3c605893b8c6ddbaf10a150ff7e741b02bad603d6df8408186c26dabb03236d"
+      }
+    },
+    {
+      "attempt": "e2e-multiply-auto-01",
+      "status": "interrupted_diagnostic",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-multiply-auto-01\\workspace",
+      "run_id": "20261117T012229-710b91fc",
+      "revision": null,
+      "source_fingerprint": null,
+      "process_exit_code": null,
+      "elapsed_seconds": null,
+      "model": "gemma4:e4b",
+      "task_model_calls": 105,
+      "root_verified": null,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-multiply-auto-02",
+      "status": "done",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-multiply-auto-02\\workspace",
+      "run_id": "20261117T013056-91436274",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "ef47f58ebbeea733265fa3e86e7fb19b9fa7f002922be29e414e5b8f589117b9",
+      "process_exit_code": 0,
+      "elapsed_seconds": 210.425,
+      "model": "gemma4:e4b",
+      "task_model_calls": 36,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 10,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "multiply.py": "806a78ec1df421a88f7b4fa0d11eb608bda09e718a3bb04a6f8cdea37d0ec99e"
+      }
+    },
+    {
+      "attempt": "e2e-greeting-direct-04",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-04\\workspace",
+      "run_id": "20261117T013710-576f4cd1",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "f09a11d23634de98531b132101e48311b80162a046d6e81238c95f55f64f97d5",
+      "process_exit_code": 1,
+      "elapsed_seconds": 97.848,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-05",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-05\\workspace",
+      "run_id": "20261117T014019-c23ac620",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "1963fbbac65d4bd42bc609c7b75ce40b02f294fd41def7ec4ed5e4fcfb2fa5be",
+      "process_exit_code": 1,
+      "elapsed_seconds": 112.192,
+      "model": "gemma4:e4b",
+      "task_model_calls": 32,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-06",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-06\\workspace",
+      "run_id": "20261117T014506-464a4646",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "b38e1e0cb02beb93592563c5946b7f0a80b579135f10bb30ef76998c1d9b6df1",
+      "process_exit_code": 1,
+      "elapsed_seconds": 183.888,
+      "model": "gemma4:e4b",
+      "task_model_calls": 23,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 2,
+      "source_assertion_failures": 2,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-auto-01",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-auto-01\\workspace",
+      "run_id": "20261117T015247-9fbdefe0",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "695bc2a796f9dda2b498c475933b277bccb7e39c1d3ca359efb57582fc9e3b82",
+      "process_exit_code": 1,
+      "elapsed_seconds": 240.199,
+      "model": "gemma4:e4b",
+      "task_model_calls": 20,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 3,
+      "source_assertion_failures": 1,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-07",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-07\\workspace",
+      "run_id": "20261117T020226-f141e325",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "3d008aa05e8d4532df0db213e894ab56e76acdc63d079ed4e14efbb273aee98b",
+      "process_exit_code": 1,
+      "elapsed_seconds": 92.018,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-direct-08",
+      "status": "failed",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-direct-08\\workspace",
+      "run_id": "20261117T020626-94a1e18c",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "cec0072ad18ef284d1e28e19c0eab638bff846a1472192238597414b07dfa57d",
+      "process_exit_code": 1,
+      "elapsed_seconds": 275.618,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-auto-02",
+      "status": "too_broad",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-auto-02\\workspace",
+      "run_id": "20261117T021306-0b7cb41f",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "4ae91bbc87e3bed3aa9afb148faeea2f3a09e741e0d6a70a19dacd8af3a57c74",
+      "process_exit_code": 1,
+      "elapsed_seconds": 111.16,
+      "model": "gemma4:e4b",
+      "task_model_calls": 20,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-greeting-auto-03",
+      "status": "done",
+      "workspace": "C:\\Users\\A-plus\\.copilot\\session-state\\bda4c8bf-f75c-4981-9621-e887ce81a049\\files\\e2e-greeting-auto-03\\workspace",
+      "run_id": "20261117T022018-a3665145",
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+      "source_fingerprint": "95dabd201a9ab5eb73456b81032cf54676a11274b55030b360a3d59f07ca2ac8",
+      "process_exit_code": 0,
+      "elapsed_seconds": 93.903,
+      "model": "gemma4:e4b",
+      "task_model_calls": 17,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 5,
+      "source_assertion_passes": 4,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "greet.py": "3d734b19b775a2315deb857d11ec41122e7bb20c1314f6bfd74bd6f88aa9f339",
+        "test_greet.py": "e0957e60c334c6528958a7faad259998d6a8604fbe8a51026c9934c8fe1bf775"
+      }
+    },
+    {
+      "attempt": "e2e-release-greeting-01",
+      "status": "too_broad",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-a4b80a2\\greeting",
+      "run_id": "20261117T022614-12568184",
+      "revision": "a4b80a24ea1a0e7c580a8007f78cab0b6ecae5bf",
+      "source_fingerprint": "95dabd201a9ab5eb73456b81032cf54676a11274b55030b360a3d59f07ca2ac8",
+      "process_exit_code": 1,
+      "elapsed_seconds": 169.586,
+      "model": "gemma4:e4b",
+      "task_model_calls": 34,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 4,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-greeting-03",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-final\\greeting",
+      "run_id": "20261117T024142-5be89054",
+      "revision": "540078bee03de1d0d119ddc2b29a85a64d32a662",
+      "source_fingerprint": "2473b00e444ec7d1763873ae3089e2eec18b9717a1d73c1280e57935c389464b",
+      "process_exit_code": 0,
+      "elapsed_seconds": 90.071,
+      "model": "gemma4:e4b",
+      "task_model_calls": 19,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 5,
+      "source_assertion_passes": 4,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "greet.py": "3d734b19b775a2315deb857d11ec41122e7bb20c1314f6bfd74bd6f88aa9f339",
+        "test_greet.py": "f225509f55fe189edd92f85963a7baa9f4e9c8a30373805d72aa79d73ddf3524"
+      }
+    },
+    {
+      "attempt": "e2e-release-multiply-03",
+      "status": "failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-final\\multiply",
+      "run_id": "20261117T024314-4de71f82",
+      "revision": "540078bee03de1d0d119ddc2b29a85a64d32a662",
+      "source_fingerprint": "2473b00e444ec7d1763873ae3089e2eec18b9717a1d73c1280e57935c389464b",
+      "process_exit_code": 1,
+      "elapsed_seconds": 119.856,
+      "model": "gemma4:e4b",
+      "task_model_calls": 28,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-multiply-04",
+      "status": "failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-405880a\\multiply",
+      "run_id": "20261117T025531-6ea81eb7",
+      "revision": "405880a572c9e0f3bcec82d4040bf3de4b633c51",
+      "source_fingerprint": "65a421d696d13f2812998ae1f06c1f3ad13ff453e3dab10606e188a4f3f6d5d5",
+      "process_exit_code": 1,
+      "elapsed_seconds": 63.299,
+      "model": "gemma4:e4b",
+      "task_model_calls": 8,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-multiply-05",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-0e398d6\\multiply",
+      "run_id": "20261117T030039-7c1191b1",
+      "revision": "0e398d60c6c2e43196446d53747aa37053c75f6c",
+      "source_fingerprint": "1268cfaf433907d4590b7546137a005d55ba3b36e1df74594588e1fa86eb28ec",
+      "process_exit_code": 0,
+      "elapsed_seconds": 117.278,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 10,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "multiply.py": "9321b9d091a6c787679c35233abd01195cdd3dcc8da3111de837eec2444f4aa0"
+      }
+    },
+    {
+      "attempt": "e2e-release-greeting-05",
+      "status": "failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-0e398d6\\greeting",
+      "run_id": "20261117T030237-ab95941e",
+      "revision": "0e398d60c6c2e43196446d53747aa37053c75f6c",
+      "source_fingerprint": "1268cfaf433907d4590b7546137a005d55ba3b36e1df74594588e1fa86eb28ec",
+      "process_exit_code": 1,
+      "elapsed_seconds": 55.34,
+      "model": "gemma4:e4b",
+      "task_model_calls": 7,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-greeting-06",
+      "status": "failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-cfc6ba4\\greeting",
+      "run_id": "20261117T030757-0a96e877",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "762c75eb2947bf15b1a14a7e244d859c3fe9ac1cfb2dfb51abcb2b4123064e5f",
+      "process_exit_code": 1,
+      "elapsed_seconds": 55.342,
+      "model": "gemma4:e4b",
+      "task_model_calls": 7,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-greeting-07",
+      "status": "failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-validated\\greeting",
+      "run_id": "20261117T031028-52724034",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "c2e8a635434329a309d22615204417156d182b7439b01d803bddbce1540169ea",
+      "process_exit_code": 1,
+      "elapsed_seconds": 166.672,
+      "model": "gemma4:e4b",
+      "task_model_calls": 37,
+      "root_verified": false,
+      "host_failure": null,
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 6,
+      "source_assertion_failures": 6,
+      "persisted_product_sha256": {}
+    },
+    {
+      "attempt": "e2e-release-multiply-07",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-validated\\multiply",
+      "run_id": "20261117T031315-0a63f39f",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "c2e8a635434329a309d22615204417156d182b7439b01d803bddbce1540169ea",
+      "process_exit_code": 0,
+      "elapsed_seconds": 118.751,
+      "model": "gemma4:e4b",
+      "task_model_calls": 29,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 10,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "multiply.py": "9321b9d091a6c787679c35233abd01195cdd3dcc8da3111de837eec2444f4aa0"
+      }
+    },
+    {
+      "attempt": "e2e-release-hello-07",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-validated\\hello",
+      "run_id": "20261117T031516-68f1aebc",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "45675cc05a93b09174345b5cbae86592097e0ddb472aac0a3d0dfa990cfe918c",
+      "process_exit_code": 0,
+      "elapsed_seconds": 191.125,
+      "model": "gemma4:e4b",
+      "task_model_calls": 17,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 1,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "hello.py": "bcf607b75d7d8c148f64173ed059f1e3d9128a7ceb4a44a273b59ae4f92b0387"
+      }
+    },
+    {
+      "attempt": "e2e-release-greeting-08",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-release\\greeting",
+      "run_id": "20261117T031623-3e49754b",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "45675cc05a93b09174345b5cbae86592097e0ddb472aac0a3d0dfa990cfe918c",
+      "process_exit_code": 0,
+      "elapsed_seconds": 176.225,
+      "model": "gemma4:e4b",
+      "task_model_calls": 17,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 5,
+      "source_assertion_passes": 4,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "greet.py": "f6344e032a4729e80808d68a13974495b21dbf7714c0c14befe7794317f5f3bb",
+        "test_greet.py": "870232333dd4ece5beefd8584c7c921704bc33bc60b6a2e520ab9a4396dd3c0a"
+      }
+    },
+    {
+      "attempt": "e2e-release-multiply-08",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-release\\multiply",
+      "run_id": "20261117T031912-b38724fb",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "45675cc05a93b09174345b5cbae86592097e0ddb472aac0a3d0dfa990cfe918c",
+      "process_exit_code": 0,
+      "elapsed_seconds": 203.63,
+      "model": "gemma4:e4b",
+      "task_model_calls": 31,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 10,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "multiply.py": "e2d8953e476d798586cb630588747db27153d8e39854e211f2a28017f6914433"
+      }
+    },
+    {
+      "attempt": "e2e-release-hello-08",
+      "status": "done",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-release\\hello",
+      "run_id": "20261117T032232-6c1228c8",
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058",
+      "source_fingerprint": "45675cc05a93b09174345b5cbae86592097e0ddb472aac0a3d0dfa990cfe918c",
+      "process_exit_code": 0,
+      "elapsed_seconds": 75.899,
+      "model": "gemma4:e4b",
+      "task_model_calls": 17,
+      "root_verified": true,
+      "host_failure": null,
+      "independent_passed": true,
+      "independent_check_count": 1,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {
+        "hello.py": "bcf607b75d7d8c148f64173ed059f1e3d9128a7ceb4a44a273b59ae4f92b0387"
+      }
+    },
+    {
+      "attempt": "e2e-release-greeting-02",
+      "status": "host_preflight_failed",
+      "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-540078b\\greeting",
+      "run_id": null,
+      "revision": "540078bee03de1d0d119ddc2b29a85a64d32a662",
+      "source_fingerprint": "2473b00e444ec7d1763873ae3089e2eec18b9717a1d73c1280e57935c389464b",
+      "process_exit_code": 2,
+      "elapsed_seconds": 1.932,
+      "model": "gemma4:e4b",
+      "task_model_calls": 0,
+      "root_verified": null,
+      "host_failure": "CRITICAL_MEMORY_HEADROOM",
+      "independent_passed": null,
+      "independent_check_count": null,
+      "source_assertion_passes": 0,
+      "source_assertion_failures": 0,
+      "persisted_product_sha256": {}
+    }
+  ],
+  "offline_checks": [
+    {
+      "check": "e2e-builtin-and-source-context",
+      "exit_code": 0,
+      "elapsed_seconds": 5.231,
+      "revision": "405880a572c9e0f3bcec82d4040bf3de4b633c51"
+    },
+    {
+      "check": "e2e-call-assertions",
+      "exit_code": 1,
+      "elapsed_seconds": 6.286,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-call-assertions-verified",
+      "exit_code": 0,
+      "elapsed_seconds": 6.929,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-complete-regression",
+      "exit_code": 0,
+      "elapsed_seconds": 223.569,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-context-after",
+      "exit_code": 0,
+      "elapsed_seconds": 6.884,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-context-before",
+      "exit_code": 1,
+      "elapsed_seconds": 3.0,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-current-draft-authority",
+      "exit_code": 0,
+      "elapsed_seconds": 8.644,
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058"
+    },
+    {
+      "check": "e2e-declared-interface-assertions",
+      "exit_code": 0,
+      "elapsed_seconds": 4.747,
+      "revision": "db758a65a60d3c0196a40cfefe9d28ed60d2168b"
+    },
+    {
+      "check": "e2e-delivered-full-suite",
+      "exit_code": 0,
+      "elapsed_seconds": 206.106,
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058"
+    },
+    {
+      "check": "e2e-delivered-self-test",
+      "exit_code": 0,
+      "elapsed_seconds": 11.898,
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058"
+    },
+    {
+      "check": "e2e-draft-and-oracle-roles",
+      "exit_code": 0,
+      "elapsed_seconds": 6.774,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-final-full-regression",
+      "exit_code": 0,
+      "elapsed_seconds": 115.529,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-final-self-test",
+      "exit_code": 0,
+      "elapsed_seconds": 7.75,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-final-self-test-candidate",
+      "exit_code": 0,
+      "elapsed_seconds": 10.037,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-final-suite-candidate",
+      "exit_code": 0,
+      "elapsed_seconds": 245.316,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-full-regression-01",
+      "exit_code": 0,
+      "elapsed_seconds": 195.011,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-future-callable-context",
+      "exit_code": 0,
+      "elapsed_seconds": 5.714,
+      "revision": "cfc6ba49fdbf83062d07a9ec240917757c8dc058"
+    },
+    {
+      "check": "e2e-latest-verification-after",
+      "exit_code": 1,
+      "elapsed_seconds": 4.259,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-latest-verification-before",
+      "exit_code": 1,
+      "elapsed_seconds": 0.898,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-latest-verification-final",
+      "exit_code": 0,
+      "elapsed_seconds": 4.135,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-latest-verification-verified",
+      "exit_code": 1,
+      "elapsed_seconds": 3.701,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-negative-exits-and-repair-context",
+      "exit_code": 0,
+      "elapsed_seconds": 7.961,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-oracle-authority-guard",
+      "exit_code": 0,
+      "elapsed_seconds": 5.098,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-postrepair-acceptance-guard",
+      "exit_code": 0,
+      "elapsed_seconds": 5.828,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-routing-and-source-fit",
+      "exit_code": 0,
+      "elapsed_seconds": 8.419,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-runtime-contract",
+      "exit_code": 0,
+      "elapsed_seconds": 3.672,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-safe-draft-revision",
+      "exit_code": 0,
+      "elapsed_seconds": 7.532,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-source-contract-completion",
+      "exit_code": 0,
+      "elapsed_seconds": 6.102,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-source-negative-input-exits",
+      "exit_code": 1,
+      "elapsed_seconds": 5.255,
+      "revision": "540078bee03de1d0d119ddc2b29a85a64d32a662"
+    },
+    {
+      "check": "e2e-source-negative-input-verified",
+      "exit_code": 0,
+      "elapsed_seconds": 4.9,
+      "revision": "540078bee03de1d0d119ddc2b29a85a64d32a662"
+    },
+    {
+      "check": "e2e-source-oracle-full-suite",
+      "exit_code": 0,
+      "elapsed_seconds": 201.494,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-source-oracle-regressions",
+      "exit_code": 0,
+      "elapsed_seconds": 7.733,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-source-signature-context",
+      "exit_code": 0,
+      "elapsed_seconds": 4.795,
+      "revision": "0e398d60c6c2e43196446d53747aa37053c75f6c"
+    },
+    {
+      "check": "e2e-structured-context-and-fresh-proof",
+      "exit_code": 0,
+      "elapsed_seconds": 7.623,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-tool-and-context-regressions",
+      "exit_code": 0,
+      "elapsed_seconds": 14.126,
+      "revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079"
+    },
+    {
+      "check": "e2e-verifier-input-classification",
+      "exit_code": 0,
+      "elapsed_seconds": 4.687,
+      "revision": "a4b80a24ea1a0e7c580a8007f78cab0b6ecae5bf"
+    },
+    {
+      "check": "e2e-verifier-input-self-test",
+      "exit_code": 0,
+      "elapsed_seconds": 6.999,
+      "revision": "a4b80a24ea1a0e7c580a8007f78cab0b6ecae5bf"
+    }
+  ],
+  "live_attempt_count": 27,
+  "warning": "Different source revisions and cases are retained for audit, not a population reliability estimate.",
+  "app_done_count": 10,
+  "independently_accepted_count": 9,
+  "independently_rejected_done_count": 1
+}

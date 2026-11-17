@@ -4,6 +4,10 @@
 المثبت محليًا؛ مفيش تحديث للـ skill أو تغيير للموديل أثناء المهمة.
 آخر live runs اكتملت بعد منتصف الليل يوم 2026-11-17 بالتوقيت المحلي.
 
+ده سجل checkpoint الدمج كما اتقاس وقتها. [المتابعة اللاحقة](LIVE_E2E_VALIDATION.md)
+أصلحت blockers إضافية ووصلت إلى three fresh default-auto Python CLI
+journeys بنتيجة محفوظة وفحص مستقل؛ نتائج المحاولات التاريخية هنا فضلت من غير تغيير.
+
 **النتيجة المختصرة:** فضل local branch واحد هو `main`، وكل الـ original
 branch tips بقت reachable منه. الـ regression suite والـ public self-test
 ناجحين، وفيه إصلاح Python حقيقي نجح مرتين بالـ local model واتراجع مستقلًا.

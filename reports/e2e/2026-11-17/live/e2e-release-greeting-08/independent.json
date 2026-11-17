@@ -1,0 +1,69 @@
+{
+  "case": "greeting",
+  "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-release\\greeting",
+  "passed": true,
+  "checks": [
+    {
+      "case": "cli-default",
+      "argv": [
+        "greet.py"
+      ],
+      "expected_stdout": "Hello, World!\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "Hello, World!\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "cli-named",
+      "argv": [
+        "greet.py",
+        "Ada"
+      ],
+      "expected_stdout": "Hello, Ada!\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "Hello, Ada!\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "cli-another-name",
+      "argv": [
+        "greet.py",
+        "Bob"
+      ],
+      "expected_stdout": "Hello, Bob!\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "Hello, Bob!\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "function-results-without-newline",
+      "argv": [
+        "-c",
+        "import json; from greet import greet; print(json.dumps([greet(), greet('Ada'), greet('Bob')]))"
+      ],
+      "expected_stdout": "[\"Hello, World!\", \"Hello, Ada!\", \"Hello, Bob!\"]\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "[\"Hello, World!\", \"Hello, Ada!\", \"Hello, Bob!\"]\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "generated-unit-tests",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "----------------------------------------------------------------------\nRan 4 tests in 0.066s\n\nOK\n",
+      "passed": true
+    }
+  ],
+  "product_files_sha256": {
+    "greet.py": "f6344e032a4729e80808d68a13974495b21dbf7714c0c14befe7794317f5f3bb",
+    "test_greet.py": "870232333dd4ece5beefd8584c7c921704bc33bc60b6a2e520ab9a4396dd3c0a"
+  }
+}

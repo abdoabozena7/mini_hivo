@@ -1,0 +1,60 @@
+{
+  "canary_calls_completed": 0,
+  "canary_calls_requested": 3,
+  "canary_prompt": "Reply with exactly: HIVO_PREFLIGHT_OK",
+  "duration_seconds": 0.185,
+  "failure_reason": "CRITICAL_MEMORY_HEADROOM",
+  "failure_stage": "static_resources",
+  "failure_summary": "available system memory is 339996672 bytes",
+  "finished_at": "2026-11-17T00:36:54.369+00:00",
+  "inventory": {
+    "available_system_ram_bytes": 339996672,
+    "cpu_logical_count": 16,
+    "free_workspace_disk_bytes": 108177207296,
+    "gpu": {
+      "driver_version": "617.14",
+      "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+      "source": "nvidia-smi",
+      "status": "MEASURED",
+      "temperature_c": 46.0,
+      "utilization_percent": 0.0,
+      "vram_free_mb": 1606.0,
+      "vram_total_mb": 6144.0,
+      "vram_used_mb": 4389.0
+    },
+    "model_availability": "UNKNOWN",
+    "ollama_availability": "UNKNOWN",
+    "os_version": "Windows 11",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "python_version": "3.13.7",
+    "selected_model": "gemma4:e4b",
+    "total_system_ram_bytes": 16371494912
+  },
+  "model": "gemma4:e4b",
+  "pid": 3584,
+  "preflight_id": "8f833deca5534c30b43a89e26f8723e1",
+  "provider_evidence": [],
+  "resource_snapshots": [
+    {
+      "available_system_ram_bytes": 339996672,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 46.0,
+        "utilization_percent": 0.0,
+        "vram_free_mb": 1606.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4389.0
+      },
+      "phase": "before_canary",
+      "sampled_at": "2026-11-17T00:36:54.258+00:00",
+      "total_system_ram_bytes": 16371494912
+    }
+  ],
+  "started_at": "2026-11-17T00:36:54.185+00:00",
+  "status": "FAIL",
+  "terminal_state": "HOST_PREFLIGHT_FAILED",
+  "warnings": []
+}

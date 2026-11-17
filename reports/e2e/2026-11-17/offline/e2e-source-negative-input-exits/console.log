@@ -1,0 +1,48 @@
+[BUILDER] creation executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file greet.py
+[TOOL] run_command python greet.py
+[BUILDER] full-packet executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[BUILDER] legacy executing
+[BUILDER] contract executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file src/auth.py
+[TOOL] run_command python -m unittest
+[REPAIRER] repair executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] run_command python -m unittest
+[BUILDER] blocked executing
+[TOOL] edit_file src/auth.py
+[BUILDER] bounded-failure executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[BUILDER] native executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file greet.py
+[TOOL] run_command python greet.py
+[BUILDER] native-invalid executing
+======================================================================
+FAIL: test_explicit_new_outputs_need_creation_contracts_not_existing_definitions (test_context_sufficiency_gate.ContextSufficiencyGateTests.test_explicit_new_outputs_need_creation_contracts_not_existing_definitions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_context_sufficiency_gate.py", line 206, in test_explicit_new_outputs_need_creation_contracts_not_existing_definitions
+    self.assertTrue(all(
+    ~~~~~~~~~~~~~~~^^^^^
+        item["resolution_status"] == "not_applicable"
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        for item in result["semantic_resolutions"]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ))
+    ^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 53 tests in 3.172s
+
+FAILED (failures=1)

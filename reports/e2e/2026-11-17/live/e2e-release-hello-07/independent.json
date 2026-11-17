@@ -1,0 +1,22 @@
+{
+  "case": "hello",
+  "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-validated\\hello",
+  "passed": true,
+  "checks": [
+    {
+      "case": "exact-console-output",
+      "argv": [
+        "hello.py"
+      ],
+      "expected_stdout": "MERGE_OK\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "MERGE_OK\n",
+      "stderr": "",
+      "passed": true
+    }
+  ],
+  "product_files_sha256": {
+    "hello.py": "bcf607b75d7d8c148f64173ed059f1e3d9128a7ceb4a44a273b59ae4f92b0387"
+  }
+}

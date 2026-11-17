@@ -1,6 +1,6 @@
 # Mini Hivo
 
-**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation and live validation](docs/BRANCH_CONSOLIDATION.md).
+**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md).
 
 Mini Hivo is a local coding-agent orchestrator pinned to one model:
 `gemma4:e4b`. Every model-backed role uses that exact model. Cross-model
@@ -41,10 +41,22 @@ The [consolidation report](docs/BRANCH_CONSOLIDATION.md) distinguishes offline
 checks, historical experiments, fresh live attempts, and independent checks of
 generated output. A context authorization is not task completion, and model
 prose or generated tests alone are not independent acceptance evidence.
-Two focused existing-code Python repairs were validated through
-`--mode baseline`; the default `auto` and greenfield paths still have recorded
-completion failures. Keep those measured limits distinct from a passing
-deterministic suite.
+The [live acceptance checkpoint](docs/LIVE_E2E_VALIDATION.md) now includes
+three fresh empty-workspace Python CLI tasks through default `auto`: greeting
+plus public function/tests, integer multiplication with invalid-input
+rejection, and exact console output. Their persisted products passed separate
+acceptance checks on the delivered implementation. Earlier failures and an
+independently rejected false success remain in the evidence; this is not a
+claim of reliability for every language or project family.
+
+`run_file` supports bounded Python-call assertions with a public `function`,
+JSON `arguments`, and an actual JSON `expected` value. `run_command` supports
+exact `expected_stdout` and `expected_exit_code`; source-required rejection of
+invalid fixed-arity integer CLI arguments is evaluated against the actual exit.
+These checks do not permit inline code, invented test-runner reports, or
+expected values that override a source-bound observable. New, unverified,
+model-owned drafts may use the existing coherent-revision policy; user-owned,
+verified, and approved-contract files retain their mutation protections.
 
 ## Architecture
 

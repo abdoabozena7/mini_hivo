@@ -1,0 +1,2 @@
+# Keep runtime evidence and generated output byte-identical.
+* -text

@@ -1,0 +1,99 @@
+[BUILDER] creation executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file greet.py
+[TOOL] run_command python greet.py
+[BUILDER] full-packet executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[BUILDER] legacy executing
+[BUILDER] contract executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] edit_file src/auth.py
+[TOOL] run_command python -m unittest
+[BUILDER] blocked executing
+[TOOL] edit_file src/auth.py
+[BUILDER] bounded-failure executing
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[TOOL] context_sufficiency_check -
+[BUILDER] native executing
+[TOOL] context_sufficiency_check -
+[TOOL] write_file greet.py
+[TOOL] run_command python greet.py
+[BUILDER] native-invalid executing
+[CONTRACT FIT EXEC-001] evaluate one approved responsibility
+[TASK EXEC-001] Extend verified existing owner InputManager for Escape pause/resume support. (REQ-001), reusing canonical interfaces.
+[FIT EXEC-001] EXECUTE
+[DONE EXEC-001]
+[CONTRACT FIT EXEC-002] evaluate one approved responsibility
+[TASK EXEC-002] Update or add focused coverage at the verified test boundary.
+[FIT EXEC-002] EXECUTE
+[DONE EXEC-002]
+[BUILDER] T executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 13}
+[TOOL] write_file probe.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 17}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 21}
+[TOOL] run_file probe.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 17}
+[BUILDER] T executing
+[TOOL] edit_file app.js
+[BUILDER] T executing
+[TOOL] write_file app.js
+[TOOL] verify_web_app index.html
+[TOOL] edit_file app.js
+[TOOL] verify_web_app index.html
+[BUILDER] 4.4 executing
+[TOOL] edit_file_range app.js
+[TOOL] verify_web_app app.js
+[REPAIRER] 4.4 executing
+[TOOL] edit_file_range app.js
+[TOOL] verify_web_app app.js
+[BUILDER] T executing
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[TOOL] edit_file script.js
+[BUILDER] history executing
+[TOOL] edit_file app.js
+[TOOL] verify_web_app index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[STRUCTURED RETRY] task-fit fallback | invalid
+[BUILDER] missing executing
+[TOOL] edit_file missing.js
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": false, "done_reason": null, "has_error": false, "body_chars": 12}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": false, "done_reason": null, "has_error": false, "body_chars": 12}
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[FALSIFY ROOT]
+[ROOT VERIFIED] PASS
+[AGGREGATE ROOT]
+[FALSIFIER] ROOT executing
+[TOOL] run_file labels.py::d4489f346948b33f
+[TOOL] run_file labels.py::4677c5a5c9063697
+[BUILDER] builder executing
+[TOOL] edit_file builder.js
+[REPAIRER] repairer executing
+[TOOL] edit_file repairer.js
+[REPAIRER] repair executing
+[TOOL] edit_file_range app.js
+[BUILDER] stale executing
+[TOOL] edit_file app.js
+[TOOL] edit_file app.js
+[BUILDER] T executing
+[TOOL] verify_web_app index.html
+[BUILDER] syntax executing
+[TOOL] edit_file_range app.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["done", "done_reason", "message"], "message_keys": ["content", "role", "thinking", "tool_calls"], "content_chars": 0, "thinking_chars": 17, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 12}
+[BUILDER] T executing
+[TOOL] verify_web_app index.html
+[TOOL] verify_web_app index.html
+[TOOL] verify_web_app index.html
+SEMANTIC_BENCHMARK {"average_evidence_items": 0.857, "correctly_classified_requests": 7, "correctly_resolved_requests": 5, "incorrect_semantic_resolutions": 0, "partial_requests": 1, "semantic_request_count": 7, "unresolved_requests": 1}
+----------------------------------------------------------------------
+Ran 158 tests in 11.943s
+
+OK (skipped=4)

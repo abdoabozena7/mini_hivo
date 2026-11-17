@@ -1,0 +1,125 @@
+{
+  "canary_calls_completed": 3,
+  "canary_calls_requested": 3,
+  "canary_prompt": "Reply with exactly: HIVO_PREFLIGHT_OK",
+  "duration_seconds": 16.92,
+  "finished_at": "2026-11-16T23:45:06.354+00:00",
+  "inventory": {
+    "available_system_ram_bytes": 2069282816,
+    "cpu_logical_count": 16,
+    "free_workspace_disk_bytes": 84554387456,
+    "gpu": {
+      "driver_version": "617.14",
+      "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+      "source": "nvidia-smi",
+      "status": "MEASURED",
+      "temperature_c": 47.0,
+      "utilization_percent": 0.0,
+      "vram_free_mb": 1596.0,
+      "vram_total_mb": 6144.0,
+      "vram_used_mb": 4399.0
+    },
+    "model_availability": "PASS",
+    "ollama_availability": "PASS",
+    "os_version": "Windows 11",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "python_version": "3.13.7",
+    "selected_model": "gemma4:e4b",
+    "total_system_ram_bytes": 16371494912
+  },
+  "model": "gemma4:e4b",
+  "pid": 8312,
+  "preflight_id": "2ff6fef66a17426eb9bdc13e7183c4ed",
+  "provider_evidence": [],
+  "resource_snapshots": [
+    {
+      "available_system_ram_bytes": 2069282816,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 47.0,
+        "utilization_percent": 0.0,
+        "vram_free_mb": 1596.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4399.0
+      },
+      "phase": "before_canary",
+      "sampled_at": "2026-11-16T23:44:49.496+00:00",
+      "total_system_ram_bytes": 16371494912
+    },
+    {
+      "available_system_ram_bytes": 2637352960,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 51.0,
+        "utilization_percent": 75.0,
+        "vram_free_mb": 1704.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4291.0
+      },
+      "phase": "after_call_1",
+      "sampled_at": "2026-11-16T23:44:59.553+00:00",
+      "total_system_ram_bytes": 16371494912
+    },
+    {
+      "available_system_ram_bytes": 2941874176,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 54.0,
+        "utilization_percent": 0.0,
+        "vram_free_mb": 1704.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4291.0
+      },
+      "phase": "after_call_2",
+      "sampled_at": "2026-11-16T23:45:01.905+00:00",
+      "total_system_ram_bytes": 16371494912
+    },
+    {
+      "available_system_ram_bytes": 2931601408,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 51.0,
+        "utilization_percent": 0.0,
+        "vram_free_mb": 1696.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4299.0
+      },
+      "phase": "after_call_3",
+      "sampled_at": "2026-11-16T23:45:04.296+00:00",
+      "total_system_ram_bytes": 16371494912
+    },
+    {
+      "available_system_ram_bytes": 2834890752,
+      "gpu": {
+        "driver_version": "617.14",
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "source": "nvidia-smi",
+        "status": "MEASURED",
+        "temperature_c": 52.0,
+        "utilization_percent": 0.0,
+        "vram_free_mb": 1696.0,
+        "vram_total_mb": 6144.0,
+        "vram_used_mb": 4299.0
+      },
+      "phase": "after_final_cooldown",
+      "sampled_at": "2026-11-16T23:45:06.354+00:00",
+      "total_system_ram_bytes": 16371494912
+    }
+  ],
+  "started_at": "2026-11-16T23:44:49.433+00:00",
+  "status": "PASS",
+  "terminal_state": "HOST_PREFLIGHT_PASSED",
+  "warnings": []
+}

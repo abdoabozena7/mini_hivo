@@ -1,0 +1,17 @@
+{
+  "ready": true,
+  "threshold_bytes": 1073741824,
+  "required_stable_samples": 2,
+  "samples": [
+    {
+      "at_utc": "2026-11-17T00:39:16.865166+00:00",
+      "available_physical_bytes": 1428992000
+    },
+    {
+      "at_utc": "2026-11-17T00:39:31.865770+00:00",
+      "available_physical_bytes": 1254154240
+    }
+  ],
+  "services_changed": false,
+  "unrelated_processes_stopped": false
+}

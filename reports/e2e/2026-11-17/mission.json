@@ -1,0 +1,25 @@
+{
+  "request": "continue until fix all problems to reach live end to end test with real output",
+  "baseline_revision": "3b02b3ea8fb21a7f99ab98f1e66c7dbc50595079",
+  "harrtest_version": "4.1.0",
+  "scope": "Continue the original consolidation mission by repairing the measured public-CLI greenfield, automatic-routing, and verification failures. Preserve original commit ancestry and all prior experiment evidence.",
+  "acceptance": [
+    "The unchanged greeting prompt that failed during consolidation completes from an empty workspace through the actual CLI and installed gemma4:e4b.",
+    "The unchanged integer-product prompt completes through default auto mode without task-specific code injected into its workspace.",
+    "Programs remain persisted after the orchestrator exits successfully, and separate deterministic acceptance commands verify exact output and error boundaries.",
+    "Run the existing regression suite and public self-test on the delivered implementation, with focused negative controls for every new authority or verification behavior.",
+    "Preserve every failed and successful live attempt with source/model identity, commands, exit codes, and outputs; record new results separately from historical consolidation evidence."
+  ],
+  "negative_controls": [
+    "Unresolved or conflicting real dependencies must not gain mutation authorization.",
+    "Skipped, syntax-only, stale, or unrelated evidence must not become behavior verification.",
+    "A textual tool call is never evaluated or treated as a native invocation.",
+    "Output acceptance checks must fail against deliberately incorrect output."
+  ],
+  "constraints": [
+    "Use only installed local gemma4:e4b for live model roles.",
+    "No push, history rewrite, branch recreation, remote deletion, or shared-service reconfiguration.",
+    "No modification or fabrication of benchmark output to make acceptance pass.",
+    "Choose autonomous implementation decisions; do not ask the user routine questions."
+  ]
+}

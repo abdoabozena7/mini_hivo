@@ -1,0 +1,13 @@
+======================================================================
+FAIL: test_latest_rerun_resolves_a_legacy_focused_test_failure (test_verification_applicability.VerificationApplicabilityTests.test_latest_rerun_resolves_a_legacy_focused_test_failure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_verification_applicability.py", line 318, in test_latest_rerun_resolves_a_legacy_focused_test_failure
+    self.assertTrue(aggregate_verification_evidence(artifact, [failed, passed])["passed"])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 1 test in 0.015s
+
+FAILED (failures=1)

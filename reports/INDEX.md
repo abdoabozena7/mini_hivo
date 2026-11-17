@@ -29,6 +29,14 @@ branch provenance, integration repairs, offline regression results, and new
 request-to-result attempts. These are new measurements, not replacements for
 the historical Experiment 1–19 results.
 
+The [2026-11-17 live end-to-end checkpoint](../docs/LIVE_E2E_VALIDATION.md)
+continues that work with three independently accepted default-auto Python
+CLI journeys on one delivered source fingerprint. Its [complete attempt
+index](e2e/2026-11-17/validation-summary.json) includes false successes,
+failures, interruption, host qualification, and the final accepted products;
+its [release acceptance](e2e/2026-11-17/release-acceptance.json) binds the
+generated output and offline checks to committed source.
+
 The JSON files for Experiments 1–11 and the supporting comparison/matrix JSON for Experiments 12–15 were copied byte-for-byte from the local experiment directories. The source and repository copies were checked with SHA-256. Reports for Experiments 12–16 were already tracked. Raw workspaces, model transcripts, and some native verifier payloads remain outside Git; they are not silently counted as uploaded evidence.
 
 For a cross-experiment narrative, distinguish deterministic probes, same-state replay, fresh approved-contract runs, and full request-to-result runs. A browser PASS, a legal mutation, Child verified, and Root verified are different milestones. Preserve each report's exact numerator, denominator, policy, task family, and boundary; never extrapolate a one-task result to general reliability.

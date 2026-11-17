@@ -1,0 +1,107 @@
+[BUILDER] STRUCTURED-T1 executing
+[BUILDER] STRUCTURED-T1 executing
+[STRUCTURED RETRY] generation-response 1/2 | Expecting value: line 1 column 1 (char 0)
+[STRUCTURED RETRY] generation-response 2/2 | Expecting value: line 1 column 1 (char 0)
+[BUILDER] STRUCTURED-T1 executing
+[STRUCTURED RETRY] generation-response 1/2 | Expecting value: line 1 column 1 (char 0)
+[BUILDER] STRUCTURED-T1 executing
+======================================================================
+ERROR: test_python_function_assertions_reject_source_code_and_preserve_distinct_cases (test_mini.MiniAgentRegressionTests.test_python_function_assertions_reject_source_code_and_preserve_distinct_cases)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_mini.py", line 58, in test_python_function_assertions_reject_source_code_and_preserve_distinct_cases
+    invalid = json.loads(mini.run_tool("run_file", {
+        "path": "labels.py", "function": '__import__("os")',
+        "arguments": [], "expected": None,
+    }, role="Falsifier"))
+  File "C:\Python313\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Python313\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
+
+======================================================================
+ERROR: test_read_only_python_function_assertions_check_exact_values_without_new_tests (test_mini.MiniAgentRegressionTests.test_read_only_python_function_assertions_check_exact_values_without_new_tests) (arguments=[], expected='default!')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_mini.py", line 45, in test_read_only_python_function_assertions_check_exact_values_without_new_tests
+    result = json.loads(mini.run_tool("run_file", {
+        "path": "labels.py", "function": "label",
+        "arguments": arguments, "expected": expected,
+    }, role="Falsifier"))
+  File "C:\Python313\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Python313\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
+
+======================================================================
+ERROR: test_read_only_python_function_assertions_check_exact_values_without_new_tests (test_mini.MiniAgentRegressionTests.test_read_only_python_function_assertions_check_exact_values_without_new_tests) (arguments=['sample'], expected='sample!')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_mini.py", line 45, in test_read_only_python_function_assertions_check_exact_values_without_new_tests
+    result = json.loads(mini.run_tool("run_file", {
+        "path": "labels.py", "function": "label",
+        "arguments": arguments, "expected": expected,
+    }, role="Falsifier"))
+  File "C:\Python313\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Python313\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
+
+======================================================================
+ERROR: test_read_only_python_function_assertions_check_exact_values_without_new_tests (test_mini.MiniAgentRegressionTests.test_read_only_python_function_assertions_check_exact_values_without_new_tests) (arguments=['sample'], expected='sample')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_mini.py", line 45, in test_read_only_python_function_assertions_check_exact_values_without_new_tests
+    result = json.loads(mini.run_tool("run_file", {
+        "path": "labels.py", "function": "label",
+        "arguments": arguments, "expected": expected,
+    }, role="Falsifier"))
+  File "C:\Python313\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Python313\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
+
+======================================================================
+FAIL: test_read_only_python_function_assertions_check_exact_values_without_new_tests (test_mini.MiniAgentRegressionTests.test_read_only_python_function_assertions_check_exact_values_without_new_tests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\projects\Ai\mini_hivo\tests\test_mini.py", line 52, in test_read_only_python_function_assertions_check_exact_values_without_new_tests
+    self.assertEqual([item.name for item in mini.WORKSPACE.iterdir()], ["labels.py"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['.agent_runs', 'labels.py'] != ['labels.py']
+
+First differing element 0:
+'.agent_runs'
+'labels.py'
+
+First list contains 1 additional elements.
+First extra element 1:
+'labels.py'
+
+- ['.agent_runs', 'labels.py']
++ ['labels.py']
+
+----------------------------------------------------------------------
+Ran 14 tests in 1.978s
+
+FAILED (failures=1, errors=4)

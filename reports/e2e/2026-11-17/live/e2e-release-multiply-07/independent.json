@@ -1,0 +1,148 @@
+{
+  "case": "multiply",
+  "workspace": "D:\\projects\\Ai\\mini_hivo\\output\\live-e2e-20261117-validated\\multiply",
+  "passed": true,
+  "checks": [
+    {
+      "case": "valid:6,7",
+      "argv": [
+        "multiply.py",
+        "6",
+        "7"
+      ],
+      "expected_stdout": "42\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "42\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "valid:-3,5",
+      "argv": [
+        "multiply.py",
+        "-3",
+        "5"
+      ],
+      "expected_stdout": "-15\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "-15\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "valid:-3,-7",
+      "argv": [
+        "multiply.py",
+        "-3",
+        "-7"
+      ],
+      "expected_stdout": "21\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "21\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "valid:0,999",
+      "argv": [
+        "multiply.py",
+        "0",
+        "999"
+      ],
+      "expected_stdout": "0\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "0\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "valid:123456789,9",
+      "argv": [
+        "multiply.py",
+        "123456789",
+        "9"
+      ],
+      "expected_stdout": "1111111101\n",
+      "expected_nonzero": false,
+      "exit_code": 0,
+      "stdout": "1111111101\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "case": "rejected:",
+      "argv": [
+        "multiply.py"
+      ],
+      "expected_stdout": null,
+      "expected_nonzero": true,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: This utility requires exactly two integer arguments.\n",
+      "passed": true
+    },
+    {
+      "case": "rejected:6",
+      "argv": [
+        "multiply.py",
+        "6"
+      ],
+      "expected_stdout": null,
+      "expected_nonzero": true,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: This utility requires exactly two integer arguments.\n",
+      "passed": true
+    },
+    {
+      "case": "rejected:6,invalid",
+      "argv": [
+        "multiply.py",
+        "6",
+        "invalid"
+      ],
+      "expected_stdout": null,
+      "expected_nonzero": true,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: Both arguments must be valid integers.\n",
+      "passed": true
+    },
+    {
+      "case": "rejected:invalid,7",
+      "argv": [
+        "multiply.py",
+        "invalid",
+        "7"
+      ],
+      "expected_stdout": null,
+      "expected_nonzero": true,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: Both arguments must be valid integers.\n",
+      "passed": true
+    },
+    {
+      "case": "rejected:6,7,8",
+      "argv": [
+        "multiply.py",
+        "6",
+        "7",
+        "8"
+      ],
+      "expected_stdout": null,
+      "expected_nonzero": true,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: This utility requires exactly two integer arguments.\n",
+      "passed": true
+    }
+  ],
+  "product_files_sha256": {
+    "multiply.py": "9321b9d091a6c787679c35233abd01195cdd3dcc8da3111de837eec2444f4aa0"
+  }
+}

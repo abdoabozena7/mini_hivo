@@ -1,0 +1,1227 @@
+{
+  "algorithm": "SHA-256",
+  "scope": "All end-to-end checkpoint evidence files except this checksum file and Python bytecode caches",
+  "file_count": 305,
+  "files": {
+    ".gitattributes": {
+      "sha256": "a2c82ba86c3e1422dca521009556616709a294f4f635eb585f7ba8cf212223c7",
+      "bytes": 71
+    },
+    "acceptance.py": {
+      "sha256": "aab94f95c91af9928daa2516b23a04dd1105bcf75561637b45a1fc0acd845d5f",
+      "bytes": 3258
+    },
+    "history-continuity.json": {
+      "sha256": "7acd99a879e25195204872ebc636e079068ba3d5a3af175c3ca0c7e6e0c5c352",
+      "bytes": 299
+    },
+    "live/e2e-greeting-auto-01/console.log": {
+      "sha256": "4f58b82b5fbeaae57cc60b0cd9e8ae82ce80be92309771a1dfd5fbeda8ba0cff",
+      "bytes": 55679
+    },
+    "live/e2e-greeting-auto-01/events/20261117T015247-9fbdefe0.jsonl": {
+      "sha256": "3830b425857ae2cdae53052d216d5bf7fc5e10e8c4d6e1cc7717cc0d7472ed0a",
+      "bytes": 66500
+    },
+    "live/e2e-greeting-auto-01/execution.json": {
+      "sha256": "da3f4577213fbeda698a6715e633d2cbc90c82b3ad1084f04445e5085dce8692",
+      "bytes": 8358
+    },
+    "live/e2e-greeting-auto-01/host-preflight.json": {
+      "sha256": "1b1b3096d4f28837a81dd4f055d21d2ae2764f652df6423e136eea7dee232d41",
+      "bytes": 3854
+    },
+    "live/e2e-greeting-auto-01/run-metrics.jsonl": {
+      "sha256": "b6d40725153bacbda0f60d080366a0d70823190b11c8663e8336f85ffe4ce4ac",
+      "bytes": 72346
+    },
+    "live/e2e-greeting-auto-01/started.json": {
+      "sha256": "c05349818778d61be6b4c8595a4db2a529f1f3928fafb47ed1ecdda29ae3909f",
+      "bytes": 8192
+    },
+    "live/e2e-greeting-auto-01/tool-events.jsonl": {
+      "sha256": "85f68122c54d1e17f958d63f1bbc0a63f11b2028e9456614d1bd943634b56a94",
+      "bytes": 21360
+    },
+    "live/e2e-greeting-auto-02/console.log": {
+      "sha256": "fae5f76fd08bf9789921f79c8b455b69055b234d02cbc2750e5fceadcc6e501e",
+      "bytes": 55527
+    },
+    "live/e2e-greeting-auto-02/events/20261117T021306-0b7cb41f.jsonl": {
+      "sha256": "c8d7e1533565bcd4846462ad65215409a5babf3207926814115dfd88d8e2887e",
+      "bytes": 54742
+    },
+    "live/e2e-greeting-auto-02/execution.json": {
+      "sha256": "682fc65ee8b073aa6b02b0d4d2ad41a934d213148e48a3a93f6805d7a13d87ed",
+      "bytes": 8389
+    },
+    "live/e2e-greeting-auto-02/host-preflight.json": {
+      "sha256": "71d01c2020d03d8afa5072ac919051c653bfb4f385016d1b4b4806f02e1e1ce1",
+      "bytes": 3856
+    },
+    "live/e2e-greeting-auto-02/run-metrics.jsonl": {
+      "sha256": "af9b7d84becb7fb665c2915b8c88012898fb12e7f68d000d7b8d856320e0a8c6",
+      "bytes": 64326
+    },
+    "live/e2e-greeting-auto-02/started.json": {
+      "sha256": "53ecb5494ed68a0e6d719ed213ae93e25b9662abb3ac5ad1e1f591fbcf6a1d71",
+      "bytes": 8224
+    },
+    "live/e2e-greeting-auto-02/tool-events.jsonl": {
+      "sha256": "e89372f0ee27b4ab8122215d4da74d4a64953110807600839de07742dad7e194",
+      "bytes": 21205
+    },
+    "live/e2e-greeting-auto-03/console.log": {
+      "sha256": "a8d4fe40cb6457d6a47dbe6fa655d049c2f39d7b15e6a52b8aeb0480ad85f99a",
+      "bytes": 50949
+    },
+    "live/e2e-greeting-auto-03/events/20261117T022018-a3665145.jsonl": {
+      "sha256": "d59c053012a885039eb3e40ce9e4eab872e5e27fd3f7685859b6c2ea22630a15",
+      "bytes": 48083
+    },
+    "live/e2e-greeting-auto-03/execution.json": {
+      "sha256": "784a2941bb0005e6252be692dbf13887e8fc78f5d182029524dccd91dd3b9b7c",
+      "bytes": 8389
+    },
+    "live/e2e-greeting-auto-03/host-preflight.json": {
+      "sha256": "bdf17346e342a890786eeb04ad5846b31af25439e800f911eb623103f18144be",
+      "bytes": 3853
+    },
+    "live/e2e-greeting-auto-03/independent.json": {
+      "sha256": "98d05518dcd0b300e703805e3450990bd201c9fc75b47ce257cbef4d53d047ee",
+      "bytes": 1979
+    },
+    "live/e2e-greeting-auto-03/product/greet.py": {
+      "sha256": "3d734b19b775a2315deb857d11ec41122e7bb20c1314f6bfd74bd6f88aa9f339",
+      "bytes": 557
+    },
+    "live/e2e-greeting-auto-03/product/test_greet.py": {
+      "sha256": "e0957e60c334c6528958a7faad259998d6a8604fbe8a51026c9934c8fe1bf775",
+      "bytes": 2140
+    },
+    "live/e2e-greeting-auto-03/run-metrics.jsonl": {
+      "sha256": "35008b6df12cf93eb49dbe75fc702c4c7550c162d25041b8fbc2f3946eb4717a",
+      "bytes": 45802
+    },
+    "live/e2e-greeting-auto-03/started.json": {
+      "sha256": "cad066608cb4263bbc1a83961a8fab588985530157887c7094270f8eb359a6e3",
+      "bytes": 8224
+    },
+    "live/e2e-greeting-auto-03/tool-events.jsonl": {
+      "sha256": "871acdba8e81ce111de668b92d98c1eb7e0f38f45fdf171afb0152affe48460d",
+      "bytes": 13198
+    },
+    "live/e2e-greeting-direct-01/console.log": {
+      "sha256": "b051f5a66b8eb56309b0365a661f37572a0b3e2fce83e796813479f5dacfe939",
+      "bytes": 46757
+    },
+    "live/e2e-greeting-direct-01/events/20261117T011149-d950a776.jsonl": {
+      "sha256": "b6d0bee13df5428409c195ff1f2faa12a296238c8a239cd71ac91cf40fa188be",
+      "bytes": 32121
+    },
+    "live/e2e-greeting-direct-01/execution.json": {
+      "sha256": "534dcc4b3ff3a245998d7c18447f5bd5d0770cd2ff267100de8630a2cbe8d040",
+      "bytes": 8065
+    },
+    "live/e2e-greeting-direct-01/host-preflight.json": {
+      "sha256": "3277fb5c13f2ae13083479022336525f78d30c62fd709a1b409fbe5b02a74440",
+      "bytes": 3847
+    },
+    "live/e2e-greeting-direct-01/run-metrics.jsonl": {
+      "sha256": "2f553c3d816c093376c5c5d4517ea9a05eca73619689fac0b00d091bae0848af",
+      "bytes": 76231
+    },
+    "live/e2e-greeting-direct-01/tool-events.jsonl": {
+      "sha256": "b5bb07b24ff42cb2dd2217dd04b9f3d5307b3c734d1bbdf2a7ea108cc458da92",
+      "bytes": 16709
+    },
+    "live/e2e-greeting-direct-02/console.log": {
+      "sha256": "b29e12a5d49c730bb09714a5095b2f0fae4a10e8663a77b79022ee513ebc4da1",
+      "bytes": 57664
+    },
+    "live/e2e-greeting-direct-02/events/20261117T011443-b9bfd6b1.jsonl": {
+      "sha256": "a260eb82da5ef10518796637a889dc3f2e659609fca8c6ca790910370ffe63b6",
+      "bytes": 80247
+    },
+    "live/e2e-greeting-direct-02/execution.json": {
+      "sha256": "2f25c7e29f69cf757c395a1678a2d2d4f1e5d3d5513d25170516538c6f091669",
+      "bytes": 8065
+    },
+    "live/e2e-greeting-direct-02/host-preflight.json": {
+      "sha256": "7038559d6030171371381f063c77dc5e517c9ce7672b74d1d45e453337d785f5",
+      "bytes": 3857
+    },
+    "live/e2e-greeting-direct-02/run-metrics.jsonl": {
+      "sha256": "c0c542c1e2cf5250b245289f74239186b49a550e0f16a98c3f6740303324342e",
+      "bytes": 69378
+    },
+    "live/e2e-greeting-direct-02/tool-events.jsonl": {
+      "sha256": "6a25e2b8d81eb9f3dee45c603b3063b6ffd6dd20df8d0700c428ca73ea1b1cb3",
+      "bytes": 36872
+    },
+    "live/e2e-greeting-direct-03/console.log": {
+      "sha256": "a62f5eb00143b1ebdfff487416636778d652b973bed703c14f3182b423e432c4",
+      "bytes": 42582
+    },
+    "live/e2e-greeting-direct-03/events/20261117T012040-7b5bd1d7.jsonl": {
+      "sha256": "3971c126c8bc3bf21d2ed98bd076599045908f8e42367148ff7441182a87153b",
+      "bytes": 28500
+    },
+    "live/e2e-greeting-direct-03/execution.json": {
+      "sha256": "027b23c3fa932045796c45056b10d70d43b6e1da3a3ff10ca54ab3beeeb70adc",
+      "bytes": 8142
+    },
+    "live/e2e-greeting-direct-03/host-preflight.json": {
+      "sha256": "5bdbc6b514598a1f52bb32c00f2f552a7a4a2c1a2309307ccd3da1506cdf789f",
+      "bytes": 3855
+    },
+    "live/e2e-greeting-direct-03/independent.json": {
+      "sha256": "156bd640ae07486f9cc6026d4d7974a234121e4b321e640535a3a920b4728e65",
+      "bytes": 1980
+    },
+    "live/e2e-greeting-direct-03/product/greet.py": {
+      "sha256": "ec8e58e956c2686ff4fc0567f7673bff87e5219e1ceb28e74ad237ea89d554ad",
+      "bytes": 2705
+    },
+    "live/e2e-greeting-direct-03/product/test_greet.py": {
+      "sha256": "b3c605893b8c6ddbaf10a150ff7e741b02bad603d6df8408186c26dabb03236d",
+      "bytes": 3456
+    },
+    "live/e2e-greeting-direct-03/run-metrics.jsonl": {
+      "sha256": "9ac322b9234572e4306c7e6d58baf1229fc561e752f7f2dfea5db7bd750cf46d",
+      "bytes": 41122
+    },
+    "live/e2e-greeting-direct-03/tool-events.jsonl": {
+      "sha256": "3a225e4b85a823a2e6e1e5dcf2fce56463d3f02986d8732c5fe9f28be75567fd",
+      "bytes": 9503
+    },
+    "live/e2e-greeting-direct-04/console.log": {
+      "sha256": "4c724088fd9b86ba9ac55fa39fb03f3ce2b48e4c0dadd20b7a31636c2c59e59b",
+      "bytes": 62040
+    },
+    "live/e2e-greeting-direct-04/events/20261117T013710-576f4cd1.jsonl": {
+      "sha256": "afd874c4c666e4bade7ab90566a6ae2a7a15d50e8a8f2401ee408c6a1008cf30",
+      "bytes": 67012
+    },
+    "live/e2e-greeting-direct-04/execution.json": {
+      "sha256": "0b665576e60ec7cee5fea215b7cfa5f0908af879fda9627e66f0d34cef1b087a",
+      "bytes": 8361
+    },
+    "live/e2e-greeting-direct-04/host-preflight.json": {
+      "sha256": "cddc76387e59088aafe8d7936d8cf8ed11f66ed0358e4e14778cedd7d514d590",
+      "bytes": 3855
+    },
+    "live/e2e-greeting-direct-04/run-metrics.jsonl": {
+      "sha256": "63dae48b02b438f95a7eb7cd5b223d6790af8fba1063fd61199a967e39070ab1",
+      "bytes": 78909
+    },
+    "live/e2e-greeting-direct-04/tool-events.jsonl": {
+      "sha256": "99be39fe53c67efcc6134298aa33b345938630c3601396e199501e5d77d0999f",
+      "bytes": 17957
+    },
+    "live/e2e-greeting-direct-05/console.log": {
+      "sha256": "18aadfe0baf21dbdba474b63f35348a9a5eea84b367e5b68c2baa6ded63fcf78",
+      "bytes": 56678
+    },
+    "live/e2e-greeting-direct-05/events/20261117T014019-c23ac620.jsonl": {
+      "sha256": "8863763cfc395bfba6bab581d77d5938256e60dcc5d07c1b7553395583a0772d",
+      "bytes": 76014
+    },
+    "live/e2e-greeting-direct-05/execution.json": {
+      "sha256": "ce92207f7726a34c930f97c0132a3823d31727d3f79647f1c001d50f9ccb4c22",
+      "bytes": 8362
+    },
+    "live/e2e-greeting-direct-05/host-preflight.json": {
+      "sha256": "0cacdda51e6a3f5dd8f669d11e23861cdc0f13c9a8821f8dafff07d6a0a06791",
+      "bytes": 3855
+    },
+    "live/e2e-greeting-direct-05/run-metrics.jsonl": {
+      "sha256": "2195c7fbcdf6d81483f757fa674c45e99f20a135f3685feae351faa414dcd9ba",
+      "bytes": 57742
+    },
+    "live/e2e-greeting-direct-05/tool-events.jsonl": {
+      "sha256": "ee0a9b79afb8ab4080447f1a9bffdfb9bdb5504e6746ab0f8e234fae6db80c83",
+      "bytes": 29475
+    },
+    "live/e2e-greeting-direct-06/console.log": {
+      "sha256": "00ff062b991ba3c8f4e4556e00df01c6f261665b490235ddc3e98d32539fe56c",
+      "bytes": 52802
+    },
+    "live/e2e-greeting-direct-06/events/20261117T014506-464a4646.jsonl": {
+      "sha256": "a75c73a2d5879725e6e68a84dab3a92d409a426427d1cf0fcb7be25c0314ca1b",
+      "bytes": 61695
+    },
+    "live/e2e-greeting-direct-06/execution.json": {
+      "sha256": "2487a54d828a574677b8e2989c779da049688adafc62ba1ec28f54e4c0d5e009",
+      "bytes": 8393
+    },
+    "live/e2e-greeting-direct-06/host-preflight.json": {
+      "sha256": "5971ffbc0c848f87e9dddb20867bee5f55934d7c8b9a2df5b95d4f93ba1debcb",
+      "bytes": 3853
+    },
+    "live/e2e-greeting-direct-06/run-metrics.jsonl": {
+      "sha256": "24418d3aeae576413401850222f781c491f7845d7feb202d456ed67fb4accb60",
+      "bytes": 58005
+    },
+    "live/e2e-greeting-direct-06/tool-events.jsonl": {
+      "sha256": "445107742e80a8c37f7de3dc6a4596d7078a92dee276eb4953592d1e9d8cb80e",
+      "bytes": 23043
+    },
+    "live/e2e-greeting-direct-07/console.log": {
+      "sha256": "2725b14413ebd5c2a84717b892c2120cf3cf57c0ea79d2e705d86181a15568be",
+      "bytes": 57719
+    },
+    "live/e2e-greeting-direct-07/events/20261117T020226-f141e325.jsonl": {
+      "sha256": "c90d3c55ede11cc43ebd05f298b0be938942f8732d2c6f9593a677baf2b51119",
+      "bytes": 62854
+    },
+    "live/e2e-greeting-direct-07/execution.json": {
+      "sha256": "385cea5c54df4bb0c220ada0a253ee211c38d0c9d2fb9594b35b9445edc9ffe0",
+      "bytes": 8393
+    },
+    "live/e2e-greeting-direct-07/host-preflight.json": {
+      "sha256": "fa311a295310915e37eca1c7b9f19955af43fc748b11d934d5678ea935925579",
+      "bytes": 3855
+    },
+    "live/e2e-greeting-direct-07/run-metrics.jsonl": {
+      "sha256": "f86d6e421daf72587055104d51c14e8e278241dd253b097a0e239232ea0f7bfe",
+      "bytes": 64390
+    },
+    "live/e2e-greeting-direct-07/started.json": {
+      "sha256": "2000bf9107d2e09a220a67d9343e574e09009c4dd6f85eef16f55fbc40b556c3",
+      "bytes": 8228
+    },
+    "live/e2e-greeting-direct-07/tool-events.jsonl": {
+      "sha256": "6b35d3b95e47b38c1ec003388bee600bfd0c9c5e6e11cefefa146f232b957e06",
+      "bytes": 22132
+    },
+    "live/e2e-greeting-direct-08/console.log": {
+      "sha256": "a238f5f98570e3e256d0409c520ddc5be3d0e1b52f741da3693e04c522f2996d",
+      "bytes": 59198
+    },
+    "live/e2e-greeting-direct-08/events/20261117T020626-94a1e18c.jsonl": {
+      "sha256": "9d9381025d9524d4e7dc67eb4a92504851c5dd00ddc924398241430eb1489669",
+      "bytes": 65401
+    },
+    "live/e2e-greeting-direct-08/execution.json": {
+      "sha256": "5f70ea01234d2427627599443a5facbda89c948bfe779c0c5be43745122adfe1",
+      "bytes": 8394
+    },
+    "live/e2e-greeting-direct-08/host-preflight.json": {
+      "sha256": "187b3a09b8cda86ef02422d5e27afdc6efa82018eaca607d3c61e130c6f15a21",
+      "bytes": 3854
+    },
+    "live/e2e-greeting-direct-08/run-metrics.jsonl": {
+      "sha256": "c2d804b89bc90035c12c5ecaebbae2814eb35d9a45f015d7adf89b216bdf0f68",
+      "bytes": 73098
+    },
+    "live/e2e-greeting-direct-08/started.json": {
+      "sha256": "93abc0a36b061554bd88f1ededed41fdf24248addbc3358a3e0b9ea2bd651fc7",
+      "bytes": 8228
+    },
+    "live/e2e-greeting-direct-08/tool-events.jsonl": {
+      "sha256": "3a8aa3c58a021b14e2874464f126b1f6f8ed091f6815786130b016719c1ae0ca",
+      "bytes": 29768
+    },
+    "live/e2e-multiply-auto-01/console.log": {
+      "sha256": "4e3ff2e5c9e25f3a131f43c7ef8f0b1cb42aa68dcaf8e67343d69f17e17fce0a",
+      "bytes": 33945
+    },
+    "live/e2e-multiply-auto-01/events/20261117T012229-710b91fc.jsonl": {
+      "sha256": "15c615a5f39d76402c0df58b04cc477be90a5d9bda1f07dae66722910750fd94",
+      "bytes": 368780
+    },
+    "live/e2e-multiply-auto-01/host-preflight.json": {
+      "sha256": "8659e4e25f29f5336bdc98da297164a32d88804aadea816847cae5f5953f7b36",
+      "bytes": 3855
+    },
+    "live/e2e-multiply-auto-01/interruption.json": {
+      "sha256": "7c5ddc1dfe5949871f0ba1d19ecaf4731e9e90053a00df95be24fe94f7db5797",
+      "bytes": 926
+    },
+    "live/e2e-multiply-auto-01/tool-events.jsonl": {
+      "sha256": "01e23be72f366dc38c02f196f8f65ac0a29c0fab389ab58064e967faf8c6b2fa",
+      "bytes": 88574
+    },
+    "live/e2e-multiply-auto-02/console.log": {
+      "sha256": "316a7af0294a6412b2d5ac8db46219218b0b8b770aa5c42b308e4843db1d4f71",
+      "bytes": 51300
+    },
+    "live/e2e-multiply-auto-02/events/20261117T013056-91436274.jsonl": {
+      "sha256": "2e938f372c02d0738e35dfa07bd41d2c6f3e10647585e106c74901b95786fc2e",
+      "bytes": 89497
+    },
+    "live/e2e-multiply-auto-02/execution.json": {
+      "sha256": "1d8f295516a164bf1a84cc49e1aaa08471d1118cf6f65f2b7c05be904d24c895",
+      "bytes": 8296
+    },
+    "live/e2e-multiply-auto-02/host-preflight.json": {
+      "sha256": "b4808f8128514296ed967c624e0fbc10fecc02f46f213c70cb3380e77459f831",
+      "bytes": 3850
+    },
+    "live/e2e-multiply-auto-02/independent.json": {
+      "sha256": "b4df8155faa24fb633b00fd02c9dd58cffe5eff95ef32e1a300aa4b783fd0bc2",
+      "bytes": 3385
+    },
+    "live/e2e-multiply-auto-02/product/multiply.py": {
+      "sha256": "806a78ec1df421a88f7b4fa0d11eb608bda09e718a3bb04a6f8cdea37d0ec99e",
+      "bytes": 841
+    },
+    "live/e2e-multiply-auto-02/run-metrics.jsonl": {
+      "sha256": "1b5508a69975e4b24a677a14c3f80f90eb9412c7cb892a0527ba94d4568ded28",
+      "bytes": 36712
+    },
+    "live/e2e-multiply-auto-02/tool-events.jsonl": {
+      "sha256": "9322b083ef542af1b8ac09021e7242c11d83795985c9cba5ee5174877533f934",
+      "bytes": 12999
+    },
+    "live/e2e-release-greeting-01/console.log": {
+      "sha256": "bcb3b3947bef4c45447d216240458787dc57a5539c183bb59917dfa709ba1119",
+      "bytes": 63915
+    },
+    "live/e2e-release-greeting-01/events/20261117T022614-12568184.jsonl": {
+      "sha256": "c02082ce33c0ca1bdc6e1ba3b701cc437f4512c20ca44caa17673658840f36d2",
+      "bytes": 93020
+    },
+    "live/e2e-release-greeting-01/execution.json": {
+      "sha256": "c2e44bd55edd7da65ffe6a61fbe71327baf8f17238f63abe55c17dbfde3221d1",
+      "bytes": 8061
+    },
+    "live/e2e-release-greeting-01/host-preflight.json": {
+      "sha256": "087f40b3a0fd45963146d2ce680ee46bccec6f0492c1037b7f1f0fbbde3a6221",
+      "bytes": 3856
+    },
+    "live/e2e-release-greeting-01/run-metrics.jsonl": {
+      "sha256": "1c91d7732bab02ee6d8f38288fffe06bea7176ae3c54cf517af3efe7ea27e7ba",
+      "bytes": 75183
+    },
+    "live/e2e-release-greeting-01/started.json": {
+      "sha256": "09b635589c44cb1c5fe71f450f47cf979955206a2c2c5369b0f3df80a9225849",
+      "bytes": 7895
+    },
+    "live/e2e-release-greeting-01/tool-events.jsonl": {
+      "sha256": "bafb0b4a1133e131e923be3ae0badcbc8b61a6f8545c90c985ca072a2652765f",
+      "bytes": 31231
+    },
+    "live/e2e-release-greeting-02/console.log": {
+      "sha256": "bb5a8bd3e0d02f361edbf421832d5c1764059e14fd017ca93f161375cc8ba17b",
+      "bytes": 496
+    },
+    "live/e2e-release-greeting-02/execution.json": {
+      "sha256": "e739fd1737df54a952ec70f56cf762c5ca759f54b473418b76cb582bc12e9d38",
+      "bytes": 8060
+    },
+    "live/e2e-release-greeting-02/host-preflight.json": {
+      "sha256": "46b1942b831d754fd08df9332669a0d811bb46a4ad2a5f6e9868b7b795adbca4",
+      "bytes": 1891
+    },
+    "live/e2e-release-greeting-02/started.json": {
+      "sha256": "1998f09306a37ec4ff52bc34dfb64dd4420013ca8aed430f83c2cbba2cedb5d2",
+      "bytes": 7896
+    },
+    "live/e2e-release-greeting-03/console.log": {
+      "sha256": "b73539fbaff627a8337d1f92953eff61f57b71b30d494179c49d1ecfd29f845c",
+      "bytes": 52032
+    },
+    "live/e2e-release-greeting-03/events/20261117T024142-5be89054.jsonl": {
+      "sha256": "9f8671d6f5a54b018fb63efddd1aaf0308966e4949aabe01836506c60e0b206d",
+      "bytes": 51604
+    },
+    "live/e2e-release-greeting-03/execution.json": {
+      "sha256": "bc1271a5abaf32a0ae190bd1c7200f4b9279963c4bd3a40874356707aa7e596e",
+      "bytes": 8075
+    },
+    "live/e2e-release-greeting-03/host-preflight.json": {
+      "sha256": "7bc1c0ede4eb296be37a89ea098816c67ef0fef732168f0cc52c8fbdaf0e218b",
+      "bytes": 3844
+    },
+    "live/e2e-release-greeting-03/independent.json": {
+      "sha256": "eb994d92104b984a91ff053d532b7aaa3df453f2a5d2f333b0ac3bd3e7d18d62",
+      "bytes": 1929
+    },
+    "live/e2e-release-greeting-03/product/greet.py": {
+      "sha256": "3d734b19b775a2315deb857d11ec41122e7bb20c1314f6bfd74bd6f88aa9f339",
+      "bytes": 557
+    },
+    "live/e2e-release-greeting-03/product/test_greet.py": {
+      "sha256": "f225509f55fe189edd92f85963a7baa9f4e9c8a30373805d72aa79d73ddf3524",
+      "bytes": 2417
+    },
+    "live/e2e-release-greeting-03/run-metrics.jsonl": {
+      "sha256": "baf2240a67e5114643b8afa69c9498dd368e725472bae8dbfdb80bc78b04b42e",
+      "bytes": 45784
+    },
+    "live/e2e-release-greeting-03/started.json": {
+      "sha256": "a89daf891b914a70b5f79b384e49829dc79c59ed77960256fe8ef11f49f529f6",
+      "bytes": 7910
+    },
+    "live/e2e-release-greeting-03/tool-events.jsonl": {
+      "sha256": "558e11af0791916e4bb9a1f8f603e8d7b3088c2094117e6ec90a9a19d69156ba",
+      "bytes": 13296
+    },
+    "live/e2e-release-greeting-05/console.log": {
+      "sha256": "e8cac557330da02a77c3548053bba9355748bae28b471a4efa1d80afe5aac068",
+      "bytes": 51511
+    },
+    "live/e2e-release-greeting-05/events/20261117T030237-ab95941e.jsonl": {
+      "sha256": "9da8924887dd9fdea24582227de87d54a570fcbbb918e1f9d5e284b6be721246",
+      "bytes": 39488
+    },
+    "live/e2e-release-greeting-05/execution.json": {
+      "sha256": "c748523df6255de74a070372c852ad54e87693924ad157e974364c192bb35832",
+      "bytes": 8077
+    },
+    "live/e2e-release-greeting-05/host-preflight.json": {
+      "sha256": "81c8fd926c631c137f24f29412806daf616f3db451f4ac9344e8c44345ec0528",
+      "bytes": 3857
+    },
+    "live/e2e-release-greeting-05/run-metrics.jsonl": {
+      "sha256": "b416c727632f3f45c5cdfe3da014525c3577802e556c0653fb533639ff80918b",
+      "bytes": 80990
+    },
+    "live/e2e-release-greeting-05/started.json": {
+      "sha256": "d43fb33a176b6721835885eb56072e9a1bff13802a349a28caa788e2b1b611e5",
+      "bytes": 7913
+    },
+    "live/e2e-release-greeting-05/tool-events.jsonl": {
+      "sha256": "030ea09a01c328409f78143f993ec336629ba9bd1699a568d47adaaba93ff34b",
+      "bytes": 18147
+    },
+    "live/e2e-release-greeting-06/console.log": {
+      "sha256": "5bcb7efe483afd3e22d446f76d4089d5b0417cdc90be0348135c407ba48bbd99",
+      "bytes": 51525
+    },
+    "live/e2e-release-greeting-06/events/20261117T030757-0a96e877.jsonl": {
+      "sha256": "eb0799489a8ad8dff58d34496fbd08fe897491ac84cb64f83522dac944527865",
+      "bytes": 38962
+    },
+    "live/e2e-release-greeting-06/execution.json": {
+      "sha256": "d460a8bd5d717af2e9651bdba59dac3e533deccdb479ec94281c7b7853fc9e9b",
+      "bytes": 8076
+    },
+    "live/e2e-release-greeting-06/host-preflight.json": {
+      "sha256": "e3292dfd778c6be9e0a99210d23d1c7c2dfa521a61d76ae12ac10bf1311b726d",
+      "bytes": 3857
+    },
+    "live/e2e-release-greeting-06/run-metrics.jsonl": {
+      "sha256": "6cac723a7d5acc0a8d84eba9b04d621be9a4f9eba5e65ea414417f9bde48c3bc",
+      "bytes": 81136
+    },
+    "live/e2e-release-greeting-06/started.json": {
+      "sha256": "fa4bf2597be1f17b212a79b5b9bd795a4da7a2ae9454c908122c053c8c1bce01",
+      "bytes": 7911
+    },
+    "live/e2e-release-greeting-06/tool-events.jsonl": {
+      "sha256": "aa962da60166adcd9a02aba79deb55cdf35f2ace6982ef010439e1eb1168cdce",
+      "bytes": 18183
+    },
+    "live/e2e-release-greeting-07/console.log": {
+      "sha256": "c29d1dddeeb29e800794505adde86858fc5ff5c3b266c9582483fd27b798d096",
+      "bytes": 62749
+    },
+    "live/e2e-release-greeting-07/events/20261117T031028-52724034.jsonl": {
+      "sha256": "f5301bc0fc7e80644de403bec73e00193271c7f8446a265c3ee050a4f6a6e1f3",
+      "bytes": 108872
+    },
+    "live/e2e-release-greeting-07/execution.json": {
+      "sha256": "d220d500e1a13f6ada865f60d28cfc30e12513b8c33e238eeefff2ece45a1137",
+      "bytes": 8135
+    },
+    "live/e2e-release-greeting-07/host-preflight.json": {
+      "sha256": "c3db1a99090143d0c159874d27748980615410f7c21a00c4b77f23442b9f3f86",
+      "bytes": 3855
+    },
+    "live/e2e-release-greeting-07/run-metrics.jsonl": {
+      "sha256": "089fd23329b336654b69289afe38b2e5080db28fe9e5c9703197e004fe6c556a",
+      "bytes": 68075
+    },
+    "live/e2e-release-greeting-07/started.json": {
+      "sha256": "dd991151d1396e62b685ecd091bb0bf7b9014e60ad3cbaa15c232b25bd577b38",
+      "bytes": 7969
+    },
+    "live/e2e-release-greeting-07/tool-events.jsonl": {
+      "sha256": "bb6b76ce3d441530cf31f11560b67e0def49f2c94a402b68500dc3769a677a7e",
+      "bytes": 35982
+    },
+    "live/e2e-release-greeting-08/console.log": {
+      "sha256": "0bbb0f42df000b65a7fb2fe1417b854680b264e08853a9a3cb6c1850ecaebae7",
+      "bytes": 50254
+    },
+    "live/e2e-release-greeting-08/events/20261117T031623-3e49754b.jsonl": {
+      "sha256": "17c2d3650083a29c50dd440e170643451b95a0cf00d2e1bb94de59dac41eefe7",
+      "bytes": 47836
+    },
+    "live/e2e-release-greeting-08/execution.json": {
+      "sha256": "315af85c36f533f682c26a5d4dfd3843eb139ae9165f7918f0b104474f6db642",
+      "bytes": 8243
+    },
+    "live/e2e-release-greeting-08/host-preflight.json": {
+      "sha256": "c17cff68fb8814b5dd126d18cee15014286e4c7b18c686b91ba9a5ecb2d673aa",
+      "bytes": 3842
+    },
+    "live/e2e-release-greeting-08/independent.json": {
+      "sha256": "e551377f4e1b935bcba8ed3fb5122b02e8adddfbbe10677755acb87d3b512319",
+      "bytes": 1931
+    },
+    "live/e2e-release-greeting-08/product/greet.py": {
+      "sha256": "f6344e032a4729e80808d68a13974495b21dbf7714c0c14befe7794317f5f3bb",
+      "bytes": 558
+    },
+    "live/e2e-release-greeting-08/product/test_greet.py": {
+      "sha256": "870232333dd4ece5beefd8584c7c921704bc33bc60b6a2e520ab9a4396dd3c0a",
+      "bytes": 1356
+    },
+    "live/e2e-release-greeting-08/run-metrics.jsonl": {
+      "sha256": "18b6a2f60fdc004cefcdd54fde0f82b1d1415094f79a52ed0e4817249c2113a1",
+      "bytes": 45585
+    },
+    "live/e2e-release-greeting-08/started.json": {
+      "sha256": "89cdf5e35696e5c6d825ad3584f02dcf657ca035c7d563cc7634632c80648bd2",
+      "bytes": 8077
+    },
+    "live/e2e-release-greeting-08/tool-events.jsonl": {
+      "sha256": "d677d1128ea0ada44c48f56211163ba35607309ac4b2cff560231553e2827a77",
+      "bytes": 12379
+    },
+    "live/e2e-release-hello-07/console.log": {
+      "sha256": "59c40dbb80f7693d0981f8f2ffb43abb05772522113b962f135b1a29dfd01342",
+      "bytes": 34349
+    },
+    "live/e2e-release-hello-07/events/20261117T031516-68f1aebc.jsonl": {
+      "sha256": "e7be2e915b4ec9c3ea64bd98d5c5710918bca609c16ec424bf2c4ee130e41d0e",
+      "bytes": 46449
+    },
+    "live/e2e-release-hello-07/execution.json": {
+      "sha256": "753afc03881d8e204128aaf3ec36e027aa48d55b5d1c82e4ef46e4693cf26660",
+      "bytes": 8236
+    },
+    "live/e2e-release-hello-07/host-preflight.json": {
+      "sha256": "23fe251a10b95133b14093028637ff56fd6ccd7f9616d539e806b7ebcdae9e47",
+      "bytes": 3856
+    },
+    "live/e2e-release-hello-07/independent.json": {
+      "sha256": "f7abb651303f1b02b583dada7a81989974342d137b187e5746511ec664e0edba",
+      "bytes": 546
+    },
+    "live/e2e-release-hello-07/product/hello.py": {
+      "sha256": "bcf607b75d7d8c148f64173ed059f1e3d9128a7ceb4a44a273b59ae4f92b0387",
+      "bytes": 17
+    },
+    "live/e2e-release-hello-07/run-metrics.jsonl": {
+      "sha256": "a945d5434b0d040df3e727c86b7d243dafc0384231a22f0ee9bc100e1768b4f2",
+      "bytes": 29907
+    },
+    "live/e2e-release-hello-07/started.json": {
+      "sha256": "940fce157fde7f827f8398ead2a270da1c924d4c7851fd6164c8327188cd14ec",
+      "bytes": 8070
+    },
+    "live/e2e-release-hello-07/tool-events.jsonl": {
+      "sha256": "958ad91d06bb552e8d40a88ff62b41888994fea516d2e619e539a0b10fdae0a1",
+      "bytes": 4751
+    },
+    "live/e2e-release-hello-08/console.log": {
+      "sha256": "04df4fada7fbd56b3f8dbfdc92baece129dca77547502170d75c473c427419e2",
+      "bytes": 34342
+    },
+    "live/e2e-release-hello-08/events/20261117T032232-6c1228c8.jsonl": {
+      "sha256": "3efa20434ce5d9408e5a4f3801f230ea7c668caea24a82bf250cb7eaa76473a3",
+      "bytes": 46588
+    },
+    "live/e2e-release-hello-08/execution.json": {
+      "sha256": "192ab04acb93c72f29db9d81a843e833bab963ebd15b6f53c34a907d6fce4ec4",
+      "bytes": 8232
+    },
+    "live/e2e-release-hello-08/host-preflight.json": {
+      "sha256": "bbd4abc79bc6f6dc6600f2400f6ec779f127c9813a2d919017deb5052fc58af2",
+      "bytes": 3858
+    },
+    "live/e2e-release-hello-08/independent.json": {
+      "sha256": "8a89596e1f6e00e7f1bc2d93d8f82de256618f87247902a447c2f21e0e126502",
+      "bytes": 544
+    },
+    "live/e2e-release-hello-08/product/hello.py": {
+      "sha256": "bcf607b75d7d8c148f64173ed059f1e3d9128a7ceb4a44a273b59ae4f92b0387",
+      "bytes": 17
+    },
+    "live/e2e-release-hello-08/run-metrics.jsonl": {
+      "sha256": "58edbc2d2a5acc2167d465b992b6580067a6018837f5eaca7bff244e0d666d33",
+      "bytes": 29900
+    },
+    "live/e2e-release-hello-08/started.json": {
+      "sha256": "ae8918d7f4c0943a6154f581ede6bd600c100118089192c902d7145229c9e8cf",
+      "bytes": 8067
+    },
+    "live/e2e-release-hello-08/tool-events.jsonl": {
+      "sha256": "1bc5f8495a865ffa1c11e340929793bc47b680e35f561b082892a96fc4615348",
+      "bytes": 4747
+    },
+    "live/e2e-release-multiply-03/console.log": {
+      "sha256": "90ba9aad3244ff9567da9e445b367f7cf16d3422597dc92ec14281a0c49f6efd",
+      "bytes": 53653
+    },
+    "live/e2e-release-multiply-03/events/20261117T024314-4de71f82.jsonl": {
+      "sha256": "d31499ed4978e2b0b5aa190a4c1db3ae9f58ab4b03bf1d87e88c195fa07d5d73",
+      "bytes": 81432
+    },
+    "live/e2e-release-multiply-03/execution.json": {
+      "sha256": "358bdc413463985a22dc1078041284f2be834a4602b577be971e20dec67b862a",
+      "bytes": 8077
+    },
+    "live/e2e-release-multiply-03/host-preflight.json": {
+      "sha256": "0ab7652ea891de544f702d0a5d27dc9f8fe1c467dc7eb661311a8468e6a13bbf",
+      "bytes": 3851
+    },
+    "live/e2e-release-multiply-03/run-metrics.jsonl": {
+      "sha256": "4e7221857b8bd25b28a906cfd076be98959ce8516d0a1cd93d966fe7502c6451",
+      "bytes": 68814
+    },
+    "live/e2e-release-multiply-03/started.json": {
+      "sha256": "d132797c8bf810862e52075959e63b284cba691ad0aff6e5d343afa7bb1709b6",
+      "bytes": 7911
+    },
+    "live/e2e-release-multiply-03/tool-events.jsonl": {
+      "sha256": "ae36d7e56fabacc6db7427bf24658e6b0bb4fad2df3e72ddfd118eecf846023d",
+      "bytes": 20785
+    },
+    "live/e2e-release-multiply-04/console.log": {
+      "sha256": "01a1f58a5b9d6145b34d477a462042d453d39741b4acf5022d6ef576a8a9da2d",
+      "bytes": 45266
+    },
+    "live/e2e-release-multiply-04/events/20261117T025531-6ea81eb7.jsonl": {
+      "sha256": "e886ab570d3dffbfbcb62d5bcdbb9a3b84723fb6d32c5abd3e18980191d70552",
+      "bytes": 42297
+    },
+    "live/e2e-release-multiply-04/execution.json": {
+      "sha256": "bb850d9dea0c295ed6ccc718e8fae8994ca531d560e6c69b9d3e011b74fb72ee",
+      "bytes": 8077
+    },
+    "live/e2e-release-multiply-04/host-preflight.json": {
+      "sha256": "4c166d77e20f12f40e909cfa98cdc945d09cdf7ac0b1e77b801d9c8beac3a82e",
+      "bytes": 3851
+    },
+    "live/e2e-release-multiply-04/run-metrics.jsonl": {
+      "sha256": "44d3c793018a3ac19d0ded3ee6292413ce5a566fd1617a351e1808372668875d",
+      "bytes": 74004
+    },
+    "live/e2e-release-multiply-04/started.json": {
+      "sha256": "b228d7347d17d2b9278e78b14c1d317a169064568f9a6e60251a2dad2d26e7e2",
+      "bytes": 7912
+    },
+    "live/e2e-release-multiply-04/tool-events.jsonl": {
+      "sha256": "aef577a9eb12746f4729faf07dbabd113ca047f074c09753ac878b3166971d50",
+      "bytes": 15764
+    },
+    "live/e2e-release-multiply-05/console.log": {
+      "sha256": "d993817f74d6afe0051ae1d8e1412768e57f814ebc2d10a8420100e65345d0fd",
+      "bytes": 48790
+    },
+    "live/e2e-release-multiply-05/events/20261117T030039-7c1191b1.jsonl": {
+      "sha256": "3a27f764f0800ef182f115b42d210f473c571138b8e25561623ee620862f21cd",
+      "bytes": 71057
+    },
+    "live/e2e-release-multiply-05/execution.json": {
+      "sha256": "eb84cc1f05eaa58a370446a79829bac17421ce6ce814aafd3e5a6c4ec422a22e",
+      "bytes": 8079
+    },
+    "live/e2e-release-multiply-05/host-preflight.json": {
+      "sha256": "90af4777965291826aa0757145eb47ddcabf650977647f634800c41d657395a6",
+      "bytes": 3856
+    },
+    "live/e2e-release-multiply-05/independent.json": {
+      "sha256": "00dd363760dfed879746286f655bb5c642425e4735fdb24b5e394ac39d6f88c1",
+      "bytes": 3373
+    },
+    "live/e2e-release-multiply-05/product/multiply.py": {
+      "sha256": "9321b9d091a6c787679c35233abd01195cdd3dcc8da3111de837eec2444f4aa0",
+      "bytes": 934
+    },
+    "live/e2e-release-multiply-05/run-metrics.jsonl": {
+      "sha256": "248d3f5baf412218da72cf77e7078fee01d94ae90fc2614a8253050df09cbc71",
+      "bytes": 36601
+    },
+    "live/e2e-release-multiply-05/started.json": {
+      "sha256": "436b1e21a09d93b838b7e5ab683dab25d7544a0c4485cb2cff47a45b6d67064b",
+      "bytes": 7913
+    },
+    "live/e2e-release-multiply-05/tool-events.jsonl": {
+      "sha256": "d5b7d1597ae8575a92bfc444928883bdd077f9a28612eed8267ab577ba3b53d8",
+      "bytes": 18037
+    },
+    "live/e2e-release-multiply-07/console.log": {
+      "sha256": "1eee65dbc465012c33d11460104d68bff1d2bfcea5d1998a829be4c1fc2c7e46",
+      "bytes": 48797
+    },
+    "live/e2e-release-multiply-07/events/20261117T031315-0a63f39f.jsonl": {
+      "sha256": "74ab346c9cd52f4137266df3efa6d88978e5483e9234ff76e21619a33cb8d8d1",
+      "bytes": 71059
+    },
+    "live/e2e-release-multiply-07/execution.json": {
+      "sha256": "3fa7aac56b28aae90b89fb6ee247f4c6efc33fccac788434c17c0489176670c9",
+      "bytes": 8135
+    },
+    "live/e2e-release-multiply-07/host-preflight.json": {
+      "sha256": "7806e89f307379afa0e53dbb5d9ab06e757e232ac0a55c8c5bcc0baf7f1fac99",
+      "bytes": 3856
+    },
+    "live/e2e-release-multiply-07/independent.json": {
+      "sha256": "95a5faedb893826882e426608a4fded9802b6b2128fdbb2a3dc2ced3ce9ddc4b",
+      "bytes": 3375
+    },
+    "live/e2e-release-multiply-07/product/multiply.py": {
+      "sha256": "9321b9d091a6c787679c35233abd01195cdd3dcc8da3111de837eec2444f4aa0",
+      "bytes": 934
+    },
+    "live/e2e-release-multiply-07/run-metrics.jsonl": {
+      "sha256": "ebbeeea73680dfef4228a23416c97e2a70ac93b7e99b4e07ebec6dd402013ffe",
+      "bytes": 36608
+    },
+    "live/e2e-release-multiply-07/started.json": {
+      "sha256": "0f6b38b90549a911c5f92e9c9995936a1eeabeada48ac29a671b4e942db89e35",
+      "bytes": 7969
+    },
+    "live/e2e-release-multiply-07/tool-events.jsonl": {
+      "sha256": "79f59c4f807abc4dc8b1a1d10993573df5ca10bc055a6a27e1f726e77e71fd09",
+      "bytes": 18613
+    },
+    "live/e2e-release-multiply-08/console.log": {
+      "sha256": "f4e74b982bcf31d868b51d10e6ecd6741631eca32ea9a1a5838f77c391e75c14",
+      "bytes": 49402
+    },
+    "live/e2e-release-multiply-08/events/20261117T031912-b38724fb.jsonl": {
+      "sha256": "4a7dd0d5340519b5764dbfeb4d0e6b541b5297bf1a6720633f7e3022bf20cb27",
+      "bytes": 74615
+    },
+    "live/e2e-release-multiply-08/execution.json": {
+      "sha256": "5adf5a061608d497d844c371a374a42c4b1238853fb301a1a7268c9437963e51",
+      "bytes": 8242
+    },
+    "live/e2e-release-multiply-08/host-preflight.json": {
+      "sha256": "3c4e263b81f75976f2e7dd730a2077c06391ae7e62e4be9cc5b406ea5e8f40c4",
+      "bytes": 3855
+    },
+    "live/e2e-release-multiply-08/independent.json": {
+      "sha256": "4f06104d1af36dab89b7d33ac251e631eed1d0d134e065d0864cbf44355335e6",
+      "bytes": 3337
+    },
+    "live/e2e-release-multiply-08/product/multiply.py": {
+      "sha256": "e2d8953e476d798586cb630588747db27153d8e39854e211f2a28017f6914433",
+      "bytes": 844
+    },
+    "live/e2e-release-multiply-08/run-metrics.jsonl": {
+      "sha256": "528f34a6538acf2cd355fb5ff79ab2d15fed902ffe2937dcc8dfc9991f8f24f6",
+      "bytes": 36804
+    },
+    "live/e2e-release-multiply-08/started.json": {
+      "sha256": "95ae1fe0c77dcf1f343f0a15a77937bc20f0bd4d3f7e19218b94b79fd20bae57",
+      "bytes": 8077
+    },
+    "live/e2e-release-multiply-08/tool-events.jsonl": {
+      "sha256": "3c202c724a219020f0aeda73d5a545b576237b26fed3d2df4198a5bbec20b7c8",
+      "bytes": 19332
+    },
+    "memory-readiness.json": {
+      "sha256": "1c501472d947e108baa4db69ee25840383a0c99b86bab471d0d369b3e9a7a280",
+      "bytes": 410
+    },
+    "mission.json": {
+      "sha256": "4fb9832d31c5865abe733256c4d3dcf28dd7c928eded296e1967592af5d5da65",
+      "bytes": 2027
+    },
+    "offline/e2e-builtin-and-source-context/console.log": {
+      "sha256": "79b44184b4f607146b0b526de5d01f17615665e0174af3442e83a184be3979e6",
+      "bytes": 1319
+    },
+    "offline/e2e-builtin-and-source-context/execution.json": {
+      "sha256": "9b109e41e0c58df48a5aec0d6c5805dbe4f1fef0e29a5f36c62039dba42e6b76",
+      "bytes": 8121
+    },
+    "offline/e2e-builtin-and-source-context/started.json": {
+      "sha256": "1b461f9dbc17775adb16e8b532cbcd304af5e03d2a4c1eeb8c414b57bc079441",
+      "bytes": 7957
+    },
+    "offline/e2e-call-assertions/console.log": {
+      "sha256": "e95cc7bcfc5f66ce856ccc7c3f136a157b46445da4cde0a548d63a870cd211c7",
+      "bytes": 6604
+    },
+    "offline/e2e-call-assertions/execution.json": {
+      "sha256": "ad28d8093a894e59161c3dc3adc19a32ec3e1b08ef47c9799c069ae21f7af3e0",
+      "bytes": 8184
+    },
+    "offline/e2e-call-assertions-verified/console.log": {
+      "sha256": "30cdd9339991b1855b084de83e87ba90ee887372c90174f14196a8b2fa491453",
+      "bytes": 701
+    },
+    "offline/e2e-call-assertions-verified/execution.json": {
+      "sha256": "05a6589819d7bec1c1b711fd8a627d8825eb6878a6587d76542cc409e4a35bc7",
+      "bytes": 8231
+    },
+    "offline/e2e-complete-regression/console.log": {
+      "sha256": "656953e7a8b650590ba46d91dfc0a479e35739279963b43178fd500f80f59fc6",
+      "bytes": 54118
+    },
+    "offline/e2e-complete-regression/execution.json": {
+      "sha256": "82591c03e67449559a7928465b12f088b7aa0c99661bff69604cbd847145cf2f",
+      "bytes": 8098
+    },
+    "offline/e2e-complete-regression/started.json": {
+      "sha256": "d6b1a5e26200226cd5e385fbda1213e8a5ce0b862e21f1590df48461e4a9f5f4",
+      "bytes": 7932
+    },
+    "offline/e2e-context-after/console.log": {
+      "sha256": "33ad5debfa8b0780a752238040b604cef36ee1d70bf464f39aa8de8ae12b3ae9",
+      "bytes": 1692
+    },
+    "offline/e2e-context-after/execution.json": {
+      "sha256": "c0743035601c6676598687ca4883795d993d2f206ceed7c2baaa1bbdb0790dc2",
+      "bytes": 7908
+    },
+    "offline/e2e-context-before/console.log": {
+      "sha256": "d87efbd042b2c8cde1393f9d090ee57faddeb116437039f19542c6af93e72853",
+      "bytes": 8930
+    },
+    "offline/e2e-context-before/execution.json": {
+      "sha256": "e0e086ecf86a489c2bdd196ec575fb120bd1ab0a523e8869f8599bbeab929036",
+      "bytes": 7853
+    },
+    "offline/e2e-current-draft-authority/console.log": {
+      "sha256": "623132ba20c9342b664d6809df2a6b6ede39bf3ccc0cc16856af94122ceda0f2",
+      "bytes": 1931
+    },
+    "offline/e2e-current-draft-authority/execution.json": {
+      "sha256": "562a69234c8565d64b2974c65796f55e421023dae2de62d3855564e7840b717d",
+      "bytes": 8282
+    },
+    "offline/e2e-current-draft-authority/started.json": {
+      "sha256": "6992fc47623361d7d00ebbe5bd322895aca07b7de70ba24552880c3cd5f7fc10",
+      "bytes": 8118
+    },
+    "offline/e2e-declared-interface-assertions/console.log": {
+      "sha256": "bf6b4c9d827aa020e2c80bf58af86daedb861c4d10e9d095d26364030e2dc85c",
+      "bytes": 220
+    },
+    "offline/e2e-declared-interface-assertions/execution.json": {
+      "sha256": "6fc28240717212bb00c64a72d7232a6cfb1dc47ee55d32947d1ddf9f03224cd4",
+      "bytes": 8131
+    },
+    "offline/e2e-declared-interface-assertions/started.json": {
+      "sha256": "2cd2659545a826efe6916a5566f88ec37f8acad3a8bbfe2c162c5e9132116b6f",
+      "bytes": 7967
+    },
+    "offline/e2e-delivered-full-suite/console.log": {
+      "sha256": "0d5c24d6af18b04aa78b0f7bfd4c650dab47935e65668afb821af729172de268",
+      "bytes": 54133
+    },
+    "offline/e2e-delivered-full-suite/execution.json": {
+      "sha256": "56559b434367abacc409efc572590a8315c9f68681d6ff1db9713c106b65eeb0",
+      "bytes": 8029
+    },
+    "offline/e2e-delivered-full-suite/started.json": {
+      "sha256": "641224d3ce494700e324ebca19af1a6c2f941e6011c02bf8931d18930afe556a",
+      "bytes": 7863
+    },
+    "offline/e2e-delivered-self-test/console.log": {
+      "sha256": "4d7436aba89ea2ea78a450c679f01f28707847ed33196508613e2515d4b3de8f",
+      "bytes": 13880
+    },
+    "offline/e2e-delivered-self-test/execution.json": {
+      "sha256": "befff71b382b85df6633ec1af72b04b5c96ec2360149d35eb0dfbada2eddb1f3",
+      "bytes": 8004
+    },
+    "offline/e2e-delivered-self-test/started.json": {
+      "sha256": "b34a472556af882444e5102ef94e8e638da7140ae266b0254f491633c6727058",
+      "bytes": 7839
+    },
+    "offline/e2e-draft-and-oracle-roles/console.log": {
+      "sha256": "d2a1166db18f650db5ba9cb130dbf961e6aa70b4a747209beccd08778db1aeaa",
+      "bytes": 1159
+    },
+    "offline/e2e-draft-and-oracle-roles/execution.json": {
+      "sha256": "2f907acd50fccf6218d1c7c92471b87abe2b61baf6477476f105e274ef3408f8",
+      "bytes": 8399
+    },
+    "offline/e2e-draft-and-oracle-roles/started.json": {
+      "sha256": "a861d181d8b94de426a089602cfe4054beafea1cd5f90e7a62eaf257f07defaa",
+      "bytes": 8235
+    },
+    "offline/e2e-final-full-regression/console.log": {
+      "sha256": "6a179f0bc510b346b82d163e1458bc809da4c10c546c1dff71586545176454fd",
+      "bytes": 54118
+    },
+    "offline/e2e-final-full-regression/execution.json": {
+      "sha256": "2e328c25256fd2fd24b997a3ba092a53ccba261925a8f4fb984acb07adcf02a6",
+      "bytes": 8132
+    },
+    "offline/e2e-final-full-regression/started.json": {
+      "sha256": "85968b3af89536e5fe2d517b9493f800c62a117d987e73b84692b202dd39272d",
+      "bytes": 7966
+    },
+    "offline/e2e-final-self-test/console.log": {
+      "sha256": "4d7436aba89ea2ea78a450c679f01f28707847ed33196508613e2515d4b3de8f",
+      "bytes": 13880
+    },
+    "offline/e2e-final-self-test/execution.json": {
+      "sha256": "d96a12e52e190e227a2ad414a5c3666400d8dd4d182a04484f3790b688ec85a8",
+      "bytes": 8101
+    },
+    "offline/e2e-final-self-test/started.json": {
+      "sha256": "beac08c3cdb0fb451c04c8fe2855e16c0d965ce1368597fe8ad69604985868d0",
+      "bytes": 7938
+    },
+    "offline/e2e-final-self-test-candidate/console.log": {
+      "sha256": "4d7436aba89ea2ea78a450c679f01f28707847ed33196508613e2515d4b3de8f",
+      "bytes": 13880
+    },
+    "offline/e2e-final-self-test-candidate/execution.json": {
+      "sha256": "2cc7723f5cb90c158b41b5d66e998fa734a0b42e2f2d67bb7e887f68169895ad",
+      "bytes": 8081
+    },
+    "offline/e2e-final-self-test-candidate/started.json": {
+      "sha256": "a884116b0119fb1918cd522b429dd6c7ae72889deae25c4c0e4d52cac31fb351",
+      "bytes": 7916
+    },
+    "offline/e2e-final-suite-candidate/console.log": {
+      "sha256": "589c5c58e9ebe98ef1c110c4bc692376ac44e61e3e3e7627242358ba737614c6",
+      "bytes": 54118
+    },
+    "offline/e2e-final-suite-candidate/execution.json": {
+      "sha256": "7fba0fdd002ab39eedd53ab0b66ccd49581b9c5a5bcebf3d1440f1bca39bfa2e",
+      "bytes": 8100
+    },
+    "offline/e2e-final-suite-candidate/started.json": {
+      "sha256": "5e3039fd4d2c7868cfbf3b3fbec2ed96374dac79da4be7b459eead15f9498648",
+      "bytes": 7934
+    },
+    "offline/e2e-full-regression-01/console.log": {
+      "sha256": "85250c32369cc38715bc1719e532465f65a1436a4d9312f8cc149ca728d039bb",
+      "bytes": 53899
+    },
+    "offline/e2e-full-regression-01/execution.json": {
+      "sha256": "31d963de5485f18fe9354b6c0d876f7aabb2c7b50384dd76de53e5066bcad2ec",
+      "bytes": 8033
+    },
+    "offline/e2e-future-callable-context/console.log": {
+      "sha256": "0f4015d6cf6e04fad104638d9ca37e94265e3b21b121a4ad82c50ad61e188269",
+      "bytes": 1319
+    },
+    "offline/e2e-future-callable-context/execution.json": {
+      "sha256": "1096b622757b1b4a8cf67fd30d13be1711de40615833c604529bbb525a85856b",
+      "bytes": 8064
+    },
+    "offline/e2e-future-callable-context/started.json": {
+      "sha256": "4c14eb9c9cef62b5ff5b9f29dcb7b797b6b3d5e0588001a20b152099c1ff489d",
+      "bytes": 7900
+    },
+    "offline/e2e-latest-verification-after/console.log": {
+      "sha256": "e75e201efa172919b0ec0c7753be4fbe1a376ef0fa26c38fced7751953a0dc15",
+      "bytes": 853
+    },
+    "offline/e2e-latest-verification-after/execution.json": {
+      "sha256": "7f1ea58ffea27eedb4d9c2d0441d3579e14ef21bee4606eea2114fdfb421b7f9",
+      "bytes": 8087
+    },
+    "offline/e2e-latest-verification-before/console.log": {
+      "sha256": "4b8ce27cc8e3b897d39d0daa51894fe6133343ca183c99823ba8f19b79f1730b",
+      "bytes": 851
+    },
+    "offline/e2e-latest-verification-before/execution.json": {
+      "sha256": "e6ae5f51d6d5f11fa8a6c5f164521604cc5d5e53c668c431d8540b1eb6598dbb",
+      "bytes": 7861
+    },
+    "offline/e2e-latest-verification-final/console.log": {
+      "sha256": "21251912279575c46cfc5d411adf93b79f1587cb085c669973b03a6d01af6376",
+      "bytes": 102
+    },
+    "offline/e2e-latest-verification-final/execution.json": {
+      "sha256": "fc81a6af9d4bca8f5d420c08ba8cb429d72921101ceaf788032ce77053459ce3",
+      "bytes": 8087
+    },
+    "offline/e2e-latest-verification-verified/console.log": {
+      "sha256": "aa0bffaae233314587c087284854640f71fb72c3ca4516381eb006a6680471dd",
+      "bytes": 911
+    },
+    "offline/e2e-latest-verification-verified/execution.json": {
+      "sha256": "7fb2bef36f95f2fd00790d390b5cdb170329f9bc89b6da0b1410c8ae0413f03f",
+      "bytes": 8090
+    },
+    "offline/e2e-negative-exits-and-repair-context/console.log": {
+      "sha256": "05e608a6f4b9e9fb22af90974e3e94658d7ca7d1cb5902c978dba52faf9befcc",
+      "bytes": 1179
+    },
+    "offline/e2e-negative-exits-and-repair-context/execution.json": {
+      "sha256": "91a7830628a1683c3183d6e5526ea827103b4e8706130893fd870ae7b1bfc7eb",
+      "bytes": 8351
+    },
+    "offline/e2e-oracle-authority-guard/console.log": {
+      "sha256": "8c148e9b015816d41243491763eb676448ba8efdabc0cda0478ce780b66ab1de",
+      "bytes": 1159
+    },
+    "offline/e2e-oracle-authority-guard/execution.json": {
+      "sha256": "670e3fc55c0ce2dc74a8eb263a48bf405ef3e89f12d6049204068774d618ef72",
+      "bytes": 8317
+    },
+    "offline/e2e-oracle-authority-guard/started.json": {
+      "sha256": "d365d83784de7425e35571a118ad6b6eb3baa9d256bd99b30299698b6c284171",
+      "bytes": 8153
+    },
+    "offline/e2e-postrepair-acceptance-guard/console.log": {
+      "sha256": "bab4ee63a1483542670e7b97642c85cd41ef1c4ae241087e30d85b5c21a45252",
+      "bytes": 1644
+    },
+    "offline/e2e-postrepair-acceptance-guard/execution.json": {
+      "sha256": "b8307177d9da145689d2f09455b480269a6300b4fd4827b3e819144257083d04",
+      "bytes": 8357
+    },
+    "offline/e2e-routing-and-source-fit/console.log": {
+      "sha256": "a39baf46a111f1537ae0a0d2390979d41f6b33338b794544f953236e70b68b93",
+      "bytes": 1865
+    },
+    "offline/e2e-routing-and-source-fit/execution.json": {
+      "sha256": "0c9e5ac1a6ce3dce7d3795794f6b8bcdb1dcf93a0dc09f344b98b1ecb16437ae",
+      "bytes": 8242
+    },
+    "offline/e2e-runtime-contract/console.log": {
+      "sha256": "00b998442d4a241a36eba7f23f77522d890a89bd02b83cd2048e047fac1c6e47",
+      "bytes": 1179
+    },
+    "offline/e2e-runtime-contract/execution.json": {
+      "sha256": "71dfd7c1af426a386990c7d2b290ed7c574704c119bd6c3f16afd63ec2acc784",
+      "bytes": 7855
+    },
+    "offline/e2e-safe-draft-revision/console.log": {
+      "sha256": "227d8f9eae2731bd1cd70ffe8e93f6fd912d08b3af7bd496625cf3ba5c6103e4",
+      "bytes": 1240
+    },
+    "offline/e2e-safe-draft-revision/execution.json": {
+      "sha256": "e4eeb0e81bca05db76a92af76d88cc317e08376dfe7ba14537762b25fbf3d179",
+      "bytes": 8380
+    },
+    "offline/e2e-safe-draft-revision/started.json": {
+      "sha256": "a53b3cd111d0a902bebe2ddb15a217223fc690012ae05b28cf1650edfc010973",
+      "bytes": 8216
+    },
+    "offline/e2e-source-contract-completion/console.log": {
+      "sha256": "4c73ad585f0b241df7a2651a1438a1749576160ee0ed617c98afd7d03b7f3925",
+      "bytes": 1240
+    },
+    "offline/e2e-source-contract-completion/execution.json": {
+      "sha256": "80a6d06652bacb4493537fc5ac281a93a18bc4a7a17284b7cf0929083d358585",
+      "bytes": 8273
+    },
+    "offline/e2e-source-contract-completion/started.json": {
+      "sha256": "068d96f002b014423118081dc36d2c14154490db137996a8bb7e3fd42ccd483f",
+      "bytes": 8109
+    },
+    "offline/e2e-source-negative-input-exits/console.log": {
+      "sha256": "e1525c5349799d75d7ad5ecfa93b726a19c5561803332a48770bbc041b09a689",
+      "bytes": 1976
+    },
+    "offline/e2e-source-negative-input-exits/execution.json": {
+      "sha256": "854bed3c1da9e6534824ffd5020c7b4ab030dd508772f22d67fada3c712e3e65",
+      "bytes": 8175
+    },
+    "offline/e2e-source-negative-input-exits/started.json": {
+      "sha256": "a421d976d5d28c05407f4a07ac9d6065f7663a57cf7af7beb4997c073ed78c77",
+      "bytes": 8011
+    },
+    "offline/e2e-source-negative-input-verified/console.log": {
+      "sha256": "1a94ececd5dfd05f4ff6ae0d927d0fb999365bf52d2cbc375f6e17bacb30f2c6",
+      "bytes": 1080
+    },
+    "offline/e2e-source-negative-input-verified/execution.json": {
+      "sha256": "a0ab703abd21b7fb6e21ebcef3e342ad46dd902096fb03a9c8d7ea98cab6a4ad",
+      "bytes": 8176
+    },
+    "offline/e2e-source-negative-input-verified/started.json": {
+      "sha256": "61401b2f093008c2139ee7468b1e1d1f41ecf29192752d25f39f2d82993785b5",
+      "bytes": 8014
+    },
+    "offline/e2e-source-oracle-full-suite/console.log": {
+      "sha256": "bdf3cefe2e5f827d7940358d827e72614cd93421a2034b9ce4219aadeafbed5d",
+      "bytes": 53899
+    },
+    "offline/e2e-source-oracle-full-suite/execution.json": {
+      "sha256": "8708c7c3f5975528fbc845ff804d6128fb1a994651a28d31402b56eb1a420d47",
+      "bytes": 8102
+    },
+    "offline/e2e-source-oracle-regressions/console.log": {
+      "sha256": "6a0ca125a257f0e65b15cf44911bbc851e2d8b424e50ff2614ac2ba13d18e1b9",
+      "bytes": 1297
+    },
+    "offline/e2e-source-oracle-regressions/execution.json": {
+      "sha256": "27469816cf454937c9d3c4d3e0b217caac45a7feb12a294c89055d355219fc26",
+      "bytes": 8372
+    },
+    "offline/e2e-source-signature-context/console.log": {
+      "sha256": "4de079f6a0f1f033ab08e5c450d01f4b23e6965172d60cbeddf0b0da2fcc2e61",
+      "bytes": 1080
+    },
+    "offline/e2e-source-signature-context/execution.json": {
+      "sha256": "141d2eb7aea715bc8061f953c6fdc5aaa2c5245e37d014dfe3008eaa1c137893",
+      "bytes": 8052
+    },
+    "offline/e2e-source-signature-context/started.json": {
+      "sha256": "72c010b625d85be44eaa9538c0c47d18530f6d343f8bbe447a916b05570154dc",
+      "bytes": 7888
+    },
+    "offline/e2e-structured-context-and-fresh-proof/console.log": {
+      "sha256": "25e8278fc311c78f1856f44c29e430e908f5e9ecb39af3eb81b3756f7ca126af",
+      "bytes": 1997
+    },
+    "offline/e2e-structured-context-and-fresh-proof/execution.json": {
+      "sha256": "48594db8327b6ac2c8ea9266447844f717c2fcec1a833d87f27b0c91536136db",
+      "bytes": 8337
+    },
+    "offline/e2e-tool-and-context-regressions/console.log": {
+      "sha256": "c7223c44215a8a24ebe3fb2f82cc9787cd59ba92ef30ce727ea8322d7a503754",
+      "bytes": 5778
+    },
+    "offline/e2e-tool-and-context-regressions/execution.json": {
+      "sha256": "3cfc02485a140258caa22ac11c17e3c474151f5a6d071b5e6210d19821c59978",
+      "bytes": 8295
+    },
+    "offline/e2e-verifier-input-classification/console.log": {
+      "sha256": "f721e37988d35b0237e63d42519bb30a45335b609551e5c0e68848f709c5601d",
+      "bytes": 220
+    },
+    "offline/e2e-verifier-input-classification/execution.json": {
+      "sha256": "a531a21266319eabab0d63dca2782ea2499fb65240cdc4dc6be561bd90614aba",
+      "bytes": 8238
+    },
+    "offline/e2e-verifier-input-classification/started.json": {
+      "sha256": "475478999f9ad770b8c890c8abc25c7fb7e65d0e59d286030713b24503276bce",
+      "bytes": 8074
+    },
+    "offline/e2e-verifier-input-self-test/console.log": {
+      "sha256": "4d7436aba89ea2ea78a450c679f01f28707847ed33196508613e2515d4b3de8f",
+      "bytes": 13880
+    },
+    "offline/e2e-verifier-input-self-test/execution.json": {
+      "sha256": "7b4d13ba67ec63be6165555efa894a817c319873793bec7a52decc7b534e0417",
+      "bytes": 7888
+    },
+    "offline/e2e-verifier-input-self-test/started.json": {
+      "sha256": "75430baf9394462fe40bf5ab6f727be320bdd9ffcb92ec661efbf5c4fb53691a",
+      "bytes": 7724
+    },
+    "prompts/greeting.txt": {
+      "sha256": "eb5da9e4094f3c1754749c1efd612eaaf908ecce5e2c200732a35e4dfc259b63",
+      "bytes": 610
+    },
+    "prompts/hello.txt": {
+      "sha256": "5fc3e1584425de47b34046eb8c61c7e1be5aa8c1f31cd31f8d863e4f89155db6",
+      "bytes": 117
+    },
+    "prompts/multiply.txt": {
+      "sha256": "01d0ffe010c19579239bf8d544abf74055aedb022f9a159d9c9a6f09a5c3d0c9",
+      "bytes": 396
+    },
+    "release-acceptance.json": {
+      "sha256": "b7b774e0d8853244261e64ec590bbe9713f9c44ee2d66178fc91095a1fc4fdd0",
+      "bytes": 17286
+    },
+    "validation-summary.json": {
+      "sha256": "cbbaddb40369d2502bce6cf4e810697a3d09f2e4c8280b4a58f46c44b5c6b51d",
+      "bytes": 29603
+    }
+  }
+}

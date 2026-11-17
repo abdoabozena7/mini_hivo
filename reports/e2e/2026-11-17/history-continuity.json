@@ -1,0 +1,11 @@
+{
+  "original_refs_checked": 104,
+  "all_original_refs_are_main_ancestors": true,
+  "remaining_local_branches": [
+    "main"
+  ],
+  "existing_stash_preserved": true,
+  "secondary_worktree_tracked_files_preserved": 248,
+  "remote_heads_unchanged": true,
+  "publication_performed": false
+}

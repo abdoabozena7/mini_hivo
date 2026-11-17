@@ -1,6 +1,6 @@
 # Mini Hivo — architecture and feature status
 
-Checkpoint: 2026-11-16. This page tracks capabilities, not individual defects. The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, integration decisions, and fresh validation separately.
+Checkpoint: 2026-11-17. This page tracks capabilities, not individual defects. The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, and the [live end-to-end checkpoint](LIVE_E2E_VALIDATION.md) records the subsequent source-to-output repairs and acceptance.
 
 ## What exists in the code
 
@@ -23,7 +23,9 @@ Experiment 18's [report](../reports/experiment18/experiment18-report.md) shows t
 
 The consolidation adds focused repairs for false source conflicts, provider/runtime context-schema drift, context-only false completion, negated browser requirements, nonzero replacement-count recovery, requirement-grounded creation impact targets, native tool-call protocol mismatches, and honest batch exit status. Source-authorized new outputs are distinguished from missing dependencies without claiming existing implementation evidence. The deterministic self-test uses independent-task fixtures.
 
-The final deterministic suite ran 1729 tests successfully with four pre-existing legacy skips. Two fresh public-CLI Python clamp repairs on `92aee80` reached Root verified; each passed eight independent behavior cases and preserved the original test file. Sixteen other live attempts across earlier revisions and different cases failed or stopped, including greenfield and default `auto` requests. The [consolidation report](BRANCH_CONSOLIDATION.md) preserves every attempt and the actual scope of acceptance. This establishes a working existing-code path, **not** reliable completion for every task family, and does not retroactively change historical experiment percentages.
+The consolidation checkpoint ran 1729 tests and independently verified two live clamp repairs, while retaining its greenfield/auto failures. The follow-up now runs **1751 tests successfully with four pre-existing legacy skips**, plus the public self-test. On `df77206`, three fresh empty-workspace requests through default `auto` reached Root verified and passed independent acceptance: a greeting CLI/public function with real tests, integer multiplication with valid/invalid input boundaries, and exact `MERGE_OK` console output. All 71 implementation files match the source fingerprint used by those final live/offline checks.
+
+The [live checkpoint](LIVE_E2E_VALIDATION.md) retains all 27 follow-up attempts, including a false success rejected independently, failed/interrupted tasks, and a real host-memory block. It fixes evidence transport, runtime/source contract resolution, structured context closure, safe draft revision, current verification, source-derived acceptance and post-repair freshness. This demonstrates measured Python CLI request-to-persisted-output behavior, **not** reliable completion for every task family; historical experiment percentages remain unchanged.
 
 ## Capabilities still needed for the intended complete architecture
 
@@ -31,7 +33,7 @@ The final deterministic suite ran 1729 tests successfully with four pre-existing
 |---|---|
 | A chosen, integrated execution policy | Compare the opt-in experiment policies on fixed, representative tasks; record which combination becomes the normal CLI behavior and why. Today many improvements are flags and `current` remains the default. |
 | End-to-end behavior across the declared task families | Fresh runs from approved contracts must reach legal mutation, child behavior verification, valid receipt, and fresh parent verification for browser games, Timer, Python unit behavior, and Node unit behavior. The five-task Experiment 12 did not reach executable verification for Timer or Python; Experiment 16 confirms their distinct stopping boundaries. |
-| Full request-to-result validation | Exercise source request, clarification, repository evidence, impact plan, user approval, execution, verification, and durable promotion together on representative existing and new projects. Experiments 12–16 start from frozen approved contracts, so they do not measure the planning/approval portion. |
+| Full request-to-result validation across project modes | New-project Python CLI source-to-output paths now have fresh default-CLI evidence. Still exercise existing-project clarification, repository evidence, impact plan, explicit approval, execution, verification, and durable promotion together. Experiments 12–16 start from frozen approved contracts, so they do not measure the planning/approval portion. |
 | Reproducible release checkpoint | Keep the selected policy, supported task families, acceptance fixtures, runbook, and measured limits together in the repo; rerun the meaningful regression and live acceptance set before calling the architecture complete. |
 
 These are feature-level acceptance milestones. Individual failures found while meeting them should be tracked separately. The existing modules form the intended pipeline, but current evidence does not support calling the whole architecture complete and reliable yet.
