@@ -132,6 +132,13 @@ class MiniAgentRegressionTests(unittest.TestCase):
                 "path": "labels.py", "function": "label", "arguments": ["sample"],
                 "expected": '"sample!"',
             }, role="Falsifier")
+            for path, function in (("labels.py", "unrequested_helper"), ("test_labels.py", "label")):
+                refused = mini.run_tool("run_file", {
+                    "path": path, "function": function, "arguments": ["sample"],
+                    "expected": "sample!",
+                }, role="Falsifier")
+                self.assertTrue(mini.result_is_tool_rejection(refused))
+                self.assertIn("No assertion was executed", refused)
         self.assertTrue(mini.result_is_tool_rejection(result))
         self.assertIn("REQ-001", result)
         self.assertIn("No assertion was executed", result)

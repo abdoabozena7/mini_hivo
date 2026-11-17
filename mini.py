@@ -3338,21 +3338,42 @@ def run_tool(name, args, role="System"):
         if "function" in args:
             if "arguments" not in args or "expected" not in args:
                 return "error: a Python function assertion requires arguments and expected"
+            records = ledger_requirements(RUN.get("source_requirement_ledger"))
+            source_text = "\n".join(
+                [str((RUN.get("source_contract") or {}).get("original_goal") or "")]
+                + [str(item.get("text", "")) for item in records]
+            )
+            function_pattern = re.escape(str(args["function"]))
+            declared_function = (
+                re.search(r"\b" + function_pattern + r"\s*\(", source_text)
+                or re.search(
+                    r"\b(?:function|method|callable)\s+(?:named\s+)?`?" + function_pattern + r"`?\b"
+                    r"|\b`?" + function_pattern + r"`?\s+(?:function|method|callable)\b",
+                    source_text, re.IGNORECASE,
+                )
+            )
+            if source_text.strip() and not declared_function:
+                return (
+                    "error: tool assertion rejected: this function is not named by the source contract. "
+                    "Check the declared interface or saved CLI instead. No assertion was executed."
+                )
             try:
-                cases = source_assertions(ledger_requirements(RUN.get("source_requirement_ledger")))
+                cases = source_assertions(records)
             except (ValueError, SyntaxError) as exc:
                 return f"error: tool assertion rejected: source acceptance is unresolved: {exc}"
             for case in cases:
                 if (case["kind"] == "function"
-                        and case["path"].replace("\\", "/").casefold()
-                        == str(args["path"]).replace("\\", "/").casefold()
                         and case["function"] == args["function"]
                         and case["arguments"] == args["arguments"]
-                        and case["expected"] != args["expected"]):
+                        and (
+                            case["expected"] != args["expected"]
+                            or case["path"].replace("\\", "/").casefold()
+                            != str(args["path"]).replace("\\", "/").casefold()
+                        )):
                     return (
                         "error: tool assertion rejected: expected disagrees with source requirements "
                         + ", ".join(case["requirement_ids"])
-                        + ". Use the actual JSON value "
+                        + ". Use path " + case["path"] + " and the actual JSON value "
                         + json.dumps(case["expected"], ensure_ascii=False)
                         + ", not its quoted representation. No assertion was executed."
                     )
