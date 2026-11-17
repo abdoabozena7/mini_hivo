@@ -972,9 +972,17 @@ def validate_pre_mutation_impact_contract(
 
     semantic_targets = [str(item.get("target") or "") for item in targets if item.get("target")]
     relevant_facts = _current_world_facts(world_model, semantic_targets[:6])
+    bound_sources = {
+        str(reference.get("path") or reference.get("source_identity") or "").casefold()
+        for reference in _contract_provenance(value)
+    }
     stale_facts = [
         fact for fact in relevant_facts
         if str(fact.get("state") or "").upper() == "STALE"
+        and any(
+            str(reference.get("path") or reference.get("source_identity") or "").casefold() in bound_sources
+            for reference in _source_refs(fact.get("provenance", []))
+        )
     ]
     if stale_facts:
         errors.append({

@@ -2432,6 +2432,19 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(check.call_count, 2)
         self.assertEqual(result["status"], "failed")
 
+    def test_source_expected_actual_mismatch_is_first_in_the_repair_packet(self):
+        task = mini.make_task("ROOT", "repair API", done_when=["source behavior matches"])
+        task["source_acceptance_failures"] = [{
+            "passed": False, "path": "api.py", "function": "label",
+            "expected": "complete!", "actual": "complete",
+        }]
+        with patch.object(mini, "execute_agent_task", return_value={"status": "failed", "memory": {}}) as worker:
+            mini.repair_task(task, self.contract(), [], {}, "ROOT_PACKET " * 900)
+        packet = worker.call_args.kwargs["extra_context"]
+        self.assertTrue(packet.startswith("CURRENT SOURCE ACCEPTANCE MISMATCHES"))
+        self.assertIn('"expected": "complete!"', packet[:700])
+        self.assertIn('"actual": "complete"', packet[:700])
+
     def test_reconnaissance_is_bounded_without_reading_source_contents(self):
         for index in range(100):
             path = mini.WORKSPACE / "src" / f"file-{index}.js"

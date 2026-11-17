@@ -553,6 +553,18 @@ class PreMutationImpactContractTests(unittest.TestCase):
         self.assertFalse(comparison["passed"])
         self.assertEqual(comparison["status"], impact.IMPACT_INVALID)
 
+    def test_later_observation_does_not_invalidate_source_only_creation_authority(self):
+        model = ProjectWorldModel(self.root)
+        candidate = self.accept(self.contract(model=model), world_model=model)
+        path = self.write("src/a.py", "def generated():\n    return 1\n")
+        model.add_fact(
+            "generated", DEFINED_IN, "src/a.py", self.provenance("src/a.py"),
+            authority_tier="HIGH", authority_score=100,
+        )
+        path.write_text("def generated():\n    return 2\n", encoding="utf-8")
+        model.refresh_currentness()
+        self.assertIsNone(impact.impact_mutation_block_reason(candidate, world_model=model))
+
     def test_rollback_restores_world_model_without_ghost_post_state(self):
         path = self.write("src/a.py", "old\n")
         model = ProjectWorldModel(self.root)

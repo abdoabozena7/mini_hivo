@@ -242,6 +242,32 @@ class ContextSufficiencyGateTests(unittest.TestCase):
             "context_status": "sufficient", "reason": "Assume the dependency is available.",
         })["mutation_allowed"])
 
+    def test_future_callable_definition_is_not_a_permanent_unresolved_repository_slot(self):
+        mini.RUN["project_mode"] = mini.NEW_PROJECT
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a module.\n- Create labels.py.\n"
+            '- Expose a label(value="default") function that returns the required label.',
+            use_model=False,
+        )
+        gate = stage7.ContextSufficiencyGate(
+            {"local_task": "Create labels.py."}, evidence_provider=mini._provide_targeted_context_evidence,
+        )
+        result = gate.evaluate({
+            "context_status": "insufficient", "reason": "The callable definition is absent.",
+            "needed_evidence": [{
+                "kind": "definition", "target": 'label(value="default")',
+                "why": "Need the source-declared callable definition before implementing it.",
+            }],
+        })
+        self.assertEqual(result["semantic_resolutions"][0]["resolution_status"], "not_applicable")
+        self.assertIn("labels.py", json.dumps(result["evidence"]))
+        self.assertTrue(gate.evaluate({
+            "context_status": "sufficient", "reason": "The source declares a future output, not an existing dependency.",
+        })["mutation_allowed"])
+        self.assertIsNone(mini._new_artifact_context_evidence({
+            "kind": "definition", "target": "unknown(value)", "why": "Need actual external behavior.",
+        }))
+
     def test_unproven_not_applicable_provider_claim_does_not_authorize_mutation(self):
         gate = stage7.ContextSufficiencyGate(
             self._anchor(),

@@ -2998,11 +2998,30 @@ def _new_artifact_context_evidence(request):
                 "tests", "test_expectation",
             }):
         return None
-    target = safe_path(request.get("target"))
+    declarations = list(_source_creation_requirements())
+    requested_target = str(request.get("target", ""))
+    signature = re.fullmatch(r"([A-Za-z]\w*)\([^()]*\)", requested_target)
+    if signature is not None:
+        implementation_paths = {
+            path for path, _requirement in declarations
+            if Path(path).suffix.casefold() == ".py" and not is_focused_test_command([path])
+        }
+        callable_requirements = [
+            item for item in ledger_requirements(RUN.get("source_requirement_ledger"))
+            if item.get("provenance") in {USER_STATED, USER_CONFIRMED}
+            and re.search(r"\b" + re.escape(signature.group(1)) + r"\s*\(", str(item.get("text", "")))
+        ]
+        if len(implementation_paths) != 1 or not callable_requirements:
+            return None
+        requested_path = next(iter(implementation_paths))
+        declarations = [(requested_path, item) for item in callable_requirements]
+    else:
+        requested_path = requested_target
+    target = safe_path(requested_path)
     if target is None or target.exists():
         return None
     relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
-    for declared_path, requirement in _source_creation_requirements():
+    for declared_path, requirement in declarations:
         text = str(requirement.get("text", ""))
         if declared_path.casefold() != relative.casefold():
             continue
@@ -17366,6 +17385,10 @@ def _source_acceptance_evidence(task):
                 "source_acceptance_assertion", task_id=task["id"], case=case,
                 case_hash=case_hash, observation=observation,
             )
+    task["source_acceptance_failures"] = [
+        json.loads(item["result"]) for item in source_evidence
+        if tool_result_failed(item["result"])
+    ]
     return source_evidence
 
 
@@ -20217,8 +20240,15 @@ def _new_project_draft_policy(task, execution_contract=None):
 def repair_task(task, contract, failure_evidence, memory, node_context, parent_goal=None):
     RUN["repairer_calls"] += 1
     event(f"[REPAIR {task['id']}]", role="Repairer", task=task["id"], action="focused repair")
+    source_failures = task.get("source_acceptance_failures", [])
+    direct_failure = (
+        "CURRENT SOURCE ACCEPTANCE MISMATCHES (verifier-observed, not model opinion):\n"
+        + json.dumps(source_failures, ensure_ascii=False)
+        + "\nThe source-bound expected values are immutable. Correct the implementation; "
+        "changing generated tests cannot satisfy these assertions.\n\n"
+    ) if source_failures else ""
     context = (
-        f"{node_context}\n\nCURRENT DETERMINISTIC FAILURE EVIDENCE:\n"
+        f"{direct_failure}{node_context}\n\nCURRENT DETERMINISTIC FAILURE EVIDENCE:\n"
         f"{json.dumps(failure_evidence, ensure_ascii=False)[:5000]}\n"
         "Repair only demonstrated implementation defects. Run fresh executable verification after the edit."
     )
