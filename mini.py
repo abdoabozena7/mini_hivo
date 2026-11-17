@@ -3089,7 +3089,7 @@ def _provide_targeted_context_evidence(request, context):
                 resolution_status=runtime_evidence["resolution_status"],
             )
             return runtime_evidence
-    if request["kind"] in {"contract", "authoritative_contract", "tests", "test_expectation"}:
+    if request["kind"] in {"contract", "authoritative_contract", "interface", "tests", "test_expectation"}:
         records = ledger_requirements(RUN.get("source_requirement_ledger"))
         target_key = re.sub(r"[^a-z0-9]", "", request["target"].casefold())
         texts = []
@@ -3135,6 +3135,18 @@ def _provide_targeted_context_evidence(request, context):
                 f"expects {json.dumps(case['expected'])}"
                 for case in cases if case["path"].casefold() == target_path.casefold()
             ]
+            signature = re.fullmatch(r"([A-Za-z]\w*)\([^()]*\)", request["target"])
+            if not texts and signature is not None:
+                texts = [
+                    f"{item['requirement_id']} [{item['provenance']}]: {item['text']}" for item in records
+                    if item.get("provenance") in {USER_STATED, USER_CONFIRMED}
+                    and re.search(r"\b" + re.escape(signature.group(1)) + r"\s*\(", str(item["text"]))
+                ]
+                texts.extend(
+                    f"{','.join(case['requirement_ids'])}: {case['function']}{json.dumps(case['arguments'])} "
+                    f"expects {json.dumps(case['expected'])}"
+                    for case in cases if case["kind"] == "function" and case["function"] == signature.group(1)
+                )
             if not texts and any(
                 path.replace("\\", "/").casefold() == target_path.casefold()
                 for path, _requirement in _source_creation_requirements()

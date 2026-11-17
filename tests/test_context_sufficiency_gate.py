@@ -432,6 +432,7 @@ class ContextSufficiencyGateTests(unittest.TestCase):
             ("authoritative_contract", "ROOT CONTRACT"),
             ("contract", "display.py"), ("tests", "display.py:16"),
             ("test_expectation", "Running python display.py Guest prints exactly Welcome! followed by a newline."),
+            ("authoritative_contract", 'display(name="Guest")'), ("interface", "display(name)"),
         ):
             with self.subTest(kind=kind, target=target):
                 result = mini._provide_targeted_context_evidence({
