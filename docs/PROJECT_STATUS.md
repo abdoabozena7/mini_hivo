@@ -7,15 +7,34 @@ Checkpoint: 2026-11-17. This page tracks capabilities, not individual defects. T
 | Capability | Status | Main implementation |
 |---|---|---|
 | Local CLI, numbered project workspaces, pinned `gemma4:e4b` transport, bounded context, and persistent SQLite run/task memory | Implemented | `mini.py`, `hivo/projects.py`, `hivo/model_policy.py`, `hivo/http_client.py`, `hivo/context.py`, `hivo/memory.py` |
+| Calm animated terminal, persistent named sessions, native scoped decisions and complete private diagnostics | Implemented; actual ConPTY/local-model acceptance | `hivo/sessions.py`, `hivo/terminal_ui.py`, `mini.py`; [guide](TERMINAL_SESSIONS.md), [measured update](../updates/R_UPDATE_004.md) |
 | Source requirement ledger, clarification, repository reconnaissance, Project Brain, and temporary Task Brain | Implemented | `hivo/requirements.py`, `hivo/project_understanding.py`, `hivo/reentry.py` |
 | Impact Map, challenge, minimal change plan, explicit approval, and immutable execution contracts | Implemented | `hivo/impact_planning.py`, `hivo/execution_contracts.py`, `hivo/approval_bound_execution.py` |
 | Recursive task decomposition, scoped Worker missions, dependency scheduling, mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
 | Browser/unit verification routing, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
-| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Reports and numeric results archived through Experiment 19; original histories integrated without rewriting | `scripts/`, `tests/`, `reports/` |
+| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Reports archived through Experiment 22 across separately identified workstreams; original histories integrated without rewriting | `scripts/`, `tests/`, `reports/` |
 
 “Implemented” means a code path and focused tests exist. It does **not** claim reliable end-to-end completion for every project or that an experimental policy is the default.
 
 ## Current working point
+
+The actual Karim PR head `34a972a` is preserved by two-parent merge `14fffa5`
+after the previous consolidation, with both independently numbered report
+workstreams retained. The [merge record](../updates/R_UPDATE_003.md) distinguishes
+that source integration from final remote publication.
+
+The subsequent [quiet-terminal checkpoint](../updates/R_UPDATE_004.md) ran
+**1950 tests, OK with four existing skips**, and the public self-test. A fresh
+actual interactive local Gemma request produced the exact 11 required bytes,
+used 10 semantic result lines against a limit of 20, retained complete local
+diagnostics and resumed its completed session in a new process. Native decision
+scope and controls were exercised at 100x30 and 60x20. This does not establish
+universal task reliability or successful completion of the original full
+Three.js game; its [actual failure](MANUAL_RUN_ANALYSIS.md) is diagnosed separately.
+
+The [selected research direction](RESEARCH_DIRECTION.md) is evidence-licensed
+decomposition, explicitly proposed rather than a completed experimental result.
+The paragraphs below retain the earlier experiment/live checkpoints as history.
 
 Experiment 17's [completed report](../reports/experiment17/experiment17-report.md) retains the **opt-in** `field_scoped` browser classifier. It classified all measured Timer/game contracts correctly, and the two game tasks each reached Root verified in 3/3 fresh approved-contract runs. Timer reached Root verified in 0/3: correct classification and browser behavior did not close its later receipt/grounding failures.
 

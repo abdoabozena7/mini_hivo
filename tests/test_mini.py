@@ -255,6 +255,36 @@ Requirements:
         self.assertEqual(target.read_text(encoding="utf-8"), "function ok() { return 1; }\n")
         mini.rollback_transaction()
 
+    def test_browser_modules_and_mjs_use_module_syntax_without_fetching_imports(self):
+        source = 'import * as THREE from "https://example.invalid/three.module.js"; export const scene = new THREE.Scene();'
+        for filename, content in (
+            ("index.html", '<script type="module">' + source + "</script>"),
+            ("index.html", "<script TYPE = 'module'>" + source + "</script>"),
+            ("scene.mjs", source),
+        ):
+            with self.subTest(filename=filename, content=content):
+                self.assertIsNone(mini.source_validation_error(mini.WORKSPACE / filename, content))
+
+    def test_module_scripts_have_independent_scopes_and_non_scripts_are_not_executed(self):
+        page = (
+            '<script type="module">export const scene = 1;</script>'
+            '<script type="module">export const scene = 2;</script>'
+            '<script src = "remote.js">this is not executable inline source</script>'
+            '<script type = "application/ld+json">{"@context": "data"}</script>'
+            '<script type="importmap">{"imports": {"three": "remote.js"}}</script>'
+        )
+        self.assertIsNone(mini.source_validation_error(mini.WORKSPACE / "index.html", page))
+
+    def test_real_broken_modules_and_module_syntax_in_classic_scripts_are_rejected(self):
+        for content in (
+            '<script type="module">export const scene = ;</script>',
+            '<script>import * as THREE from "three";</script>',
+            '<script type="module">export const fine = 1;</script><script>const broken = ;</script>',
+        ):
+            with self.subTest(content=content):
+                self.assertIn("syntax validation failed",
+                              mini.source_validation_error(mini.WORKSPACE / "index.html", content))
+
     def test_repeated_exact_edit_mismatch_routes_model_to_range_tool(self):
         hint = mini.tool_recovery_hint(
             "edit_file", "error: expected 1 exact replacement(s), found 0; file was not changed", 2

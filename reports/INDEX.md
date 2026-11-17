@@ -36,6 +36,20 @@ branch provenance, integration repairs, offline regression results, and new
 request-to-result attempts. These are new measurements, not replacements for
 the historical Experiment 1–19 results.
 
+The actual [Karim PR integration](../updates/R_UPDATE_003.md) preserves all 36
+incoming commits and both independently numbered report workstreams. Its
+[validation record](integration/karim-pr1/validation.json) retains successful
+and failed live integration attempts.
+
+The [quiet-terminal update](../updates/R_UPDATE_004.md) adds actual Windows
+ConPTY session/navigation/native-decision and local-model request acceptance.
+Its [sanitized measurements](integration/quiet-terminal/validation.json)
+separate final regression, controlled functional checks, live exact-byte output,
+quiet-output thresholds, historical cancellation and formal provenance limits.
+The [manual-run analysis](../docs/MANUAL_RUN_ANALYSIS.md) and
+[single research direction](../docs/RESEARCH_DIRECTION.md) distinguish an
+observed failure from a future, unmeasured research hypothesis.
+
 The [2026-11-17 live end-to-end checkpoint](../docs/LIVE_E2E_VALIDATION.md)
 continues that work with three independently accepted default-auto Python
 CLI journeys on one delivered source fingerprint. Its [complete attempt

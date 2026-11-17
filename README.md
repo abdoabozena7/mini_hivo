@@ -1,6 +1,10 @@
 # Mini Hivo
 
-**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md).
+**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md) · [Karim PR integration](updates/R_UPDATE_003.md).
+
+Latest: [quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md),
+[manual Three.js run diagnosis](docs/MANUAL_RUN_ANALYSIS.md), and
+[one selected research contribution](docs/RESEARCH_DIRECTION.md).
 
 Mini Hivo is a local coding-agent orchestrator pinned to one model:
 `gemma4:e4b`. Every model-backed role uses that exact model. Cross-model
@@ -23,10 +27,24 @@ ollama pull gpt-oss:20b-cloud
 This option requires Ollama Cloud authentication. Each run still uses one
 model for every role, with no cross-model fallback.
 
-At the workspace prompt, pressing Enter creates the next numbered project under
-`list/` (`project-1`, `project-2`, ...). Supplying an existing path uses that
-path directly. Legacy files that previously lived directly under `list/` are
-migrated once into `list/project-1`.
+The normal interactive terminal is quiet: one active progress line, a short
+result, and detailed local logs. Sessions survive restarts. Use `/new`,
+`/sessions`, `/switch`, `/resume`, `/history` and `/logs`; Ctrl+N creates a
+session and Ctrl+R opens the chooser. Enter submits; Alt+Enter adds a newline.
+See the [session and terminal guide](docs/TERMINAL_SESSIONS.md).
+
+```powershell
+.\.venv\Scripts\python.exe mini.py --sessions
+.\.venv\Scripts\python.exe mini.py --resume
+.\.venv\Scripts\python.exe mini.py --workspace .\list\project-1
+```
+
+With no saved sessions, the terminal creates the next numbered project under
+`list/` (`project-1`, `project-2`, ...); `/new` does the same. A normal relaunch
+returns to the most recently active session. `--workspace` registers an
+existing folder. `--verbose` also shows diagnostics; `--plain` preserves the
+old line-oriented interface and workspace prompt. Existing legacy contents
+directly under `list/` still migrate once into `list/project-1`.
 
 For a noninteractive run, supply an existing workspace directory and a UTF-8
 prompt file:
@@ -73,6 +91,8 @@ verified, and approved-contract files retain their mutation protections.
 - `mini.py`: CLI, one adaptive task-tree controller, the reusable leaf engine, tools, transactions, and runtime wiring.
 - `hivo/model_policy.py`: immutable Gemma-only model and context policy.
 - `hivo/projects.py`: legacy migration and atomic `project-N` allocation.
+- `hivo/sessions.py`: private SQLite session catalogue and durable, truthful turn/log references.
+- `hivo/terminal_ui.py`: quiet Rich/prompt_toolkit interface, keyboard commands, session navigation and request logging.
 - `hivo/context.py`: bounded provider context without mutating source history.
 - `hivo/http_client.py`: dependency-free local Ollama transport using Python's standard library.
 - `hivo/memory.py`: per-project SQLite memory, verified-note retrieval, and a resumable run/task ledger.

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "Quiet terminal, persistent sessions, native decision review and an actual local-model terminal request",
+  "base_merge": "14fffa5f1e995b5eb5da10d3860abea8a9752fe3",
+  "karim_pr_head": "34a972a0b2feb80a31e06d0b93d6c22ca2961bc8",
+  "tested_working_tree_fingerprint": "eb6deae1f335854c0077474108f3d06d438ef94efb3553a750339e9716bbec2f",
+  "mini_py_sha256": "130efca3643bbb7dadbf1d34707579fa6cb05279d6a65074d317bf1078454a91",
+  "fingerprint_scope": "Exact captured checkout bytes of mini.py and hivo/*.py; not a claim that Windows working-tree bytes equal LF-normalized Git blobs",
+  "terminal_backend": "Actual Windows ConPTY, pywinpty Backend.ConPTY=0",
+  "tested_terminal_sizes_columns_rows": [[100, 30], [60, 20]],
+  "normal_ui": "Rich and prompt_toolkit; no new application dependency",
+  "model": "gemma4:e4b",
+  "model_digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+  "current_live_request": {
+    "attempt": "qa-live-20261117-repair03",
+    "prompt": "Create proof.txt containing exactly:MERGE_READY",
+    "run_id": "20261117T210037-2ef107f3",
+    "source_sha256_matches_pin": true,
+    "entrypoint": "mini.py, default auto mode, interactive You> prompt, --no-bootstrap",
+    "provider": "Actual local Ollama; every role pinned to the same model",
+    "empty_workspace_required": true,
+    "model_requests_submitted_by_user": 1,
+    "provider_retries": 0,
+    "status": "completed",
+    "independent_artifact_check": {
+      "relative_path": "proof.txt",
+      "expected_utf8_hex": "4d455247455f5245414459",
+      "actual_utf8_hex": "4d455247455f5245414459",
+      "length_bytes": 11,
+      "sha256": "7046c074dbba4ec74ad46f975f928ae029a8e5491cc3c10e9751c3975dfd6f3b",
+      "passed": true
+    },
+    "saved_turn_elapsed_seconds": 51.517305,
+    "displayed_elapsed_seconds": 51.5,
+    "first_visible_progress_seconds": 0.2292,
+    "preflight": {"passed": true, "canaries_completed": 3, "canaries_requested": 3, "elapsed_seconds": 13.598},
+    "quiet_output": {
+      "max_nonempty_semantic_lines": 20,
+      "observed_nonempty_semantic_lines": 10,
+      "count_scope": "After the sole echoed request and before /logs",
+      "excluded": ["editable input echo", "empty rows", "persistent input toolbar", "ANSI status refresh"],
+      "raw_metrics_or_transport_json_visible": false,
+      "passed": true
+    },
+    "private_request_log": {
+      "utf8_bytes": 103469,
+      "sha256": "ba37756a507c9632c889660523c968106cbb5de6dc03e948d16ccc7a9d12f16d",
+      "complete_engine_result_present": true,
+      "metrics_fields_independently_parsed": 500,
+      "complete_json_transport_shapes_independently_parsed": 5,
+      "all_role_model_pins_checked": true
+    },
+    "actual_exit_and_resume": {
+      "terminal_columns_rows": [60, 20],
+      "completed_history_restored": true,
+      "history_and_logs_commands_worked": true,
+      "no_automatic_replay": true,
+      "artifact_and_log_hashes_unchanged": true
+    }
+  },
+  "controlled_native_decisions": {
+    "provider_boundary": "No model planning simulated as live success; actual selectors and real ConPTY keys",
+    "question_and_reason_visible_in_active_dialog": true,
+    "actual_plan_scope_visible_in_active_dialog": true,
+    "read_only_context_verified": true,
+    "actual_paging_to_preservation_and_test_tail": true,
+    "select_skip_cancel_and_recovery": true,
+    "complete_button_labels_at_both_sizes": true,
+    "activity_paused_during_decisions": true
+  },
+  "session_navigation": {
+    "full_create_rename_list_switch_chooser_and_relaunch": "Passed before dialog repair on unchanged session/UI components; retained as historical evidence",
+    "current_representative_navigation_errors_switch_and_relaunch": "Passed on the pinned current implementation",
+    "stable_ids_workspace_bindings_and_recorded_turns": true,
+    "unknown_reference_did_not_execute_or_change_selection": true
+  },
+  "cancellation": {
+    "real_preflight_cancel_and_recovered_input": "Passed; retained historical actual Ctrl+C evidence",
+    "measured_recovery_seconds": 6.0773,
+    "live_mutating_transaction_cancel": "Not newly exercised",
+    "controlled_transaction_rollback_and_print_restoration": "Passed in actual main callback regression with only provider/engine decisions scripted"
+  },
+  "activity": {
+    "live_grid_samples": 15,
+    "sample_window_seconds": 1.426,
+    "distinct_spinner_states": 3,
+    "busy_status_rows": 1,
+    "idle_grid_samples": 15,
+    "idle_sample_window_seconds": 1.4135,
+    "distinct_idle_grids": 1
+  },
+  "regression": [
+    {"id": "quiet-tui-final-regression", "command": "python -X utf8 -m unittest discover -s tests -q", "tests_run": 1950, "skipped": 4, "exit_code": 0, "elapsed_seconds": 128.458, "existing_browser_opt_in": true},
+    {"id": "quiet-tui-final-self-test", "command": "python -X utf8 mini.py --self-test --no-bootstrap", "exit_code": 0, "elapsed_seconds": 6.075},
+    {"id": "terminal-repaired-pin", "command": "python -X utf8 -m unittest discover -s tests -q -p test_terminal_*.py", "tests_run": 46, "skipped": 0, "exit_code": 0},
+    {"id": "module-and-decision-regressions", "tests_run": 191, "skipped": 4, "exit_code": 0}
+  ],
+  "failed_attempts_preserved": [
+    "Initial native dialogs hid the supplied question/scope outside the active alternate buffer and clipped the long skip label; actual product FAIL retained, then repaired and rechecked at both sizes.",
+    "Early parent glue tests had incorrect stdout-patch ordering and a narrow wrapping assertion; corrected without weakening product behavior.",
+    "Private QA repaired incremental ANSI observation, alternate-buffer/full-cell rendering, wrapped punctuation, key:value metrics parsing, path type comparison and derivative crop naming. Original failures and frames remain immutable; these were not extra winning model retries."
+  ],
+  "production_ownership": {
+    "sessions_worker": "Session/Turn dataclasses, SQLite catalogue and focused persistence tests",
+    "terminal_worker": "Initial prompt/input/commands/status/logging module and focused tests",
+    "coordinator": "Engine integration, source/authority resets, native dialog repair, status/startup follow-up after the UI worker's transport failure, module-syntax repair and documentation",
+    "independent_qa": "Read-only real public ConPTY journeys, native dialogs, artifact/state/log audits and inspected temporal/full/detail frames"
+  },
+  "harrtest": {
+    "version": "4.1.0",
+    "native_contributions_and_actual_runtime_checks": "Retained",
+    "formal_team_provenance": "UNVERIFIED: Codex-only parent-thread adapter and stale initial UI-owner handoff after its failed repair turn",
+    "synthetic_or_refreshed_owner_receipts_created": false
+  },
+  "limitations": [
+    "One accepted short TUI request is not a broad stochastic reliability benchmark.",
+    "Original complete Three.js game live acceptance is not claimed.",
+    "General evidence-licensed decomposition is a proposed research contribution, not implemented or evaluated by these product checks.",
+    "Four historical legacy-scheduler skips remain; five opt-in contributor browser cases were actually executed.",
+    "Raw host details, transcripts, SQLite data, screenshots with local paths and complete private logs are intentionally not newly published."
+  ]
+}

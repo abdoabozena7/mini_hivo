@@ -7,6 +7,7 @@ __pycache__/
 .agent_evidence/
 .agent_backups/
 .hivo/
+.runtime-proof/
 output/
 
 # Private original evidence: retained locally; curated copies live under evidence/.

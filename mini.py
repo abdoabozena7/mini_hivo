@@ -1,8 +1,12 @@
 import argparse
 import base64
+import builtins
 import copy
+from contextlib import contextmanager
 import difflib
 from dataclasses import replace
+from functools import wraps
+from html.parser import HTMLParser
 import hashlib
 import importlib
 import importlib.util
@@ -12,6 +16,7 @@ import re
 import shlex
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -722,6 +727,19 @@ MEMORY_STORE = None
 VISION_ENABLED_FOR_RUN = False
 PREFLIGHT_CONFLICT_STATE = {"registry": {}, "active": set(), "sequence": 0}
 HOST_PREFLIGHT_RESULT = None
+ACTIVE_TERMINAL = None
+
+
+def _terminal_dialog(function):
+    @wraps(function)
+    def show(*args, **kwargs):
+        if ACTIVE_TERMINAL is None:
+            return function(*args, **kwargs)
+        if len(args) < 3 and "output_fn" not in kwargs:
+            kwargs["output_fn"] = ACTIVE_TERMINAL.detail_print
+        with ACTIVE_TERMINAL.interaction():
+            return function(*args, **kwargs)
+    return show
 
 
 class ProviderError(RuntimeError):
@@ -1259,6 +1277,36 @@ def backup(target):
         return f"error: backup failed, file NOT changed: {exc}"
 
 
+class _InlineJavaScript(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.scripts = []
+        self._active = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "script":
+            return
+        attrs = dict(attrs)
+        script_type = str(attrs.get("type") or "").split(";", 1)[0].strip().casefold()
+        if "src" not in attrs and script_type in {
+            "", "module", "text/javascript", "application/javascript",
+            "text/ecmascript", "application/ecmascript",
+        }:
+            self._active = ("module" if script_type == "module" else "commonjs", [])
+        else:
+            self._active = None
+
+    def handle_data(self, data):
+        if self._active is not None:
+            self._active[1].append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._active is not None:
+            mode, parts = self._active
+            self.scripts.append((mode, "".join(parts)))
+            self._active = None
+
+
 def source_validation_error(target, content):
     suffix = target.suffix.casefold()
     text = str(content)
@@ -1274,23 +1322,28 @@ def source_validation_error(target, content):
         except (ValueError, TypeError) as exc:
             return f"JSON syntax validation failed: {exc}"
         return None
-    javascript = text if suffix in {".js", ".mjs", ".cjs"} else ""
+    scripts = [("module" if suffix == ".mjs" else "commonjs", text)] if suffix in {".js", ".mjs", ".cjs"} else []
     if suffix in {".html", ".htm"}:
-        javascript = "\n;\n".join(re.findall(
-            r"<script(?![^>]*\bsrc=)(?![^>]*type=[\"'](?:application|application/ld)\/json[\"'])[^>]*>([\s\S]*?)</script>",
-            text, flags=re.IGNORECASE,
-        ))
-    if not javascript.strip():
-        return None
-    try:
-        checked = subprocess.run(
-            ["node", "--check", "-"], input=javascript, text=True,
-            encoding="utf-8", errors="replace", capture_output=True, timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if checked.returncode != 0:
-        return f"JavaScript syntax validation failed: {compact_text(checked.stderr or checked.stdout, 500)}"
+        parser = _InlineJavaScript()
+        parser.feed(text)
+        parser.close()
+        scripts = parser.scripts
+        classic = [source for mode, source in scripts if mode == "commonjs"]
+        scripts = [item for item in scripts if item[0] == "module"]
+        if classic:
+            scripts.append(("commonjs", "\n;\n".join(classic)))
+    for mode, javascript in scripts:
+        if not javascript.strip():
+            continue
+        try:
+            checked = subprocess.run(
+                ["node", f"--input-type={mode}", "--check", "-"], input=javascript, text=True,
+                encoding="utf-8", errors="replace", capture_output=True, timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if checked.returncode != 0:
+            return f"JavaScript syntax validation failed: {compact_text(checked.stderr or checked.stdout, 500)}"
     return None
 
 
@@ -4640,6 +4693,8 @@ def event(text, role=None, task=None, action=None, tool=None):
     if tool:
         DASHBOARD["tool"] = tool
     DASHBOARD["event"] = text
+    if ACTIVE_TERMINAL is not None:
+        ACTIVE_TERMINAL.progress(text, role=role, task=task, action=action, tool=tool)
     print(text)
     record_run_event("status", text=text, role=role, task=task, action=action, tool=tool)
 
@@ -5722,6 +5777,61 @@ def navigate_clarification_options(options, key_sequence, initial_index=0):
     return index
 
 
+def _show_terminal_decision(title, context, labels, *, cancel_text):
+    from prompt_toolkit.application import Application, get_app
+    from prompt_toolkit.key_binding import KeyBindings as DialogBindings
+    from prompt_toolkit.layout import HSplit, Layout
+    from prompt_toolkit.layout.dimension import Dimension
+    from prompt_toolkit.styles import Style
+    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList, TextArea
+
+    options = RadioList(values=list(enumerate(labels)))
+    options.window.height = Dimension(min=min(3, len(labels)), preferred=len(labels), max=6)
+    review = TextArea(
+        text=context.strip(), read_only=True, scrollbar=True, wrap_lines=True,
+        height=Dimension(min=3, weight=1), style="class:review",
+    )
+    bindings = DialogBindings()
+
+    @bindings.add("tab")
+    def focus_next(event):
+        event.app.layout.focus_next()
+
+    @bindings.add("s-tab")
+    def focus_previous(event):
+        event.app.layout.focus_previous()
+
+    @bindings.add("escape", eager=True)
+    @bindings.add("c-c")
+    def cancel(event):
+        event.app.exit(result=None)
+
+    dialog = Dialog(
+        title=title, width=Dimension(preferred=88, max=100),
+        body=HSplit([
+            Label("Up/Down, Space choose; Tab actions; Esc cancel.\n"
+                  "Shift+Tab to review context; PgUp/PgDn scroll.", dont_extend_height=True),
+            review, options,
+        ], padding=1),
+        buttons=[
+            Button("Select", handler=lambda: get_app().exit(result=options.current_value)),
+            Button(cancel_text, handler=lambda: get_app().exit(result=None)),
+        ],
+    )
+    return Application(
+        layout=Layout(dialog, focused_element=options), key_bindings=bindings,
+        full_screen=True, style=Style.from_dict({
+            "dialog": "bg:ansiblack ansiwhite",
+            "dialog frame.label": "bold ansicyan",
+            "dialog.body": "bg:ansiblack ansiwhite",
+            "review": "bg:ansiblack ansiwhite",
+            "radio-selected": "bold ansicyan",
+            "button.focused": "bg:ansicyan ansiblack",
+        }),
+    ).run()
+
+
+@_terminal_dialog
 def select_clarification_option(question, key_sequence=None, output_fn=print, terminal_available=None):
     """Show one compact arrow-key question and return the selected index."""
     question = question if isinstance(question, dict) else {}
@@ -5737,12 +5847,11 @@ def select_clarification_option(question, key_sequence=None, output_fn=print, te
     output_fn(f"Reason: {compact_text(question.get('reason', ''), 260)}")
     if PROMPT_TOOLKIT_AVAILABLE:
         try:
-            from prompt_toolkit.shortcuts import radiolist_dialog
-            values = [(index, label) for index, label in enumerate(labels)]
-            selected = radiolist_dialog(
-                title="HIVO clarification", text="Use Up/Down and Enter to select.",
-                values=values, ok_text="Select", cancel_text="Skip / use default",
-            ).run()
+            selected = _show_terminal_decision(
+                "HIVO clarification",
+                f"{question.get('question', 'Choose an option.')}\n\nReason: {question.get('reason', '')}",
+                labels, cancel_text="Skip",
+            )
             return int(selected) if selected is not None else None
         except (ImportError, EOFError, KeyboardInterrupt, TypeError, ValueError):
             return None
@@ -9292,6 +9401,7 @@ def format_plan_approval_summary(plan):
     return "\n".join(lines)
 
 
+@_terminal_dialog
 def select_plan_approval_option(plan, key_sequence=None, output_fn=print,
                                 terminal_available=None, allow_revision=True):
     labels = plan_approval_option_labels(allow_revision)
@@ -9304,12 +9414,10 @@ def select_plan_approval_option(plan, key_sequence=None, output_fn=print,
     output_fn(format_plan_approval_summary(plan))
     if PROMPT_TOOLKIT_AVAILABLE:
         try:
-            from prompt_toolkit.shortcuts import radiolist_dialog
-            selected = radiolist_dialog(
-                title="HIVO change plan", text="Use Up/Down and Enter to select.",
-                values=[(index, label) for index, label in enumerate(labels)],
-                ok_text="Select", cancel_text="Cancel",
-            ).run()
+            selected = _show_terminal_decision(
+                "HIVO change plan", format_plan_approval_summary(plan), labels,
+                cancel_text="Cancel",
+            )
             return int(selected) if selected is not None else None
         except (ImportError, EOFError, KeyboardInterrupt, TypeError, ValueError):
             return None
@@ -30594,11 +30702,16 @@ def run_self_test(install_browser=False):
 # CLI
 # ---------------------------------------------------------------------------
 
+def _explicit_workspace(value):
+    path = Path(value).expanduser().resolve()
+    if not path.is_dir():
+        raise RuntimeError(f"workspace is not a folder: {path}")
+    return path
+
+
 def get_workspace(explicit=None, projects_root=None):
     if explicit:
-        path = Path(explicit).expanduser().resolve()
-        if not path.exists() or not path.is_dir():
-            raise RuntimeError(f"workspace is not a folder: {path}")
+        path = _explicit_workspace(explicit)
         print(f"workspace set to: {path}\n")
         return path
     store = ProjectStore(projects_root or DEFAULT_PROJECTS_ROOT)
@@ -30619,6 +30732,8 @@ def get_workspace(explicit=None, projects_root=None):
 
 
 def read_user_prompt(prompt_label="You> "):
+    if ACTIVE_TERMINAL is not None:
+        return ACTIVE_TERMINAL.read_prompt(prompt_label)
     if PROMPT_TOOLKIT_AVAILABLE and sys.stdin.isatty():
         bindings = KeyBindings()
         @bindings.add("enter")
@@ -30664,7 +30779,13 @@ def parse_args():
     parser.add_argument("--integration-target-policy", choices=("current", "resolved"),
                         default="current")
     parser.add_argument("--semantic-evidence-policy", choices=("current", "compatible", "monotonic", "strict"), default="current")
-    parser.add_argument("--workspace")
+    workspace_args = parser.add_mutually_exclusive_group()
+    workspace_args.add_argument("--workspace")
+    workspace_args.add_argument("--resume", nargs="?", const="", metavar="SESSION",
+                                help="Resume a saved terminal session (most recent if omitted)")
+    parser.add_argument("--sessions", action="store_true", help="List saved sessions without calling the model")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed interactive diagnostics as well as logging them")
+    parser.add_argument("--plain", action="store_true", help="Use the original line-oriented interface")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
     parser.add_argument("--no-bootstrap", action="store_true")
@@ -30677,6 +30798,68 @@ def ollama_reachable():
         return response.status_code == 200
     except Exception:
         return False
+
+
+@contextmanager
+def _terminal_engine_output(terminal):
+    global ACTIVE_TERMINAL
+    previous_terminal = ACTIVE_TERMINAL
+    had_print = "print" in globals()
+    previous_print = globals().get("print", builtins.print)
+    ACTIVE_TERMINAL = terminal
+    globals()["print"] = terminal.detail_print
+    try:
+        yield
+    finally:
+        ACTIVE_TERMINAL = previous_terminal
+        if had_print:
+            globals()["print"] = previous_print
+        else:
+            globals().pop("print", None)
+
+
+def _session_memory(workspace):
+    global WORKSPACE, MEMORY_STORE, RUN, TASKS, RUN_ID, LAST_COMMITTED_TRANSACTION
+    global ACTIVE_CONTRACT, ACTIVE_TOOL_CONTRACT, ACTIVE_CONTEXT_SUFFICIENCY_GATE
+    global ACTIVE_PROJECT_WORLD_MODEL, ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
+    if ACTIVE_TRANSACTION is not None:
+        raise RuntimeError("Cannot switch sessions while a workspace transaction is active.")
+    WORKSPACE = _explicit_workspace(workspace)
+    MEMORY_STORE = None
+    RUN, TASKS, RUN_ID = {}, {}, ""
+    LAST_COMMITTED_TRANSACTION = None
+    ACTIVE_CONTRACT = ACTIVE_TOOL_CONTRACT = ACTIVE_CONTEXT_SUFFICIENCY_GATE = None
+    ACTIVE_PROJECT_WORLD_MODEL = ACTIVE_IMPACT_CONTRACT = None
+    ACTIVE_IMPACT_REQUIRED = False
+    return load_memory()
+
+
+def _terminal_catalogue():
+    from hivo.sessions import SessionStore
+    state_dir = os.environ.get("HIVO_SESSION_HOME") or Path(__file__).resolve().parent / ".hivo" / "terminal"
+    return SessionStore(Path(state_dir))
+
+
+def _new_session_workspace():
+    store = ProjectStore(DEFAULT_PROJECTS_ROOT)
+    migration = store.migrate_legacy_contents()
+    if migration.moved:
+        print(f"[PROJECT MIGRATION] moved {len(migration.moved)} legacy item(s) into {migration.project}")
+    return store.create_project()
+
+
+def _initial_terminal_session(store, args):
+    sessions = store.list()
+    reference = getattr(args, "resume", None)
+    if reference is not None:
+        if not sessions:
+            raise RuntimeError("No saved sessions. Start without --resume to create one.")
+        return store.select(store.resolve(reference).id if reference else sessions[0].id)
+    if args.workspace:
+        workspace = _explicit_workspace(args.workspace)
+        existing = next((session for session in sessions if session.workspace == workspace), None)
+        return store.select(existing.id) if existing else store.create(workspace)
+    return store.select(sessions[0].id) if sessions else store.create(_new_session_workspace())
 
 
 def main():
@@ -30697,31 +30880,46 @@ def main():
     except ValueError as exc:
         print(f"[SETUP_ERROR] {exc}")
         raise SystemExit(2)
-    try:
-        WORKSPACE = get_workspace(args.workspace)
-    except RuntimeError as exc:
-        if args.workspace:
-            HOST_PREFLIGHT_RESULT = failed_host_preflight_result(
-                args.workspace, selected_model, reason="WORKSPACE_UNUSABLE", stage="workspace", summary=exc,
-            )
-            print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+    if getattr(args, "sessions", False):
+        from hivo.terminal_ui import list_sessions
+        try:
+            list_sessions(_terminal_catalogue())
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            print(f"[SESSION_ERROR] {exc}")
+            raise SystemExit(2)
+        return
+    use_terminal = bool(
+        not args.prompt_file and not getattr(args, "plain", False)
+        and sys.stdin.isatty() and sys.stdout.isatty()
+    )
+    if getattr(args, "resume", None) is not None and not use_terminal:
+        print("[SETUP_ERROR] --resume requires an interactive terminal without --plain or --prompt-file.")
+        raise SystemExit(2)
+    memory = {}
+    if not use_terminal:
+        try:
+            WORKSPACE = get_workspace(args.workspace)
+        except RuntimeError as exc:
+            if args.workspace:
+                HOST_PREFLIGHT_RESULT = failed_host_preflight_result(
+                    args.workspace, selected_model, reason="WORKSPACE_UNUSABLE", stage="workspace", summary=exc,
+                )
+                print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+                print("terminal: HOST_PREFLIGHT_FAILED")
+            else:
+                print(f"[SETUP_ERROR] {exc}")
+            raise SystemExit(2)
+        HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
+        print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+        if not HOST_PREFLIGHT_RESULT["passed"]:
             print("terminal: HOST_PREFLIGHT_FAILED")
-        else:
+            raise SystemExit(2)
+        try:
+            select_local_ollama_model(selected_model)
+        except (RuntimeError, ValueError) as exc:
             print(f"[SETUP_ERROR] {exc}")
-        raise SystemExit(2)
-    HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
-    print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
-    if not HOST_PREFLIGHT_RESULT["passed"]:
-        print("terminal: HOST_PREFLIGHT_FAILED")
-        raise SystemExit(2)
-    # Preserve the established model configuration path after qualification;
-    # the preflight itself never mutates HIVO task state or metrics.
-    try:
-        select_local_ollama_model(selected_model)
-    except (RuntimeError, ValueError) as exc:
-        print(f"[SETUP_ERROR] {exc}")
-        raise SystemExit(2)
-    memory = load_memory()
+            raise SystemExit(2)
+        memory = load_memory()
 
     def handle(user_text, interactive=True):
         nonlocal memory
@@ -30793,6 +30991,48 @@ def main():
         print("Agent>", result.get("summary", ""))
         return result
 
+    if use_terminal:
+        from hivo.terminal_ui import TerminalApp
+        try:
+            store = _terminal_catalogue()
+            initial_session = _initial_terminal_session(store, args)
+        except (OSError, ValueError, KeyError, RuntimeError, sqlite3.Error) as exc:
+            print(f"[SESSION_ERROR] {exc}")
+            print("Use --sessions to list saved sessions, or --workspace with an existing folder.")
+            raise SystemExit(2)
+        qualified = {}
+
+        def run_session_request(user_text, session):
+            nonlocal memory
+            global HOST_PREFLIGHT_RESULT
+            with _terminal_engine_output(terminal):
+                try:
+                    memory = _session_memory(session.workspace)
+                    terminal.progress("Checking local model", action="host preflight")
+                    preflight = qualified.get(WORKSPACE)
+                    if preflight is None:
+                        preflight = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
+                        HOST_PREFLIGHT_RESULT = preflight
+                        print(format_host_preflight_report(preflight))
+                        if not preflight["passed"]:
+                            reason = preflight.get("report", {}).get("failure_reason", "see diagnostic log")
+                            raise ProviderError(f"HOST_PREFLIGHT_FAILED: {reason}")
+                        qualified[WORKSPACE] = preflight
+                    HOST_PREFLIGHT_RESULT = preflight
+                    select_local_ollama_model(selected_model)
+                    result = handle(user_text, interactive=True)
+                    return {**result, "run_id": RUN_ID}
+                except BaseException:
+                    if ACTIVE_TRANSACTION is not None:
+                        rollback_transaction()
+                    raise
+
+        terminal = TerminalApp(
+            store, run_session_request, _new_session_workspace,
+            verbose=getattr(args, "verbose", False), model=selected_model,
+        )
+        terminal.run(initial_session)
+        return
     if args.prompt_file:
         path = Path(args.prompt_file).expanduser().resolve()
         result = handle(path.read_text(encoding="utf-8"), interactive=False)
