@@ -31,6 +31,104 @@ class MiniAgentRegressionTests(unittest.TestCase):
         self.assertTrue(mini._fit_validator({"decision": "split", "reason": "broad", "subtasks": ["a", "b"]}))
         self.assertFalse(mini._fit_validator({"decision": "split", "reason": "bad", "subtasks": []}))
 
+    def test_read_only_python_function_assertions_check_exact_values_without_new_tests(self):
+        path = mini.WORKSPACE / "labels.py"
+        path.write_text(
+            'def label(value="default"):\n    return value + "!"\n', encoding="utf-8",
+        )
+        before = path.read_bytes()
+        for arguments, expected, passed in (
+            ([], "default!", True), (["sample"], "sample!", True),
+            (["sample"], "sample", False),
+        ):
+            with self.subTest(arguments=arguments, expected=expected):
+                result = json.loads(mini.run_tool("run_file", {
+                    "path": "labels.py", "function": "label",
+                    "arguments": arguments, "expected": expected,
+                }, role="Falsifier"))
+                self.assertEqual(result["passed"], passed)
+                self.assertTrue(result["source_unchanged"])
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(
+            [item.name for item in mini.WORKSPACE.iterdir() if not item.name.startswith(".agent_")],
+            ["labels.py"],
+        )
+
+    def test_command_assertions_distinguish_expected_rejection_and_exact_stdout(self):
+        (mini.WORKSPACE / "checked.py").write_text(
+            'import sys\n'
+            'if len(sys.argv) != 1:\n'
+            '    sys.exit(2)\n'
+            'print("READY")\n', encoding="utf-8",
+        )
+        for arguments, expected_exit, stdout, passed in (
+            ("", 0, "READY\n", True), ("", 0, "READY", False),
+            (" invalid", "nonzero", "", True), (" invalid", 0, "", False),
+        ):
+            with self.subTest(arguments=arguments, expected_exit=expected_exit, stdout=stdout):
+                result = json.loads(mini.run_tool("run_command", {
+                    "command": "python checked.py" + arguments,
+                    "expected_exit_code": expected_exit, "expected_stdout": stdout,
+                }, role="Falsifier"))
+                self.assertEqual(result["passed"], passed)
+        self.assertTrue(mini.tool_result_failed(mini.run_command("python checked.py invalid")))
+        self.assertIn("inline Python is not allowed", mini.run_command(
+            'python -c "print(1)"', expected_exit_code=0, expected_stdout="1\n",
+        ))
+        refusal = mini.run_command('python -c "import labels; print(labels.label())"')
+        hint = mini.tool_recovery_hint("run_command", refusal, 1)
+        self.assertIn("run_file", hint)
+        self.assertIn("expected", hint)
+        with patch.object(mini.subprocess, "run", side_effect=AssertionError("invalid test oracle executed")):
+            for expectation in ({"expected_stdout": "Ran 4 tests in 0.00Xs"}, {"expected_exit_code": 1}):
+                refused = mini.run_command("python -m unittest test_example.py", **expectation)
+                self.assertTrue(mini.result_is_tool_rejection(refused))
+                self.assertIn("only the command field", refused)
+
+    def test_python_function_assertions_reject_source_code_and_preserve_distinct_cases(self):
+        (mini.WORKSPACE / "labels.py").write_text(
+            'def label(value):\n    return value + "!"\n', encoding="utf-8",
+        )
+        invalid = json.loads(mini.run_tool("run_file", {
+            "path": "labels.py", "function": '__import__("os")',
+            "arguments": [], "expected": None,
+        }, role="Falsifier"))
+        self.assertFalse(invalid["passed"])
+        responses = [{
+            "role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "run_file", "arguments": {
+                    "path": "labels.py", "function": "label",
+                    "arguments": ["sample"], "expected": expected,
+                }},
+            }],
+        } for expected in ("incorrect", "sample!")]
+        responses.append({"role": "assistant", "content": "checked", "tool_calls": []})
+        with patch.object(mini, "ask_ollama", side_effect=responses):
+            result = mini.execute_agent_task(
+                "Check the declared function values.", {}, role="Falsifier", max_steps=3,
+            )
+        failures = mini.unresolved_tool_failures(result["tool_evidence"])
+        self.assertEqual(len(failures), 1)
+        self.assertNotEqual(
+            result["tool_evidence"][0]["target"], result["tool_evidence"][1]["target"],
+        )
+
+    def test_function_assertion_cannot_redefine_a_source_bound_expected_value(self):
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a label utility.\n"
+            "- Running python labels.py sample prints exactly sample! followed by a newline.\n"
+            '- Expose a label(value="sample") function that returns the same output without a newline.',
+            use_model=False,
+        )
+        with patch.object(mini, "check_python_call", side_effect=AssertionError("invalid oracle executed")):
+            result = mini.run_tool("run_file", {
+                "path": "labels.py", "function": "label", "arguments": ["sample"],
+                "expected": '"sample!"',
+            }, role="Falsifier")
+        self.assertTrue(mini.result_is_tool_rejection(result))
+        self.assertIn("REQ-001", result)
+        self.assertIn("No assertion was executed", result)
+
     def test_invalid_structured_task_fit_uses_nonfatal_fallback(self):
         task = {"id": "ROOT", "goal": "build several features", "depth": 0}
         contract = {"requirements": ["core", "tests", "polish"], "constraints": [], "success_criteria": []}

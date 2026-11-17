@@ -285,6 +285,25 @@ class VerificationApplicabilityTests(unittest.TestCase):
             item["kind"] == BROWSER for item in aggregate["skipped_not_applicable"]
         ))
 
+    def test_existing_source_named_in_root_task_has_an_executable_route_without_scope_hints(self):
+        self.write("hello.py", 'print("READY")\n')
+        task = self.task(
+            "ROOT", "Create hello.py that prints READY.", ["Run hello.py successfully."], [],
+        )
+        artifact = mini.analyze_verification_applicability(task, task, self.snapshot())
+        route = self.route(artifact, SYNTAX_STATIC_GATE)
+        self.assertTrue(route["required"])
+        self.assertEqual(route["target"], "hello.py")
+        for target, result, passed in (
+            ("hello.py", "[exit_code=0]\nREADY", True),
+            ("other.py", "[exit_code=0]\nOTHER", False),
+            ("hello.py", "[exit_code=1]\nSyntaxError", False),
+        ):
+            with self.subTest(target=target, result=result):
+                self.assertEqual(aggregate_verification_evidence(artifact, [{
+                    "tool": "run_file", "target": target, "result": result,
+                }])["passed"], passed)
+
     def test_required_failure_dominates_optional_skip(self):
         artifact = {
             "child_id": "C",
@@ -303,6 +322,27 @@ class VerificationApplicabilityTests(unittest.TestCase):
         self.assertFalse(aggregate["passed"])
         self.assertEqual(len(aggregate["actual_failures"]), 1)
         self.assertEqual(len(aggregate["skipped_not_applicable"]), 1)
+
+    def test_latest_rerun_resolves_a_legacy_focused_test_failure(self):
+        self.write("test_greet.py", "import unittest\n")
+        artifact = mini.analyze_verification_applicability(
+            self.task(
+                goal="Create a greeting utility",
+                done_when=["python -m unittest test_greet.py passes"], scope=[],
+            ),
+            {"goal": "Create a greeting utility"}, self.snapshot(),
+        )
+        failed = {
+            "tool": "run_command", "target": "python -m unittest test_greet.py",
+            "result": "[exit_code=1]\nAssertionError: incorrect greeting",
+        }
+        passed = {**failed, "result": "[exit_code=0]\nRan 2 tests\nOK"}
+        self.assertTrue(aggregate_verification_evidence(artifact, [failed, passed])["passed"])
+        self.assertFalse(aggregate_verification_evidence(artifact, [passed, failed])["passed"])
+        different_failure = {**failed, "target": "python -m unittest -v test_greet.py"}
+        self.assertFalse(aggregate_verification_evidence(
+            artifact, [different_failure, passed],
+        )["passed"])
 
     def test_no_actual_required_evidence_fails_closed(self):
         self.write("src/module.js")

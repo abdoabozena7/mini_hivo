@@ -20,6 +20,8 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from hivo.evidence import latest_verification_evidence
+
 
 FOCUSED_TEST = "FOCUSED_TEST"
 SYNTAX_STATIC_GATE = "SYNTAX_STATIC_GATE"
@@ -797,6 +799,10 @@ def _is_focused_test_evidence(item: dict) -> bool:
     ) and bool(_TEST_MARKERS.search(text))
 
 
+def is_focused_test_command(parts: Iterable[str]) -> bool:
+    return any(_TEST_MARKERS.search(part) or _is_test_path(part) for part in parts)
+
+
 def _approved_authority_artifact(
     *,
     child_id: str,
@@ -1059,6 +1065,10 @@ def analyze_verification_applicability(
                 if _is_test_path(candidate):
                     facts["tests"] = _unique_paths(facts.get("tests", []) + [candidate])
     source_paths = _unique_paths([path for path in scope_paths if _is_source_path(path)])
+    if not source_paths and not has_child:
+        source_paths = _unique_paths(_references_from_text(
+            text_bundle, [path for path in facts.get("files", []) if _is_source_path(path)],
+        ))
     test_files = _unique_paths([path for path in facts.get("tests", []) if _is_test_path(path)])
     if not test_files:
         test_files = _unique_paths([path for path in facts.get("files", []) if _is_test_path(path)])
@@ -2163,6 +2173,10 @@ def _aggregate_verification_routes(
             ]
         else:
             matched = [item for item in evidence if _evidence_matches(route, item)]
+        if (kind in {FOCUSED_TEST, SYNTAX_STATIC_GATE}
+                and not _route_authority_key(route) and not route.get("authority_type")
+                and not _is_direct_route(route) and strict_evidence_context is None):
+            matched = latest_verification_evidence(matched)
         related = [
             item for item in evidence
             if _evidence_is_related(route, item)

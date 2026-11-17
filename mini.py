@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from hivo.browser_checks import run_profile_interactions
+from hivo.python_checks import check_call as check_python_call
+from hivo.python_checks import check_source_assertion, source_assertions
 from hivo.context import compact_messages
 from hivo.evidence import evidence_for_review
 from hivo.evidence import MUTATION_TOOLS
@@ -124,6 +126,7 @@ from hivo.verification_routing import SYNTAX_STATIC_GATE
 from hivo.verification_routing import TEST_TARGET_PRESENT
 from hivo.verification_routing import VERIFICATION_EVIDENCE_UNAVAILABLE
 from hivo.verification_routing import aggregate_verification_evidence
+from hivo.verification_routing import is_focused_test_command
 from hivo.verification_routing import analyze_verification_applicability as _analyze_verification_applicability
 from hivo.integration_gate import INTEGRATION_EVIDENCE_UNAVAILABLE
 from hivo.integration_gate import INTEGRATION_FAILED
@@ -1007,13 +1010,32 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "run_file", "description": "Run a .py, .js, .cpp/.cc file or inspect an HTML entry in Chromium.",
-        "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
+        "name": "run_file", "description": (
+            "Run a file. For an independent Python function assertion, provide function, arguments (JSON array), "
+            "and expected (JSON value). This imports and calls the function in an isolated process without "
+            "writing a test file or accepting inline source code. Derive expected from the user contract."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "function": {"type": "string"},
+            "arguments": {"type": "array", "maxItems": 16, "items": {}},
+            "expected": {
+                "type": ["string", "number", "boolean", "object", "array", "null"],
+                "description": "The actual JSON value, not JSON text or repr. Do not add quote characters around a string's content.",
+            },
+        },
                        "required": ["path"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "run_command", "description": "Run an allowlisted verification command inside the workspace.",
-        "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
+        "name": "run_command", "description": (
+            "Run an allowlisted verification command. For a contract requiring rejection of invalid input, "
+            "provide expected_exit_code='nonzero' (or an exact integer). Optional expected_stdout asserts exact "
+            "stdout including newlines. Without these fields, a nonzero exit is a failure."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "command": {"type": "string"},
+            "expected_exit_code": {"anyOf": [{"type": "integer"}, {"type": "string", "enum": ["nonzero"]}]},
+            "expected_stdout": {"type": "string"},
+        },
                        "required": ["command"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
@@ -1749,12 +1771,17 @@ def list_files():
         return f"error listing files: {exc}"
 
 
-def run_file(path):
+def run_file(path, *, function=None, arguments=None, expected=None):
     target = safe_path(path)
     if target is None:
         return f"error: '{path}' is outside the workspace."
     if not target.exists():
         return f"error: file does not exist: {target}"
+    if function is not None:
+        return json.dumps(
+            check_python_call(WORKSPACE, path, function, arguments, expected),
+            ensure_ascii=False,
+        )
     ext = target.suffix.lower()
     try:
         if ext == ".py":
@@ -1793,8 +1820,6 @@ def run_file(path):
 
 def _validated_command_parts(command):
     lower = command.lower()
-    if any(bad in lower for bad in DANGEROUS) or any(token in command for token in ("\n", "\r", "&&", "||", ";", "|", ">", "<")):
-        return None, "dangerous commands and shell composition are not allowed"
     try:
         parts = shlex.split(command, posix=(os.name != "nt"))
         parts = [part.strip('"') for part in parts]
@@ -1803,11 +1828,16 @@ def _validated_command_parts(command):
     if not parts:
         return None, "empty command"
     executable = Path(parts[0]).stem.lower()
+    if executable in {"python", "python3", "py"} and "-c" in parts:
+        return None, (
+            "inline Python is not allowed; use run_file with path, function, arguments, and expected "
+            "for a Python return-value assertion, or run the existing unittest file"
+        )
+    if any(bad in lower for bad in DANGEROUS) or any(token in command for token in ("\n", "\r", "&&", "||", ";", "|", ">", "<")):
+        return None, "dangerous commands and shell composition are not allowed"
     allowed = {"python", "python3", "py", "node", "npm", "npx", "pytest", "git", "g++", "clang++", "tsc"}
     if executable not in allowed:
         return None, f"executable '{executable}' is not in the verification allowlist"
-    if executable in {"python", "python3", "py"} and "-c" in parts:
-        return None, "inline Python is not allowed"
     if executable == "node" and any(flag in parts for flag in ("-e", "--eval")):
         return None, "inline Node.js is not allowed"
     if executable == "git":
@@ -1832,10 +1862,26 @@ def _validated_command_parts(command):
     return parts, None
 
 
-def run_command(command):
+def run_command(command, *, expected_exit_code=None, expected_stdout=None):
+    if expected_exit_code is not None and not (
+        isinstance(expected_exit_code, int) and not isinstance(expected_exit_code, bool)
+        or expected_exit_code == "nonzero"
+    ):
+        return "error: expected_exit_code must be an integer or 'nonzero'"
+    if expected_stdout is not None and not isinstance(expected_stdout, str):
+        return "error: expected_stdout must be a string"
     parts, error = _validated_command_parts(command)
     if error:
         return f"error: command refused: {error}"
+    if is_focused_test_command(parts) and (
+        expected_stdout is not None or expected_exit_code not in (None, 0)
+    ):
+        return (
+            "error: tool assertion rejected: a test runner must succeed by its actual exit status. "
+            "Do not invent an exact test-report stdout or expect failing tests to succeed. "
+            "Run the existing test command with only the command field: "
+            + json.dumps({"command": command})
+        )
     resolved_policy = RUN.get("verification_environment_policy") == "resolved"
     if resolved_policy:
         preflight = verification_env.preflight_command(parts, WORKSPACE)
@@ -1859,6 +1905,17 @@ def run_command(command):
             RUN.setdefault("verification_command_results", []).append({
                 "command": command, **outcome})
             record_run_event("verification_command_result", command=command, **outcome)
+        if expected_exit_code is not None or expected_stdout is not None:
+            exit_matches = (
+                result.returncode != 0 if expected_exit_code == "nonzero"
+                else result.returncode == (0 if expected_exit_code is None else expected_exit_code)
+            )
+            return json.dumps({
+                "passed": exit_matches and (expected_stdout is None or result.stdout == expected_stdout),
+                "exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
+                "expected_exit_code": 0 if expected_exit_code is None else expected_exit_code,
+                "expected_stdout": expected_stdout,
+            }, ensure_ascii=False)
         output = (result.stdout + result.stderr).strip()
         return f"[exit_code={result.returncode}]\n{output or '(no output)'}"
     except subprocess.TimeoutExpired:
@@ -1891,6 +1948,16 @@ def tools_for_role(role, tool_policy=None, recovery_strategy=None):
         base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     else:
         base = [tool for tool in TOOLS if tool["function"]["name"] != _CONTEXT_COMPLETION_TOOL]
+    if tool_policy == "coherent_rewrite":
+        base = copy.deepcopy(base)
+        for item in base:
+            definition = item["function"]
+            if definition["name"] == "run_file":
+                definition["description"] = "Run a saved application or test file; use the unittest file to check Python functions."
+                definition["parameters"]["properties"] = {"path": {"type": "string"}}
+            elif definition["name"] == "run_command":
+                definition["description"] = "Run existing tests or an allowlisted CLI verification command. A nonzero exit is a failure."
+                definition["parameters"]["properties"] = {"command": {"type": "string"}}
     if isinstance(recovery_strategy, dict):
         strategy = recovery_strategy.get("current_strategy")
         if not isinstance(strategy, dict) and recovery_strategy.get("artifact_type") == RECOVERY_MUTATION_STRATEGY:
@@ -2428,6 +2495,20 @@ def _context_anchor_for_worker(task_text, task_id, context_anchor=None, executio
         "allowed_inspection_paths",
         active.get("allowed_inspection_paths") or effective.get("allowed_inspection_paths"),
     )
+    if (not supplied.get("allowed_inspection_paths") and execution_contract is None
+            and not RUN.get("impact_planning_required")):
+        texts = [
+            str(task_text), str(source.get("original_goal") or ""),
+            *(str(item.get("text", "")) for item in ledger_requirements(
+                RUN.get("source_requirement_ledger"),
+            )),
+        ]
+        supplied["allowed_inspection_paths"] = sorted({
+            reference["path"] for text in texts
+            for reference in stage4.code_location_references(text)
+            if reference.get("classification") == "CODE_PATH"
+            and safe_path(reference["path"]) is not None
+        })
     supplied["task_id"] = str(task_id)
     return supplied
 
@@ -2874,6 +2955,26 @@ def _world_model_revalidate_after_files(changed_paths, *, phase="commit"):
     return {"revalidated": [item for item in results if item.get("resolution_status") == "resolved"], "targets": results}
 
 
+def _source_creation_requirements():
+    records = list(ledger_requirements(RUN.get("source_requirement_ledger")))
+    source = RUN.get("source_contract") or {}
+    original = str(source.get("original_goal") or "").splitlines()
+    if original:
+        records.insert(0, {
+            "requirement_id": "SOURCE-GOAL", "text": original[0], "provenance": USER_STATED,
+        })
+    for requirement in records:
+        if requirement.get("provenance") not in {USER_STATED, USER_CONFIRMED}:
+            continue
+        for reference in stage4.code_location_references(
+            str(requirement.get("text", "")), include_action=True,
+        ):
+            if (reference.get("classification") == "CODE_PATH"
+                    and reference.get("intent") == "MUTATION"
+                    and reference.get("action", "").casefold().startswith(("creat", "writ"))):
+                yield reference["path"], requirement
+
+
 def _new_artifact_context_evidence(request):
     """Distinguish source-authorized future outputs from missing dependencies."""
     if (RUN.get("project_mode") != NEW_PROJECT
@@ -2886,18 +2987,9 @@ def _new_artifact_context_evidence(request):
     if target is None or target.exists():
         return None
     relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
-    for requirement in ledger_requirements(RUN.get("source_requirement_ledger")):
-        if requirement.get("provenance") not in {USER_STATED, USER_CONFIRMED}:
-            continue
+    for declared_path, requirement in _source_creation_requirements():
         text = str(requirement.get("text", ""))
-        declared = any(
-            reference.get("classification") == "CODE_PATH"
-            and reference.get("intent") == "MUTATION"
-            and reference.get("action", "").casefold().startswith(("creat", "writ"))
-            and reference.get("path", "").casefold() == relative.casefold()
-            for reference in stage4.code_location_references(text, include_action=True)
-        )
-        if not declared:
+        if declared_path.casefold() != relative.casefold():
             continue
         requirement_id = requirement["requirement_id"]
         absence = (
@@ -2951,6 +3043,81 @@ def _provide_targeted_context_evidence(request, context):
             "evidence": [],
             "resolver": "SEMANTIC_EVIDENCE_RESOLVER",
         }
+    request = checked["request"]
+    definition = TOOL_DEFINITIONS.get(request["target"].strip("`"))
+    if definition is not None and request["kind"] in {
+        "contract", "authoritative_contract", "interface", "definition", "symbol_definition",
+    }:
+        excerpt = json.dumps(definition, ensure_ascii=False)
+        record_run_event(
+            "runtime_tool_context_evidence", target=request["target"], resolution_status="resolved",
+        )
+        return {
+            "request_kind": request["kind"], "target": request["target"],
+            "resolution_status": "resolved", "facts_established": [excerpt],
+            "evidence": [{
+                "kind": request["kind"], "target": request["target"],
+                "source_identity": "runtime-tool:" + definition["name"],
+                "source_kind": "RUNTIME_TOOL_CONTRACT", "authoritative": True,
+                "excerpt": excerpt,
+            }],
+            "resolver": "RUNTIME_TOOL_CONTRACT", "source_scan_performed": False,
+        }
+    if request["kind"] in {"contract", "authoritative_contract", "tests", "test_expectation"}:
+        records = ledger_requirements(RUN.get("source_requirement_ledger"))
+        target_key = re.sub(r"[^a-z0-9]", "", request["target"].casefold())
+        texts = []
+        if target_key in {"rootcontract", "sourcecontract", "goalcontract", "taskcontract"}:
+            texts = [
+                f"{item['requirement_id']} [{item['provenance']}]: {item['text']}" for item in records
+                if item.get("provenance") in {USER_STATED, USER_CONFIRMED}
+            ]
+        else:
+            target_path = re.sub(r":\d+(?:-\d+)?$", "", request["target"]).replace("\\", "/")
+            try:
+                cases = source_assertions(records)
+            except (ValueError, SyntaxError) as exc:
+                record_run_event(
+                    "source_contract_context_unresolved", target=request["target"], error=str(exc),
+                )
+                return {
+                    "request_kind": request["kind"], "target": request["target"],
+                    "resolution_status": "unresolved", "facts_established": [],
+                    "evidence": [], "error": str(exc), "resolver": "SOURCE_REQUIREMENT_LEDGER",
+                }
+            texts = [
+                f"{','.join(case['requirement_ids'])}: {case['kind']} {case['path']} "
+                f"{case.get('function', '')}{json.dumps(case['arguments'])} "
+                f"expects {json.dumps(case['expected'])}"
+                for case in cases if case["path"].casefold() == target_path.casefold()
+            ]
+        if texts:
+            chunks = [""]
+            complete = True
+            for text in texts:
+                if len(text) > _CONTEXT_PROVIDER_EXCERPT_CHARS:
+                    complete = False
+                text = text[:_CONTEXT_PROVIDER_EXCERPT_CHARS]
+                if chunks[-1] and len(chunks[-1]) + len(text) + 1 > _CONTEXT_PROVIDER_EXCERPT_CHARS:
+                    chunks.append("")
+                chunks[-1] += ("\n" if chunks[-1] else "") + text
+            complete = complete and len(chunks) <= _CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST
+            evidence = [{
+                "kind": request["kind"], "target": request["target"],
+                "source_identity": f"source-requirement-ledger:{index}",
+                "source_kind": "SOURCE_REQUIREMENT_LEDGER", "authoritative": True,
+                "excerpt": chunk.rstrip(),
+                "purpose": "Required source behavior only; this does not claim implementation or test execution.",
+            } for index, chunk in enumerate(chunks[:_CONTEXT_PROVIDER_MAX_EXCERPTS_PER_REQUEST], 1)]
+            status = "resolved" if complete else "partial"
+            record_run_event(
+                "source_contract_context_evidence", target=request["target"], resolution_status=status,
+            )
+            return {
+                "request_kind": request["kind"], "target": request["target"],
+                "resolution_status": status, "facts_established": texts[:2], "evidence": evidence,
+                "resolver": "SOURCE_REQUIREMENT_LEDGER", "source_scan_performed": False,
+            }
     creation_evidence = _new_artifact_context_evidence(checked["request"])
     if creation_evidence is not None:
         return creation_evidence
@@ -3168,8 +3335,38 @@ def run_tool(name, args, role="System"):
     if name == "list_files":
         return list_files()
     if name == "run_file":
+        if "function" in args:
+            if "arguments" not in args or "expected" not in args:
+                return "error: a Python function assertion requires arguments and expected"
+            try:
+                cases = source_assertions(ledger_requirements(RUN.get("source_requirement_ledger")))
+            except (ValueError, SyntaxError) as exc:
+                return f"error: tool assertion rejected: source acceptance is unresolved: {exc}"
+            for case in cases:
+                if (case["kind"] == "function"
+                        and case["path"].replace("\\", "/").casefold()
+                        == str(args["path"]).replace("\\", "/").casefold()
+                        and case["function"] == args["function"]
+                        and case["arguments"] == args["arguments"]
+                        and case["expected"] != args["expected"]):
+                    return (
+                        "error: tool assertion rejected: expected disagrees with source requirements "
+                        + ", ".join(case["requirement_ids"])
+                        + ". Use the actual JSON value "
+                        + json.dumps(case["expected"], ensure_ascii=False)
+                        + ", not its quoted representation. No assertion was executed."
+                    )
+            return run_file(
+                args["path"], function=args["function"],
+                arguments=args["arguments"], expected=args["expected"],
+            )
         return run_file(args["path"])
     if name == "run_command":
+        if "expected_exit_code" in args or "expected_stdout" in args:
+            return run_command(
+                args["command"], expected_exit_code=args.get("expected_exit_code"),
+                expected_stdout=args.get("expected_stdout"),
+            )
         return run_command(args["command"])
     if name == "verify_web_app":
         active = ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {}
@@ -4442,6 +4639,10 @@ SYSTEM_PROMPT = (
     "result is incomplete. Use tests, commands, or browser checks before claiming completion. For browser games expose "
     f"{GAME_BRIDGE_EXPRESSION} with getState(), start(), restart(), move(direction), plus forceCollision/forceCollect/forceWin "
     "when those mechanics are requested. If tools or environment fail, report truthfully. Do not reveal hidden reasoning."
+    " Inline Python (-c) is unavailable. Check Python return values in focused unittest tests."
+    " Python CLI unit tests should run the saved script with subprocess.run and sys.executable, capture actual stdout "
+    "and returncode, and assert those observable results. Do not mock sys.argv, sys.stdout, or print internals for CLI "
+    "acceptance; test exposed Python functions separately."
 )
 ROLE_SYSTEM_PROMPTS = {
     "Builder": SYSTEM_PROMPT,
@@ -11733,6 +11934,24 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
             }
     if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("TASK_FIT")
+    if (str(task.get("id", "")) == "ROOT" and RUN.get("project_mode") == NEW_PROJECT
+            and not isinstance(execution_contract, dict) and not force_smaller
+            and not task.get("initial_result")):
+        declared_paths = sorted({path for path, _requirement in _source_creation_requirements()})
+        structural_fit = stage4.analyze_structural_fit({
+            "worker_required": True, "allowed_mutation_paths": declared_paths,
+        })
+        if structural_fit["non_test_mutation_path_count"] == 1:
+            record_run_event(
+                "source_creation_structural_fit", task_id=task.get("id"),
+                paths=declared_paths, structural_fit=structural_fit,
+            )
+            return {
+                "decision": "execute",
+                "reason": "one source-declared implementation owner and its tests; measure bounded execution before splitting",
+                "structural_fit": structural_fit,
+                "fit_scope": "SOURCE_CREATION_NOT_APPROVED_EXECUTION",
+            }
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard budget reached"}
@@ -13645,8 +13864,22 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         f"{impact_contract_projection}\n\n"
         if impact_contract_projection else ""
     )
+    source_acceptance_section = ""
+    if str(task.get("id")) == "ROOT" and not isinstance(execution_contract, dict):
+        try:
+            source_cases = source_assertions(ledger_requirements(RUN.get("source_requirement_ledger")))
+        except (ValueError, SyntaxError) as exc:
+            source_acceptance_section = f"SOURCE ACCEPTANCE UNRESOLVED: {exc}\n\n"
+        else:
+            if source_cases:
+                source_acceptance_section = (
+                    "SOURCE ACCEPTANCE EXAMPLES (derived only from the cited USER_STATED requirements; "
+                    "expected strings include exact punctuation):\n"
+                    + json.dumps(source_cases, ensure_ascii=False) + "\n\n"
+                )
     packet = (
         f"{root_contract_section}"
+        f"{source_acceptance_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
         f"{brain_section}"
         f"{execution_contract_section}"
@@ -13696,6 +13929,12 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
 
 def tool_recovery_hint(tool_name, result, repeated_failures):
     lower = str(result).casefold()
+    if tool_name == "run_command" and "inline python is not allowed" in lower:
+        return (
+            "Do not repeat or rewrite the inline Python command. Invoke run_file using the existing .py path, "
+            "the public function identifier, a JSON arguments array, and the expected JSON return value. "
+            "For a test suite, run the existing unittest file instead. No inline source will be executed."
+        )
     if tool_name == "edit_file" and repeated_failures >= 2 and ("exact replacement" in lower or "found 0" in lower):
         return "Stop repeating the exact edit. Read numbered lines, then use one small edit_file_range."
     if "incomplete or truncated" in lower and repeated_failures >= 2:
@@ -14401,6 +14640,12 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             )[:24]
             return result
     system_prompt = ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)
+    if tool_policy == "coherent_rewrite":
+        system_prompt += (
+            " COHERENT DRAFT REVISION: write_file may revise only your own current unverified model-created "
+            "drafts. Use complete coherent files instead of fragile exact/range edits. Read the current draft "
+            "before revising it and preserve the whole source contract. User-owned or verified files remain protected."
+        )
     if context_gate is not None:
         system_prompt += (
             " CONTEXT SUFFICIENCY GATE (runtime-enforced): before any write/edit mutation, "
@@ -14527,6 +14772,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     context_decision_seen = False
     context_decision_reanchors = 0
     context_decision_missing = False
+    context_format_repair = False
+    context_format_repair_used = False
     grounding_terminal = False
     if (role == "Builder" and isinstance(execution_contract, dict)
             and recovery_state is None
@@ -14589,7 +14836,30 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             }
         else:
             try:
-                assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False)
+                if context_format_repair:
+                    context_format_repair = False
+                    response = ask_ollama(
+                        messages, tools=None, response_format=stage7_context.context_sufficiency_schema(),
+                        role=role, think=False,
+                    )
+                    try:
+                        decision = _parse_json_content(response.get("content", ""))
+                        checked = stage7_context.validate_sufficiency_decision(decision)
+                        if not checked.get("valid"):
+                            raise ValueError("; ".join(checked.get("errors", [])))
+                    except (ValueError, TypeError) as exc:
+                        context_decision_missing = True
+                        status = "failed"
+                        summary = f"{CONTEXT_DECISION_MISSING}: invalid structured context decision: {exc}"
+                        break
+                    assistant_message = {
+                        "role": "assistant", "content": "", "tool_calls": [{
+                            "function": {"name": _CONTEXT_COMPLETION_TOOL, "arguments": checked["decision"]},
+                        }],
+                    }
+                    record_run_event("worker_context_format_repaired", role=role, task_id=task_id)
+                else:
+                    assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False)
             except ProviderError as exc:
                 if (context_closure_policy == "bounded_closure" and progress is not None
                         and context_gate is not None and not context_gate.mutation_allowed
@@ -14633,6 +14903,21 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         tool_calls = assistant_message.get("tool_calls", [])
         if not tool_calls:
             content = assistant_message.get("content", "") or ""
+            if (context_gate is not None and not context_gate.mutation_allowed
+                    and context_gate.snapshot().get("round", 0) > 0
+                    and not context_format_repair_used and _step + 1 < max(1, int(step_budget))):
+                context_format_repair = True
+                context_format_repair_used = True
+                messages.append({
+                    "role": "user", "content": (
+                        "The context evidence round returned, but prose is not a sufficiency decision. "
+                        "Return one JSON context decision using the supplied schema. Mark sufficient only "
+                        "if the evidence resolves the local task; otherwise request the specific missing fact. "
+                        "No code, tool wrapper, or completion claim."
+                    ),
+                })
+                record_run_event("worker_context_format_repair_requested", role=role, task_id=task_id)
+                continue
             textual_call = re.match(
                 r"\s*(?:```(?:python|py)?\s*)?([A-Za-z_]\w*)\s*\(", content,
             )
@@ -14905,6 +15190,22 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             )
             target = (selected_candidate["path"] if selected_candidate is not None
                       else args.get("path") or args.get("command") or "-")
+            if name == "run_file" and "function" in args:
+                case_identity = {
+                    key: args.get(key) for key in ("function", "arguments", "expected")
+                }
+                target = str(target) + "::" + hashlib.sha256(
+                    json.dumps(case_identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                ).hexdigest()[:16]
+            elif name == "run_command" and (
+                "expected_exit_code" in args or "expected_stdout" in args
+            ):
+                case_identity = {
+                    key: args.get(key) for key in ("expected_exit_code", "expected_stdout")
+                }
+                target = str(target) + "::" + hashlib.sha256(
+                    json.dumps(case_identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                ).hexdigest()[:16]
             RUN["tool_calls"] += 1
             tool_was_offered = name in offered_names
             mutation_fingerprint_before = (
@@ -15425,6 +15726,14 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 break
 
             if context_tool_call:
+                if context_tool_result.get("final") and not context_gate.mutation_allowed:
+                    status = "failed"
+                    summary = (
+                        f"{CONTEXT_INSUFFICIENT_FAILURE}: "
+                        + str(context_tool_result.get("reason") or "context completion ended without authorization")
+                    )
+                    stop = True
+                    break
                 if context_gate.mutation_allowed:
                     messages.append({
                         "role": "user",
@@ -15441,10 +15750,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "role": "system", "content": system_prompt,
                 }, {
                     "role": "user",
-                    "content": compact_text(
-                        base_worker_prompt + "\n\nCONTEXT GATE UPDATE:\n" + context_feedback,
-                        MAX_WORKER_MISSION_CHARS,
-                    ),
+                    "content": base_worker_prompt,
+                }, {
+                    "role": "user",
+                    "content": "CONTEXT GATE UPDATE:\n" + context_feedback,
                 }]
                 context_reanchor_after_tool = True
                 break
@@ -16949,20 +17258,63 @@ def task_risk(task_text):
     return "normal"
 
 
+def _source_acceptance_evidence(task):
+    source_evidence = []
+    if str(task.get("id")) == "ROOT":
+        try:
+            cases = source_assertions(ledger_requirements(RUN.get("source_requirement_ledger")))
+        except (ValueError, SyntaxError) as exc:
+            return [{
+                "tool": "run_file", "target": "source-acceptance",
+                "result": json.dumps({"passed": False, "error": str(exc)}),
+            }]
+        for case in cases:
+            observation = check_source_assertion(WORKSPACE, case)
+            case_hash = hashlib.sha256(
+                json.dumps(case, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:16]
+            source_evidence.append({
+                "tool": "run_file",
+                "target": case["path"] + "::source-assertion:" + case_hash,
+                "result": json.dumps({
+                    "source_assertion": case, **observation,
+                }, ensure_ascii=False),
+            })
+            record_run_event(
+                "source_acceptance_assertion", task_id=task["id"], case=case,
+                case_hash=case_hash, observation=observation,
+            )
+    return source_evidence
+
+
 def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_context=""):
     if task_risk(task.get("goal", "")) == "low" or builder_result.get("status") != "done":
         return {"status": "skipped", "summary": "low-risk leaf", "tool_evidence": [], "memory": memory}
     RUN["falsifier_calls"] += 1
     event(f"[FALSIFY {task['id']}]", role="Falsifier", task=task["id"], action="adversarial verification")
+    source_evidence = _source_acceptance_evidence(task)
+    if any(tool_result_failed(item["result"]) for item in source_evidence):
+        RUN["falsifier_detected_failures"] += 1
+        return {
+            "status": "done", "summary": "Source-derived acceptance assertion failed.",
+            "memory": memory, "tool_evidence": source_evidence,
+        }
     instruction = (
         f"BUILDER SUMMARY: {compact_text(builder_result.get('summary', ''), 700)}\n"
         "Actively try to falsify success using current files. Run relevant tests/commands/browser interactions. "
         "For normal/high risk, attempt at most 1-2 cheap edge-case probes (boundary/invalid/reload/repeated action/alternate viewport) when useful. "
         "Do not modify application files. Concrete executable failures matter; narrative suspicion is advisory."
+        " Treat the source requirements as the oracle, not the Builder summary or its generated tests. "
+        "For an exposed Python function, use run_file with function, arguments and expected to assert its actual "
+        "return value independently. Compare all characters and punctuation; 'the same output without a newline' "
+        "must preserve everything except that newline. Do not repair a test to accept a conflicting implementation."
+        " For required invalid-input rejection, assert the intended nonzero exit with run_command's "
+        "expected_exit_code='nonzero'; do not report the requested rejection itself as a defect."
     )
     result = execute_agent_task(
         instruction, memory, role="Falsifier", task_id=task["id"], extra_context=node_context,
     )
+    result["tool_evidence"] = list(result.get("tool_evidence", [])) + source_evidence
     if unresolved_tool_failures(result.get("tool_evidence", [])):
         RUN["falsifier_detected_failures"] += 1
     return result
@@ -19765,6 +20117,21 @@ def print_node_diagnosis():
             print(f"  integration preflight: {labels or 'FAIL'}")
 
 
+def _new_project_draft_policy(task, execution_contract=None):
+    if (RUN.get("project_mode") != NEW_PROJECT or str(task.get("id")) != "ROOT"
+            or execution_contract is not None):
+        return None
+    paths = [safe_path(path) for path, _requirement in _source_creation_requirements()]
+    if not paths or any(path is None for path in paths):
+        return None
+    snapshots = (ACTIVE_TRANSACTION or {}).get("files", {})
+    if any(snapshot.get("existed", True) for snapshot in snapshots.values()):
+        return None
+    if any(path.exists() and str(path) not in snapshots for path in paths):
+        return None
+    return "coherent_rewrite"
+
+
 def repair_task(task, contract, failure_evidence, memory, node_context, parent_goal=None):
     RUN["repairer_calls"] += 1
     event(f"[REPAIR {task['id']}]", role="Repairer", task=task["id"], action="focused repair")
@@ -19774,8 +20141,14 @@ def repair_task(task, contract, failure_evidence, memory, node_context, parent_g
         "Repair only demonstrated implementation defects. Run fresh executable verification after the edit."
     )
     worker_execution_contract = _current_execution_contract(task)
+    draft_policy = _new_project_draft_policy(task, worker_execution_contract)
+    if draft_policy:
+        RUN["coherent_rewrite_recoveries"] += 1
+        record_run_event("new_project_draft_recovery", task_id=task["id"], policy=draft_policy)
     return execute_agent_task(
-        task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context,
+        task["goal"], memory, role="Builder" if draft_policy else "Repairer",
+        task_id=task["id"], extra_context=context,
+        **({"tool_policy": draft_policy} if draft_policy else {}),
         worker_context=context,
         execution_contract=worker_execution_contract,
         context_sufficiency_enabled=True,
@@ -20009,9 +20382,13 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
     worker_execution_contract = _current_execution_contract(task)
+    draft_policy = _new_project_draft_policy(task, worker_execution_contract) if not strategy_context else None
+    if draft_policy:
+        record_run_event("new_project_draft_policy", task_id=task["id"], policy=draft_policy)
     builder = execute_agent_task(
         task["goal"], memory, role="Builder", task_id=task["id"], extra_context=node_context,
         worker_context=node_context,
+        **({"tool_policy": draft_policy} if draft_policy else {}),
         execution_contract=worker_execution_contract,
         context_sufficiency_enabled=True,
         context_anchor={
@@ -20184,12 +20561,17 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                     "repair_history": repair_history, "repairer": repaired,
                     "mutation_failures": repair_mutation_failures}
         # Fresh verification only: do not carry stale Builder/Falsifier failures into the post-repair gate.
+        source_evidence = _source_acceptance_evidence(task)
+        fresh_falsifier = (
+            {"status": "done", "tool_evidence": source_evidence, "memory": memory}
+            if source_evidence else None
+        )
         current_browser = optional_browser_check(
             task, ACTIVE_TOOL_CONTRACT,
             syntax_failures=_combined_syntax_validation_failures(repaired),
-            execution_evidence=merged_verification_evidence(repaired),
+            execution_evidence=merged_verification_evidence(repaired, fresh_falsifier),
         )
-        current_gate = evidence_gate(repaired, None, current_browser)
+        current_gate = evidence_gate(repaired, fresh_falsifier, current_browser)
         verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and current_gate["passed"] else "VERIFY " + task["id"]
         event(f"[{verify_label}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
               role="Quality Review", task=task["id"], action="fresh post-repair verification")
@@ -20201,7 +20583,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                 impact_comparison = _impact_post_mutation_check(
                     impact_contract,
                     verification_result=current_gate,
-                    verification_evidence=merged_verification_evidence(repaired),
+                    verification_evidence=merged_verification_evidence(repaired, fresh_falsifier),
                     task_id=task.get("id", "ROOT"),
                     task=task,
                 )
@@ -20223,7 +20605,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             changed = commit_transaction()
             remember_verified_outcome(task, contract, repaired["summary"], changed)
             result = {"status": "done", "summary": repaired["summary"], "memory": memory, "builder": repaired,
-                      "falsifier": falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed,
+                      "falsifier": fresh_falsifier or falsifier, "browser": current_browser, "gate": current_gate, "changed_files": changed,
                       "repair_history": repair_history, "mutation_failures": repair_mutation_failures,
                       "impact_contract": task.get("impact_contract") or impact_contract,
                       "impact_comparison": task.get("impact_contract_comparison")}

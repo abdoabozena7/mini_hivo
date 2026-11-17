@@ -335,6 +335,174 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         self.assertIn("callers", calls[0]["why"])
         self.assertLessEqual(result["working_evidence_chars"], stage7.MAX_CONTEXT_EVIDENCE_CHARS)
 
+    def test_completion_evidence_reaches_worker_after_a_full_initial_packet(self):
+        fact = "AUTHORITATIVE_RETURN_CONTRACT: refresh_token returns a string token."
+        seen = []
+        responses = [
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "insufficient", "reason": "The return contract is missing.",
+                "needed_evidence": [{
+                    "kind": "contract", "target": "refresh_token",
+                    "why": "Need the return shape to preserve the public API.",
+                }],
+            }),
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "sufficient", "reason": "The returned contract resolves the type.",
+            }),
+            {"role": "assistant", "content": "Blocked for this test.", "tool_calls": []},
+        ]
+
+        def ask(messages, **_kwargs):
+            seen.append(mini.compact_messages(
+                messages, max_chars=int(mini.MODEL_POLICY.context_window("Builder") * 1.5),
+                keep_recent=4,
+            ))
+            return responses[len(seen) - 1]
+
+        with patch.object(mini, "ask_ollama", side_effect=ask):
+            mini.execute_agent_task(
+                "Update refresh_token.", {}, task_id="full-packet",
+                extra_context="ROOT_AUTHORITY: preserve the public API.\n" + "bounded context " * 300,
+                context_anchor=self._anchor(), context_sufficiency_enabled=True,
+                context_evidence_provider=lambda *_args: [{
+                    "kind": "contract", "source_identity": "api.pyi:4", "excerpt": fact,
+                }],
+                max_steps=3,
+            )
+        self.assertIn(fact, json.dumps(seen[1]))
+        self.assertIn("ROOT_AUTHORITY: preserve the public API.", json.dumps(seen[1]))
+
+    def test_runtime_tool_contract_is_resolved_without_repository_search_or_execution(self):
+        gate = stage7.ContextSufficiencyGate(
+            self._anchor(), evidence_provider=mini._provide_targeted_context_evidence,
+        )
+        with patch.object(mini.stage7_semantic, "resolve_targeted_evidence") as resolve, \
+                patch.object(mini, "run_tool") as execute:
+            result = gate.evaluate({
+                "context_status": "insufficient",
+                "reason": "The verification tool's argument contract is missing.",
+                "needed_evidence": [{
+                    "kind": "authoritative_contract", "target": "run_command",
+                    "why": "Need the real tool arguments before running the verification command.",
+                }],
+            })
+        resolve.assert_not_called()
+        execute.assert_not_called()
+        self.assertEqual(result["semantic_resolutions"][0]["resolution_status"], "resolved")
+        self.assertIn('"command"', result["evidence"][0]["excerpt"])
+        self.assertEqual(result["evidence"][0]["source_kind"], "RUNTIME_TOOL_CONTRACT")
+        self.assertFalse(result["mutation_allowed"])
+        self.assertTrue(gate.evaluate({
+            "context_status": "sufficient", "reason": "The runtime tool contract is now available.",
+        })["mutation_allowed"])
+
+    def test_unbound_creation_repair_can_inspect_its_source_declared_files(self):
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a module.\n- Create values.py with the required conversion.\n",
+            use_model=False,
+        )
+        (mini.WORKSPACE / "values.py").write_text("def convert(value):\n    return value\n", encoding="utf-8")
+        (mini.WORKSPACE / "unrelated.py").write_text("unrelated = True\n", encoding="utf-8")
+        gate = mini._context_gate_for_execution("Repair values.py.", "repair", enabled=True)
+        self.assertIn("values.py", gate.anchor["allowed_inspection_paths"])
+        self.assertNotIn("unrelated.py", gate.anchor["allowed_inspection_paths"])
+        result = gate.evaluate({
+            "context_status": "insufficient", "reason": "The current implementation is needed.",
+            "needed_evidence": [{
+                "kind": "definition", "target": "values.py",
+                "why": "Need the actual current source before making a focused correction.",
+            }],
+        })
+        self.assertEqual(result["semantic_resolutions"][0]["resolution_status"], "resolved")
+        self.assertIn("def convert", result["evidence"][0]["excerpt"])
+        protected = mini._context_gate_for_execution(
+            "Repair values.py.", "approved", enabled=True,
+            execution_contract={"allowed_inspection_paths": [], "allowed_mutation_paths": ["values.py"]},
+        )
+        self.assertEqual(protected.anchor["allowed_inspection_paths"], [])
+
+    def test_source_contract_and_line_qualified_expectations_are_not_missing_repository_facts(self):
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            "Create a display utility.\n"
+            "- Running python display.py Guest prints exactly Welcome! followed by a newline.\n"
+            '- Expose a display(name="Guest") function that returns the same output without a newline.',
+            use_model=False,
+        )
+        for kind, target in (
+            ("authoritative_contract", "ROOT CONTRACT"),
+            ("contract", "display.py"), ("tests", "display.py:16"),
+        ):
+            with self.subTest(kind=kind, target=target):
+                result = mini._provide_targeted_context_evidence({
+                    "kind": kind, "target": target,
+                    "why": "Need the source-authorized expected behavior before correcting the implementation.",
+                }, {})
+                self.assertEqual(result["resolution_status"], "resolved")
+                self.assertIn("Welcome!", json.dumps(result["evidence"]))
+                self.assertTrue(all(
+                    item["source_kind"] == "SOURCE_REQUIREMENT_LEDGER"
+                    and "does not claim" in item["purpose"]
+                    for item in result["evidence"]
+                ))
+
+    def test_terminal_context_failure_stops_without_consuming_the_worker_budget(self):
+        decision = self._tool_response("context_sufficiency_check", {
+            "context_status": "insufficient", "reason": "The external contract is missing.",
+            "needed_evidence": [{
+                "kind": "contract", "target": "external_api",
+                "why": "Need the actual external interface before editing its caller.",
+            }],
+        })
+        with patch.object(mini, "ask_ollama", return_value=decision) as ask:
+            result = mini.execute_agent_task(
+                "Update the external API caller.", {}, task_id="bounded-failure",
+                context_sufficiency_enabled=True, context_evidence_provider=lambda *_args: None,
+                max_steps=mini.MAX_TOOL_STEPS,
+            )
+        self.assertEqual(ask.call_count, stage7.MAX_CONTEXT_COMPLETION_ROUNDS + 1)
+        self.assertFalse(result["mutation_authorized"])
+        self.assertEqual(result["failure_type"], mini.CONTEXT_INSUFFICIENT_FAILURE)
+
+    def test_returned_evidence_requires_a_structured_decision_not_prose_completion(self):
+        seen = []
+        answers = [
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "insufficient", "reason": "The current contract is missing.",
+                "needed_evidence": [{
+                    "kind": "contract", "target": "refresh_token",
+                    "why": "Need the return contract before repairing the implementation.",
+                }],
+            }),
+            {"role": "assistant", "content": "I can now repair it.", "tool_calls": []},
+            {"role": "assistant", "content": '{"context_status":"sufficient","reason":"The evidence resolves the return contract."}'},
+            self._tool_response("run_command", {"command": "python -m unittest"}),
+            {"role": "assistant", "content": "verified", "tool_calls": []},
+        ]
+
+        def ask(_messages, **kwargs):
+            seen.append(kwargs)
+            return answers[len(seen) - 1]
+
+        def tool(name, arguments, role="Repairer"):
+            if name == "context_sufficiency_check":
+                return mini._context_sufficiency_tool(arguments, role=role, task_id="repair")
+            return "[exit_code=0]\nOK"
+
+        with patch.object(mini, "ask_ollama", side_effect=ask), \
+                patch.object(mini, "run_tool", side_effect=tool):
+            result = mini.execute_agent_task(
+                "Repair the focused return behavior.", {}, role="Repairer", task_id="repair",
+                context_sufficiency_enabled=True, context_anchor=self._anchor(), max_steps=5,
+                context_evidence_provider=lambda *_args: [{
+                    "kind": "contract", "source_identity": "api.pyi:4",
+                    "excerpt": "refresh_token returns a string token.",
+                }],
+            )
+        self.assertIsNone(seen[2]["tools"])
+        self.assertEqual(seen[2]["response_format"], stage7.context_sufficiency_schema())
+        self.assertTrue(result["mutation_authorized"])
+        self.assertEqual(result["status"], "done")
+
     def test_goal_anchor_survives_completion(self):
         anchor = self._anchor()
         gate = stage7.ContextSufficiencyGate(

@@ -898,6 +898,60 @@ class AdaptiveArchitectureTests(unittest.TestCase):
         self.assertEqual(calls, ["establish shell", "add behavior", "finish verification"])
         self.assertTrue(all(mini.TASKS[str(i)]["scope_hint"] == ["index.html"] for i in range(1, 4)))
 
+    def test_new_single_owner_uses_existing_structural_fit_before_speculative_splitting(self):
+        raw = (
+            "Create product.py, a standalone Python CLI.\n"
+            "- Accept two integers and print their product.\n"
+            "- Reject invalid arguments."
+        )
+        mini.RUN.update(
+            project_mode=mini.NEW_PROJECT,
+            source_requirement_ledger=mini.extract_source_requirement_ledger(raw, use_model=False),
+            source_contract={"original_goal": raw},
+        )
+        contract = self.contract(["accept arguments", "calculate product", "verify results"])
+        task = mini.make_task("ROOT", "Create product.py.", done_when=contract["requirements"])
+        with patch.object(mini, "structured_model_call", side_effect=AssertionError("speculative fit call")):
+            decision = mini.decide_task_fit(task, 0, contract, {})
+        self.assertEqual(decision["decision"], "execute")
+        self.assertEqual(decision["structural_fit"]["classification"], mini.stage4.DIRECT_ALLOWED)
+        with_test = raw + "\n- Create test_product.py with focused unit tests."
+        mini.RUN["source_requirement_ledger"] = mini.extract_source_requirement_ledger(
+            with_test, use_model=False,
+        )
+        with patch.object(mini, "structured_model_call", side_effect=AssertionError("speculative fit call")):
+            with_tests = mini.decide_task_fit(task, 0, contract, {})
+        self.assertEqual(with_tests["decision"], "execute")
+        self.assertEqual(with_tests["structural_fit"]["non_test_mutation_path_count"], 1)
+        self.assertEqual(with_tests["structural_fit"]["test_mutation_path_count"], 1)
+        with patch.object(mini, "structured_model_call", return_value={"decision": "split"}) as model:
+            retry = mini.decide_task_fit(task, 0, contract, {}, force_smaller=True)
+        self.assertEqual(retry["decision"], "split")
+        model.assert_called_once()
+
+    def test_coherent_creation_policy_preserves_user_and_approved_file_boundaries(self):
+        mini.RUN.update(
+            project_mode=mini.NEW_PROJECT,
+            source_requirement_ledger=mini.extract_source_requirement_ledger(
+                "Create a utility.\n- Create program.py.", use_model=False,
+            ),
+        )
+        task = mini.make_task("ROOT", "Create program.py.")
+        mini.begin_transaction("ROOT")
+        self.assertEqual(mini._new_project_draft_policy(task), "coherent_rewrite")
+        mini.write_file("program.py", "print(1)\n", role="Builder")
+        self.assertEqual(mini._new_project_draft_policy(task), "coherent_rewrite")
+        mini.write_file("program.py", "print(2)\n", role="Builder")
+        self.assertEqual((mini.WORKSPACE / "program.py").read_text(encoding="utf-8"), "print(2)\n")
+        self.assertIsNone(mini._new_project_draft_policy(task, {"allowed_mutation_paths": ["program.py"]}))
+        mini.rollback_transaction()
+        (mini.WORKSPACE / "program.py").write_text("user_owned = True\n", encoding="utf-8")
+        mini.begin_transaction("ROOT")
+        self.assertIsNone(mini._new_project_draft_policy(task))
+        refusal = mini.write_file("program.py", "print(3)\n", role="Builder")
+        self.assertTrue(mini.tool_result_failed(refusal))
+        self.assertEqual((mini.WORKSPACE / "program.py").read_text(encoding="utf-8"), "user_owned = True\n")
+
     def test_node_packet_contains_only_bounded_contract_and_verified_projections(self):
         contract = self.contract([f"root requirement {index}" for index in range(20)])
         task = mini.make_task(
@@ -2353,6 +2407,30 @@ class AdaptiveArchitectureTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "done")
         self.assertEqual(mini.RUN["repairer_calls"], 1)
+
+    def test_post_repair_source_acceptance_failure_cannot_be_replaced_by_worker_test_success(self):
+        contract = self.contract(["repair API"])
+        task = mini.make_task("ROOT", "repair API", done_when=["tests pass"])
+        builder = {
+            "status": "done", "summary": "candidate", "memory": {},
+            "tool_evidence": [{"tool": "run_command", "target": "pytest", "result": "[exit_code=1]"}],
+        }
+        falsifier = {"status": "done", "memory": {}, "tool_evidence": []}
+        repaired = {
+            "status": "done", "summary": "tests passed", "memory": {},
+            "tool_evidence": [{"tool": "run_command", "target": "pytest", "result": "[exit_code=0]"}],
+        }
+        failed_source = [{
+            "tool": "run_file", "target": "api.py::source-assertion",
+            "result": '{"passed": false, "expected": "complete!", "actual": "complete"}',
+        }]
+        with patch.object(mini, "execute_agent_task", side_effect=[builder, falsifier, repaired]), \
+                patch.object(mini, "optional_browser_check", return_value=None), \
+                patch.object(mini, "_source_acceptance_evidence", side_effect=[[], failed_source]) as check, \
+                patch.object(mini, "MAX_REPAIRS_PER_LEAF", 1):
+            result = mini.execute_leaf(task, contract, {}, {})
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual(result["status"], "failed")
 
     def test_reconnaissance_is_bounded_without_reading_source_contents(self):
         for index in range(100):

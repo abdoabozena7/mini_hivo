@@ -1045,6 +1045,23 @@ class SemanticEvidenceResolver:
             lines = text.splitlines()
             if not lines:
                 continue
+            if str(request.get("target", "")).replace("\\", "/").removeprefix("./") == path:
+                if request_kind == SYMBOL_DEFINITION:
+                    structural.append(self._record(
+                        request=request, request_kind=request_kind, path=path,
+                        line_number=1, lines=lines, role="symbol_definition",
+                        facts=[f"Current source definition of the explicitly requested file {path}."],
+                        score=100, relationship="explicit_file_definition",
+                    ))
+                elif request_kind == TEST_EXPECTATION:
+                    for number, line in enumerate(lines, 1):
+                        if re.search(r"\b(?:self\.assert\w*|assert|expect)\b", line):
+                            structural.append(self._record(
+                                request=request, request_kind=request_kind, path=path,
+                                line_number=number, lines=lines, role="test_direct",
+                                facts=[f"Existing test assertion: {line.strip()}"],
+                                score=100, relationship="explicit_test_assertion",
+                            ))
             structural.extend(self._definition_candidates(request, request_kind, path, lines, symbols))
             structural.extend(self._type_and_contract_records(request, request_kind, path, lines, symbols))
             structural.extend(self._call_records(request, request_kind, path, lines, symbols))
