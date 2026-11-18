@@ -110,6 +110,72 @@ multiword payload to make the boundary explicit. The final evidence and
 impact gates still run. Broader tasks and requests with extra requirements
 keep their existing verification path.
 
+## Internal headless jobs
+
+The callable Python job API (`hivo.job_service.JobService`, version 1) is
+separate from the terminal UI. A trusted host supplies a registered Git
+repository, an independent behavior checker, and the operator authorization
+callback. Submit a full base revision with an idempotency key and keep the
+returned job ID. Use `status` and the `events` cursor for polling; the
+interface does not require interpreting the engine's logs.
+
+The host drives queued work with `run_next()`. After a planning attempt,
+`waiting_clarification` or `waiting_approval` exposes an outstanding
+decision without holding a worker slot. Pass the exact decision ID and, for
+approval or rejection, the displayed plan hash. Approval allows a change only
+to the job's disposable copy. It does not publish or apply a patch. An old
+plan or changed base must not be used to authorize a different change.
+
+```python
+from pathlib import Path
+
+from hivo.job_runtime import DockerJobRuntime
+from hivo.job_service import JobService
+from hivo.job_store import JobStore
+
+runtime = DockerJobRuntime(
+    private_runtime_path, image=pinned_local_image_id, engine_root=Path.cwd()
+)
+jobs = JobService(
+    JobStore(private_jobs_db), runtime, registered_projects, independent_checker,
+    authorize_decision=authenticated_operator_allowed,
+)
+job = jobs.submit(
+    "registered-project", base_revision=full_commit_id,
+    prompt="Change the CLI success message but preserve invalid input handling.",
+    idempotency_key=request_key,
+)
+jobs.run_next()
+state = jobs.status(job["job_id"])
+```
+
+`independent_checker(job, disposable_workspace)` is trusted caller code. It
+returns a nonempty list of records with `check_id` and boolean `passed`, and
+must use the isolated runtime, such as `runtime.check(...)`, if it executes
+candidate code. Configure the oracle outside the worker; model-generated
+tests alone are not this acceptance check. The result is a diff plus its
+base revision, changed paths, digests and checks. It is returned only for
+`verified`; the API does not expose an apply operation.
+
+The queue admits two attempts on different projects and one per project. The
+host drives those attempts concurrently; one call to `run_next()` is
+synchronous. Keep the queue database and runtime journals private and durable
+across restarts. Use `recover()` to reconcile attempts with confirmed stops;
+an unknown stop does not release a slot. Retry explicitly using the
+remaining job budget. No cancelled or unverified attempt may deliver a patch.
+
+Native execution requires a pre-provisioned trusted Linux Docker image
+(full local image ID) with Python and the fixture's dependencies, a compatible
+local Docker daemon, and the configured local Gemma model. No host fallback,
+automatic download, or external provider is used. The runtime fails closed
+if isolation is unavailable. Jobs do not write to the original repository.
+
+Run the controlled journey with `python -B -m unittest discover -s tests -p
+test_headless_job_integration.py -v`. To include the live case, set
+`HIVO_HEADLESS_TEST_IMAGE` to the trusted, already installed Linux image ID on
+an eligible host. The controlled cases substitute the provider and execution
+environment and do not establish live isolation.
+
 ## Architecture
 
 - `mini.py`: CLI, one adaptive task-tree controller, the reusable leaf engine, tools, transactions, and runtime wiring.
