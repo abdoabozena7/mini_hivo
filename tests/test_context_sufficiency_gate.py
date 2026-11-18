@@ -45,6 +45,12 @@ class ContextSufficiencyGateTests(unittest.TestCase):
             "allowed_inspection_paths": ["src/auth.py", "tests/test_auth.py"],
         }
 
+    def _impact_candidate(self, task_text, task_id):
+        return mini._impact_candidate_for_worker(
+            task_text, task_id, context_anchor=self._anchor(),
+            execution_contract={"allowed_mutation_paths": ["src/auth.py"]},
+        )
+
     @staticmethod
     def _tool_response(name, arguments):
         return {
@@ -327,14 +333,16 @@ class ContextSufficiencyGateTests(unittest.TestCase):
                 mutation_calls.append((name, arguments))
             return "ok"
 
+        task_text = "Update refresh_token implementation"
         with patch.object(mini, "ask_ollama", side_effect=responses), \
                 patch.object(mini, "run_tool", side_effect=run_tool):
             result = mini.execute_agent_task(
-                "Update refresh_token implementation", {}, role="Builder", task_id="contract",
+                task_text, {}, role="Builder", task_id="contract",
                 extra_context="INITIAL BOUNDED PACKET: implementation only",
                 context_sufficiency_enabled=True,
                 context_anchor=self._anchor(),
                 context_evidence_provider=provider,
+                impact_contract=self._impact_candidate(task_text, "contract"),
                 max_steps=5,
             )
 
@@ -343,6 +351,27 @@ class ContextSufficiencyGateTests(unittest.TestCase):
         self.assertTrue(mutation_calls)
         self.assertTrue(result["mutation_authorized"])
         self.assertEqual(result["context_sufficiency"]["anchor"]["root_goal"], self._anchor()["root_goal"])
+
+    def test_sufficient_context_does_not_make_an_inspection_path_writable(self):
+        target = mini.WORKSPACE / "src" / "auth.py"
+        target.parent.mkdir()
+        original = b"VALUE = 1\n"
+        target.write_bytes(original)
+        responses = [
+            self._tool_response("context_sufficiency_check", {
+                "context_status": "sufficient", "reason": "The return behavior is understood.",
+            }),
+            self._tool_response("edit_file", {"path": "src/auth.py", "old": "VALUE = 1", "new": "VALUE = 2"}),
+        ]
+        with patch.object(mini, "ask_ollama", side_effect=responses):
+            result = mini.execute_agent_task(
+                "Update refresh_token implementation", {}, role="Builder", task_id="inspection-only",
+                context_sufficiency_enabled=True, context_anchor=self._anchor(), max_steps=2,
+            )
+        self.assertTrue(result["context_sufficiency"]["mutation_allowed"])
+        self.assertFalse(result["mutation_authorized"])
+        self.assertFalse(result["impact_authorized"])
+        self.assertEqual(target.read_bytes(), original)
 
     def test_missing_caller_expectation_requests_narrow_reasoned_evidence(self):
         calls = []
@@ -528,11 +557,13 @@ class ContextSufficiencyGateTests(unittest.TestCase):
                 return mini._context_sufficiency_tool(arguments, role=role, task_id="repair")
             return "[exit_code=0]\nOK"
 
+        task_text = "Repair the focused return behavior."
         with patch.object(mini, "ask_ollama", side_effect=ask), \
                 patch.object(mini, "run_tool", side_effect=tool):
             result = mini.execute_agent_task(
-                "Repair the focused return behavior.", {}, role="Repairer", task_id="repair",
+                task_text, {}, role="Repairer", task_id="repair",
                 context_sufficiency_enabled=True, context_anchor=self._anchor(), max_steps=5,
+                impact_contract=self._impact_candidate(task_text, "repair"),
                 context_evidence_provider=lambda *_args: [{
                     "kind": "contract", "source_identity": "api.pyi:4",
                     "excerpt": "refresh_token returns a string token.",
