@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from hivo.evidence import latest_verification_evidence
+from hivo.evidence import latest_verification_evidence, structured_verification_outcome
 
 
 FOCUSED_TEST = "FOCUSED_TEST"
@@ -1268,25 +1268,8 @@ class VerificationApplicabilityAnalyzer:
 
 def _parse_result(value: Any) -> tuple[str | None, bool]:
     if isinstance(value, dict):
-        statuses = [
-            str(value[key]).strip().upper()
-            for key in ("verification_status", "status", "result")
-            if value.get(key) is not None and str(value[key]).strip()
-        ]
-        success_statuses = {PASS, "PASSED", "SUCCESS", "SUCCEEDED"}
-        failure_statuses = {FAIL, "FAILED", "FAILURE"}
-        unavailable_statuses = {SKIPPED_NOT_APPLICABLE, PENDING, NOT_RUN, MISSING_RECEIPT}
-        if value.get("passed") is False or any(status in failure_statuses for status in statuses):
-            return FAIL, True
-        if any(status in unavailable_statuses for status in statuses):
-            return None, False
-        if any(status not in success_statuses for status in statuses):
-            return None, False
-        if statuses:
-            return PASS, True
-        if value.get("passed") is True:
-            return PASS, True
-        return None, False
+        outcome = structured_verification_outcome(value)
+        return outcome, outcome is not None
     text = str(value or "").strip()
     if text.casefold().startswith("[not_applicable]"):
         return None, False
@@ -1309,6 +1292,11 @@ def _parse_result(value: Any) -> tuple[str | None, bool]:
     if re.search(r"\[exit_code=[1-9]\d*\]", text, re.I) or re.search(r"\b(?:fail|failed|failure|syntaxerror|assertionerror)\b", text, re.I):
         return FAIL, True
     return None, False
+
+
+def verification_outcome(value: Any) -> str | None:
+    """Return a recognized executed outcome, not a pending or ambiguous receipt."""
+    return _parse_result(value)[0]
 
 
 def _route_authority_key(route: dict[str, Any] | None) -> str:

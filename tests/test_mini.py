@@ -1,5 +1,7 @@
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +26,150 @@ class MiniAgentRegressionTests(unittest.TestCase):
     def tearDown(self):
         mini.rollback_transaction()
         self.temp.cleanup()
+
+    def _decision_evidence_replay(self, initial, calls, *, impact_targets=None):
+        def tool(name, args):
+            return {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": name, "arguments": args}},
+            ]}
+
+        script = mini.WORKSPACE / "status.py"
+        script.write_bytes(initial)
+        goal = "Fix a typo in the status printed by status.py. It must print READY."
+        contract = {
+            "goal": goal, "requirements": [], "success_criteria": [], "constraints": [],
+            "allowed_mutation_paths": ["status.py"],
+        }
+        if impact_targets is not None:
+            contract["expected_targets"] = [{"target": path, "path": path} for path in impact_targets]
+            contract["allowed_mutation_paths"] = list(impact_targets)
+        end = {"role": "assistant", "content": "Finished the scripted attempt.", "tool_calls": []}
+        ready = tool("context_sufficiency_check", {"context_status": "sufficient", "reason": goal})
+        builder_replies = iter([ready] + [tool(name, args) for name, args in calls] + [end])
+        builder_evidence = []
+        repair_calls = 0
+
+        def provider(_messages, *, role, **_kwargs):
+            nonlocal repair_calls
+            if role == "Repairer":
+                # This control does not supply any repair or new proof.
+                repair_calls += 1
+                return end
+            self.assertEqual(role, "Builder")
+            return next(builder_replies)
+
+        execute_agent_task = mini.execute_agent_task
+
+        def observe_worker(*args, **kwargs):
+            result = execute_agent_task(*args, **kwargs)
+            if kwargs.get("role") == "Builder":
+                builder_evidence.extend(result["tool_evidence"])
+            return result
+
+        with patch.object(mini, "ask_ollama", side_effect=provider), \
+                patch.object(mini, "execute_agent_task", side_effect=observe_worker):
+            result, _ = mini.run_baseline_request(
+                goal, mini.load_memory(), contract_override=contract, interactive=False, finish=False,
+            )
+        observed = subprocess.run(
+            [sys.executable, str(script)], check=True, capture_output=True, text=True, timeout=10,
+        ).stdout
+        return result, script.read_bytes(), observed, builder_evidence, repair_calls
+
+    @staticmethod
+    def _status_check():
+        return ("run_command", {"command": "python status.py", "expected_stdout": "READY\n"})
+
+    def test_decision_evidence_refuses_old_pass_after_a_real_edit(self):
+        initial = b'print("READY")\n'
+        result, stored, observed, evidence, _ = self._decision_evidence_replay(initial, [
+            self._status_check(),
+            ("edit_file", {"path": "status.py", "old": '"READY"', "new": '"BROKEN"'}),
+        ])
+        self.assertIn('"passed": true', next(item["result"] for item in evidence
+                                            if item["tool"] == "run_command"))
+        self.assertTrue(any(item["tool"] == "edit_file" and not mini.tool_result_failed(item["result"])
+                            for item in evidence))
+        self.assertEqual((result["status"], stored, observed), ("failed", initial, "READY\n"))
+
+    def test_decision_evidence_accepts_fresh_proof_after_a_real_edit(self):
+        with patch.object(mini, "event", wraps=mini.event) as events:
+            result, stored, observed, _, repairs = self._decision_evidence_replay(b'print("WRONG")\n', [
+                ("edit_file", {"path": "status.py", "old": '"WRONG"', "new": '"READY"'}),
+                self._status_check(),
+            ])
+        self.assertEqual((result["status"], stored.replace(b"\r\n", b"\n"), observed, repairs),
+                         ("done", b'print("READY")\n', "READY\n", 0))
+        self.assertIn("[ROOT VERIFIED] PASS", [call.args[0] for call in events.call_args_list])
+
+    def test_decision_evidence_does_not_announce_root_success_on_impact_rollback(self):
+        initial = b'print("WRONG")\n'
+        with patch.object(mini, "event", wraps=mini.event) as events:
+            result, stored, observed, evidence, _ = self._decision_evidence_replay(initial, [
+                ("edit_file", {"path": "status.py", "old": '"WRONG"', "new": '"READY"'}),
+                self._status_check(),
+            ], impact_targets=("status.py", "required.py"))
+        self.assertIn('"passed": true', next(item["result"] for item in evidence
+                                            if item["tool"] == "run_command"))
+        self.assertEqual((result["status"], result["failure_type"], stored, observed),
+                         ("failed", "IMPACT_CONTRACT_VERIFICATION_FAILED", initial, "WRONG\n"))
+        self.assertNotIn("[ROOT VERIFIED] PASS", [call.args[0] for call in events.call_args_list])
+        self.assertFalse(mini.RUN["root_verified"])
+
+    def test_decision_evidence_keeps_current_pass_after_rejected_edit(self):
+        initial = b'print("READY")\n'
+        result, stored, observed, evidence, repairs = self._decision_evidence_replay(initial, [
+            self._status_check(),
+            ("edit_file", {"path": "status.py", "old": '"ABSENT"', "new": '"BROKEN"'}),
+        ])
+        self.assertTrue(any(item["tool"] == "edit_file" and mini.tool_result_failed(item["result"])
+                            for item in evidence))
+        self.assertEqual((result["status"], stored, observed, repairs),
+                         ("done", initial, "READY\n", 0))
+
+    def test_decision_evidence_reports_schema_exhaustion_without_a_scope_verdict(self):
+        bad_edit = ("edit_file_range", {"path": "status.py", "end_line": 1, "new": 'print("READY")\n'})
+        initial = b'print("WRONG")\n'
+        result, stored, observed, evidence, repairs = self._decision_evidence_replay(initial, [bad_edit] * 4)
+        attempts = [item["result"] for item in evidence if item["tool"] == "edit_file_range"]
+        self.assertEqual(len(attempts), 4)
+        self.assertTrue(all("missing: start_line" in receipt for receipt in attempts))
+        self.assertEqual(
+            (result["status"], result["failure_type"], stored, observed, repairs),
+            ("failed", "MUTATION_ARGUMENT_RETRIES_EXHAUSTED", initial, "WRONG\n", 0),
+        )
+        self.assertEqual(mini.RUN["task_too_broad_count"], 0)
+
+    def test_decision_evidence_allows_corrected_schema_within_budget(self):
+        args = {"path": "status.py", "end_line": 1, "new": 'print("READY")\n'}
+        result, stored, observed, _, repairs = self._decision_evidence_replay(b'print("WRONG")\n', [
+            ("edit_file_range", args),
+            ("edit_file_range", {**args, "start_line": 1}),
+            self._status_check(),
+        ])
+        self.assertEqual((result["status"], stored.replace(b"\r\n", b"\n"), observed, repairs),
+                         ("done", b'print("READY")\n', "READY\n", 0))
+
+    def test_decision_evidence_requires_a_receipt_that_proves_execution(self):
+        oversized = json.dumps({"passed": True, "interaction_checks": [{"details": "x" * 2000}]})
+        compact = mini.project_tool_evidence_result("verify_web_app", oversized)
+        self.assertEqual(json.loads(compact)["verification_status"], "NOT_RUN")
+        for receipt in (compact, '{"status": "ERROR", "passed": true}', '{"verification_status": "FAIL"}'):
+            with self.subTest(receipt=receipt):
+                builder = {
+                    "status": "done", "tool_evidence": [
+                        {"tool": "verify_web_app", "target": "index.html", "result": receipt},
+                    ],
+                }
+                self.assertFalse(mini.evidence_gate(builder)["passed"])
+
+        builder["tool_evidence"].append({
+            "tool": "run_command", "target": "python status.py", "result": "[exit_code=0]",
+        })
+        # A different successful check cannot clear a structured failure.
+        self.assertFalse(mini.evidence_gate(builder)["passed"])
+        builder["tool_evidence"][0]["result"] = '{"verification_status": "PASS"}'
+        self.assertTrue(mini.evidence_gate(builder)["passed"])
 
     def test_task_fit_contract_rejects_contradictions(self):
         self.assertTrue(mini._fit_validator({"decision": "execute", "reason": "small", "subtasks": []}))
@@ -351,7 +497,7 @@ Requirements:
         self.assertIn("Completed Sessions: 0", digest)
         self.assertIn("Preserve the working phase transition", digest)
 
-    def test_three_identical_browser_failures_route_to_fresh_focused_context(self):
+    def test_three_identical_browser_failures_report_neutral_stagnation(self):
         failed = (
             '{"passed":false,"environment_error":false,"interaction_checks":['
             '{"name":"timer_start_changes_visible_time","passed":false}],'
@@ -367,10 +513,10 @@ Requirements:
                 patch.object(mini, "run_tool", return_value=failed):
             result = mini.execute_agent_task("fix timer", memory, role="Builder", task_id="T")
 
-        self.assertEqual(result["status"], "too_broad")
-        self.assertEqual(result["failure_type"], "TASK_TOO_BROAD")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "BROWSER_VERIFICATION_STAGNATION")
         self.assertEqual(ask.call_count, 3)
-        self.assertIn("TASK_TOO_BROAD", result["summary"])
+        self.assertNotIn("TASK_TOO_BROAD", result["summary"])
 
     def test_coherent_rewrite_rejects_catastrophic_fragment_before_mutation(self):
         target = mini.WORKSPACE / "script.js"
@@ -411,7 +557,7 @@ Requirements:
         self.assertEqual(ask.call_count, 1)
         run_tool.assert_called_once_with("verify_web_app", {"path": "index.html"}, role="Builder")
 
-    def test_four_failed_mutations_on_model_draft_route_early_to_rewrite(self):
+    def test_four_syntax_rejections_report_mutation_nonprogress(self):
         target = mini.WORKSPACE / "script.js"
         target.write_text("const version = 1;\n", encoding="utf-8")
         mini.get_memory_store().mark_model_artifact("script.js", mini.RUN_ID)
@@ -428,10 +574,10 @@ Requirements:
                 patch.object(mini, "run_tool", return_value="error: JavaScript syntax validation failed"):
             result = mini.execute_agent_task("fix script", memory, role="Builder", task_id="T")
 
-        self.assertEqual(result["status"], "too_broad")
-        self.assertEqual(result["failure_type"], "TASK_TOO_BROAD")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "WORKER_NO_MUTATION_PROGRESS")
         self.assertEqual(ask.call_count, 4)
-        self.assertIn("TASK_TOO_BROAD", result["summary"])
+        self.assertNotIn("TASK_TOO_BROAD", result["summary"])
         self.assertEqual(len(result["mutation_failures"]), 1)
         self.assertEqual(result["mutation_failures"][0]["category"], "SYNTAX_INVALID_MUTATION")
         self.assertEqual(result["mutation_failures"][0]["count"], 4)

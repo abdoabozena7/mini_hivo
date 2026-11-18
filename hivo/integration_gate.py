@@ -10,6 +10,8 @@ passes can make a parent eligible, but they cannot make the parent verified.
 
 from __future__ import annotations
 
+import ast
+from collections import deque
 import copy
 import hashlib
 import json
@@ -63,6 +65,8 @@ _IMPORT_RE = re.compile(
     r"[\"']([^\"']+)[\"']",
     re.IGNORECASE,
 )
+_MAX_DEPENDENCY_FILES = 120
+_MAX_IMPORT_SOURCE_BYTES = 512 * 1024
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_$])(?:\.{0,2}/)?[A-Za-z0-9_./\\-]+\.(?:c|cc|cpp|css|go|h|html?|java|js|jsx|json|mjs|cjs|py|rs|ts|tsx|toml|ya?ml)"
     r"(?![A-Za-z0-9_$])",
@@ -237,14 +241,69 @@ def _path_like_values(value: Any, workspace: str | os.PathLike | None = None) ->
     return _unique_strings(found)
 
 
+def _python_import_files(root: Path, path: Path, source: bytes) -> list[Path]:
+    try:
+        tree = ast.parse(source, filename=path.name)
+    except (SyntaxError, ValueError):
+        return []
+
+    def resolve(base, module):
+        parts = module.split(".") if module else []
+        folder = base.joinpath(*parts)
+        package = folder / "__init__.py"
+        resolved = ([package] if package.is_file() else
+                    [folder.with_suffix(".py")] if parts and folder.with_suffix(".py").is_file() else [])
+        if resolved:
+            resolved.extend(base.joinpath(*parts[:index], "__init__.py")
+                            for index in range(1, len(parts))
+                            if base.joinpath(*parts[:index], "__init__.py").is_file())
+        return resolved
+
+    files = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            references = [([], alias.name, 0) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            references = [([alias.name for alias in node.names if alias.name != "*"], node.module or "", node.level)]
+        else:
+            continue
+        for names, module, level in references:
+            if level and level > len(path.parents):
+                continue
+            bases = (path.parents[level - 1],) if level else (path.parent, root)
+            for base in bases:
+                if not base.is_relative_to(root):
+                    continue
+                found = resolve(base, module)
+                # "from pkg import item" can resolve to pkg.item or a normal exported name.
+                for name in names:
+                    found.extend(resolve(base, f"{module}.{name}" if module else name))
+                if found:
+                    files.extend(found)
+                    break
+    return files
+
+
 def _read_local_imports(root: Path | None, relative: str) -> list[str]:
     if root is None:
         return []
-    path = root / relative
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root):
+        return []
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as stream:
+            source = stream.read(_MAX_IMPORT_SOURCE_BYTES + 1)
     except OSError:
         return []
+    if len(source) > _MAX_IMPORT_SOURCE_BYTES:
+        return []
+    if path.suffix.casefold() == ".py":
+        return _unique_strings(
+            dependency.relative_to(root).as_posix()
+            for item in _python_import_files(root, path, source)
+            if (dependency := item.resolve()).is_relative_to(root)
+        )
+    text = source.decode("utf-8", errors="replace")
     result: list[str] = []
     for raw in _IMPORT_RE.findall(text):
         if not str(raw).startswith((".", "/")):
@@ -322,20 +381,22 @@ def derive_evidence_dependency_paths(
         normalize_path(item, workspace) for item in values if normalize_path(item, workspace)
     )
     root = _root_path(workspace)
-    expanded = list(initial)
-    seen = set(initial)
+    expanded = list(initial[:_MAX_DEPENDENCY_FILES])
+    seen = set(expanded)
     # Follow imports from evidence/route files only.  This is bounded and does
     # not turn the entire repository into a dependency fingerprint.
-    queue = list(initial)
-    while queue and len(expanded) < 120:
-        current = queue.pop(0)
+    queue = deque(expanded)
+    while queue and len(expanded) < _MAX_DEPENDENCY_FILES:
+        current = queue.popleft()
         for imported in _read_local_imports(root, current):
             imported = normalize_path(imported, workspace)
             if imported and imported not in seen:
                 seen.add(imported)
                 expanded.append(imported)
                 queue.append(imported)
-    return sorted(set(expanded), key=str.casefold)[:120]
+                if len(expanded) == _MAX_DEPENDENCY_FILES:
+                    break
+    return sorted(expanded, key=str.casefold)
 
 
 def _safe_projection(value: Any, depth: int = 0) -> Any:

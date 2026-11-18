@@ -9,6 +9,19 @@ VERIFICATION_TOOLS = frozenset({"run_file", "run_command", "verify_web_app"})
 MUTATION_TOOLS = frozenset({"write_file", "edit_file", "edit_file_range"})
 
 
+def structured_verification_outcome(payload: dict) -> str | None:
+    statuses = {
+        str(payload[key]).strip().upper()
+        for key in ("verification_status", "status", "result")
+        if payload.get(key) is not None and str(payload[key]).strip()
+    }
+    if payload.get("passed") is False or statuses & {"FAIL", "FAILED", "FAILURE"}:
+        return "FAIL"
+    if statuses - {"PASS", "PASSED", "SUCCESS", "SUCCEEDED"}:
+        return None
+    return "PASS" if statuses or payload.get("passed") is True else None
+
+
 def project_tool_evidence_result(tool: str, result: object, limit: int = 1600) -> str:
     """Bound display text without turning clipped verification JSON into proof.
 
@@ -59,8 +72,7 @@ def project_tool_evidence_result(tool: str, result: object, limit: int = 1600) -
     # declare unavailable rather than dropping required facts from a pass.
     fallback = {"verification_status": "NOT_RUN", "evidence_error": "VERIFICATION_EVIDENCE_OVERFLOW",
                 "source_sha256": summary["source_sha256"]}
-    if isinstance(payload, dict) and (payload.get("passed") is False
-            or str(payload.get("verification_status") or payload.get("status")).upper() in {"FAIL", "FAILED", "FAILURE"}):
+    if isinstance(payload, dict) and structured_verification_outcome(payload) == "FAIL":
         fallback.update(passed=False, verification_status="FAIL")
     return json.dumps(fallback, separators=(",", ":"))
 
@@ -84,12 +96,15 @@ def result_is_tool_rejection(result: object) -> bool:
 def result_failed(result: object) -> bool:
     text = str(result).strip()
     lower = text.lower()
-    if text.startswith("{"):
+    if isinstance(result, dict):
+        if structured_verification_outcome(result) == "FAIL":
+            return True
+    elif text.startswith("{"):
         try:
             payload = json.loads(text)
         except (TypeError, ValueError):
             payload = None
-        if isinstance(payload, dict) and payload.get("passed") is False:
+        if isinstance(payload, dict) and structured_verification_outcome(payload) == "FAIL":
             return True
     if lower.startswith((
         "error:", "error writing file:", "error reading file:",
@@ -158,16 +173,72 @@ def mutation_failure_record(tool: object, target: object, result: object, role: 
     return record
 
 
+def _verification_payload(result):
+    if isinstance(result, dict):
+        return result
+    try:
+        value = json.loads(str(result))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _verification_evidence_key(item, payload):
+    tool, target = str(item.get("tool", "")), str(item.get("target", "-"))
+    profile = payload.get("verification_profile")
+    browser = tool == "verify_web_app" or isinstance(profile, dict)
+    identity = tuple(
+        str(payload.get(key) or item.get(key) or "")
+        for key in ("authority_id", "verification_id", "oracle_id", "oracle_hash")
+    )
+    return (tool, target, str(item.get("role") or "") if browser else "",
+            json.dumps(profile, sort_keys=True) if browser else "", identity)
+
+
+def _is_comparable_executed_pass(result, payload):
+    if payload:
+        return not payload.get("environment_error") and structured_verification_outcome(payload) == "PASS"
+    text = str(result).strip()
+    return not result_failed(result) and bool(re.match(r"^\[exit_code=0\](?:\s|$)", text, re.I))
+
+
 def latest_verification_evidence(evidence: list[dict]) -> list[dict]:
-    """Keep only the newest executable verification per tool and target."""
-    latest: dict[tuple[str, str], tuple[int, dict]] = {}
+    """Keep each latest observation and any comparable failure it did not resolve."""
+    latest = {}
+    outstanding = {}
     for index, item in enumerate(evidence):
         tool = str(item.get("tool", ""))
-        if tool not in VERIFICATION_TOOLS or result_not_applicable(item.get("result", "")):
+        result = item.get("result", "")
+        if tool not in VERIFICATION_TOOLS or result_not_applicable(result):
             continue
-        key = (tool, str(item.get("target", "-")))
-        latest[key] = (index, item)
-    return [item for _index, item in sorted(latest.values(), key=lambda pair: pair[0])]
+        payload = _verification_payload(result)
+        key = _verification_evidence_key(item, payload)
+        latest[key] = index
+        if result_is_tool_rejection(result) or payload.get("environment_error") is True:
+            continue
+        if _is_comparable_executed_pass(result, payload):
+            outstanding.pop(key, None)
+        elif result_failed(result):
+            outstanding[key] = index
+    kept = set(latest.values()) | set(outstanding.values())
+    return [item for index, item in enumerate(evidence) if index in kept]
+
+
+def current_verification_evidence(evidence: list[dict]) -> list[dict]:
+    """Old proof cannot certify changed bytes; failing obligations need a comparable rerun."""
+    last_mutation = -1
+    for index, item in enumerate(evidence):
+        if item.get("tool") in MUTATION_TOOLS:
+            result = item.get("result", "")
+            if not result_failed(result) and not result_not_applicable(result):
+                last_mutation = index
+    if last_mutation < 0:
+        return list(evidence)
+    unresolved = {id(item) for item in unresolved_tool_failures(evidence)}
+    return [
+        item for index, item in enumerate(evidence)
+        if index > last_mutation or item.get("tool") not in VERIFICATION_TOOLS or id(item) in unresolved
+    ]
 
 
 def unresolved_tool_failures(evidence: list[dict]) -> list[dict]:
@@ -187,6 +258,7 @@ def unresolved_tool_failures(evidence: list[dict]) -> list[dict]:
 
 def evidence_for_review(evidence: list[dict], limit: int = 8) -> list[dict]:
     """Project raw history into current, non-misleading review evidence."""
+    evidence = current_verification_evidence(evidence)
     latest_ids = {id(item) for item in latest_verification_evidence(evidence)}
     projected = []
     for item in evidence:

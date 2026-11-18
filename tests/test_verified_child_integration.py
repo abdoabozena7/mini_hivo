@@ -1,4 +1,6 @@
 import copy
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +25,7 @@ from hivo.integration_gate import create_verified_child_receipt
 from hivo.integration_gate import receipt_contains_private_transcript
 from hivo.integration_gate import receipt_freshness
 from hivo.integration_gate import validate_verified_child_receipt
+from hivo.verification_routing import _aggregate_verification_routes
 
 
 class VerifiedChildIntegrationGateTests(unittest.TestCase):
@@ -205,6 +208,68 @@ class VerifiedChildIntegrationGateTests(unittest.TestCase):
         freshness = receipt_freshness(receipt, self.root)
         self.assertFalse(freshness["fresh"])
         self.assertIn("src/b.js", freshness["stale_paths"])
+
+    def test_python_import_chain_invalidates_executed_child_receipt(self):
+        focused = "checks/test_status.py"
+        surface = "checks/receipt_fixture/api.py"
+        dependency = "checks/receipt_fixture/detail/value.py"
+        names_only = "checks/receipt_fixture/detail/unrelated.py"
+        self.write(focused, "import local_bridge\nprint(local_bridge.status())\n"
+                   "raise SystemExit(local_bridge.status() != 'READY')\n")
+        self.write("checks/local_bridge.py", "from receipt_fixture import api\nstatus = api.status\n")
+        self.write("checks/receipt_fixture/__init__.py", "PREFIX = ''\n")
+        self.write(surface, "from . import PREFIX\nfrom .detail.value import STATUS\n"
+                   "def status():\n    return PREFIX + STATUS\n")
+        self.write("checks/receipt_fixture/detail/__init__.py", "")
+        self.write(dependency, "STATUS = 'READY'\n# import unrelated\n")
+        self.write(names_only, "OTHER = 1\n")
+
+        flags = ["-B", "-E", "-S", focused]
+
+        def verify():
+            return subprocess.run([sys.executable, *flags], cwd=self.root, timeout=15,
+                                  capture_output=True, text=True, check=False)
+
+        initial = verify()
+        self.assertEqual((initial.returncode, initial.stdout), (0, "READY\n"), initial.stderr)
+        task, result = self.child("A", surface, focused=focused)
+        evidence = [{
+            "tool": "run_command", "target": " ".join(["python", *flags]),
+            "result": f"[exit_code={initial.returncode}]\n{initial.stdout}",
+        }]
+        routes = result["gate"]["verification_aggregation"]["verification_routes"]
+        result["gate"]["verification_aggregation"] = _aggregate_verification_routes(
+            {"child_id": "A", "verification_routes": routes[:1]}, evidence, None,
+        )
+        result["builder"]["tool_evidence"] = evidence
+        receipt = create_verified_child_receipt(
+            task, result, parent_id="PARENT", parent_contract=self.parent_contract, workspace=self.root,
+        )
+        self.assertTrue(validate_verified_child_receipt(receipt, workspace=self.root)["verified"],
+                        receipt["verification_failure_reasons"])
+
+        def readiness():
+            return self.readiness([(task, result)], {"A": receipt}, self.plan[:1])
+
+        self.assertEqual(readiness()["readiness"], "READY")
+        self.write(names_only, "OTHER = 2\n")
+        unrelated = verify()
+        self.assertEqual((unrelated.returncode, unrelated.stdout), (0, "READY\n"))
+        self.assertEqual(readiness()["readiness"], "READY")
+
+        self.write(dependency, "STATUS = 'BROKEN'\n")
+        changed = verify()
+        self.assertEqual((changed.returncode, changed.stdout), (1, "BROKEN\n"))
+        gate = readiness()
+        self.assertEqual(gate["reason"], NOT_READY_STALE_EVIDENCE,
+                         f"Python returned {changed.returncode} with {changed.stdout!r}; "
+                         f"old receipt still leads to {gate['readiness']}")
+        self.assertEqual(receipt_freshness(receipt, self.root)["stale_paths"], [dependency])
+        self.assertEqual(
+            {item["path"] for item in receipt["evidence_dependency_fingerprint"]["paths"]},
+            {focused, "checks/local_bridge.py", "checks/receipt_fixture/__init__.py",
+             surface, "checks/receipt_fixture/detail/__init__.py", dependency},
+        )
 
     def test_passing_leaves_do_not_make_failed_integration_pass(self):
         a = self.receipt("A", "src/a.js")

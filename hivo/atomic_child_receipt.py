@@ -10,9 +10,39 @@ from hivo.integration_gate import canonical_hash, create_verified_child_receipt
 from hivo.integration_gate import validate_verified_child_receipt
 from hivo.integration_gate import _artifact_from_inputs, _aggregation_from_inputs
 from hivo.integration_gate import fingerprint_dependency_paths
-from hivo.verification_routing import requires_execution_verification_closure
+from hivo.verification_routing import requires_execution_verification_closure, verification_outcome
 from hivo import evidence_compatibility as semantic_evidence
 from hivo import evidence_monotonic
+
+
+def _route_key(route):
+    return tuple(route.get(key) for key in ("kind", "target", "authority_id", "verification_id", "oracle_id",
+                                            "oracle_hash"))
+
+
+def _terminal_route_errors(aggregation, routes):
+    if aggregation.get("passed") is not True:
+        return ["STAGE5A_VERIFICATION_NOT_PASSED"]
+    passes = [_route_key(route) for route in aggregation.get("actual_passes", []) or []
+              if isinstance(route, dict) and route.get("result") == "PASS"]
+    return [
+        "REQUIRED_ROUTE_WITHOUT_MATCHING_PASS:" + str(route.get("kind"))
+        for route in routes
+        if route.get("required") is True and route.get("applicable") is True
+        and (route.get("result") != "PASS" or _route_key(route) not in passes)
+    ]
+
+
+def _reported_terminal_failure(result):
+    for source in (result, result.get("gate"), result.get("browser"), result.get("verification")):
+        if not isinstance(source, dict):
+            continue
+        if verification_outcome(source) == "FAIL":
+            return True
+        nested = source.get("verification_aggregation")
+        if isinstance(nested, dict) and nested.get("passed") is False:
+            return True
+    return False
 
 
 def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
@@ -44,6 +74,12 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
         task, result, verification_aggregation=aggregation,
         verification_applicability=verification_applicability, **kwargs,
     )
+    errors = _terminal_route_errors(aggregation, receipt["verification_routes"])
+    if _reported_terminal_failure(result):
+        errors.append("TERMINAL_CHILD_VERIFICATION_FAILED")
+    if errors:
+        receipt.update(verified=False, receipt_status="UNVERIFIED", verification_status="failed")
+        receipt["verification_failure_reasons"] = list(dict.fromkeys(receipt["verification_failure_reasons"] + errors))
     contract = task.get("execution_contract") if isinstance(task.get("execution_contract"), dict) else {}
     receipt["covered_node_ids"] = list(
         (receipt.get("coverage") or {}).get("owned_plan_node_ids")
@@ -73,13 +109,32 @@ def create_atomic_child_receipt(task, result, *, verification_aggregation=None,
 def validate_atomic_child_receipt(receipt, *, workspace=None, expected_contract_hash=None,
                                   expected_node_ids=None, expected_requirement_ids=None,
                                   expected_requirements=None):
-    checked = validate_verified_child_receipt(receipt, workspace=workspace)
     value = receipt if isinstance(receipt, dict) else {}
+    errors = [f"invalid {key}" for key in ("coverage", "authority", "verification_aggregation",
+                                          "evidence_dependency_fingerprint")
+              if not isinstance(value.get(key), dict)]
+    for key in ("semantic_browser_evidence", "semantic_compatibility_audit"):
+        if key in value and not isinstance(value[key], dict):
+            errors.append(f"invalid {key}")
+    for key in ("verification_evidence", "verification_routes"):
+        rows = value.get(key)
+        if not isinstance(rows, list) or not all(isinstance(item, dict) for item in rows):
+            errors.append(f"invalid {key}")
+    fingerprint = value.get("evidence_dependency_fingerprint")
+    if isinstance(fingerprint, dict) and not isinstance(fingerprint.get("paths"), list):
+        errors.append("invalid evidence_dependency_fingerprint paths")
+    if errors:
+        return {"valid": False, "verified": False, "fresh": False, "errors": errors}
+    checked = validate_verified_child_receipt(receipt, workspace=workspace)
     errors = list(checked.get("errors", []))
     if value.get("verified") is not True:
         errors.append("child verification did not produce a verified receipt")
     if not value.get("child_id"):
         errors.append("missing child id")
+    if (str(value.get("terminal_child_status", "")).casefold() not in {"done", "completed", "verified"}
+            or str(value.get("verification_status", "")).casefold() != "passed"):
+        errors.append("child or verification is not terminally successful")
+    errors.extend(_terminal_route_errors(value["verification_aggregation"], value["verification_routes"]))
     if not value.get("covered_node_ids") or value.get("covered_node_ids") != list(
         (value.get("coverage") or {}).get("owned_plan_node_ids")
         or (value.get("coverage") or {}).get("plan_node_ids") or []

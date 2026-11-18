@@ -26,7 +26,8 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
         mini.WORKSPACE = self.previous_workspace
         self.temp.cleanup()
 
-    def run_children(self, specs, failures=(), failure_type="VERIFICATION_TARGET_UNRESOLVED"):
+    def run_children(self, specs, failures=(), failure_type="VERIFICATION_TARGET_UNRESOLVED",
+                     inherited_dependencies=()):
         parent = mini.make_task(
             "P", self.contract["goal"], 0, "ROOT", ["all children evaluated"], [],
         )
@@ -47,6 +48,7 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
         fit_calls = []
         leaf_calls = []
         dependency_inputs = {}
+        dependency_summaries = {}
         aggregate_calls = []
 
         def fit(task, *_args):
@@ -57,6 +59,9 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
             task_id = task["id"]
             leaf_calls.append(task_id)
             dependency_inputs[task_id] = [item.get("task_id") for item in dependencies]
+            dependency_summaries[task_id] = {
+                item.get("task_id"): item.get("summary") for item in dependencies
+            }
             if task_id in set(failures):
                 return {
                     "status": "failed",
@@ -76,7 +81,7 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
             return {"status": "done", "summary": "all children completed", "memory": memory}
 
         result = mini._execute_children(
-            parent, children, 0, self.contract, {}, {"files": []}, "", [],
+            parent, children, 0, self.contract, {}, {"files": []}, "", inherited_dependencies,
             fit_decider=fit, leaf_executor=leaf, aggregator=aggregate,
         )
         return {
@@ -86,6 +91,7 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
             "fit_calls": fit_calls,
             "leaf_calls": leaf_calls,
             "dependency_inputs": dependency_inputs,
+            "dependency_summaries": dependency_summaries,
             "aggregate_calls": aggregate_calls,
         }
 
@@ -187,6 +193,89 @@ class DependencyAwareSchedulerTests(unittest.TestCase):
         self.assertEqual(observed["dependency_inputs"]["B"], [])
         self.assertEqual(observed["dependency_inputs"]["C"], ["A", "B"])
         self.assertEqual(observed["aggregate_calls"], [["A", "B", "C"]])
+
+    def test_out_of_order_prerequisites_run_before_consumers_with_stable_ready_order(self):
+        observed = self.run_children([
+            ("C", ["B"]), ("X", []), ("B", ["A"]), ("A", []), ("Y", []),
+        ])
+
+        order = ["X", "A", "B", "C", "Y"]
+        self.assertEqual(observed["leaf_calls"], order)
+        self.assertEqual(observed["fit_calls"], order)
+        self.assertEqual(observed["parent"]["child_scheduler"]["execution_order"], order)
+        self.assertEqual(observed["dependency_inputs"]["B"], ["A"])
+        self.assertEqual(observed["dependency_inputs"]["C"], ["B"])
+        self.assertEqual(observed["aggregate_calls"], [order])
+        self.assertEqual(observed["result"]["status"], "done")
+
+    def test_out_of_order_failure_blocks_only_the_dependent_sibling(self):
+        observed = self.run_children(
+            [("B", ["A"]), ("A", []), ("C", [])], failures={"A"},
+        )
+
+        self.assertEqual(observed["leaf_calls"], ["A", "C"])
+        self.assertEqual(observed["fit_calls"], ["A", "C"])
+        blocked = observed["children"][0]["child_scheduler"]
+        self.assertEqual(blocked["blocked_by"], ["A"])
+        self.assertEqual(blocked["dependency_statuses"][0]["normalized_status"], "FAILED")
+        self.assertTrue(blocked["continued_after_prior_failure"])
+        self.assertEqual(observed["result"]["failure_type"], "VERIFICATION_TARGET_UNRESOLVED")
+
+    def test_local_prerequisite_uses_current_summary_but_external_dependency_keeps_inherited(self):
+        observed = self.run_children(
+            [("A", []), ("B", ["A", "External"])],
+            inherited_dependencies=[
+                {"task_id": "A", "status": "done", "summary": "older A"},
+                {"task_id": "External", "status": "done", "summary": "verified outside parent"},
+            ],
+        )
+
+        self.assertEqual(observed["result"]["status"], "done")
+        self.assertEqual(observed["dependency_summaries"]["B"], {
+            "A": "A completed", "External": "verified outside parent",
+        })
+
+    def test_unknown_and_cyclic_dependencies_block_even_with_an_inherited_cycle_match(self):
+        observed = self.run_children(
+            [
+                ("Tail", ["A"]), ("Missing", ["absent"]), ("A", ["B"]),
+                ("Independent", []), ("B", ["A"]), ("Self", ["Self"]),
+            ],
+            inherited_dependencies=[
+                {"task_id": "B", "status": "done", "summary": "a different run's B"},
+                {"task_id": "Self", "status": "done", "summary": "a different run's Self"},
+            ],
+        )
+
+        self.assertEqual(observed["leaf_calls"], ["Independent"])
+        self.assertEqual(observed["fit_calls"], ["Independent"])
+        expected_blocks = {"Tail": "A", "Missing": "absent", "A": "B", "B": "A", "Self": "Self"}
+        nodes = observed["parent"]["child_scheduler"]["nodes"]
+        self.assertEqual(len(nodes), len(observed["children"]))
+        self.assertEqual({
+            node["child_id"]: node["blocked_by"][0]
+            for node in nodes if node["terminal_status"] == "DEPENDENCY_BLOCKED"
+        }, expected_blocks)
+        self.assertEqual(observed["result"]["status"], "failed")
+        self.assertEqual(observed["result"]["failure_type"], mini.EXECUTION_DEPENDENCY_BLOCKED)
+        self.assertFalse(observed["aggregate_calls"])
+
+    def test_duplicate_identity_is_ambiguous_and_runs_no_provider_or_consumer(self):
+        observed = self.run_children(
+            [("Provider", []), ("Consumer", ["Provider"]), ("Provider", []), ("Other", [])],
+            inherited_dependencies=[
+                {"task_id": "Provider", "status": "done", "summary": "different provider"},
+            ],
+        )
+
+        self.assertEqual(observed["leaf_calls"], ["Other"])
+        self.assertEqual(observed["fit_calls"], ["Other"])
+        self.assertEqual([child["status"] for child in observed["children"]], [
+            "blocked", "blocked", "blocked", "done",
+        ])
+        self.assertEqual(observed["children"][1]["child_scheduler"]["blocked_by"], ["Provider"])
+        self.assertEqual(observed["result"]["failure_type"], mini.EXECUTION_DEPENDENCY_BLOCKED)
+        self.assertFalse(observed["aggregate_calls"])
 
     def test_order_does_not_create_implicit_dependency_edges(self):
         observed = self.run_children(

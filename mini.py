@@ -29,8 +29,15 @@ from typing import Any
 from hivo.browser_checks import run_profile_interactions
 from hivo.python_checks import check_call as check_python_call
 from hivo.python_checks import check_source_assertion, runtime_documentation, source_assertions, source_exit_expectation
+from hivo.dependency_schedule import ambiguous_child_ids, order_children
+from hivo.failure_decision import BROWSER_VERIFICATION_STAGNATION
+from hivo.failure_decision import MUTATION_ARGUMENT_RETRIES_EXHAUSTED, classify_mutation_exhaustion
+from hivo.provider_usage import record_provider_usage
+from hivo.run_budget import RunBudget, RunBudgetExceeded
 from hivo.context import compact_messages
+from hivo.evidence import current_verification_evidence
 from hivo.evidence import evidence_for_review
+from hivo.evidence import latest_verification_evidence
 from hivo.evidence import MUTATION_TOOLS
 from hivo.evidence import mutation_failure_record
 from hivo.evidence import project_tool_evidence_result
@@ -135,6 +142,7 @@ from hivo.verification_routing import TEST_TARGET_PRESENT
 from hivo.verification_routing import VERIFICATION_EVIDENCE_UNAVAILABLE
 from hivo.verification_routing import aggregate_verification_evidence
 from hivo.verification_routing import is_focused_test_command
+from hivo.verification_routing import verification_outcome
 from hivo.verification_routing import analyze_verification_applicability as _analyze_verification_applicability
 from hivo.integration_gate import INTEGRATION_EVIDENCE_UNAVAILABLE
 from hivo.integration_gate import INTEGRATION_FAILED
@@ -707,6 +715,7 @@ DASHBOARD = {
 LIVE_VIEW = None
 RUN_STARTED = 0.0
 RUN_ID = ""
+ACTIVE_RUN_BUDGET = None
 ACTIVE_TRANSACTION = None
 LAST_COMMITTED_TRANSACTION = None
 ACTIVE_CONTRACT = None
@@ -1179,6 +1188,7 @@ def _transaction_capture(target):
 
 def commit_transaction():
     global ACTIVE_TRANSACTION, LAST_COMMITTED_TRANSACTION
+    _check_run_deadline()
     transaction = ACTIVE_TRANSACTION or {"task_id": None, "files": {}}
     ACTIVE_TRANSACTION = None
     LAST_COMMITTED_TRANSACTION = transaction
@@ -2185,7 +2195,9 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
             for reference in stage4.code_location_references(text, effective):
                 if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
                     continue
-                path = reference["path"]
+                path = _normalized_workspace_relative_path(reference["path"])
+                if not path:
+                    continue
                 targets.setdefault(path.casefold(), {
                     "target": path, "path": path, "kind": "path",
                     "provenance": [{
@@ -2196,6 +2208,7 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
                 })
         if targets:
             task["expected_targets"] = list(targets.values())
+            task["allowed_mutation_paths"] = [item["path"] for item in targets.values()]
     return stage10_impact.build_pre_mutation_impact_contract(
         task,
         task_id=task_id,
@@ -2362,7 +2375,9 @@ def _impact_gate_mutation_guard(name, role="System", target=None):
         relative = _normalized_workspace_relative_path(target)
         outside = (relative not in allowed if ACTIVE_IMPACT_CONTRACT.get("scope_required")
                    else not stage10_impact._allowed_path(relative, allowed))
-        if allowed and outside:
+        if allowed and relative is None:
+            issue = f"error: '{target}' is outside the workspace."
+        elif allowed and outside:
             issue = (f"error: {stage10_impact.UNEXPECTED_AND_OUT_OF_SCOPE}: "
                      f"'{target}' is outside the accepted impact mutation paths. "
                      f"Use only these authorized targets: {json.dumps(allowed, ensure_ascii=False)}")
@@ -4324,6 +4339,7 @@ def new_metrics(mode):
         "preflight_blocking_conflicts_resolved": 0,
         "integration_conflict_resolution": None,
         "repairer_calls": 0, "falsifier_calls": 0, "falsifier_detected_failures": 0,
+        "closed_literal_model_bypasses": 0,
         "planner_structured_retries": 0, "model_calls": 0, "tool_calls": 0,
         "builder_calls": 0, "predictor_calls": 0, "challenger_calls": 0,
         "quality_reviews": 0, "invalid_tool_calls": 0,
@@ -4655,6 +4671,8 @@ def finish_metrics(status):
     RUN["average_leaf_context_tokens"] = round(sum(samples) / len(samples), 2) if samples else 0.0
     RUN["elapsed_seconds"] = round(time.time() - RUN_STARTED, 2)
     RUN["status"] = status
+    if ACTIVE_RUN_BUDGET is not None:
+        RUN["run_budget"] = ACTIVE_RUN_BUDGET.snapshot()
     recompute_resplit_metrics()
     recompute_search_metrics()
     recompute_integration_metrics()
@@ -4995,6 +5013,16 @@ def _emit_provider_capture(callback, event, **payload):
         callback(str(event), dict(payload))
 
 
+def _check_run_deadline():
+    if ACTIVE_RUN_BUDGET is not None and ACTIVE_RUN_BUDGET.remaining_seconds() == 0:
+        raise RunBudgetExceeded("elapsed")
+
+
+def _claim_run_budget(resource):
+    if ACTIVE_RUN_BUDGET is not None:
+        ACTIVE_RUN_BUDGET.claim(resource)
+
+
 def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, think=False,
                provider_retries=None, model_override=None, role="Builder",
                provider_capture=None, capture_context=None):
@@ -5067,6 +5095,9 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     retry_limit = MAX_PROVIDER_RETRIES if provider_retries is None else max(0, int(provider_retries))
     last_error = "unknown provider error"
     for attempt in range(retry_limit + 1):
+        remaining = ACTIVE_RUN_BUDGET.remaining_seconds() if ACTIVE_RUN_BUDGET is not None else None
+        timeout = OLLAMA_TIMEOUT_SECONDS if remaining is None else min(OLLAMA_TIMEOUT_SECONDS, remaining)
+        _claim_run_budget("model")
         RUN["model_calls"] += 1
         _emit_provider_capture(
             provider_capture,
@@ -5081,7 +5112,7 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                          structured=bool(response_format), context_tokens=estimate,
                          num_ctx=context_window, stream=False, think=bool(think))
         try:
-            response = http_post_json(OLLAMA_URL, timeout=OLLAMA_TIMEOUT_SECONDS, payload=payload)
+            response = http_post_json(OLLAMA_URL, timeout=timeout, payload=payload)
         except HttpTransportError as exc:
             response = None
             last_error = f"could not reach Ollama at {OLLAMA_URL}: {exc}"
@@ -5096,6 +5127,15 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                 role=role,
                 error=last_error,
             )
+        body = None
+        decode_error = None
+        if response is not None:
+            try:
+                body = response.json()
+            except (ValueError, TypeError) as exc:
+                decode_error = exc
+        record_provider_usage(RUN.setdefault("provider_usage", {}), role, body)
+        _check_run_deadline()
         if response is not None and response.status_code == 200:
             _emit_provider_capture(
                 provider_capture,
@@ -5107,11 +5147,9 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                 status_code=int(response.status_code),
                 response_text=str(getattr(response, "text", "")),
             )
-            try:
-                body = response.json()
-            except (ValueError, TypeError) as exc:
+            if decode_error is not None:
                 RUN["ollama_malformed_responses"] = RUN.get("ollama_malformed_responses", 0) + 1
-                last_error = f"invalid response from model: {exc}"
+                last_error = f"invalid response from model: {decode_error}"
             else:
                 RUN["ollama_http_200"] = RUN.get("ollama_http_200", 0) + 1
                 clean, diagnostics = normalize_ollama_response(body, response.status_code, response.text)
@@ -15027,6 +15065,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     literal_command_rejections = 0
     mutation_failure_counts = {}
     mutation_failure_records = []
+    observation_stop = None
     last_verification_signature = ()
     stagnant_verifications = 0
     provider_error = None
@@ -15484,6 +15523,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         restart_after_recovery_epoch_reanchor = False
         restart_after_recovery_mutation_path_reorientation = False
         for call in tool_calls:
+            _claim_run_budget("tool")
             try:
                 name = call["function"]["name"]
                 args = call["function"].get("arguments", {})
@@ -15549,6 +15589,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 if progress is not None and name in MUTATION_TOOLS else None
             )
             grounding_decision = None
+            argument_issue = None
             context_mutation_issue = _context_gate_mutation_guard(
                 name, role=role, target=target,
             )
@@ -15571,9 +15612,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     else:
                         result = f"error: tool {name!r} is unavailable for role {role}"
                 else:
-                    issue = tool_argument_error(name, args)
-                    if issue:
-                        result = issue
+                    argument_issue = tool_argument_error(name, args)
+                    if argument_issue:
+                        result = argument_issue
                     elif grounding is not None and name in MUTATION_TOOLS:
                         grounding_decision = grounding.before_mutation(
                             name, args, safe_path(args.get("path")),
@@ -15673,6 +15714,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                                                   source="controller_tool_result", requested_target=target)
             mutation_record = None if (context_mutation_blocked or impact_mutation_blocked) else mutation_failure_record(name, target, result, role=role)
             if mutation_record is not None:
+                if argument_issue:
+                    mutation_record["category"] = "TOOL_ARGUMENT_REJECTED"
                 RUN["mutation_failures_recorded"] = RUN.get("mutation_failures_recorded", 0) + 1
                 record_run_event(
                     "mutation_failure_recorded", role=role, task_id=task_id,
@@ -16373,8 +16416,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stop = True
                     break
 
-            if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result) and not context_mutation_blocked:
-                mutation_failure_counts[str(target)] = mutation_failure_counts.get(str(target), 0) + 1
+            if role == "Builder" and name in MUTATION_TOOLS and tool_result_failed(result) and not context_mutation_blocked:
+                categories = mutation_failure_counts.setdefault(str(target), [])
+                if len(categories) < 4:
+                    categories.append((mutation_record or {}).get("category"))
                 if recovery_state is not None and recovery_observation is not None and (
                     recovery_observation.get("switched") or recovery_observation.get("terminal_state")
                 ):
@@ -16382,9 +16427,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     # exhaustion owns the terminal meaning for this recovery
                     # state; the generic historical guard must not preempt it.
                     pass
-                elif mutation_failure_counts[str(target)] >= 4:
-                    status = "too_broad"
-                    summary = "TASK_TOO_BROAD: repeated invalid mutations show the current node exceeds reliable focused capacity"
+                elif len(categories) >= 4:
+                    observation_stop = classify_mutation_exhaustion(categories)
+                    status = "failed"
+                    reason = ("four calls were rejected by the mutation tool argument schema"
+                              if observation_stop == MUTATION_ARGUMENT_RETRIES_EXHAUSTED
+                              else "four refused mutations on one target; no change from those calls")
+                    summary = f"{observation_stop}: {reason}"
                     stop = True
                     break
 
@@ -16396,12 +16445,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     last_verification_signature = signature
                     stagnant_verifications = 1 if signature else 0
                 if stagnant_verifications >= 3:
-                    status = "too_broad"
-                    summary = "TASK_TOO_BROAD: the same executable browser failure survived three focused verification cycles"
+                    observation_stop = BROWSER_VERIFICATION_STAGNATION
+                    status = "failed"
+                    summary = f"{observation_stop}: the same browser failure persisted for three checks"
                     stop = True
                     break
 
-            if role in {"Builder", "Repairer"} and name == "verify_web_app" and not tool_result_failed(result):
+            if (role in {"Builder", "Repairer"} and name == "verify_web_app"
+                    and not tool_result_failed(result)
+                    and verification_outcome(result) == VERIFICATION_PASS):
                 status = "done"
                 summary = "Deterministic browser verification passed; stop-on-proof completed this focused execution."
                 stop = True
@@ -16550,6 +16602,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             ((context_sufficiency_snapshot or {}).get("failure_code") or
              (CONTEXT_INSUFFICIENT_FAILURE if (context_sufficiency_snapshot or {}).get("context_status") == "insufficient"
               else "CONTEXT_SUFFICIENCY_REQUIRED")) if context_gate is not None and status == "failed" and not provider_error and not structured_response_error and not (context_sufficiency_snapshot or {}).get("mutation_allowed") else
+            observation_stop if observation_stop else
             "TASK_TOO_BROAD" if status == "too_broad" else
             EXECUTION_BUDGET_EXHAUSTED if execution_budget_exhausted else
             "STRUCTURED_OUTPUT_INVALID" if status == "structured_response_failure" else
@@ -17439,8 +17492,19 @@ def analyze_verification_applicability(
     if isinstance(source_contract, dict):
         evidence.extend(source_contract.get("relevant_repository_facts", []) or [])
         invariants.extend(source_contract.get("project_invariants", []) or [])
+    impact = task.get("impact_contract")
+    impact_paths = impact.get("authorized_mutation_paths", []) if isinstance(impact, dict) else []
+    accepted_paths = (
+        impact_paths
+        if len(impact_paths) == 1 and not _authority_bound_execution_attempt()
+        and not _current_execution_contract(task) and stage10_impact.impact_mutation_block_reason(
+            impact, world_model=_world_model_for_workspace(),
+        ) is None
+        else ()
+    )
     artifact = _analyze_verification_applicability(
         task, source_contract, snapshot, workspace=WORKSPACE,
+        mutation_paths=accepted_paths,
         repository_evidence=evidence + invariants,
         requested_path=requested_path,
         observed_file_types=snapshot.get("languages", []),
@@ -17529,6 +17593,7 @@ def _browser_syntax_failures(workspace, entrypoint, requested_from_node=None):
 
 def verify_browser_application(requested_path=None, task_id="ROOT", profile=None, evidence=None):
     """Syntax-gate, resolve, then verify the application through its HTML entrypoint."""
+    _check_run_deadline()
     target_evidence = dict(evidence or {})
     target_evidence["requested_from_node"] = requested_path
     requested_syntax_failures = _browser_syntax_failures(WORKSPACE, None, requested_path)
@@ -17714,6 +17779,7 @@ def task_risk(task_text):
 
 
 def _source_acceptance_evidence(task):
+    _check_run_deadline()
     source_evidence = []
     impact_contract = task.get("impact_contract")
     if (str(task.get("id")) == "ROOT" and isinstance(impact_contract, dict)
@@ -17722,13 +17788,19 @@ def _source_acceptance_evidence(task):
         for target in impact_contract.get("expected_targets", []):
             if target.get("path") and target.get("post_state_sha256"):
                 raw = run_file(target["path"])
+                if not raw.startswith("{"):
+                    raw = json.dumps({
+                        "verification_kind": "LITERAL_ARTIFACT", "path": target["path"],
+                        "expected_sha256": target["post_state_sha256"],
+                        "status": "FAIL", "passed": False, "error": raw,
+                    }, ensure_ascii=False)
                 source_evidence.append({
                     "tool": "run_file", "target": target["path"], "result": raw,
                     "role": "Falsifier",
                 })
                 record_run_event(
                     "source_literal_readback", task_id=task["id"], target=target["path"],
-                    result=json.loads(raw) if raw.startswith("{") else raw,
+                    result=json.loads(raw),
                 )
     if str(task.get("id")) == "ROOT":
         try:
@@ -17761,8 +17833,46 @@ def _source_acceptance_evidence(task):
     return source_evidence
 
 
+def _literal_readback_covers_request(task, source_evidence):
+    """Use deterministic review only if fresh native proof closes the entire source request."""
+    if (task.get("id") != "ROOT" or RUN.get("project_mode") != NEW_PROJECT
+            or _authority_bound_execution_attempt(task) or _current_execution_contract(task)
+            or len(source_evidence) != 1):
+        return False
+    source = RUN.get("source_contract") or {}
+    original = source.get("original_goal")
+    literal = literal_file_request(original, closed_text=True)
+    if not literal or any(source.get(field) for field in (
+        "user_confirmed_requirements", "clarification_answers", "test_contract", "verification_requirements",
+    )):
+        return False
+    ledger = source.get("source_requirement_ledger") or {}
+    if ledger.get("overflow") or ledger.get("confirmed_requirements"):
+        return False
+    expected_ledger = build_source_requirement_ledger(deterministic_requirement_candidates(original, 1))
+    expected = _deterministic_contract_from_ledger(original, expected_ledger)
+    if (ledger_requirements(ledger) != ledger_requirements(expected_ledger)
+            or any(source.get(field) != expected[field] for field in ("requirements", "constraints", "success_criteria"))
+            or task.get("done_when") != expected["requirements"] + expected["success_criteria"]):
+        return False
+    observation = source_evidence[0]
+    proof = json.loads(observation["result"])
+    impact = task.get("impact_contract") or {}
+    digest = hashlib.sha256(literal["content"].encode("utf-8")).hexdigest()
+    return (
+        proof.get("verification_kind") == "LITERAL_ARTIFACT"
+        and proof.get("passed") is True and proof.get("status") == "PASS"
+        and observation.get("target") == proof.get("path") == literal["name"]
+        and impact.get("authorized_mutation_paths") == [literal["name"]]
+        and len(impact.get("expected_targets", [])) == 1
+        and proof.get("expected_sha256") == proof.get("actual_sha256") == digest
+        and proof.get("impact_contract_hash") == impact.get("contract_hash")
+    )
+
+
 def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_context=""):
-    if task_risk(task.get("goal", "")) == "low" or builder_result.get("status") != "done":
+    risk = task_risk(task.get("goal", ""))
+    if risk == "low" or builder_result.get("status") != "done":
         return {"status": "skipped", "summary": "low-risk leaf", "tool_evidence": [], "memory": memory}
     RUN["falsifier_calls"] += 1
     event(f"[FALSIFY {task['id']}]", role="Falsifier", task=task["id"], action="adversarial verification")
@@ -17771,6 +17881,14 @@ def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_con
         RUN["falsifier_detected_failures"] += 1
         return {
             "status": "done", "summary": "Source-derived acceptance assertion failed.",
+            "memory": memory, "tool_evidence": source_evidence,
+        }
+    if risk == "normal" and _literal_readback_covers_request(task, source_evidence):
+        RUN["closed_literal_model_bypasses"] = RUN.get("closed_literal_model_bypasses", 0) + 1
+        record_run_event("closed_literal_review_from_readback", task_id=task["id"],
+                         target=source_evidence[0]["target"])
+        return {
+            "status": "done", "summary": "Source-bound exact-byte readback covers the request.",
             "memory": memory, "tool_evidence": source_evidence,
         }
     instruction = (
@@ -17804,7 +17922,7 @@ def merged_verification_evidence(builder_result, falsifier_result=None):
                 item for item in source.get(key, []) or []
                 if isinstance(item, dict)
             )
-    return values
+    return current_verification_evidence(values)
 
 
 def _legacy_quality_projection(value):
@@ -17814,7 +17932,7 @@ def _legacy_quality_projection(value):
 def _current_verification_failures(builder_result, falsifier_result=None, browser_result=None):
     builder_evidence = list(builder_result.get("tool_evidence", []))
     falsifier_evidence = list((falsifier_result or {}).get("tool_evidence", []))
-    merged = builder_evidence + falsifier_evidence
+    merged = current_verification_evidence(builder_evidence + falsifier_evidence)
     failures = unresolved_tool_failures(merged)
     optional_browser = (
         isinstance(browser_result, dict)
@@ -18781,23 +18899,24 @@ def deterministic_quality_checks(builder_result, falsifier_result=None, browser_
     if failures:
         checks.append({"name": "executable_failures", "status": "FAIL", "source": "deterministic",
                        "evidence": compact_text(json.dumps(failures, ensure_ascii=False), 900)})
-    verification_tools = {"run_file", "run_command", "verify_web_app"}
-    verification_ran = any(
-        item.get("tool") in verification_tools
-        and not result_is_tool_rejection(item.get("result", ""))
-        and not result_not_applicable(item.get("result", ""))
-        for item in merged
-    ) or (
+    browser_passed = (
         browser_result is not None
-        and browser_result.get("verification_status") != SKIPPED_NOT_APPLICABLE
+        and browser_result.get("passed") is True
+        and verification_outcome(browser_result) == VERIFICATION_PASS
     )
-    if not verification_ran:
+    verification_passed = browser_passed or any(
+        verification_outcome(item.get("result", "")) == VERIFICATION_PASS
+        for item in latest_verification_evidence([
+            item for item in merged if not result_is_tool_rejection(item.get("result", ""))
+        ])
+    )
+    if not verification_passed and not failures:
         checks.append({"name": "executable_verification", "status": "FAIL", "source": "deterministic",
-                       "evidence": "no executable verification was attempted"})
+                       "evidence": "no executable verification PASS is available for the current workspace state"})
     if (
         browser_result is not None
         and browser_result.get("verification_status") != SKIPPED_NOT_APPLICABLE
-        and browser_result.get("passed") is not True
+        and not browser_passed
     ):
         checks.append({"name": "browser_contract", "status": "FAIL", "source": "deterministic",
                        "evidence": compact_text(json.dumps(browser_result, ensure_ascii=False), 900)})
@@ -19369,7 +19488,7 @@ def _has_only_non_implementation_mutation_evidence(evidence):
     if not records or _has_concrete_executable_failure(evidence):
         return False
     return all(str(item.get("category", "")).upper() in {
-        "SAFETY_REJECTED_MUTATION", "ENVIRONMENT_FAILURE", "MISSING_TARGET",
+        "SAFETY_REJECTED_MUTATION", "ENVIRONMENT_FAILURE", "MISSING_TARGET", "TOOL_ARGUMENT_REJECTED",
     } for item in records)
 
 
@@ -19678,7 +19797,17 @@ def diagnose_failure(task, result, evidence=None):
         or _verification_target_is_unresolved(result)
         or _verification_target_is_unresolved(evidence)
     )
-    if failure_type == "CONTEXT_SUFFICIENCY_REQUIRED" or failure_type.startswith("IMPACT_CONTRACT_"):
+    if failure_type == BROWSER_VERIFICATION_STAGNATION:
+        category = "unknown"
+        rationale = "A repeated browser failure does not distinguish an application, verifier, or environment cause."
+    elif failure_type == MUTATION_ARGUMENT_RETRIES_EXHAUSTED:
+        category = "orchestration_failure"
+        confidence = "high"
+        rationale = (
+            "The recorded mutation calls failed the tool argument schema before editing. "
+            "Inspect the argument contract and receipts; they do not establish task breadth."
+        )
+    elif failure_type == "CONTEXT_SUFFICIENCY_REQUIRED" or failure_type.startswith("IMPACT_CONTRACT_"):
         category = "orchestration_failure"
         confidence = "high"
         rationale = ("The context/impact authorization lifecycle did not reach a valid mutation permission. "
@@ -20930,11 +21059,14 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         rollback_transaction()
         return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": builder["summary"],
                 "memory": memory, "builder": builder}
-    if builder.get("failure_type") == NO_EXECUTION_PROGRESS:
+    if builder.get("failure_type") in {
+        NO_EXECUTION_PROGRESS, MUTATION_ARGUMENT_RETRIES_EXHAUSTED, BROWSER_VERIFICATION_STAGNATION,
+    }:
         rollback_transaction()
+        failure_type = builder["failure_type"]
         return {
-            "status": "failed", "failure_type": NO_EXECUTION_PROGRESS,
-            "summary": builder.get("summary", NO_EXECUTION_PROGRESS),
+            "status": "failed", "failure_type": failure_type,
+            "summary": builder.get("summary", failure_type),
             "memory": memory, "builder": builder,
             "worker_progress": builder.get("worker_progress"),
             "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
@@ -20994,8 +21126,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         execution_evidence=merged_verification_evidence(builder, falsifier),
     )
     gate = evidence_gate(builder, falsifier, browser)
-    verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and gate["passed"] else "VERIFY " + task["id"]
-    event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}", role="Quality Review",
+    event(f"[VERIFY {task['id']}] {'PASS' if gate['passed'] else 'FAIL'}", role="Quality Review",
           task=task["id"], action="deterministic evidence gate")
     if gate["passed"]:
         result = _commit_verified_leaf(task, contract, builder, falsifier, browser, gate, memory)
@@ -21075,8 +21206,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             execution_evidence=merged_verification_evidence(repaired, fresh_falsifier),
         )
         current_gate = evidence_gate(repaired, fresh_falsifier, current_browser)
-        verify_label = "ROOT VERIFIED" if task.get("id") == "ROOT" and current_gate["passed"] else "VERIFY " + task["id"]
-        event(f"[{verify_label}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
+        event(f"[VERIFY {task['id']}] {'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
               role="Quality Review", task=task["id"], action="fresh post-repair verification")
         if current_gate["passed"]:
             impact_contract = _accepted_impact_contract_for_result(task, repaired)
@@ -21312,6 +21442,15 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
             "status": "failed", "failure_type": "ENVIRONMENT_ERROR",
             "summary": builder.get("summary", "integration provider failure"),
             "memory": memory, "builder": builder,
+        }
+    if builder.get("failure_type") in {
+        MUTATION_ARGUMENT_RETRIES_EXHAUSTED, BROWSER_VERIFICATION_STAGNATION, WORKER_NO_MUTATION_PROGRESS,
+    }:
+        rollback_transaction()
+        return {
+            "status": "failed", "failure_type": builder["failure_type"],
+            "summary": builder["summary"], "memory": memory, "builder": builder,
+            "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
         }
     if _context_sufficiency_failed(builder):
         rollback_transaction()
@@ -23017,11 +23156,18 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         task["integration_preflight"]["after"] = preflight_after
         _finish_parent_integration(task, passed=False, preflight=preflight_after)
         rollback_transaction(); RUN["integration_failures"] += 1
-        failure_type = CONTEXT_INSUFFICIENT_FAILURE if _context_sufficiency_failed(builder) else (
-            "ENVIRONMENT_ERROR" if builder["status"] == "provider_failure" else (
-            "INTEGRATION_TOO_BROAD" if builder["status"] == "too_broad" else "INTEGRATION_FAILURE"
-            )
-        )
+        if _context_sufficiency_failed(builder):
+            failure_type = CONTEXT_INSUFFICIENT_FAILURE
+        elif builder["status"] == "provider_failure":
+            failure_type = "ENVIRONMENT_ERROR"
+        elif builder["status"] == "too_broad":
+            failure_type = "INTEGRATION_TOO_BROAD"
+        elif builder.get("failure_type") in {
+            MUTATION_ARGUMENT_RETRIES_EXHAUSTED, BROWSER_VERIFICATION_STAGNATION, WORKER_NO_MUTATION_PROGRESS,
+        }:
+            failure_type = builder["failure_type"]
+        else:
+            failure_type = "INTEGRATION_FAILURE"
         parent_failure_evidence = _integration_failure_evidence(preflight_after) + _worker_failure_evidence(builder)
         return {"status": "failed",
                 "failure_type": failure_type, "summary": builder["summary"], "memory": memory,
@@ -23054,8 +23200,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         if preflight_after.get("passed") else None
     )
     gate = evidence_gate(builder, falsifier, browser, integration_preflight=preflight_after)
-    verify_label = "ROOT VERIFIED" if root and gate["passed"] else ("ROOT VERIFY" if root else "VERIFY " + label)
-    event(f"[{verify_label}] {'PASS' if gate['passed'] else 'FAIL'}",
+    event(f"[VERIFY {label}] {'PASS' if gate['passed'] else 'FAIL'}",
           role="Quality Review", task=label, action="parent evidence gate")
     if gate["passed"] and task.get("impact_contract_required"):
         impact_contract = _accepted_impact_contract_for_result(task, builder)
@@ -23155,8 +23300,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
             )
             current_gate = evidence_gate(repaired, None, current_browser,
                                          integration_preflight=current_preflight)
-            verify_label = "ROOT VERIFIED" if root and current_gate["passed"] else ("ROOT VERIFY" if root else "VERIFY " + label)
-            event(f"[{verify_label}] "
+            event(f"[VERIFY {label}] "
                   f"{'PASS' if current_gate['passed'] else 'FAIL'} (fresh)",
                   role="Quality Review", task=label, action="fresh parent verification")
             if current_gate["passed"]:
@@ -23365,6 +23509,8 @@ def _mark_task_result(task, result, *, count=True):
                 result.setdefault("failure_diagnosis", diagnosis)
             RUN["failed_nodes"] += 1
     update_task_ledger(task)
+    if count and status == "done" and task.get("id") == "ROOT":
+        event("[ROOT VERIFIED] PASS", role="Quality Review", task="ROOT", action="final verified outcome")
 
 
 def _is_terminal_too_broad_child(child, result):
@@ -23601,13 +23747,21 @@ def _scheduler_dependency_summary(child, result):
     }
 
 
-def _scheduler_dependency_state(dependency_id, results, tasks, inherited):
+def _scheduler_dependency_state(dependency_id, results, tasks, inherited, ambiguous=()):
     """Resolve one explicit dependency without treating order as an edge."""
     dependency_id = str(dependency_id)
+    if dependency_id in ambiguous:
+        return {
+            "dependency_id": dependency_id, "status": "blocked",
+            "normalized_status": "DEPENDENCY_BLOCKED",
+            "failure_type": EXECUTION_DEPENDENCY_BLOCKED,
+            "summary": "more than one child declares this dependency ID",
+            "source": "ambiguous_sibling",
+        }
     result = results.get(dependency_id)
     dependency_task = tasks.get(dependency_id, {})
     source = "child_result"
-    if result is None:
+    if result is None and dependency_id not in tasks:
         result = next(
             (
                 item for item in inherited
@@ -23653,7 +23807,10 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
     """Run children sequentially while propagating only explicit dependencies."""
     completed = []
     inherited_dependencies = copy.deepcopy(list(dependency_summaries or []))
-    child_list = [child for child in (children or []) if isinstance(child, dict)]
+    child_list = order_children(
+        [child for child in (children or []) if isinstance(child, dict)], _scheduler_dependency_ids,
+    )
+    ambiguous = ambiguous_child_ids(child_list)
     child_by_id = {str(child.get("id", "")): child for child in child_list}
     results = {}
     prior_failure = False
@@ -23671,13 +23828,15 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             for dependency_id in dependency_ids
         )
         dependency_states = [
-            _scheduler_dependency_state(dependency_id, results, child_by_id, inherited_dependencies)
+            _scheduler_dependency_state(dependency_id, results, child_by_id, inherited_dependencies, ambiguous)
             for dependency_id in dependency_ids
         ]
         blocking = [
             state for state in dependency_states
             if state.get("normalized_status") != "COMPLETED"
         ]
+        if child_id in ambiguous:
+            blocking.append(_scheduler_dependency_state(child_id, results, child_by_id, inherited_dependencies, ambiguous))
         node = {
             "child_id": child_id,
             "order_position": len(scheduler["nodes"]) + 1,
@@ -23719,7 +23878,10 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
                 "child_scheduler_continued_after_failure", 0,
             ) + 1
         node["started"] = True
-        child_dependencies = copy.deepcopy(inherited_dependencies)
+        child_dependencies = [
+            copy.deepcopy(item) for item in inherited_dependencies
+            if not isinstance(item, dict) or str(item.get("task_id", "")) not in child_by_id
+        ]
         completed_dependency_ids = {
             str(item.get("task_id", "")) for item in child_dependencies if isinstance(item, dict)
         }
@@ -30755,6 +30917,9 @@ def parse_args():
     parser.add_argument("--model", choices=(GEMMA_MODEL, "gpt-oss:20b-cloud"),
                         help=f"Pin every role to this model (default: {GEMMA_MODEL})")
     parser.add_argument("--prompt-file")
+    parser.add_argument("--max-model-calls", type=int, help="Admit at most this many task generation requests, including retries")
+    parser.add_argument("--max-tool-calls", type=int, help="Admit at most this many model-proposed tool calls")
+    parser.add_argument("--max-elapsed-seconds", type=float, help="Task admission deadline; excludes startup preflight")
     parser.add_argument("--experiment-case-id")
     parser.add_argument("--mission-advice-policy", choices=("strict", "contract_fallback"),
                         default="strict")
@@ -30789,7 +30954,30 @@ def parse_args():
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
     parser.add_argument("--no-bootstrap", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        RunBudget(**_requested_budget_limits(args))
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
+
+
+def _requested_budget_limits(args):
+    return {
+        key: value for key in ("max_model_calls", "max_tool_calls", "max_elapsed_seconds")
+        if (value := getattr(args, key, None)) is not None
+    }
+
+
+@contextmanager
+def _request_budget(limits):
+    global ACTIVE_RUN_BUDGET
+    previous = ACTIVE_RUN_BUDGET
+    ACTIVE_RUN_BUDGET = RunBudget(**limits) if limits else None
+    try:
+        yield
+    finally:
+        ACTIVE_RUN_BUDGET = previous
 
 
 def ollama_reachable():
@@ -30921,7 +31109,7 @@ def main():
             raise SystemExit(2)
         memory = load_memory()
 
-    def handle(user_text, interactive=True):
+    def run_request(user_text, interactive):
         nonlocal memory
         mission_policy = getattr(args, "mission_advice_policy", "strict")
         mission_kwargs = ({"mission_advice_policy": mission_policy}
@@ -30988,6 +31176,23 @@ def main():
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)
+        return result
+
+    def handle(user_text, interactive=True):
+        with _request_budget(_requested_budget_limits(args)):
+            try:
+                result = run_request(user_text, interactive)
+            except RunBudgetExceeded as exc:
+                rollback_transaction()
+                summary = f"RUN_BUDGET_EXHAUSTED: {exc.resource}"
+                result = {"status": "budget_exhausted", "failure_type": "RUN_BUDGET_EXHAUSTED",
+                          "summary": summary, "memory": memory}
+                RUN["run_budget_stop_resource"] = exc.resource
+                record_run_event("run_budget_exhausted", resource=exc.resource)
+                root = TASKS.get("ROOT")
+                if isinstance(root, dict):
+                    _mark_task_result(root, result, count=False)
+                finish_metrics("budget_exhausted")
         print("Agent>", result.get("summary", ""))
         return result
 

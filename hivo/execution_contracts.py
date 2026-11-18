@@ -2759,7 +2759,9 @@ MISSION_ADVICE_ALIASES = {
 }
 
 _ADVICE_MUTATION_VERBS = re.compile(
-    r"\b(?:add|change|create|delete|edit|implement|modify|move|mutate|patch|refactor|remove|rename|replace|rewrite|set|store|touch|update|write)\w*\b",
+    r"\b(?:(?:add|change|create|delete|edit|implement|modify|move|mutate|patch|refactor|remove|"
+    r"rename|replace|rewrite|set|store|touch|update|write)\w*|"
+    r"(?:fix|repair|correct)(?:es|s|ed|ing)?)\b",
     re.IGNORECASE,
 )
 _ADVICE_SAFE_VERBS = re.compile(
@@ -2784,7 +2786,11 @@ _ADVICE_OWNER_CHANGE = re.compile(
     r"|\b(?:owner|ownership)\b[^.!?;]{0,120}\b(?:change|move|replace|shift|transfer)\b",
     re.IGNORECASE,
 )
-_ADVICE_CLAUSE_BOUNDARY = re.compile(r"[!?;,]|\.(?=\s|$)")
+_ADVICE_CLAUSE_BOUNDARY = re.compile(r"[!?;,\r\n]|\.(?=\s|$)|\band\s+then\b", re.IGNORECASE)
+_ADVICE_REFERENCE_CONTEXT = re.compile(
+    r"\b(?:based\s+on|(?:described|documented|specified|shown|explained)\s+in)\b",
+    re.IGNORECASE,
+)
 
 
 def mission_advice_schema():
@@ -2968,31 +2974,39 @@ def _advice_safe_intent(verb):
     return "INSPECTION"
 
 
-def _advice_action_events(text):
+def _advice_action_events(text, path_spans):
     actions = []
     for match in _ADVICE_MUTATION_VERBS.finditer(text):
-        if not _advice_negated(text, match.start()):
-            actions.append((match.start(), match.end(), "MUTATION", match.group(0)))
+        intent = "UNKNOWN" if _advice_negated(text, match.start()) else "MUTATION"
+        actions.append((match.start(), match.end(), intent, match.group(0)))
     for match in _ADVICE_SAFE_VERBS.finditer(text):
         actions.append((match.start(), match.end(), _advice_safe_intent(match.group(0)), match.group(0)))
-    return sorted(actions, key=lambda item: (item[0], item[1]))
+    return sorted(
+        (item for item in actions
+         if not any(item[0] < end and start < item[1] for start, end in path_spans)),
+        key=lambda item: (item[0], item[1]),
+    )
 
 
-def _advice_local_action(text, start, end, actions=None):
+def _advice_local_action(text, start, end, actions):
     """Find intent only in the clause local to one detected candidate."""
-    actions = list(actions if actions is not None else _advice_action_events(text))
     previous = [item for item in actions if item[1] <= start]
     candidate = previous[-1] if previous else None
     if candidate is not None:
         between = text[candidate[1]:start]
         if _ADVICE_CLAUSE_BOUNDARY.search(between):
             candidate = None
+        elif candidate[2] == "MUTATION" and _ADVICE_REFERENCE_CONTEXT.search(between):
+            return None
     if candidate is None:
         following = [item for item in actions if item[0] >= end]
         if following:
             next_candidate = following[0]
             between = text[end:next_candidate[0]]
-            if next_candidate[0] - end <= 70 and not _ADVICE_CLAUSE_BOUNDARY.search(between):
+            passive = re.fullmatch(r"[`\"']?\s+(?:(?:must|should|will|can|may)\s+be|(?:is|are)\s+to\s+be)\s+", between, re.I)
+            leading_location = (re.search(r"\bin\s+[`\"']?$", text[:start], re.I)
+                                and re.fullmatch(r"[`\"']?\s*,\s*", between))
+            if passive or leading_location:
                 candidate = next_candidate
     return candidate
 
@@ -3000,16 +3014,16 @@ def _advice_local_action(text, start, end, actions=None):
 def code_location_references(text, contract=None, *, include_action=False):
     """Return classified path candidates with clause-local semantic intent."""
     source = str(text or "")
-    actions = _advice_action_events(source)
-    references = []
+    paths = []
     for path_match in _PATH_RE.finditer(source):
         reference = classify_code_location_reference(path_match.group(1), contract)
-        if reference is None:
-            continue
-        reference_end = path_match.start(1) + len(reference.get("text", ""))
-        action = _advice_local_action(
-            source, path_match.start(1), reference_end, actions,
-        )
+        if reference is not None:
+            start = path_match.start(1)
+            paths.append((start, start + len(reference["text"]), reference))
+    actions = _advice_action_events(source, [(start, end) for start, end, _ in paths])
+    references = []
+    for start, end, reference in paths:
+        action = _advice_local_action(source, start, end, actions)
         reference["intent"] = action[2] if action is not None else "UNKNOWN"
         if include_action:
             reference["action"] = action[3] if action is not None else ""

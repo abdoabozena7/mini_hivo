@@ -199,6 +199,15 @@ class PreMutationImpactContractTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertTrue(result["out_of_scope"])
 
+    def test_generic_prose_is_not_a_structured_mutation_target(self):
+        candidate = impact.build_pre_mutation_impact_contract(
+            {"id": "ROOT", "goal": "Fix the inconsistent result after startup."},
+        )
+        self.assertEqual(candidate["expected_targets"], [])
+        checked = impact.accept_pre_mutation_impact_contract(candidate)
+        self.assertFalse(checked["accepted"])
+        self.assertTrue(any("target surface is missing" in row["reason"] for row in checked["errors"]))
+
     def test_missing_known_consumer_rejects_contract_before_mutation(self):
         model = self.model([
             ("src/a.py", "def A(value):\n    return value\n"),
