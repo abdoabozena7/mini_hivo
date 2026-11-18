@@ -1,0 +1,19 @@
+{
+  "experiment": 19,
+  "status": "Live improvements demonstrated; complete live acceptance remains pending",
+  "fully_live_passed": false,
+  "full_e2e_passed": false,
+  "criteria": {
+    "long_fail_preserved": "demonstrated",
+    "basic_pass_cannot_override": "demonstrated",
+    "foundation_acceptance": "demonstrated_separate_profile",
+    "authorized_repair_writes": "demonstrated_provisional",
+    "functional_repair": "not_achieved",
+    "fresh_required_pass": "not_obtained",
+    "matching_success_supersession": "not_reached_live",
+    "repaired_transaction_acceptance": "not_demonstrated"
+  },
+  "original_offline_results": "../experiment19-results.json",
+  "new_runs_or_tests_for_documentation": 0,
+  "cohort_scope": "133 selected methods before final hint change; 9 hint plus 1 existing validator afterward. Overlapping, not full suite."
+}

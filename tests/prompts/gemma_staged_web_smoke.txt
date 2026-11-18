@@ -1,0 +1,11 @@
+Create a polished, self-contained browser focus timer in this empty workspace.
+
+Requirements:
+- A working timer with Start, Pause, and Reset controls.
+- Configurable focus and break durations with sensible validation.
+- Automatic focus/break phase switching and a visible completed-session count.
+- Persist settings and completed-session count in localStorage across reloads.
+- Responsive, keyboard-accessible UI with clear focus states and reduced-motion support.
+- No external services or build step; it must run by opening the local HTML entry point.
+
+Use clean maintainable code and verify the real behavior in a browser. This is an architecture smoke test: implement the application yourself through the available coding tools.

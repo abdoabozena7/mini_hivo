@@ -1,0 +1,30 @@
+{
+  "experiment": 20,
+  "production_treatment_unchanged": true,
+  "syntax_parsed": true,
+  "markdown_file_links_checked": 55,
+  "json_artifacts_valid": true,
+  "diff_check": "PASS",
+  "preserved_existing_worktrees": 10,
+  "preserved_run010_files": 230,
+  "protected_functions_unchanged": [
+    "evidence_gate",
+    "_commit_verified_leaf",
+    "repair_task",
+    "execute_agent_task"
+  ],
+  "modified_existing_controller_functions": [
+    "aggregate_task",
+    "execute_leaf",
+    "optional_browser_check",
+    "run_tool"
+  ],
+  "runtime_drift_negative_control": "rejected",
+  "inherited_dependency_negative_control": "rejected",
+  "selected_methods": 176,
+  "existing_baseline_methods": 142,
+  "model_calls": 0,
+  "browser_calls": 0,
+  "full_e2e_runs": 0,
+  "publication": "none"
+}

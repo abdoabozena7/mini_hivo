@@ -1,0 +1,110 @@
+[
+  {
+    "log": "test_adaptive_architecture.log",
+    "tests_run": 90,
+    "seconds": 4.557,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 90,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_adaptive_architecture.py -v"
+  },
+  {
+    "log": "test_authorityall.log",
+    "tests_run": 23,
+    "seconds": 0.554,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 23,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_authority*.py -v"
+  },
+  {
+    "log": "test_context_sufficiency_gate.log",
+    "tests_run": 9,
+    "seconds": 0.217,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 9,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_context_sufficiency_gate.py -v"
+  },
+  {
+    "log": "test_experimentall.log",
+    "tests_run": 122,
+    "seconds": 1.743,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 122,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_experiment*.py -v"
+  },
+  {
+    "log": "test_greenfield_impact_lifecycle.log",
+    "tests_run": 17,
+    "seconds": 0.971,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 17,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_greenfield_impact_lifecycle.py -v"
+  },
+  {
+    "log": "test_level1_native_verification-final.log",
+    "tests_run": 10,
+    "seconds": 0.568,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 10,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_level1_native_verification.py -v"
+  },
+  {
+    "log": "test_pre_mutation_impact.log",
+    "tests_run": 27,
+    "seconds": 0.249,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 27,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_pre_mutation_impact.py -v"
+  },
+  {
+    "log": "test_verification_applicability.log",
+    "tests_run": 15,
+    "seconds": 0.114,
+    "observed_summary": "OK",
+    "observed_case_outcomes": {
+      "ok": 15,
+      "ERROR": 0,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_verification_applicability.py -v"
+  },
+  {
+    "log": "test_verification_policy.log",
+    "tests_run": 8,
+    "seconds": 0.013,
+    "observed_summary": "FAILED (errors=2)",
+    "observed_case_outcomes": {
+      "ok": 6,
+      "ERROR": 2,
+      "FAIL": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_verification_policy.py -v"
+  }
+]

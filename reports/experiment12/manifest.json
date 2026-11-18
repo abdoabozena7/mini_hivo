@@ -1,0 +1,123 @@
+{
+  "experiment": 12,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "repeats": 3,
+  "primary_boundary": "approved contract -> fresh Worker -> child receipt -> fresh parent verification",
+  "planning_cost_included": false,
+  "policies": {
+    "planning_route": "decomposition_first_recursive",
+    "mission_advice_policy": "contract_fallback",
+    "worker_progress_policy": "progress_constrained",
+    "mutation_grounding_policy": "evidence_grounded",
+    "target_locator_policy": "evidence_directed",
+    "verification_environment_policy": "resolved",
+    "verification_surface_policy": "discovery",
+    "child_receipt_policy": "atomic_verified",
+    "integration_target_policy": "resolved"
+  },
+  "cases": [
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "source": "arena.html",
+      "symbol": "move",
+      "goal": "Fix the arena game's ArrowUp keyboard movement so the player moves up, while preserving existing touch controls.",
+      "integration_target": "arena.html",
+      "expected_interactions": [
+        "keyboard_movement",
+        "touch_control"
+      ],
+      "seed_sha256": {
+        "arena.html": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+      },
+      "approved_plan_hash": "79a23bf18d4f2e9b99d6ce55d2f400923f8d4ef4d894a63f96783b9897c0ff5f",
+      "execution_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "source": "arena.html",
+      "symbol": "restart",
+      "goal": "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls.",
+      "integration_target": "arena.html",
+      "expected_interactions": [
+        "keyboard_movement",
+        "restart_resets_state",
+        "goal_win_state",
+        "touch_control"
+      ],
+      "seed_sha256": {
+        "arena.html": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+      },
+      "approved_plan_hash": "0a23aed5c55b893028a6ce989073e5ad82be88ca278942f8f4fb023802589c7f",
+      "execution_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "source": "timer.html",
+      "symbol": "pause",
+      "goal": "Fix Pause in the countdown timer so it freezes the visible time without resetting it, while preserving Start and Reset.",
+      "integration_target": "timer.html",
+      "expected_interactions": [
+        "timer_start_changes_visible_time",
+        "timer_pause_freezes_visible_time",
+        "timer_reset_restores_visible_time"
+      ],
+      "seed_sha256": {
+        "timer.html": "84fa3f7e5ef89445b6628a5d1b4f37501e7f68cfe318c5ea3d28dd5ac67a371d"
+      },
+      "approved_plan_hash": "cff3a6c590011c02d59aa6a0c6043e66713672c43029023af7ae842894c8d51a",
+      "execution_contract_hash": "ce528e029aae5fae00f8990f50fa5967cad5ed6a2ff9e8e3d39cd3f71f5233ae"
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "source": "numbers_api.py",
+      "symbol": "clamp_number",
+      "goal": "Fix clamp_number so values above upper clamp to upper, while preserving lower-bound clamping, values inside the bounds, and ValueError for inverted bounds.",
+      "test_target": "tests/test_clamp.py",
+      "integration_target": "python tests/test_clamp.py",
+      "expected_tests": 5,
+      "seed_sha256": {
+        "numbers_api.py": "c4cc50eb84c001013791ebe87f5b83f4250ca55eba96e0b2ad43d850b9712a4a",
+        "tests/test_clamp.py": "672a11da462960c302e33922201c41977c6d0181cd4159908c180790f357edcb"
+      },
+      "approved_plan_hash": "89cac93b5e756eaff5017f408b97924c3c30b14bfa41fdca130a67a2deaee374",
+      "execution_contract_hash": "dea8ea007ebc370daf1c92c79c3e7a2eec0e33b048a0db8989b3e4f5d8f61f99"
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "source": "values.js",
+      "symbol": "uniqueValues",
+      "goal": "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior.",
+      "test_target": "tests/unique.test.js",
+      "integration_target": "node tests/unique.test.js",
+      "expected_tests": 4,
+      "seed_sha256": {
+        "values.js": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+        "tests/unique.test.js": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35"
+      },
+      "approved_plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+      "execution_contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242"
+    }
+  ],
+  "production_sha256": {
+    "mini.py": "e97c04e94b145a0da28b3ccace32b7cc43d2ab8bae79a1fe224991508223f236",
+    "hivo/evidence_compatibility.py": "9b1614721414c6326b6828053ac1cdbfd4ce9474a75f61640af5d120fd5ec67a",
+    "hivo/atomic_child_receipt.py": "4afda6a41102f1e43fdb1e0dccd73776217470effffa465dbe6d5c2784f37126",
+    "hivo/verification_routing.py": "74e19db0d6f3ac2c876347157afe988ba8bdabd280f64b7a59f054edcf74ce55",
+    "hivo/verification.py": "74cfde6c378a34799cb365507f7062fe6dcd27287a2ccd21aaebfcc7daaaf29c",
+    "hivo/verification_surfaces.py": "6b9e251b8373d00ae3ad94012d967735a0c66efda9b0dbc13a5d9473c96378fd",
+    "hivo/worker_progress.py": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+    "hivo/mutation_grounding.py": "ea269861b3e819befbc5d615e36329eb6131f1f26a2a29f8ad9828ca0825b082",
+    "hivo/integration_targets.py": "e5b8bde6682e162a60c302de798843c25bcdbfc63ea6a26c56146e26332c41a5"
+  },
+  "eligibility": "At least one actual executable verification invocation in the preregistered runs; no selection on PASS.",
+  "false_accept_definition": "Final verified receipt despite independently known mismatched obligation/behavior/target or failing acceptance oracle.",
+  "false_reject_definition": "Same current source, required assertions actually passed, aggregation/receipt normalization rejects compatible evidence.",
+  "order": "case-major; repeat1 current/compatible, repeat2 compatible/current, repeat3 current/compatible",
+  "default_change_allowed": false
+}

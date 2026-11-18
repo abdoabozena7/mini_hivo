@@ -1,0 +1,47 @@
+{
+  "experiment": 20,
+  "title": "Child-Scoped Verification Obligations and Parent Completion Coverage",
+  "status": "Offline-validated bounded greenfield-game implementation; live E2E pending",
+  "baseline": "d15b6068f78dd5b9e46daacd81f5543af5c2cf89",
+  "treatment": "a91062551c9b346a35eb4abb5f18a6f64f95a72b",
+  "method": "Retrospective controlled fixtures; no preregistration or field reliability claim",
+  "source_git_blob_sha256": {
+    "mini.py": "01c41fbc418f1df8dc4304482625e7a9b67480a19159ec4710e72350f019487b",
+    "hivo/verification_scope.py": "95ef83286ad08d0cb871be6b63e49747d382f9dfa4db367a7de5903e41710aad",
+    "tests/test_experiment20_child_scope.py": "2c7bf261540c1ff34a07b110d962524e26bbeb4536b1bcf3a9c1afb1f954092d",
+    "tests/fixtures/experiment20_scope.json": "71f5b5aea86fb8019ef366e75d479a9c61d39a02c85a38d693099f878408a988"
+  },
+  "paired_cases": 12,
+  "selected_test_methods": 176,
+  "existing_baseline_methods": 142,
+  "controls": [
+    "ordinary greenfield route",
+    "recognized local game obligations",
+    "full root source retained",
+    "committed prior behavior rechecked",
+    "unknown scope conservative fallback",
+    "existing/approved/timer route exclusion",
+    "fully recognized acceptance clauses; unsupported mixed duties fail conservatively"
+  ],
+  "not_measured": [
+    "original complete compiled mission",
+    "live model assignment distribution",
+    "live browser interactions",
+    "full original acceptance criteria",
+    "live root completion"
+  ],
+  "case_protocol": "protocol.json",
+  "methodology_review": "METHODOLOGY-REVIEW.md",
+  "review_provenance": "supporting/review-provenance.json",
+  "reproduction_checks": [
+    "Pinned tracked Python runtime and test inputs; inherited inputs also identical to baseline",
+    "Expected per-case assertion outcomes and selected-method counts required; skips rejected",
+    "Python/platform/package versions and normalized source/runner hashes recorded"
+  ],
+  "live_campaign": {
+    "results": "supporting/live-results-20261107.json",
+    "protocol": "supporting/live-protocol-20261107.json",
+    "evidence": "supporting/live-evidence-20261107.json",
+    "historical_fields_scope": "Existing source/hash/count pins describe the original offline study, not this later campaign or updated checkout."
+  }
+}

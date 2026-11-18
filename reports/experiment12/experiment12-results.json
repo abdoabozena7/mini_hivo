@@ -1,0 +1,2747 @@
+{
+  "experiment": 12,
+  "suite": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1",
+  "all_completed": true,
+  "production_pins_valid": true,
+  "planning_included": false,
+  "worker_budget": 28,
+  "model": "gemma4:e4b",
+  "fresh_trials": [
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T135448-b83d528b",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 1,
+      "model_calls": 12,
+      "tool_calls": 8,
+      "elapsed_seconds": 75.33,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "aggregation",
+        "reason": [
+          "REQUIRED_VERIFICATION_FAILED"
+        ],
+        "invalid_receipt_count": 1
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-1\\.agent_runs\\20260928T135448-b83d528b.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T135844-7680499c",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 1,
+      "model_calls": 12,
+      "tool_calls": 8,
+      "elapsed_seconds": 62.28,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "aggregation",
+        "reason": [
+          "REQUIRED_VERIFICATION_FAILED"
+        ],
+        "invalid_receipt_count": 1
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-2\\.agent_runs\\20260928T135844-7680499c.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T140000-a4d6c3ac",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 8,
+      "tool_calls": 6,
+      "elapsed_seconds": 46.75,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:00:47.684",
+          "run_id": "20260928T140000-a4d6c3ac",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "arena_arrow",
+          "elapsed_seconds": 46.736,
+          "model_calls": 8,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-3\\.agent_runs\\20260928T140000-a4d6c3ac.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T135617-bd6e6ba6",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 7,
+      "elapsed_seconds": 44.16,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T13:57:02.016",
+          "run_id": "20260928T135617-bd6e6ba6",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "arena_arrow",
+          "elapsed_seconds": 44.146,
+          "model_calls": 9,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-1\\.agent_runs\\20260928T135617-bd6e6ba6.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T135716-1d5a1529",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 10,
+      "tool_calls": 7,
+      "elapsed_seconds": 74.94,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-2\\.agent_runs\\20260928T135716-1d5a1529.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T140101-bbb22ea3",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 65.2,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-3\\.agent_runs\\20260928T140101-bbb22ea3.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\compatible-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T140220-9bcca71f",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 1,
+      "model_calls": 13,
+      "tool_calls": 9,
+      "elapsed_seconds": 67.63,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "aggregation",
+        "reason": [
+          "REQUIRED_VERIFICATION_FAILED"
+        ],
+        "invalid_receipt_count": 1
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1\\.agent_runs\\20260928T140220-9bcca71f.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T140629-61337b23",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 1,
+      "model_calls": 11,
+      "tool_calls": 7,
+      "elapsed_seconds": 63.12,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "aggregation",
+        "reason": [
+          "REQUIRED_VERIFICATION_FAILED"
+        ],
+        "invalid_receipt_count": 1
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-2\\.agent_runs\\20260928T140629-61337b23.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "current",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T140745-8d07d5f0",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 1,
+      "model_calls": 14,
+      "tool_calls": 10,
+      "elapsed_seconds": 70.48,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "aggregation",
+        "reason": [
+          "REQUIRED_VERIFICATION_FAILED"
+        ],
+        "invalid_receipt_count": 1
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-3\\.agent_runs\\20260928T140745-8d07d5f0.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-3-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T140342-8d1e449a",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 60.93,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-1\\.agent_runs\\20260928T140342-8d1e449a.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-1-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T140456-90549aea",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 78.45,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-2\\.agent_runs\\20260928T140456-90549aea.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-2-result.json"
+      }
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "compatible",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T140910-54bb5563",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 10,
+      "tool_calls": 7,
+      "elapsed_seconds": 58.6,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-3\\.agent_runs\\20260928T140910-54bb5563.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\compatible-3-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "current",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141022-aed67f74",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 7,
+      "tool_calls": 6,
+      "elapsed_seconds": 29.02,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:10:51.786",
+          "run_id": "20260928T141022-aed67f74",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 29.01,
+          "model_calls": 7,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-1\\.agent_runs\\20260928T141022-aed67f74.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-1-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "current",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T141233-a1640d85",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 7,
+      "tool_calls": 6,
+      "elapsed_seconds": 28.71,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:13:02.442",
+          "run_id": "20260928T141233-a1640d85",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 28.7,
+          "model_calls": 7,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-2\\.agent_runs\\20260928T141233-a1640d85.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-2-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "current",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T141315-2921aa7c",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 7,
+      "tool_calls": 6,
+      "elapsed_seconds": 28.72,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:13:44.625",
+          "run_id": "20260928T141315-2921aa7c",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 28.708,
+          "model_calls": 7,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-3\\.agent_runs\\20260928T141315-2921aa7c.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\current-3-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "compatible",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141105-58c97ea9",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 8,
+      "elapsed_seconds": 32.06,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:11:37.780",
+          "run_id": "20260928T141105-58c97ea9",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 32.045,
+          "model_calls": 9,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-1\\.agent_runs\\20260928T141105-58c97ea9.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-1-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "compatible",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T141151-b5d24e00",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 7,
+      "tool_calls": 6,
+      "elapsed_seconds": 28.77,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:12:20.284",
+          "run_id": "20260928T141151-b5d24e00",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 28.753,
+          "model_calls": 7,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-2\\.agent_runs\\20260928T141151-b5d24e00.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-2-result.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "family": "browser_timer",
+      "policy": "compatible",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T141358-0db0747c",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 7,
+      "tool_calls": 6,
+      "elapsed_seconds": 28.91,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_mutation_grounding",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "controller_label": {
+          "time": "2026-09-28T14:14:27.149",
+          "run_id": "20260928T141358-0db0747c",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "timer_pause",
+          "elapsed_seconds": 28.897,
+          "model_calls": 7,
+          "stage": "MUTATION_GROUNDING",
+          "reason": "MUTATION_TARGET_UNRESOLVED",
+          "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+        },
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-3\\.agent_runs\\20260928T141358-0db0747c.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\timer_pause\\compatible-3-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "current",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141440-e9114340",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 20.23,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:15:00.907",
+          "run_id": "20260928T141440-e9114340",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 20.218,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-1\\.agent_runs\\20260928T141440-e9114340.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-1-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "current",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T141622-b54873e2",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 20.29,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:16:42.541",
+          "run_id": "20260928T141622-b54873e2",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 20.278,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-2\\.agent_runs\\20260928T141622-b54873e2.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-2-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "current",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T141656-0db1f1d3",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 19.95,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:17:15.941",
+          "run_id": "20260928T141656-0db1f1d3",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 19.933,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-3\\.agent_runs\\20260928T141656-0db1f1d3.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\current-3-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "compatible",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141514-bc442f99",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 19.96,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:15:34.595",
+          "run_id": "20260928T141514-bc442f99",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 19.944,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-1\\.agent_runs\\20260928T141514-bc442f99.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-1-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "compatible",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T141548-5d925838",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 20.66,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:16:08.726",
+          "run_id": "20260928T141548-5d925838",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 20.645,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-2\\.agent_runs\\20260928T141548-5d925838.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-2-result.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "family": "python_unit_behavior",
+      "policy": "compatible",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T141729-cfc8c9c5",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": false,
+      "verification_pass": false,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "child verification did not produce a verified receipt",
+        "missing verification evidence"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 2,
+      "tool_calls": 0,
+      "elapsed_seconds": 19.99,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "stage": "worker_pre_mutation_impact",
+        "reason": "IMPACT_NOT_ACCEPTED",
+        "controller_label": {
+          "time": "2026-09-28T14:17:49.604",
+          "run_id": "20260928T141729-cfc8c9c5",
+          "kind": "BLOCKED",
+          "planning_route": "decomposition_first_recursive",
+          "experiment_case_id": "python_clamp",
+          "elapsed_seconds": 19.982,
+          "model_calls": 2,
+          "stage": "CHILD_VERIFICATION",
+          "reason": "CONTEXT_INSUFFICIENT",
+          "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+        },
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-3\\.agent_runs\\20260928T141729-cfc8c9c5.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\python_clamp\\compatible-3-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "current",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141803-29e0536c",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 10,
+      "tool_calls": 7,
+      "elapsed_seconds": 42.54,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1\\.agent_runs\\20260928T141803-29e0536c.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "current",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T142044-6401151e",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.11,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-2\\.agent_runs\\20260928T142044-6401151e.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-2-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "current",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T142135-dcfff8c0",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.25,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-3\\.agent_runs\\20260928T142135-dcfff8c0.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-3-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "compatible",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T141900-40dd7c55",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 36.52,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "time": "2026-09-28T14:19:36.515",
+        "run_id": "20260928T141900-40dd7c55",
+        "kind": "BLOCKED",
+        "planning_route": "decomposition_first_recursive",
+        "experiment_case_id": "node_unique",
+        "elapsed_seconds": 36.51,
+        "model_calls": 9,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: semantic evidence hash or inventory is invalid"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-1\\.agent_runs\\20260928T141900-40dd7c55.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-1-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "compatible",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T141950-a0ba3034",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 10,
+      "tool_calls": 7,
+      "elapsed_seconds": 40.55,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "time": "2026-09-28T14:20:30.561",
+        "run_id": "20260928T141950-a0ba3034",
+        "kind": "BLOCKED",
+        "planning_route": "decomposition_first_recursive",
+        "experiment_case_id": "node_unique",
+        "elapsed_seconds": 40.541,
+        "model_calls": 10,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: semantic evidence hash or inventory is invalid"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-2\\.agent_runs\\20260928T141950-a0ba3034.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-2-result.json"
+      }
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "compatible",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T142225-aa95ce7a",
+      "result": "failed",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": false,
+      "receipt_validation_errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "child_verified": false,
+      "root_verified": false,
+      "fresh_parent_verification": false,
+      "fresh_parent_proof_covers_requirement": false,
+      "false_reject": true,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.24,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "time": "2026-09-28T14:23:03.173",
+        "run_id": "20260928T142225-aa95ce7a",
+        "kind": "BLOCKED",
+        "planning_route": "decomposition_first_recursive",
+        "experiment_case_id": "node_unique",
+        "elapsed_seconds": 37.228,
+        "model_calls": 9,
+        "stage": "CHILD_RECEIPT",
+        "reason": "CHILD_RECEIPT_INVALID",
+        "detail": "child receipt invalid: semantic evidence hash or inventory is invalid"
+      },
+      "terminal_reason": "INTEGRATION_NOT_READY",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-3\\.agent_runs\\20260928T142225-aa95ce7a.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\compatible-3-result.json"
+      }
+    }
+  ],
+  "fresh_summary": {
+    "current": {
+      "expected_attempts": 15,
+      "completed_attempts": 15,
+      "verification_executable_rate": {
+        "numerator": 8,
+        "denominator": 15,
+        "percent": 53.33
+      },
+      "verification_pass_rate": {
+        "numerator": 8,
+        "denominator": 15,
+        "percent": 53.33
+      },
+      "valid_receipt_rate": {
+        "numerator": 3,
+        "denominator": 8,
+        "percent": 37.5
+      },
+      "child_verified_rate": {
+        "numerator": 3,
+        "denominator": 15,
+        "percent": 20.0
+      },
+      "root_verified_rate": {
+        "numerator": 3,
+        "denominator": 15,
+        "percent": 20.0
+      },
+      "false_rejection_rate": {
+        "numerator": 5,
+        "denominator": 8,
+        "percent": 62.5
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 5,
+        "denominator": 15,
+        "percent": 33.33
+      },
+      "repairer_calls": 5,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 125,
+      "total_tool_calls": 85,
+      "agent_tool_calls_per_root_verified": 28.33,
+      "total_elapsed_seconds": 649.41,
+      "model_calls_per_root_verified": 41.67,
+      "seconds_per_root_verified": 216.47,
+      "first_blockers": {
+        "aggregation": 5,
+        "worker_mutation_grounding": 4,
+        "worker_pre_mutation_impact": 3
+      }
+    },
+    "compatible": {
+      "expected_attempts": 15,
+      "completed_attempts": 15,
+      "verification_executable_rate": {
+        "numerator": 8,
+        "denominator": 15,
+        "percent": 53.33
+      },
+      "verification_pass_rate": {
+        "numerator": 8,
+        "denominator": 15,
+        "percent": 53.33
+      },
+      "valid_receipt_rate": {
+        "numerator": 5,
+        "denominator": 8,
+        "percent": 62.5
+      },
+      "child_verified_rate": {
+        "numerator": 5,
+        "denominator": 15,
+        "percent": 33.33
+      },
+      "root_verified_rate": {
+        "numerator": 5,
+        "denominator": 15,
+        "percent": 33.33
+      },
+      "false_rejection_rate": {
+        "numerator": 3,
+        "denominator": 8,
+        "percent": 37.5
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 0,
+        "denominator": 15,
+        "percent": 0.0
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 122,
+      "total_tool_calls": 87,
+      "agent_tool_calls_per_root_verified": 17.4,
+      "total_elapsed_seconds": 646.94,
+      "model_calls_per_root_verified": 24.4,
+      "seconds_per_root_verified": 129.39,
+      "first_blockers": {
+        "worker_mutation_grounding": 4,
+        "worker_pre_mutation_impact": 3,
+        "CHILD_RECEIPT": 3
+      }
+    }
+  },
+  "by_case": {
+    "arena_arrow": {
+      "current": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "verification_pass_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 2,
+          "percent": 0.0
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 2,
+          "denominator": 2,
+          "percent": 100.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "repairer_calls": 2,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 32,
+        "total_tool_calls": 22,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 184.36,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "aggregation": 2,
+          "worker_mutation_grounding": 1
+        }
+      },
+      "compatible": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "verification_pass_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "valid_receipt_rate": {
+          "numerator": 2,
+          "denominator": 2,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "root_verified_rate": {
+          "numerator": 2,
+          "denominator": 3,
+          "percent": 66.67
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 2,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 31,
+        "total_tool_calls": 23,
+        "agent_tool_calls_per_root_verified": 11.5,
+        "total_elapsed_seconds": 184.3,
+        "model_calls_per_root_verified": 15.5,
+        "seconds_per_root_verified": 92.15,
+        "first_blockers": {
+          "worker_mutation_grounding": 1
+        }
+      }
+    },
+    "arena_q_restart": {
+      "current": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "repairer_calls": 3,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 38,
+        "total_tool_calls": 26,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 201.23,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "aggregation": 3
+        }
+      },
+      "compatible": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 34,
+        "total_tool_calls": 25,
+        "agent_tool_calls_per_root_verified": 8.33,
+        "total_elapsed_seconds": 197.98,
+        "model_calls_per_root_verified": 11.33,
+        "seconds_per_root_verified": 65.99,
+        "first_blockers": {}
+      }
+    },
+    "timer_pause": {
+      "current": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "verification_pass_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 21,
+        "total_tool_calls": 18,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 86.45,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "worker_mutation_grounding": 3
+        }
+      },
+      "compatible": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "verification_pass_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 23,
+        "total_tool_calls": 20,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 89.74,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "worker_mutation_grounding": 3
+        }
+      }
+    },
+    "python_clamp": {
+      "current": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "verification_pass_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 6,
+        "total_tool_calls": 0,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 60.47,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "worker_pre_mutation_impact": 3
+        }
+      },
+      "compatible": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "verification_pass_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 0,
+          "percent": null
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 6,
+        "total_tool_calls": 0,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 60.61,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "worker_pre_mutation_impact": 3
+        }
+      }
+    },
+    "node_unique": {
+      "current": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 28,
+        "total_tool_calls": 19,
+        "agent_tool_calls_per_root_verified": 6.33,
+        "total_elapsed_seconds": 116.9,
+        "model_calls_per_root_verified": 9.33,
+        "seconds_per_root_verified": 38.97,
+        "first_blockers": {}
+      },
+      "compatible": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "child_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "root_verified_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "false_rejection_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 28,
+        "total_tool_calls": 19,
+        "agent_tool_calls_per_root_verified": null,
+        "total_elapsed_seconds": 114.31,
+        "model_calls_per_root_verified": null,
+        "seconds_per_root_verified": null,
+        "first_blockers": {
+          "CHILD_RECEIPT": 3
+        }
+      }
+    }
+  },
+  "paired_handoffs": {
+    "experiment": 12,
+    "mode": "paired_frozen_child_handoff",
+    "root_proof_reused": false,
+    "excluded_cases": [
+      {
+        "case_id": "python_clamp",
+        "reason": "NO_COMPLETED_WORKER_HANDOFF"
+      },
+      {
+        "case_id": "timer_pause",
+        "reason": "NO_COMPLETED_WORKER_HANDOFF"
+      }
+    ],
+    "full_original_results_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\comparison.json",
+    "comparisons": [
+      {
+        "case_id": "arena_arrow",
+        "input_capture": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_arrow\\current-1-EXEC-001-handoff.json",
+        "arms": [
+          {
+            "policy": "current",
+            "input_hash": "cb6e9304260443e7f7a093212991ed666e24772a6543f9c25706691b91cd8a92",
+            "eligible": true,
+            "child_verified": false,
+            "blocker": [
+              "REQUIRED_VERIFICATION_FAILED"
+            ],
+            "commit_status": null,
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "e38b263b796a5cb8f00c1c2461646befc96bbce03f2c7543e19d454bd613750e",
+            "subject_after_hash": "e38b263b796a5cb8f00c1c2461646befc96bbce03f2c7543e19d454bd613750e",
+            "receipt_validation": null,
+            "receipt_hash": null,
+            "gate_passed": false,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\arena_arrow\\current.json"
+          },
+          {
+            "policy": "compatible",
+            "input_hash": "cb6e9304260443e7f7a093212991ed666e24772a6543f9c25706691b91cd8a92",
+            "eligible": true,
+            "child_verified": true,
+            "blocker": null,
+            "commit_status": "done",
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "e38b263b796a5cb8f00c1c2461646befc96bbce03f2c7543e19d454bd613750e",
+            "subject_after_hash": "e38b263b796a5cb8f00c1c2461646befc96bbce03f2c7543e19d454bd613750e",
+            "receipt_validation": {
+              "valid": true,
+              "verified": true,
+              "errors": [],
+              "fresh": true
+            },
+            "receipt_hash": "8c15b192d2ded73e6e52e24f2d2a1eb304686d50f823dc77f2d00894cfa54e4d",
+            "gate_passed": true,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\arena_arrow\\compatible.json"
+          }
+        ]
+      },
+      {
+        "case_id": "arena_q_restart",
+        "input_capture": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1-EXEC-001-handoff.json",
+        "arms": [
+          {
+            "policy": "current",
+            "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+            "eligible": true,
+            "child_verified": false,
+            "blocker": [
+              "REQUIRED_VERIFICATION_FAILED"
+            ],
+            "commit_status": null,
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+            "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+            "receipt_validation": null,
+            "receipt_hash": null,
+            "gate_passed": false,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\arena_q_restart\\current.json"
+          },
+          {
+            "policy": "compatible",
+            "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+            "eligible": true,
+            "child_verified": true,
+            "blocker": null,
+            "commit_status": "done",
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+            "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+            "receipt_validation": {
+              "valid": true,
+              "verified": true,
+              "errors": [],
+              "fresh": true
+            },
+            "receipt_hash": "ecb8202ca78f54ed817e666f3e681326435b02b41c5a4c99cd743e2a49c70325",
+            "gate_passed": true,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\arena_q_restart\\compatible.json"
+          }
+        ]
+      },
+      {
+        "case_id": "node_unique",
+        "input_capture": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1-EXEC-001-handoff.json",
+        "arms": [
+          {
+            "policy": "current",
+            "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+            "eligible": true,
+            "child_verified": true,
+            "blocker": null,
+            "commit_status": "done",
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe",
+            "subject_after_hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe",
+            "receipt_validation": {
+              "valid": true,
+              "verified": true,
+              "errors": [],
+              "fresh": true
+            },
+            "receipt_hash": "3b22e84dcc1777fbe1a93e1553f84853d02df282c506ef456d81570f42e0f3c4",
+            "gate_passed": true,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\node_unique\\current.json"
+          },
+          {
+            "policy": "compatible",
+            "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+            "eligible": true,
+            "child_verified": false,
+            "blocker": [
+              "semantic evidence hash or inventory is invalid"
+            ],
+            "commit_status": "failed",
+            "model_calls": 0,
+            "repairer_calls": 0,
+            "root_verification_executed": false,
+            "subject_before_hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe",
+            "subject_after_hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe",
+            "receipt_validation": {
+              "valid": false,
+              "verified": false,
+              "errors": [
+                "semantic evidence hash or inventory is invalid"
+              ],
+              "fresh": true
+            },
+            "receipt_hash": "765d0710c8d46d0afbf6d957f8944d4a0f9107f82b8949c3a98021911b6f3aaf",
+            "gate_passed": true,
+            "full_result_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\paired-handoffs\\node_unique\\compatible.json"
+          }
+        ]
+      }
+    ]
+  },
+  "matrix_path": "D:\\projects\\Ai\\mini_hivo_experiment12\\evidence-matrix-v4\\matrix.json",
+  "protocol_summary": {
+    "current": {
+      "positive_cases": 17,
+      "negative_cases": 20,
+      "false_rejection_rate": {
+        "numerator": 5,
+        "denominator": 17,
+        "percent": 29.41
+      },
+      "final_receipt_false_acceptance_rate": {
+        "numerator": 15,
+        "denominator": 20,
+        "percent": 75.0
+      },
+      "aggregation_false_acceptance_rate": {
+        "numerator": 15,
+        "denominator": 20,
+        "percent": 75.0
+      }
+    },
+    "compatible": {
+      "positive_cases": 17,
+      "negative_cases": 20,
+      "false_rejection_rate": {
+        "numerator": 11,
+        "denominator": 17,
+        "percent": 64.71
+      },
+      "final_receipt_false_acceptance_rate": {
+        "numerator": 0,
+        "denominator": 20,
+        "percent": 0.0
+      },
+      "aggregation_false_acceptance_rate": {
+        "numerator": 6,
+        "denominator": 20,
+        "percent": 30.0
+      }
+    }
+  },
+  "default_promoted": false,
+  "eligible_fresh_cases": [
+    "arena_arrow",
+    "arena_q_restart",
+    "node_unique"
+  ],
+  "native_reference_compatibility": {
+    "arena_arrow": {
+      "native_verifications": 3,
+      "current": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "compatible": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      }
+    },
+    "arena_q_restart": {
+      "native_verifications": 3,
+      "current": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "compatible": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      }
+    },
+    "timer_pause": {
+      "native_verifications": 3,
+      "current": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "compatible": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      }
+    },
+    "python_clamp": {
+      "native_verifications": 3,
+      "current": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "compatible": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      }
+    },
+    "node_unique": {
+      "native_verifications": 3,
+      "current": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "compatible": {
+        "numerator": 0,
+        "denominator": 3,
+        "percent": 0.0
+      }
+    }
+  },
+  "protocol_repetitions_agree": true,
+  "protocol_repetitions": [
+    {
+      "path": "D:\\projects\\Ai\\mini_hivo_experiment12\\evidence-matrix-v4\\matrix.json",
+      "summary": {
+        "current": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 5,
+            "denominator": 17,
+            "percent": 29.41
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          }
+        },
+        "compatible": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 11,
+            "denominator": 17,
+            "percent": 64.71
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 0,
+            "denominator": 20,
+            "percent": 0.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 6,
+            "denominator": 20,
+            "percent": 30.0
+          }
+        }
+      }
+    },
+    {
+      "path": "D:\\projects\\Ai\\mini_hivo_experiment12\\evidence-matrix-v5\\matrix.json",
+      "summary": {
+        "current": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 5,
+            "denominator": 17,
+            "percent": 29.41
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          }
+        },
+        "compatible": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 11,
+            "denominator": 17,
+            "percent": 64.71
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 0,
+            "denominator": 20,
+            "percent": 0.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 6,
+            "denominator": 20,
+            "percent": 30.0
+          }
+        }
+      }
+    },
+    {
+      "path": "D:\\projects\\Ai\\mini_hivo_experiment12\\evidence-matrix-v6\\matrix.json",
+      "summary": {
+        "current": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 5,
+            "denominator": 17,
+            "percent": 29.41
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 15,
+            "denominator": 20,
+            "percent": 75.0
+          }
+        },
+        "compatible": {
+          "positive_cases": 17,
+          "negative_cases": 20,
+          "false_rejection_rate": {
+            "numerator": 11,
+            "denominator": 17,
+            "percent": 64.71
+          },
+          "final_receipt_false_acceptance_rate": {
+            "numerator": 0,
+            "denominator": 20,
+            "percent": 0.0
+          },
+          "aggregation_false_acceptance_rate": {
+            "numerator": 6,
+            "denominator": 20,
+            "percent": 30.0
+          }
+        }
+      }
+    }
+  ],
+  "result_path": "D:\\projects\\Ai\\mini_hivo\\reports\\experiment12\\experiment12-results.json"
+}

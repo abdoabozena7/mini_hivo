@@ -1,0 +1,136 @@
+{
+  "date": "2026-10-22",
+  "timezone": "Africa/Cairo",
+  "scope": "Fresh offline publication checks; no live model rerun. Successful manual live result remains the dated 21 October observation.",
+  "tested_base": "cca388daa3537030abdb7b6cf175d847f23b99ec",
+  "production_source_sha256": {
+    "mini.py": "2f1823505464543ead724168163f8158364aee9b7fcb08c27205378c77df7862",
+    "hivo/requirements.py": "d9b018027b9c6cf4eeb39036db308ad2177c5c4cba2dc86238d109b1fcc24c4a",
+    "hivo/verification_routing.py": "ba25ccf44567ba1e6b2a40b98211f09c44e9ebed5667aa48377fdec5246f16d4"
+  },
+  "suites": [
+    {
+      "pattern": "test_adaptive_architecture.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_adaptive_architecture.py -v",
+      "tests_run": 90,
+      "seconds": 5.404,
+      "individual_ok": 90,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_adaptive_architecture.log"
+    },
+    {
+      "pattern": "test_authority*.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_authority*.py -v",
+      "tests_run": 23,
+      "seconds": 0.643,
+      "individual_ok": 23,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_authorityall.log"
+    },
+    {
+      "pattern": "test_context_sufficiency_gate.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_context_sufficiency_gate.py -v",
+      "tests_run": 9,
+      "seconds": 0.216,
+      "individual_ok": 9,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_context_sufficiency_gate.log"
+    },
+    {
+      "pattern": "test_experiment*.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_experiment*.py -v",
+      "tests_run": 122,
+      "seconds": 4.953,
+      "individual_ok": 122,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_experimentall.log"
+    },
+    {
+      "pattern": "test_greenfield_impact_lifecycle.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_greenfield_impact_lifecycle.py -v",
+      "tests_run": 17,
+      "seconds": 0.969,
+      "individual_ok": 17,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_greenfield_impact_lifecycle.log"
+    },
+    {
+      "pattern": "test_level1_native_verification.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_level1_native_verification.py -v",
+      "tests_run": 10,
+      "seconds": 0.62,
+      "individual_ok": 10,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_level1_native_verification.log"
+    },
+    {
+      "pattern": "test_model_policy.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_model_policy.py -v",
+      "tests_run": 4,
+      "seconds": 0.346,
+      "individual_ok": 4,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_model_policy.log"
+    },
+    {
+      "pattern": "test_pre_mutation_impact.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_pre_mutation_impact.py -v",
+      "tests_run": 27,
+      "seconds": 0.299,
+      "individual_ok": 27,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_pre_mutation_impact.log"
+    },
+    {
+      "pattern": "test_project_understanding.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_project_understanding.py -v",
+      "tests_run": 32,
+      "seconds": 1.025,
+      "individual_ok": 32,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_project_understanding.log"
+    },
+    {
+      "pattern": "test_verification_applicability.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_verification_applicability.py -v",
+      "tests_run": 15,
+      "seconds": 0.12,
+      "individual_ok": 15,
+      "individual_errors": 0,
+      "individual_failures": 0,
+      "observed_summary": "OK",
+      "log": "publication-checks/test_verification_applicability.log"
+    },
+    {
+      "pattern": "test_verification_policy.py",
+      "command": ".\\.venv\\Scripts\\python.exe -B -X utf8 -m unittest discover -s tests -p test_verification_policy.py -v",
+      "tests_run": 8,
+      "seconds": 0.026,
+      "individual_ok": 6,
+      "individual_errors": 2,
+      "individual_failures": 0,
+      "observed_summary": "FAILED (errors=2)",
+      "log": "publication-checks/test_verification_policy.log"
+    }
+  ],
+  "controlled_replay": "publication-checks/controlled-result.json",
+  "limitations": "Known verification-policy fixture errors retained; full discovery not run because of historical dependencies and a live-calling test. Counts are not summed as unique coverage."
+}

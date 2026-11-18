@@ -1,0 +1,68 @@
+{
+  "base_url": "http://127.0.0.1:8765/",
+  "environment": "local",
+  "headed": true,
+  "timeout_ms": 10000,
+  "scenarios": [
+    {
+      "name": "add-and-persist",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "steps": [
+        {
+          "action": "goto"
+        },
+        {
+          "action": "fill",
+          "selector": "#item",
+          "value": "Check this actual item"
+        },
+        {
+          "action": "click",
+          "selector": "#add"
+        },
+        {
+          "action": "expect_text",
+          "selector": "#items li",
+          "value": "Check this actual item"
+        },
+        {
+          "action": "reload"
+        },
+        {
+          "action": "expect_text",
+          "selector": "#items li",
+          "value": "Check this actual item"
+        }
+      ]
+    },
+    {
+      "name": "mobile-empty-input",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "steps": [
+        {
+          "action": "goto"
+        },
+        {
+          "action": "click",
+          "selector": "#add"
+        },
+        {
+          "action": "expect_text",
+          "selector": "#error",
+          "value": "Enter an item"
+        },
+        {
+          "action": "expect_count",
+          "selector": "#items li",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

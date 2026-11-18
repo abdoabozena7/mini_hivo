@@ -1,0 +1,19 @@
+{
+  "experiment": 20,
+  "status": "Live improvements demonstrated; complete live acceptance remains pending",
+  "fully_live_passed": false,
+  "full_e2e_passed": false,
+  "criteria": {
+    "foundation_acceptance": "demonstrated",
+    "incomplete_parent_rejection": "demonstrated",
+    "movement_only_child_profile": "demonstrated",
+    "authorized_writes": "demonstrated_provisional",
+    "movement_acceptance": "not_achieved",
+    "collection_child": "not_dispatched",
+    "retained_movement_during_collection": "not_tested_live",
+    "complete_parent_acceptance": "not_reached"
+  },
+  "original_offline_results": "../experiment20-results.json",
+  "new_runs_or_tests_for_documentation": 0,
+  "cohort_scope": "133 selected methods before final hint change; 9 hint plus 1 existing validator afterward. Overlapping, not full suite."
+}

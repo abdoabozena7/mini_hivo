@@ -1,0 +1,122 @@
+[
+  {
+    "number": 12,
+    "title": "Experiment 18A Follow-up \u2014 Existing Evidence Schema and Feedback Fix History",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-28T12:38:42Z",
+    "head": "0572f9360698ec42473ad037eb798c8e6966300e",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/12"
+  },
+  {
+    "number": 11,
+    "title": "Experiment 3 Follow-up \u2014 Existing Greenfield Worker Fix History and Validation",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-28T12:38:23Z",
+    "head": "2ef3b550ebce33b29656c1c0303b003c68bc8dc4",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/11"
+  },
+  {
+    "number": 10,
+    "title": "Experiment 20 \u2014 Child-Scoped Verification",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-11-07T14:51:48Z",
+    "head": "156c616a3a678b803d3e695dcb8386dae040960d",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/10"
+  },
+  {
+    "number": 9,
+    "title": "Experiment 19 \u2014 Verification Integrity",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-11-07T14:51:46Z",
+    "head": "af5ed5dded24f2ae8f3bdc10e60eb9362efd0563",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/9"
+  },
+  {
+    "number": 8,
+    "title": "WIP: R_UPDATE_003 \u2014 Level 2 Progress, Recovery and Verification Investigation",
+    "author": "rodinaasfour665-ctrl",
+    "state": "open",
+    "draft": true,
+    "updated_at": "2026-10-23T14:23:03Z",
+    "head": "6f0047ca27e979db10e338357f0fa6a22fe0bf93",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/8"
+  },
+  {
+    "number": 7,
+    "title": "E2E -Mini Hivo \u2014 Cumulative Implementation Update Through Run-010",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-23T07:47:35Z",
+    "head": "2a8b94590734cec3375047a18e0dc71df2476f85",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/7"
+  },
+  {
+    "number": 6,
+    "title": "Complete Level 1 native verification and document the real Ollama pass",
+    "author": "rodinaasfour665-ctrl",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-21T21:23:39Z",
+    "head": "9957271c8e66d10bdfa5b408c74d26fcd7b78be2",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/6"
+  },
+  {
+    "number": 5,
+    "title": "Fix literal greenfield impact authorization and exact-byte verification",
+    "author": "rodinaasfour665-ctrl",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-21T16:16:33Z",
+    "head": "cca388daa3537030abdb7b6cf175d847f23b99ec",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/5"
+  },
+  {
+    "number": 4,
+    "title": "E2E _Implementation Handoff and Runs 007->009",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": false,
+    "updated_at": "2026-10-23T07:46:42Z",
+    "head": "d5acac182a5f3340968c2676d70a35369d81c3c5",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/4"
+  },
+  {
+    "number": 3,
+    "title": "E2E \u2014 Cross-Experiment Integration Findings (Experiments 1\u201318)",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": true,
+    "updated_at": "2026-10-21T09:37:16Z",
+    "head": "3d20a720302c05d527bb72a0540e726fc525c9e2",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/3"
+  },
+  {
+    "number": 2,
+    "title": "E2E \u2014 Validation",
+    "author": "tasneem-ahmed05",
+    "state": "open",
+    "draft": true,
+    "updated_at": "2026-10-20T22:52:12Z",
+    "head": "1e233845b3e9d26b10bb66238ec13a00f108356e",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/2"
+  },
+  {
+    "number": 1,
+    "title": "docs(research): preserve Experiment 18B findings",
+    "author": "kareem232003",
+    "state": "closed",
+    "draft": false,
+    "updated_at": "2026-10-11T15:21:12Z",
+    "head": "6bfa36b0a3aa3c1d67cc737d91a0867e38738d5f",
+    "url": "https://github.com/kareem232003/mini_hivo/pull/1"
+  }
+]

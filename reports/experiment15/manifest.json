@@ -1,0 +1,121 @@
+{
+  "experiment": 15,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "repeats": 3,
+  "baseline_suite": "D:\\projects\\Ai\\mini_hivo_experiment14\\suite-v2",
+  "arms": [
+    "evidence_grounded",
+    "evidence_bound"
+  ],
+  "cases": [
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "source": "arena.html",
+      "symbol": "move",
+      "goal": "Fix the arena game's ArrowUp keyboard movement so the player moves up, while preserving existing touch controls.",
+      "integration_target": "arena.html",
+      "expected_interactions": [
+        "keyboard_movement",
+        "touch_control"
+      ],
+      "seed_sha256": {
+        "arena.html": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+      },
+      "approved_plan_hash": "79a23bf18d4f2e9b99d6ce55d2f400923f8d4ef4d894a63f96783b9897c0ff5f",
+      "execution_contract_hash": "474a6b12dbecb93a8284352a14c31809ffb822b9fcf716575159424e64bd4e14"
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "source": "arena.html",
+      "symbol": "restart",
+      "goal": "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls.",
+      "integration_target": "arena.html",
+      "expected_interactions": [
+        "keyboard_movement",
+        "restart_resets_state",
+        "goal_win_state",
+        "touch_control"
+      ],
+      "seed_sha256": {
+        "arena.html": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+      },
+      "approved_plan_hash": "0a23aed5c55b893028a6ce989073e5ad82be88ca278942f8f4fb023802589c7f",
+      "execution_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac"
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "source": "values.js",
+      "symbol": "uniqueValues",
+      "goal": "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior.",
+      "test_target": "tests/unique.test.js",
+      "integration_target": "node tests/unique.test.js",
+      "expected_tests": 4,
+      "seed_sha256": {
+        "values.js": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+        "tests/unique.test.js": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35"
+      },
+      "approved_plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+      "execution_contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242"
+    }
+  ],
+  "policies": {
+    "planning_route": "decomposition_first_recursive",
+    "mission_advice_policy": "contract_fallback",
+    "worker_progress_policy": "progress_constrained",
+    "mutation_grounding_policy": "evidence_grounded",
+    "target_locator_policy": "evidence_directed",
+    "verification_environment_policy": "resolved",
+    "verification_surface_policy": "discovery",
+    "child_receipt_policy": "atomic_verified",
+    "integration_target_policy": "resolved"
+  },
+  "production_sha256": {
+    "mini.py": "c8ee02ba7153ee72e22db2c764480c00dc9727d9951154f91a4166f661f814b0",
+    "hivo/evidence_compatibility.py": "9b1614721414c6326b6828053ac1cdbfd4ce9474a75f61640af5d120fd5ec67a",
+    "hivo/atomic_child_receipt.py": "21e9c0e197f00469da57e6f4c7a950698ed0111269fb4a0aaebf70202e3493bd",
+    "hivo/verification_routing.py": "5489d09c51234f1e3717d4cb58619c9736574ceb010a9841f02c3ec6f9d62206",
+    "hivo/verification.py": "74cfde6c378a34799cb365507f7062fe6dcd27287a2ccd21aaebfcc7daaaf29c",
+    "hivo/verification_surfaces.py": "6b9e251b8373d00ae3ad94012d967735a0c66efda9b0dbc13a5d9473c96378fd",
+    "hivo/worker_progress.py": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+    "hivo/mutation_grounding.py": "11d318d175435ab05115d8c48a02da2b89143769bd71e0bdeea9331b790d4ac7",
+    "hivo/integration_targets.py": "e5b8bde6682e162a60c302de798843c25bcdbfc63ea6a26c56146e26332c41a5",
+    "hivo/evidence_monotonic.py": "2525c66cc0fa5cf74b70a1eb1eb8d39784b985522c3826485c1213a7bf4312c2",
+    "hivo/evidence_strict.py": "aefb9e8168a1d6a83bfd930894f6bc9b0f0c22d753279f7a9872c838601cfcc8"
+  },
+  "unchanged_component_sha256": {
+    "hivo/verification.py": "74cfde6c378a34799cb365507f7062fe6dcd27287a2ccd21aaebfcc7daaaf29c",
+    "hivo/verification_surfaces.py": "6b9e251b8373d00ae3ad94012d967735a0c66efda9b0dbc13a5d9473c96378fd",
+    "hivo/worker_progress.py": "422e1a0bf6a7084765d61b4928cb4ed3eb5db9aeddfa7a014b7d25e1e143fc45",
+    "hivo/integration_targets.py": "e5b8bde6682e162a60c302de798843c25bcdbfc63ea6a26c56146e26332c41a5",
+    "hivo/verification_routing.py": "5489d09c51234f1e3717d4cb58619c9736574ceb010a9841f02c3ec6f9d62206",
+    "hivo/evidence_strict.py": "aefb9e8168a1d6a83bfd930894f6bc9b0f0c22d753279f7a9872c838601cfcc8",
+    "hivo/atomic_child_receipt.py": "21e9c0e197f00469da57e6f4c7a950698ed0111269fb4a0aaebf70202e3493bd",
+    "hivo/evidence_monotonic.py": "2525c66cc0fa5cf74b70a1eb1eb8d39784b985522c3826485c1213a7bf4312c2",
+    "hivo/evidence_compatibility.py": "9b1614721414c6326b6828053ac1cdbfd4ce9474a75f61640af5d120fd5ec67a"
+  },
+  "primary_boundary": "approved contract -> fresh Worker -> child receipt -> fresh parent verification",
+  "planning_cost_included": false,
+  "excluded_cases": {
+    "timer_pause": "upstream grounding failure",
+    "python_clamp": "upstream impact failure"
+  },
+  "hypothesis": "Identical bounded current source can authorize one exact retry independently of read tool spelling.",
+  "fixed_semantic_evidence_policy": "strict",
+  "fixed_controller_ast_sha256": {
+    "execute_agent_task": "5d9e75818f0c94367203b1900f27f4aaa67134d3f8bb013f7c76a0f40abc35ee",
+    "ask_ollama": "e10e89e9e9695007ab6eebc79978797122e683a3dcb892197c25b1909dd1ecd6",
+    "run_tool": "045e3e2042cca639e6b3e1660c3f9df778e455cf89d5d8b28ed77e7ae464d5d2",
+    "optional_browser_check": "fa6f4a543cfb3ba7efbd199301adb16586d00485d7b52ae1063f73cb4e659d6a",
+    "_verification_aggregation": "17772bf5918825d7b0bd97a6d804adfb56ba8aa3de5ebb4799bf59d578d8f40e",
+    "falsify_task": "a0d791428f9a239ae5306505e10d45ba0e5473f0be03e9df0c6da6a5df7012b5",
+    "_commit_verified_leaf": "fe39339b70406a2251eefece20f36fee155040043a7c1da3c7b7407216ed222f",
+    "_stage5b_parent_readiness": "ab8d222d6260dec417d061a86337896e4762801ace863f4fa4e1eb183a5ba8b7",
+    "_aggregate_stage5b_parent": "b9772deb567e96e273dc7dc5d0f9e7a47568123e261cb4e75828ffdf185e8258"
+  },
+  "final_receipt_gate_changed": false,
+  "default_change_allowed": false
+}

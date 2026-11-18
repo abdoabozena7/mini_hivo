@@ -1,0 +1,139 @@
+{
+  "experiment": 22,
+  "suite_count": 13,
+  "expected_methods": 181,
+  "observed_methods": 181,
+  "passed": true,
+  "suites": [
+    {
+      "suite": "test_experiment20_child_scope.py",
+      "expected_methods": 38,
+      "observed_methods": 38,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_experiment17_field_scoped_profile.py",
+      "expected_methods": 5,
+      "observed_methods": 5,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_verified_child_integration.py",
+      "expected_methods": 22,
+      "observed_methods": 22,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_experiment9_integration_targets.py",
+      "expected_methods": 12,
+      "observed_methods": 12,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_verification_outcome_integrity.py",
+      "expected_methods": 31,
+      "observed_methods": 31,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_evidence_policy.py",
+      "expected_methods": 9,
+      "observed_methods": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_verification_applicability.py",
+      "expected_methods": 15,
+      "observed_methods": 15,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_experiment11_evidence_compatibility.py",
+      "expected_methods": 10,
+      "observed_methods": 10,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_experiment13_monotonic.py",
+      "expected_methods": 9,
+      "observed_methods": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_experiment18a_schema_feedback.py",
+      "expected_methods": 9,
+      "observed_methods": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_context_sufficiency_gate.py",
+      "expected_methods": 9,
+      "observed_methods": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_greenfield_context_progress.py",
+      "expected_methods": 9,
+      "observed_methods": 9,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    },
+    {
+      "suite": "test_repair_impact_anchor.py",
+      "expected_methods": 3,
+      "observed_methods": 3,
+      "exit_code": 0,
+      "summary": [
+        "OK"
+      ],
+      "passed": true
+    }
+  ]
+}

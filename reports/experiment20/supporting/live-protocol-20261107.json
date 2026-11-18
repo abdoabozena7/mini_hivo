@@ -1,0 +1,35 @@
+{
+  "experiment": 20,
+  "base_commit": "6ec3bda16e88af764f63ea9fc7319096ffd25cbe",
+  "dates": [
+    "2026-11-06",
+    "2026-11-07"
+  ],
+  "model": "gemma4:e4b",
+  "model_digest": "dc35e8d9c6061baa6f0fa870975ab6932e2542b579b13ea0f199fa4bb7300c9c",
+  "python": "3.11.9",
+  "policy": "current_recursive",
+  "browser_policy": "field_scoped",
+  "limits": {
+    "process_seconds": 1800,
+    "worker_steps": 28,
+    "falsifier_steps": 8,
+    "request_timeout_seconds": 600
+  },
+  "boundary": "Real production roles/tools/browser/quality/transaction; controlled movement/collection subset, not full CLI ingestion/specification/decomposition or full game",
+  "observers": "Original calls/results forwarded unchanged",
+  "checkpoints": "Actual failed receipt/mission or accepted foundation explicitly reused; fresh authorization, never counted as new scripted model evidence",
+  "mutation_safety": "Context/Impact active; ordinary execution contract null; optional progress-constrained/contract-bound activation not claimed",
+  "acceptance_observations": {
+    "foundation_acceptance": "demonstrated",
+    "incomplete_parent_rejection": "demonstrated",
+    "movement_only_child_profile": "demonstrated",
+    "authorized_writes": "demonstrated_provisional",
+    "movement_acceptance": "not_achieved",
+    "collection_child": "not_dispatched",
+    "retained_movement_during_collection": "not_tested_live",
+    "complete_parent_acceptance": "not_reached"
+  },
+  "reproduction_limit": "Raw harnesses local-only. Curated evidence review, not portable one-command live reproduction.",
+  "complete_acceptance": "Successful functional repair/fresh required verification/transaction, or accepted sequential movement/collection with retained duties and complete parent, remain mandatory."
+}

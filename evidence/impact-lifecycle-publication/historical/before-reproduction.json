@@ -1,0 +1,47 @@
+{
+  "status": "failed",
+  "failure_type": "CONTEXT_INSUFFICIENT",
+  "summary": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation",
+  "impact_validation": null,
+  "impact_authorized": false,
+  "context_sufficiency": {
+    "state": "PREPARING_CONTEXT",
+    "context_status": null,
+    "mutation_allowed": false,
+    "round": 0,
+    "request_count": 0,
+    "max_rounds": 3,
+    "max_requests_per_round": 3,
+    "anchor": {
+      "root_goal": "Create a text file named welcone containing exactly welcome.",
+      "parent_goal": "",
+      "local_task": "Create a text file named welcone containing exactly welcome.",
+      "group_goal": "",
+      "group_invariant": "",
+      "requirements": [
+        "Create a text file.",
+        "The file name must be 'welcone'.",
+        "The content of the file must be 'welcome'."
+      ],
+      "constraints": [],
+      "allowed_inspection_paths": []
+    },
+    "anchor_hash": "d317e68d1b8cbf0bf316aef4232e3982f4f7a61e2b910fce40f080cf91683ea5",
+    "working_evidence": [],
+    "working_evidence_count": 0,
+    "working_evidence_chars": 2,
+    "working_evidence_limit": 4200,
+    "evidence_items_dropped": 0,
+    "contradictions": [],
+    "semantic_resolutions": [],
+    "history": [],
+    "failure_code": null
+  },
+  "metrics": {
+    "impact_contracts_created": 1,
+    "impact_contracts_validated": 0,
+    "impact_contract_authorizations": 0,
+    "tool_calls": 0
+  },
+  "source_sha256": "b22b51b3ae71e21893385fc1f940ef834f1a83337124b004e1e0af34944ed43b"
+}

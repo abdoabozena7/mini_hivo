@@ -1,0 +1,49 @@
+{
+  "case_id": "rkey_01",
+  "route": "decomposition_first_recursive",
+  "approved_plan_hash": "465262cd697d45053c410406edb607373e771ddf06568ef752b11e4646185d43",
+  "runs": {
+    "current": {
+      "policy": "current",
+      "status": "failed",
+      "worker_started": true,
+      "first_mutation_attempt_step": 3,
+      "mutation_attempts": 2,
+      "grounded_mutation_attempts": 0,
+      "grounded_attempt_percent": 0.0,
+      "rejected_mutation_attempts": 2,
+      "bounded_refreshes": 0,
+      "first_applied_legal_mutation_step": null,
+      "budget_remaining_at_first_applied_mutation": null,
+      "verification_attempted_after_mutation": false,
+      "verified_child_commit": false,
+      "root_verified": false,
+      "first_blocker_stage": "WORKER_PROGRESS",
+      "first_blocker_reason": "WORKER_NO_MUTATION_PROGRESS",
+      "tool_steps_observed": 5,
+      "scope_violations": 0,
+      "preservation_violations": 0
+    },
+    "evidence_grounded": {
+      "policy": "evidence_grounded",
+      "status": "failed",
+      "worker_started": true,
+      "first_mutation_attempt_step": 3,
+      "mutation_attempts": 2,
+      "grounded_mutation_attempts": 0,
+      "grounded_attempt_percent": 0.0,
+      "rejected_mutation_attempts": 2,
+      "bounded_refreshes": 1,
+      "first_applied_legal_mutation_step": null,
+      "budget_remaining_at_first_applied_mutation": null,
+      "verification_attempted_after_mutation": false,
+      "verified_child_commit": false,
+      "root_verified": false,
+      "first_blocker_stage": "MUTATION_GROUNDING",
+      "first_blocker_reason": "MUTATION_TARGET_UNRESOLVED",
+      "tool_steps_observed": 5,
+      "scope_violations": 0,
+      "preservation_violations": 0
+    }
+  }
+}

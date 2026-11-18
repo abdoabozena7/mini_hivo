@@ -1,0 +1,11 @@
+{
+  "provenance": "Intermediate fallback regression only; not a stable whole-cohort comparison.",
+  "suite": {
+    "pattern": "test_experiment20_child_scope.py",
+    "tests": 26,
+    "exit_code": 1,
+    "summary": [
+      "FAILED (failures=1)"
+    ]
+  }
+}

@@ -1,0 +1,135 @@
+[
+  {
+    "label": "greenfield",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_greenfield_impact_lifecycle.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 1.3
+  },
+  {
+    "label": "impact",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_pre_mutation_impact.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 0.81
+  },
+  {
+    "label": "context",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_context_sufficiency_gate.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 0.87
+  },
+  {
+    "label": "authority",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_authority*.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 1.16
+  },
+  {
+    "label": "understanding",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_project_understanding.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 1.26
+  },
+  {
+    "label": "experiments",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_experiment*.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 2.2
+  },
+  {
+    "label": "adaptive",
+    "command": [
+      "<LOCAL_PATH>",
+      "-B",
+      "-X",
+      "utf8",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_adaptive_architecture.py",
+      "-v"
+    ],
+    "exit_code": 0,
+    "seconds": 4.89
+  }
+]

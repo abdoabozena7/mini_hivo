@@ -1,0 +1,1078 @@
+{
+  "experiment": 13,
+  "outcomes": [
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "INVALID_RECEIPT",
+          "metadata_status": "AVAILABLE",
+          "decision": "SEMANTIC_RESCUE"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "arena_arrow",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "INVALID_RECEIPT",
+          "metadata_status": "AVAILABLE",
+          "decision": "SEMANTIC_RESCUE"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "run_file_load_plus_fresh_behavior",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "cross_tool_same_executed_assertions",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence does not cover every required assertion"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic browser target has no bound claims/evidence"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements",
+        "available evidence is incompatible with approved assertions/current subject"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PASS",
+          "metadata_status": "AVAILABLE",
+          "decision": "CURRENT"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "arena.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "arena_q_restart",
+      "scenario": "unit_pass_cannot_replace_browser_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "native_matching_claim",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_file",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_run_command",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_unit_assertions_unit_test_result",
+      "expected_compatible": true,
+      "false_accept": false,
+      "false_reject": true,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence requirement differs from approved requirements"
+      ],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_requirement",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence behavior is not bound to required verification"
+      ],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "same_file_different_behavior",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": true,
+      "valid_receipt": true,
+      "errors": [],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": true,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": true,
+      "valid_receipt": false,
+      "errors": [
+        "declared evidence target differs from required verification target"
+      ],
+      "decisions": [],
+      "case_id": "node_unique",
+      "scenario": "different_target",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": true
+    },
+    {
+      "policy": "current",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "compatible",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt",
+        "semantic evidence hash or inventory is invalid"
+      ],
+      "decisions": null,
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    },
+    {
+      "policy": "monotonic",
+      "aggregation_accepted": false,
+      "valid_receipt": false,
+      "errors": [
+        "child verification did not produce a verified receipt"
+      ],
+      "decisions": [
+        {
+          "kind": "BROWSER",
+          "target": "unrelated.html",
+          "current_result": "PENDING",
+          "metadata_status": "UNKNOWN",
+          "decision": "LEGACY_UNCHANGED"
+        }
+      ],
+      "case_id": "node_unique",
+      "scenario": "unit_cannot_replace_browser_obligation",
+      "expected_compatible": false,
+      "false_accept": false,
+      "false_reject": false,
+      "aggregation_false_accept": false
+    }
+  ],
+  "model_calls": 0,
+  "primary_cases": [
+    "arena_arrow",
+    "arena_q_restart",
+    "node_unique"
+  ],
+  "upstream_exclusions": [
+    "timer_pause",
+    "python_clamp"
+  ],
+  "scope": "Reference candidate verification + declared adversarial/provenance replays; no Worker or Root success claimed."
+}

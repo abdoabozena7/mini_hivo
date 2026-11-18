@@ -1,0 +1,133 @@
+{
+  "provenance": {
+    "run": "010",
+    "sqlite_event": 10,
+    "tool": "verify_web_app",
+    "original_content_sha256": "3a6741d8df6b2108fdd7aaf382f73ae2dd68dc552922a0d97174ba1fb0aaeb96",
+    "derivative": "Original payload with URL, screenshot path and ignored favicon diagnostics omitted. Route/applicability metadata retained to reproduce the storage overflow. Not byte-identical to the original full payload."
+  },
+  "target": "index.html",
+  "failed_payload": {
+    "requested_from_node": "index.html",
+    "resolved_entrypoint": "index.html",
+    "resolution_source": "unique_root_html",
+    "resolution_status": "RESOLVED",
+    "passed": false,
+    "environment_error": false,
+    "title": "Coin Courier",
+    "text": "Score: 0\nBest Score: 0\nCoin Courier\n\nNavigate the courier to collect coins!\n\nUse Arrow Keys or WASD to move.\n\nCollect coins to score points. Avoid obstacles (not implemented yet).\n\nStart Game",
+    "console_errors": [],
+    "page_errors": [],
+    "network_errors": [],
+    "runtime_state": {
+      "canvasCount": 1,
+      "gameBridge": null,
+      "debugState": null
+    },
+    "interaction_checks": [],
+    "failures": [
+      {
+        "code": "missing_game_bridge",
+        "evidence": "window.AGENT_GAME verification bridge is unavailable"
+      },
+      {
+        "code": "missing_interaction",
+        "evidence": "required browser interaction did not run: keyboard_movement"
+      },
+      {
+        "code": "missing_interaction",
+        "evidence": "required browser interaction did not run: collection_updates_state"
+      }
+    ],
+    "verification_profile": {
+      "kind": "game",
+      "require_title": true,
+      "require_canvas": true,
+      "require_game_bridge": true,
+      "required_interactions": [
+        "keyboard_movement",
+        "collection_updates_state"
+      ]
+    },
+    "entry_path": "index.html",
+    "verification_status": "FAIL",
+    "verification_route": {
+      "kind": "BROWSER",
+      "required": true,
+      "applicable": true,
+      "target": "index.html",
+      "reason_codes": [
+        "EXPLICIT_BROWSER_REQUIREMENT",
+        "SUPPORTED_TARGET_PRESENT"
+      ],
+      "evidence_refs": [
+        "child:1",
+        "contract:browser_requirement",
+        "contract:requested_target:index.html",
+        "repo:entrypoint:index.html"
+      ],
+      "result": "FAIL",
+      "requested_from_node": "index.html",
+      "resolution_status": "RESOLVED",
+      "resolution_source": "unique_root_html",
+      "candidates": [],
+      "actual_result": "FAIL"
+    },
+    "verification_applicability": {
+      "schema_version": "V20.5A",
+      "child_id": "1",
+      "model_calls": 0,
+      "verification_routes": [
+        {
+          "kind": "SYNTAX_STATIC_GATE",
+          "required": false,
+          "applicable": false,
+          "target": null,
+          "reason_codes": [
+            "VERIFIER_NOT_REQUIRED"
+          ],
+          "evidence_refs": [
+            "child:1"
+          ],
+          "result": "SKIPPED_NOT_APPLICABLE",
+          "resolution_status": "NOT_APPLICABLE",
+          "resolution_source": "applicability_analyzer"
+        },
+        {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "index.html",
+          "reason_codes": [
+            "EXPLICIT_BROWSER_REQUIREMENT",
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:1",
+            "contract:browser_requirement",
+            "contract:requested_target:index.html",
+            "repo:entrypoint:index.html"
+          ],
+          "result": "FAIL",
+          "requested_from_node": "index.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": [],
+          "actual_result": "FAIL"
+        }
+      ],
+      "repository_evidence": {
+        "known_entrypoints": [
+          "index.html"
+        ],
+        "known_test_files": [],
+        "observed_file_types": [
+          "html"
+        ]
+      },
+      "verification_applicability_hash": "a7dcdb9e62af16e5b7baadeb77a3597dbbaea78a0904d5c17197d942b7f5050c",
+      "verification_routes_hash": "a7dcdb9e62af16e5b7baadeb77a3597dbbaea78a0904d5c17197d942b7f5050c",
+      "last_result": "FAIL"
+    }
+  }
+}

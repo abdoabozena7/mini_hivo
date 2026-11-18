@@ -1,0 +1,104 @@
+{
+  "request": "Create a text file named test_level_1.txt containing exactly:Hello Mini Hivo",
+  "wall_limit_seconds": 360,
+  "kind": "REAL_OLLAMA_CLI_AUTO",
+  "source_sha256": {
+    "mini.py": "2f1823505464543ead724168163f8158364aee9b7fcb08c27205378c77df7862",
+    "hivo/requirements.py": "d9b018027b9c6cf4eeb39036db308ad2177c5c4cba2dc86238d109b1fcc24c4a",
+    "hivo/verification_routing.py": "ba25ccf44567ba1e6b2a40b98211f09c44e9ebed5667aa48377fdec5246f16d4"
+  },
+  "process_exit": null,
+  "status": "INTERRUPTED_AT_WALL_LIMIT",
+  "elapsed_seconds": 360.02,
+  "actual_file_exists": true,
+  "actual_hex": "48656c6c6f204d696e69204869766f",
+  "exact_bytes": true,
+  "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+  "run_id": "20261021T223144-04cab4b6",
+  "root_completion": "not observed; process interrupted at 360-second limit",
+  "falsifier_started": false,
+  "tool_events": [
+    {
+      "id": 1,
+      "role": "Builder",
+      "tool": "context_sufficiency_check",
+      "target": "",
+      "status": "succeeded"
+    },
+    {
+      "id": 2,
+      "role": "Builder",
+      "tool": "write_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 3,
+      "role": "Builder",
+      "tool": "run_command",
+      "target": "cat test_level_1.txt",
+      "status": "failed"
+    },
+    {
+      "id": 4,
+      "role": "Builder",
+      "tool": "run_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 5,
+      "role": "Builder",
+      "tool": "context_sufficiency_check",
+      "target": "",
+      "status": "succeeded"
+    },
+    {
+      "id": 6,
+      "role": "Builder",
+      "tool": "write_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    },
+    {
+      "id": 7,
+      "role": "Builder",
+      "tool": "run_file",
+      "target": "test_level_1.txt",
+      "status": "succeeded"
+    }
+  ],
+  "native_proofs": [
+    {
+      "verification_kind": "LITERAL_ARTIFACT",
+      "path": "test_level_1.txt",
+      "status": "PASS",
+      "passed": true,
+      "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+    },
+    {
+      "verification_kind": "LITERAL_ARTIFACT",
+      "path": "test_level_1.txt",
+      "status": "PASS",
+      "passed": true,
+      "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+    }
+  ],
+  "successful_native_readbacks": 2,
+  "recorded_model_requests": 11,
+  "model_tool_sequence": [
+    "context_sufficiency_check",
+    "write_file",
+    "run_command",
+    "run_file",
+    "context_sufficiency_check",
+    "write_file",
+    "run_file"
+  ],
+  "transaction_committed": false,
+  "interpretation": "Real model reached exact file creation and native literal PASS after one refused cat. It then repeated context/write/read steps instead of completing. No Falsifier or Root verification observed before interruption; not an end-to-end success."
+}

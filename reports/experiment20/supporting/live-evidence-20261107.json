@@ -1,0 +1,105 @@
+{
+  "experiment": 20,
+  "campaign_id": "experiment19-20-live-validation-20261106",
+  "artifacts": [
+    {
+      "artifact": "live/scope-sequence-02/child-1.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "27d48571b2ed532968e7b772d01a0e5ea585ec5628e001443a8a6a2d070a71da"
+    },
+    {
+      "artifact": "live/scope-sequence-02/parent-after-1.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "c28ac0694ad6356c2038c254fa1cad5d1f5cb7c700b7b7435becb2eeb4df316d"
+    },
+    {
+      "artifact": "monitors/scope-checkpoint-03.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "11361291746f14fb0a19e15e9490e7bb6f52c05f67e87a8d2151e012ddaba824"
+    },
+    {
+      "artifact": "live/scope-checkpoint-03/tools.jsonl",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "99fc4b87383536e0f7c4c2153b1a127ee419d5e9c1f5451cc2be5386d690f7e2"
+    },
+    {
+      "artifact": "live/scope-checkpoint-03/independent-after-stop/physical-keyboard.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "5908ddc8ad55e363b8a1b8a81227bbc06ae840ff21a2644e56180fec844bd841"
+    },
+    {
+      "artifact": "live/scope-checkpoint-03/independent-after-stop/parent-browser.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "31bd4adf2bc9b9e7befc483be5343a92564eeab2c6afbf55b6e480407b86b2b2"
+    },
+    {
+      "artifact": "offline/constructor-before.log",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "2af1f3041cbc0fcf7a69582636e23170194e34765ec7cbae1653da4c6a38cd4b"
+    },
+    {
+      "artifact": "offline/constructor-after.log",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "340e59288eae8412984b0599f22f7afff791292764cdcffdca23d87803652203"
+    },
+    {
+      "artifact": "source-before-live.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "27fbaa5d51900e440fbc1f7d31d269a3c555b11e85ce5930feb9c3bf8da58f6a"
+    },
+    {
+      "artifact": "source-before-recovery-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "14230ea1e4fd4293d3af0fb78ddc604c95f4aeb4596b3a0444a84d36cc5ddd00"
+    },
+    {
+      "artifact": "source-before-schema-retry-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "7ab9674e2d897f2fc03e72ac033c067a829c871f15041e4f28301b455de6341c"
+    },
+    {
+      "artifact": "source-before-schema-final-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "736c24faec4943edf999b45589a9bbecd3d34de259dc776c119c069f5e206ad7"
+    }
+  ],
+  "final_stage_source_byte_sha256": {
+    "hivo/context.py": "64475a25dbdaf709fe2e21d951225ef1107e7842bc990fdfb081e68c1abca3a8",
+    "hivo/verification_scope.py": "c82dd16d7d1101b157ca16a973bcc723400bd7d4dcc0169270bcf39f7428a3b3",
+    "mini.py": "8d1ef41295ff0fc1643c141027991d260e59a478960da7c10940098b8861fe7b",
+    "tests/test_experiment20_child_scope.py": "458682b779e20a690dc2d790602504491364a9d60931392b028b12c3499e9502",
+    "tests/test_live_mission_retention.py": "37c3ebb044ff09003b9b9e34b76d261ac2954addfd7803bcd6dc637ca524ae45",
+    "tests/test_tool_schema_recovery_feedback.py": "0c2aa7ae77ff24c6c4f2bb59b85707730c76b6a7821abc10efb651a34fa09dac"
+  },
+  "source_scope": "Final-stage hashes, not identical code for every earlier case. Shared context/hint patches remain excluded from this update.",
+  "curation": "Derived facts and hashes only; no raw logs/game/database",
+  "observations": {
+    "builder_writes": 3,
+    "repairer_writes": 1,
+    "builder_invalid_mutations": 3,
+    "repairer_stale_target": 1,
+    "physical_player_positions": [
+      [
+        400,
+        300
+      ],
+      [
+        410,
+        300
+      ],
+      [
+        410,
+        290
+      ]
+    ],
+    "parent_required_interactions": [
+      "keyboard_movement",
+      "collection_updates_state"
+    ],
+    "parent_failures": [
+      "source_dump",
+      "failed_interaction",
+      "missing_interaction"
+    ]
+  }
+}

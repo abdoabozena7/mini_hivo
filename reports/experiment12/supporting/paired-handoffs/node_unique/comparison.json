@@ -1,0 +1,1605 @@
+{
+  "case_id": "node_unique",
+  "input_capture": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1-EXEC-001-handoff.json",
+  "arms": [
+    {
+      "policy": "current",
+      "model_calls": 0,
+      "repairer_calls": 0,
+      "root_verification_executed": false,
+      "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+      "subject_before": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "tests/unique.test.js",
+            "exists": true,
+            "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+            "size": 374
+          },
+          {
+            "path": "values.js",
+            "exists": true,
+            "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+            "size": 519
+          }
+        ],
+        "hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe"
+      },
+      "eligible": true,
+      "browser": {
+        "requested_from_node": "values.js",
+        "resolved_entrypoint": null,
+        "resolution_source": "applicability_analyzer",
+        "resolution_status": "NOT_APPLICABLE",
+        "passed": null,
+        "environment_error": false,
+        "failure_type": null,
+        "verification_status": "SKIPPED_NOT_APPLICABLE",
+        "verification_route": {
+          "kind": "BROWSER",
+          "required": false,
+          "applicable": false,
+          "target": null,
+          "reason_codes": [
+            "VERIFIER_NOT_REQUIRED",
+            "NO_SUPPORTED_BROWSER_TARGET"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:values.js"
+          ],
+          "result": "SKIPPED_NOT_APPLICABLE",
+          "requested_from_node": "values.js",
+          "resolution_status": "NOT_APPLICABLE",
+          "resolution_source": "applicability_analyzer"
+        },
+        "verification_applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [],
+            "known_test_files": [
+              "tests/unique.test.js"
+            ],
+            "observed_file_types": [
+              "javascript"
+            ]
+          },
+          "verification_applicability_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+          "verification_routes_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+          "last_result": "SKIPPED_NOT_APPLICABLE"
+        },
+        "evidence": "Browser verification is not applicable to the current child responsibility."
+      },
+      "gate": {
+        "passed": true,
+        "checks": [],
+        "deterministic_failures": [],
+        "advisory_checks": [],
+        "advisory_failures": [],
+        "verification_aggregation": {
+          "child_id": "EXEC-001",
+          "verification_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "actual_passes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "required_target_failures": [],
+          "required_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "invalid_receipts": [],
+          "failure_codes": [],
+          "evidence_available": true,
+          "passed": true,
+          "model_calls": 0,
+          "required_execution_verification_set": {
+            "schema_version": "V25.6",
+            "artifact_type": "RequiredExecutionVerificationSet",
+            "child_id": "EXEC-001",
+            "plan_id": null,
+            "plan_hash": null,
+            "verification_digest": null,
+            "coverage_hash": null,
+            "applicable_authority_ids": [],
+            "required_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "required_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "approved_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "system_authority_ids": [],
+            "optional_authority_ids": [],
+            "routes": [
+              {
+                "authority_id": "UNRESOLVED-ROUTE-6CB8A49B65993132",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "FOCUSED_TEST",
+                "execution_channel": null,
+                "target": "tests/unique.test.js",
+                "required": true,
+                "applicable": true,
+                "route_hash": "6cb8a49b65993132046e4dc8b63eccc65e9cf00960506d2bd5ef77d6d3648c3a"
+              },
+              {
+                "authority_id": "UNRESOLVED-ROUTE-E786AFFCAC96D270",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "SYNTAX_STATIC_GATE",
+                "execution_channel": null,
+                "target": "tests/unique.test.js",
+                "required": true,
+                "applicable": true,
+                "route_hash": "e786affcac96d270d0541b6fde967efae2eea7ccffad0c55a6c572fd26fd57e1"
+              }
+            ],
+            "set_hash": "5b738aaac3db91ff94a309d78136da6f445d8c4bfddb2a9b07bb27adfa161eac",
+            "canonical_hash": "5b738aaac3db91ff94a309d78136da6f445d8c4bfddb2a9b07bb27adfa161eac"
+          },
+          "execution_obligation_evidence": [],
+          "all_required_passed": true
+        }
+      },
+      "commit_status": "done",
+      "receipt": {
+        "schema_version": "V21.5B",
+        "artifact_type": "VerifiedChildReceipt",
+        "child_id": "EXEC-001",
+        "parent_id": "ROOT",
+        "verified": true,
+        "receipt_status": "VERIFIED",
+        "verification_status": "passed",
+        "terminal_child_status": "done",
+        "verification_failure_reasons": [],
+        "child_authority_hash": "e1503d95680fb62ee4a885e3f1633faeaffb14307970cf35a700ed67f91ccc1f",
+        "authority": {
+          "execution_contract_id": "EXEC-001",
+          "execution_contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242",
+          "plan_id": "PLAN-790F096A4178",
+          "plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+          "parent_contract_hash": null
+        },
+        "parent_contract_hash": null,
+        "plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+        "mutation_paths": [
+          "values.js"
+        ],
+        "verification_applicability_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+        "verification_routes_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+        "verification_routes": [
+          {
+            "kind": "FOCUSED_TEST",
+            "required": true,
+            "applicable": true,
+            "target": "tests/unique.test.js",
+            "result": "PASS",
+            "reason_codes": [
+              "CONTRACT_REQUIRES_TEST",
+              "FOCUSED_TEST_PRESENT",
+              "TEST_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:done_when",
+              "repo:test:tests/unique.test.js"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "deterministic_test_file"
+          },
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "required": true,
+            "applicable": true,
+            "target": "tests/unique.test.js",
+            "result": "PASS",
+            "reason_codes": [
+              "SUPPORTED_SOURCE_PRESENT",
+              "CONTRACT_REQUIRES_SYNTAX"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:mutation_paths"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "contract_source_paths"
+          },
+          {
+            "kind": "BROWSER",
+            "required": false,
+            "applicable": false,
+            "target": null,
+            "result": "SKIPPED_NOT_APPLICABLE",
+            "reason_codes": [
+              "VERIFIER_NOT_REQUIRED",
+              "NO_SUPPORTED_BROWSER_TARGET"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:requested_target:values.js"
+            ],
+            "resolution_status": "NOT_APPLICABLE",
+            "resolution_source": "applicability_analyzer",
+            "requested_from_node": "values.js"
+          }
+        ],
+        "required_execution_verification_set": null,
+        "execution_verification_closure": null,
+        "execution_verification_closure_hash": null,
+        "browser": {
+          "required": false,
+          "applicable": false,
+          "resolved_target": null,
+          "result": "SKIPPED_NOT_APPLICABLE",
+          "verifier_invoked": false
+        },
+        "verification_aggregation": {
+          "passed": true,
+          "evidence_available": true,
+          "failure_codes": [],
+          "actual_passes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "result": "PASS",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "result": "PASS",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "requested_from_node": "values.js"
+            }
+          ],
+          "required_execution_verification_set_hash": null,
+          "execution_verification_closure": null
+        },
+        "verification_evidence": [
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { // Return each primitive value once, preserving its first occurrence order. return [...values].sort(); } module.exports = {uniqueValues};"
+          },
+          {
+            "tool": "read_file",
+            "target": "tests/unique.test.js",
+            "result": "const assert=require('node:assert/strict'); const {uniqueValues}=require('../values.js'); assert.deepEqual(uniqueValues([3,1,3,2,1]), [3,1,2]); assert.deepEqual(uniqueValues(['b','a','b']), ['b','a']); assert.deepEqual(uniqueValues([]), []); const original=[2,1,2]; uniqueValues(original); assert.deepEqual(original,[2,1,2]); console.log('unique behavior tests: 4 passed');"
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"cd0ee755252f047e8e3206a8101caa88320d1e62850e91cb08dcc8a0a380b529\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to fix `uniqueValues` in `values.js` to remove duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior. I have read both `values.js` and `tests/unique.test.js`. The tests indicate the expected behavior: `[3,1,3,2,1]` -> `[3,1,2]` (order preserved, duplicates removed). The current implementation `[...values].sort()` fails on both uniquen...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+          },
+          {
+            "tool": "edit_file",
+            "target": "values.js",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1\\values.js (1 replacement(s)) (managed backup: .agent_backups\\20260928T141803-29e0536c\\values.js)"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { const seen = new Set(); const result = []; for (const item of values) { // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol) // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check. // Using Set handles primitive uniqueness correctly. if (!seen.has(item)) { seen.add(item); result.push(item); } } return result; } module.exports = {uniqueValues};"
+          }
+        ],
+        "required_evidence": [
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { // Return each primitive value once, preserving its first occurrence order. return [...values].sort(); } module.exports = {uniqueValues};"
+          },
+          {
+            "tool": "read_file",
+            "target": "tests/unique.test.js",
+            "result": "const assert=require('node:assert/strict'); const {uniqueValues}=require('../values.js'); assert.deepEqual(uniqueValues([3,1,3,2,1]), [3,1,2]); assert.deepEqual(uniqueValues(['b','a','b']), ['b','a']); assert.deepEqual(uniqueValues([]), []); const original=[2,1,2]; uniqueValues(original); assert.deepEqual(original,[2,1,2]); console.log('unique behavior tests: 4 passed');"
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"cd0ee755252f047e8e3206a8101caa88320d1e62850e91cb08dcc8a0a380b529\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to fix `uniqueValues` in `values.js` to remove duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior. I have read both `values.js` and `tests/unique.test.js`. The tests indicate the expected behavior: `[3,1,3,2,1]` -> `[3,1,2]` (order preserved, duplicates removed). The current implementation `[...values].sort()` fails on both uniquen...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+          },
+          {
+            "tool": "edit_file",
+            "target": "values.js",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1\\values.js (1 replacement(s)) (managed backup: .agent_backups\\20260928T141803-29e0536c\\values.js)"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { const seen = new Set(); const result = []; for (const item of values) { // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol) // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check. // Using Set handles primitive uniqueness correctly. if (!seen.has(item)) { seen.add(item); result.push(item); } } return result; } module.exports = {uniqueValues};"
+          }
+        ],
+        "coverage": {
+          "plan_node_ids": [
+            "NODE-001"
+          ],
+          "owned_plan_node_ids": [
+            "NODE-001"
+          ],
+          "responsibility_units": [
+            "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior."
+          ]
+        },
+        "verified_subject_state_hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761",
+        "verified_subject_state": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T141803-29e0536c/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/node_unique/current-1/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "tests/unique.test.js",
+              "exists": true,
+              "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+              "size": 374
+            },
+            {
+              "path": "values.js",
+              "exists": true,
+              "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+              "size": 519
+            }
+          ],
+          "hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761"
+        },
+        "evidence_dependency_fingerprint": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T141803-29e0536c/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/node_unique/current-1/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "tests/unique.test.js",
+              "exists": true,
+              "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+              "size": 374
+            },
+            {
+              "path": "values.js",
+              "exists": true,
+              "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+              "size": 519
+            }
+          ],
+          "hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761"
+        },
+        "provenance": {
+          "source": "deterministic_stage5a_verified_semantics",
+          "model_calls": 0,
+          "raw_worker_transcript_included": false,
+          "memory_promotion": false
+        },
+        "receipt_hash": "3b22e84dcc1777fbe1a93e1553f84853d02df282c506ef456d81570f42e0f3c4",
+        "covered_node_ids": [
+          "NODE-001"
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "verification_evidence_hash": "aec78386bb8d1a77e59ada5346ff155598d4eb9a293290c7a907f226b77136bd",
+        "subject_after_hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761",
+        "contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242"
+      },
+      "receipt_validation": {
+        "valid": true,
+        "verified": true,
+        "errors": [],
+        "fresh": true
+      },
+      "child_verified": true,
+      "impact_comparison": {
+        "status": "IMPACT_CONTRACT_PASSED",
+        "passed": true,
+        "failure_type": null,
+        "comparisons": [
+          {
+            "kind": "target",
+            "target": "values.js",
+            "status": "EXPECTED_AND_OBSERVED",
+            "actual": [
+              {
+                "target": "values.js",
+                "kind": "path",
+                "path": "values.js"
+              },
+              {
+                "target": "values.js",
+                "path": "values.js",
+                "kind": "path"
+              }
+            ]
+          },
+          {
+            "kind": "verification_obligation",
+            "id": "impact-obligation-1",
+            "status": "SATISFIED"
+          }
+        ],
+        "missing": [],
+        "unexpected_related": [],
+        "out_of_scope": [],
+        "preservation_violations": [],
+        "obligations": [
+          {
+            "id": "impact-obligation-1",
+            "category": "BEHAVIOR",
+            "meaning": "tests/unique.test.js",
+            "target": "",
+            "required": true,
+            "verification_kind": "existing_gate",
+            "mode": "controller",
+            "status": "SATISFIED",
+            "provenance": [
+              {
+                "source_identity": "controller:approved-task-contract",
+                "path": "controller:approved-task-contract",
+                "location": "EXEC-001",
+                "evidence_kind": "approved_task_contract",
+                "evidence_id": "",
+                "authority_tier": "HIGH",
+                "authority_score": 100,
+                "excerpt": "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior."
+              }
+            ]
+          }
+        ],
+        "unresolved_obligations": [],
+        "conflicts": [],
+        "actual_changed_paths": [
+          "values.js"
+        ],
+        "contract_hash": "3dc1b363fe271e5ce2f9b0a00ee1874b6dce9c2e5b9416ead46ddaecfa829037",
+        "revision": 0,
+        "bounded": true
+      },
+      "subject_after": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "tests/unique.test.js",
+            "exists": true,
+            "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+            "size": 374
+          },
+          {
+            "path": "values.js",
+            "exists": true,
+            "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+            "size": 519
+          }
+        ],
+        "hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe"
+      }
+    },
+    {
+      "policy": "compatible",
+      "model_calls": 0,
+      "repairer_calls": 0,
+      "root_verification_executed": false,
+      "input_hash": "b2d36078493fabe5bbc7a895b4280dad4fdf1c1fae3df281e999e839e24fed1e",
+      "subject_before": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "tests/unique.test.js",
+            "exists": true,
+            "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+            "size": 374
+          },
+          {
+            "path": "values.js",
+            "exists": true,
+            "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+            "size": 519
+          }
+        ],
+        "hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe"
+      },
+      "eligible": true,
+      "browser": {
+        "requested_from_node": "values.js",
+        "resolved_entrypoint": null,
+        "resolution_source": "applicability_analyzer",
+        "resolution_status": "NOT_APPLICABLE",
+        "passed": null,
+        "environment_error": false,
+        "failure_type": null,
+        "verification_status": "SKIPPED_NOT_APPLICABLE",
+        "verification_route": {
+          "kind": "BROWSER",
+          "required": false,
+          "applicable": false,
+          "target": null,
+          "reason_codes": [
+            "VERIFIER_NOT_REQUIRED",
+            "NO_SUPPORTED_BROWSER_TARGET"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:values.js"
+          ],
+          "result": "SKIPPED_NOT_APPLICABLE",
+          "requested_from_node": "values.js",
+          "resolution_status": "NOT_APPLICABLE",
+          "resolution_source": "applicability_analyzer"
+        },
+        "verification_applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [],
+            "known_test_files": [
+              "tests/unique.test.js"
+            ],
+            "observed_file_types": [
+              "javascript"
+            ]
+          },
+          "verification_applicability_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+          "verification_routes_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+          "last_result": "SKIPPED_NOT_APPLICABLE"
+        },
+        "evidence": "Browser verification is not applicable to the current child responsibility."
+      },
+      "gate": {
+        "passed": true,
+        "checks": [],
+        "deterministic_failures": [],
+        "advisory_checks": [],
+        "advisory_failures": [],
+        "verification_aggregation": {
+          "child_id": "EXEC-001",
+          "verification_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "actual_passes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "requested_from_node": "values.js",
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "actual_result": "SKIPPED_NOT_APPLICABLE"
+            }
+          ],
+          "required_target_failures": [],
+          "required_routes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file",
+              "candidate_targets": [
+                "tests/unique.test.js"
+              ],
+              "selected_target": "tests/unique.test.js",
+              "target_resolution_reason": "contract_scope",
+              "resolution_mode": "SUPPORTED_TARGET_DISCOVERY"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "invalid_receipts": [],
+          "failure_codes": [],
+          "evidence_available": true,
+          "passed": true,
+          "model_calls": 0,
+          "semantic_browser_evidence": {},
+          "required_execution_verification_set": {
+            "schema_version": "V25.6",
+            "artifact_type": "RequiredExecutionVerificationSet",
+            "child_id": "EXEC-001",
+            "plan_id": null,
+            "plan_hash": null,
+            "verification_digest": null,
+            "coverage_hash": null,
+            "applicable_authority_ids": [],
+            "required_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "required_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "approved_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-6CB8A49B65993132",
+              "UNRESOLVED-ROUTE-E786AFFCAC96D270"
+            ],
+            "system_authority_ids": [],
+            "optional_authority_ids": [],
+            "routes": [
+              {
+                "authority_id": "UNRESOLVED-ROUTE-6CB8A49B65993132",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "FOCUSED_TEST",
+                "execution_channel": null,
+                "target": "tests/unique.test.js",
+                "required": true,
+                "applicable": true,
+                "route_hash": "6cb8a49b65993132046e4dc8b63eccc65e9cf00960506d2bd5ef77d6d3648c3a"
+              },
+              {
+                "authority_id": "UNRESOLVED-ROUTE-E786AFFCAC96D270",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "SYNTAX_STATIC_GATE",
+                "execution_channel": null,
+                "target": "tests/unique.test.js",
+                "required": true,
+                "applicable": true,
+                "route_hash": "e786affcac96d270d0541b6fde967efae2eea7ccffad0c55a6c572fd26fd57e1"
+              }
+            ],
+            "set_hash": "5b738aaac3db91ff94a309d78136da6f445d8c4bfddb2a9b07bb27adfa161eac",
+            "canonical_hash": "5b738aaac3db91ff94a309d78136da6f445d8c4bfddb2a9b07bb27adfa161eac"
+          },
+          "execution_obligation_evidence": [],
+          "all_required_passed": true
+        }
+      },
+      "commit_status": "failed",
+      "receipt": {
+        "schema_version": "V21.5B",
+        "artifact_type": "VerifiedChildReceipt",
+        "child_id": "EXEC-001",
+        "parent_id": "ROOT",
+        "verified": true,
+        "receipt_status": "VERIFIED",
+        "verification_status": "passed",
+        "terminal_child_status": "done",
+        "verification_failure_reasons": [],
+        "child_authority_hash": "e1503d95680fb62ee4a885e3f1633faeaffb14307970cf35a700ed67f91ccc1f",
+        "authority": {
+          "execution_contract_id": "EXEC-001",
+          "execution_contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242",
+          "plan_id": "PLAN-790F096A4178",
+          "plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+          "parent_contract_hash": null
+        },
+        "parent_contract_hash": null,
+        "plan_hash": "790f096a41781183c668df189783fd8b6305bb1658589e8d7bf41e47323b3e20",
+        "mutation_paths": [
+          "values.js"
+        ],
+        "verification_applicability_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+        "verification_routes_hash": "033c0614d28b02ff17f2797256ea0c03cbe2789e17f46278d130f00e8446cf96",
+        "verification_routes": [
+          {
+            "kind": "FOCUSED_TEST",
+            "required": true,
+            "applicable": true,
+            "target": "tests/unique.test.js",
+            "result": "PASS",
+            "reason_codes": [
+              "CONTRACT_REQUIRES_TEST",
+              "FOCUSED_TEST_PRESENT",
+              "TEST_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:done_when",
+              "repo:test:tests/unique.test.js"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "deterministic_test_file"
+          },
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "required": true,
+            "applicable": true,
+            "target": "tests/unique.test.js",
+            "result": "PASS",
+            "reason_codes": [
+              "SUPPORTED_SOURCE_PRESENT",
+              "CONTRACT_REQUIRES_SYNTAX"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:mutation_paths"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "contract_source_paths"
+          },
+          {
+            "kind": "BROWSER",
+            "required": false,
+            "applicable": false,
+            "target": null,
+            "result": "SKIPPED_NOT_APPLICABLE",
+            "reason_codes": [
+              "VERIFIER_NOT_REQUIRED",
+              "NO_SUPPORTED_BROWSER_TARGET"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:requested_target:values.js"
+            ],
+            "resolution_status": "NOT_APPLICABLE",
+            "resolution_source": "applicability_analyzer",
+            "requested_from_node": "values.js"
+          }
+        ],
+        "required_execution_verification_set": null,
+        "execution_verification_closure": null,
+        "execution_verification_closure_hash": null,
+        "browser": {
+          "required": false,
+          "applicable": false,
+          "resolved_target": null,
+          "result": "SKIPPED_NOT_APPLICABLE",
+          "verifier_invoked": false
+        },
+        "verification_aggregation": {
+          "passed": true,
+          "evidence_available": true,
+          "failure_codes": [],
+          "actual_passes": [
+            {
+              "kind": "FOCUSED_TEST",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "result": "PASS",
+              "reason_codes": [
+                "CONTRACT_REQUIRES_TEST",
+                "FOCUSED_TEST_PRESENT",
+                "TEST_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:done_when",
+                "repo:test:tests/unique.test.js"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "deterministic_test_file"
+            },
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "tests/unique.test.js",
+              "result": "PASS",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [
+            {
+              "kind": "BROWSER",
+              "required": false,
+              "applicable": false,
+              "target": null,
+              "result": "SKIPPED_NOT_APPLICABLE",
+              "reason_codes": [
+                "VERIFIER_NOT_REQUIRED",
+                "NO_SUPPORTED_BROWSER_TARGET"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:values.js"
+              ],
+              "resolution_status": "NOT_APPLICABLE",
+              "resolution_source": "applicability_analyzer",
+              "requested_from_node": "values.js"
+            }
+          ],
+          "required_execution_verification_set_hash": null,
+          "execution_verification_closure": null
+        },
+        "verification_evidence": [
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { // Return each primitive value once, preserving its first occurrence order. return [...values].sort(); } module.exports = {uniqueValues};"
+          },
+          {
+            "tool": "read_file",
+            "target": "tests/unique.test.js",
+            "result": "const assert=require('node:assert/strict'); const {uniqueValues}=require('../values.js'); assert.deepEqual(uniqueValues([3,1,3,2,1]), [3,1,2]); assert.deepEqual(uniqueValues(['b','a','b']), ['b','a']); assert.deepEqual(uniqueValues([]), []); const original=[2,1,2]; uniqueValues(original); assert.deepEqual(original,[2,1,2]); console.log('unique behavior tests: 4 passed');"
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"cd0ee755252f047e8e3206a8101caa88320d1e62850e91cb08dcc8a0a380b529\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to fix `uniqueValues` in `values.js` to remove duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior. I have read both `values.js` and `tests/unique.test.js`. The tests indicate the expected behavior: `[3,1,3,2,1]` -> `[3,1,2]` (order preserved, duplicates removed). The current implementation `[...values].sort()` fails on both uniquen...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+          },
+          {
+            "tool": "edit_file",
+            "target": "values.js",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1\\values.js (1 replacement(s)) (managed backup: .agent_backups\\20260928T141803-29e0536c\\values.js)"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { const seen = new Set(); const result = []; for (const item of values) { // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol) // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check. // Using Set handles primitive uniqueness correctly. if (!seen.has(item)) { seen.add(item); result.push(item); } } return result; } module.exports = {uniqueValues};"
+          }
+        ],
+        "required_evidence": [
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { // Return each primitive value once, preserving its first occurrence order. return [...values].sort(); } module.exports = {uniqueValues};"
+          },
+          {
+            "tool": "read_file",
+            "target": "tests/unique.test.js",
+            "result": "const assert=require('node:assert/strict'); const {uniqueValues}=require('../values.js'); assert.deepEqual(uniqueValues([3,1,3,2,1]), [3,1,2]); assert.deepEqual(uniqueValues(['b','a','b']), ['b','a']); assert.deepEqual(uniqueValues([]), []); const original=[2,1,2]; uniqueValues(original); assert.deepEqual(original,[2,1,2]); console.log('unique behavior tests: 4 passed');"
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"cd0ee755252f047e8e3206a8101caa88320d1e62850e91cb08dcc8a0a380b529\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The goal is to fix `uniqueValues` in `values.js` to remove duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior. I have read both `values.js` and `tests/unique.test.js`. The tests indicate the expected behavior: `[3,1,3,2,1]` -> `[3,1,2]` (order preserved, duplicates removed). The current implementation `[...values].sort()` fails on both uniquen...\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_res..."
+          },
+          {
+            "tool": "edit_file",
+            "target": "values.js",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\node_unique\\current-1\\values.js (1 replacement(s)) (managed backup: .agent_backups\\20260928T141803-29e0536c\\values.js)"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "run_file",
+            "target": "tests/unique.test.js",
+            "result": "[exit_code=0] unique behavior tests: 4 passed"
+          },
+          {
+            "tool": "read_file",
+            "target": "values.js",
+            "result": "function uniqueValues(values) { const seen = new Set(); const result = []; for (const item of values) { // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol) // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check. // Using Set handles primitive uniqueness correctly. if (!seen.has(item)) { seen.add(item); result.push(item); } } return result; } module.exports = {uniqueValues};"
+          }
+        ],
+        "coverage": {
+          "plan_node_ids": [
+            "NODE-001"
+          ],
+          "owned_plan_node_ids": [
+            "NODE-001"
+          ],
+          "responsibility_units": [
+            "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior."
+          ]
+        },
+        "verified_subject_state_hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761",
+        "verified_subject_state": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T141803-29e0536c/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/node_unique/current-1/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "tests/unique.test.js",
+              "exists": true,
+              "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+              "size": 374
+            },
+            {
+              "path": "values.js",
+              "exists": true,
+              "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+              "size": 519
+            }
+          ],
+          "hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761"
+        },
+        "evidence_dependency_fingerprint": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T141803-29e0536c/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/node_unique/current-1/values.js",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "tests/unique.test.js",
+              "exists": true,
+              "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+              "size": 374
+            },
+            {
+              "path": "values.js",
+              "exists": true,
+              "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+              "size": 519
+            }
+          ],
+          "hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761"
+        },
+        "provenance": {
+          "source": "deterministic_stage5a_verified_semantics",
+          "model_calls": 0,
+          "raw_worker_transcript_included": false,
+          "memory_promotion": false
+        },
+        "receipt_hash": "765d0710c8d46d0afbf6d957f8944d4a0f9107f82b8949c3a98021911b6f3aaf",
+        "covered_node_ids": [
+          "NODE-001"
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "verification_evidence_hash": "aec78386bb8d1a77e59ada5346ff155598d4eb9a293290c7a907f226b77136bd",
+        "subject_after_hash": "52623ca726f8e70eae9a3c6465aa2ba251a54f7b4e01b3e752c3b424bf94e761",
+        "contract_hash": "9f6c0dd4585c21eef6c867ae24d724a089518baed98a2c34240446a983681242",
+        "semantic_browser_evidence": {},
+        "semantic_requirements": [
+          {
+            "requirement_id": "REQ-001",
+            "text": "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior.",
+            "provenance": "USER_STATED",
+            "status": "active"
+          }
+        ],
+        "semantic_evidence_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      "receipt_validation": {
+        "valid": false,
+        "verified": false,
+        "errors": [
+          "semantic evidence hash or inventory is invalid"
+        ],
+        "fresh": true
+      },
+      "child_verified": false,
+      "impact_comparison": {
+        "status": "IMPACT_CONTRACT_PASSED",
+        "passed": true,
+        "failure_type": null,
+        "comparisons": [
+          {
+            "kind": "target",
+            "target": "values.js",
+            "status": "EXPECTED_AND_OBSERVED",
+            "actual": [
+              {
+                "target": "values.js",
+                "kind": "path",
+                "path": "values.js"
+              },
+              {
+                "target": "values.js",
+                "path": "values.js",
+                "kind": "path"
+              }
+            ]
+          },
+          {
+            "kind": "verification_obligation",
+            "id": "impact-obligation-1",
+            "status": "SATISFIED"
+          }
+        ],
+        "missing": [],
+        "unexpected_related": [],
+        "out_of_scope": [],
+        "preservation_violations": [],
+        "obligations": [
+          {
+            "id": "impact-obligation-1",
+            "category": "BEHAVIOR",
+            "meaning": "tests/unique.test.js",
+            "target": "",
+            "required": true,
+            "verification_kind": "existing_gate",
+            "mode": "controller",
+            "status": "SATISFIED",
+            "provenance": [
+              {
+                "source_identity": "controller:approved-task-contract",
+                "path": "controller:approved-task-contract",
+                "location": "EXEC-001",
+                "evidence_kind": "approved_task_contract",
+                "evidence_id": "",
+                "authority_tier": "HIGH",
+                "authority_score": 100,
+                "excerpt": "Fix uniqueValues so it removes duplicate primitive values while preserving first-occurrence order, the original input array, and the empty-array behavior."
+              }
+            ]
+          }
+        ],
+        "unresolved_obligations": [],
+        "conflicts": [],
+        "actual_changed_paths": [
+          "values.js"
+        ],
+        "contract_hash": "3dc1b363fe271e5ce2f9b0a00ee1874b6dce9c2e5b9416ead46ddaecfa829037",
+        "revision": 0,
+        "bounded": true
+      },
+      "subject_after": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "tests/unique.test.js",
+            "exists": true,
+            "sha256": "b98d24271038906c2f606658a6cf42652aeb362f79363f0cad29263a7d3dbe35",
+            "size": 374
+          },
+          {
+            "path": "values.js",
+            "exists": true,
+            "sha256": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+            "size": 519
+          }
+        ],
+        "hash": "934bca3169b87f0e30d16f3da4c255b2db161e9a58d29182a125244866231cfe"
+      }
+    }
+  ]
+}

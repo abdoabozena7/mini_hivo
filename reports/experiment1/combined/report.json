@@ -1,0 +1,201 @@
+{
+  "cases": 2,
+  "aggregate": {
+    "current_recursive": {
+      "runs": 2,
+      "worker_reached": 0,
+      "awaiting_approval": 1,
+      "approval_rejected": 0,
+      "pre_worker_blocked": 1,
+      "runs_with_verified_child": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": 0,
+      "safety_blocks": 0,
+      "unsafe_terminals": 0,
+      "first_blocker_stages": {
+        "GLOBAL_PLAN_GATE": 1
+      },
+      "rates": {
+        "worker_reached": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "pre_worker_blocked": {
+          "count": 1,
+          "total": 2,
+          "percent": 50.0
+        },
+        "runs_with_verified_child": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "root_verified": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "awaiting_approval": {
+          "count": 1,
+          "total": 2,
+          "percent": 50.0
+        },
+        "unsafe_terminals": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        }
+      },
+      "average_model_calls": 5.0,
+      "average_elapsed_seconds": 31.97
+    },
+    "decomposition_first_recursive": {
+      "runs": 2,
+      "worker_reached": 0,
+      "awaiting_approval": 1,
+      "approval_rejected": 0,
+      "pre_worker_blocked": 1,
+      "runs_with_verified_child": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": 0,
+      "safety_blocks": 0,
+      "unsafe_terminals": 0,
+      "first_blocker_stages": {
+        "SCOPE_AGGREGATION_GATE": 1
+      },
+      "rates": {
+        "worker_reached": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "pre_worker_blocked": {
+          "count": 1,
+          "total": 2,
+          "percent": 50.0
+        },
+        "runs_with_verified_child": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "root_verified": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        },
+        "awaiting_approval": {
+          "count": 1,
+          "total": 2,
+          "percent": 50.0
+        },
+        "unsafe_terminals": {
+          "count": 0,
+          "total": 2,
+          "percent": 0.0
+        }
+      },
+      "average_model_calls": 11.0,
+      "average_elapsed_seconds": 59.64
+    }
+  },
+  "comparison": {
+    "worker_reached_delta_percentage_points": 0.0,
+    "pre_worker_blocked_delta_percentage_points": 0.0,
+    "runs_with_verified_child_delta_percentage_points": 0.0,
+    "root_verified_delta_percentage_points": 0.0,
+    "awaiting_approval_delta_percentage_points": 0.0,
+    "unsafe_terminals_delta_percentage_points": 0.0
+  },
+  "runs": [
+    {
+      "run_id": "20260927T162349-019d494a",
+      "case_id": "pause-01",
+      "route": "current_recursive",
+      "status": "plan_incomplete",
+      "first_blocker_stage": "GLOBAL_PLAN_GATE",
+      "first_blocker_reason": "PLAN_INCOMPLETE",
+      "first_blocker_detail": "REQ-001: active requirement is unassigned; REQ-002: active requirement is unassigned; REQ-005: active requirement is unassigned; unresolved blocking challenge; REQ-001: semantic obligations are incomplete (BEHAVIOR_CHANGE); REQ-002: semantic obligations are incomplete (BEHAVIOR_CHANGE); REQ-005: semantic obligations are incomplete (TEST)",
+      "worker_reached": false,
+      "awaiting_approval": false,
+      "approval_rejected": false,
+      "pre_worker_blocked": true,
+      "verified_children": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": false,
+      "model_calls_before_worker": null,
+      "seconds_before_worker_excluding_approval": null,
+      "total_model_calls": 5,
+      "elapsed_seconds": 33.45,
+      "safety_blocks": 0,
+      "unsafe_terminal": false
+    },
+    {
+      "run_id": "20260927T162450-7a3fb3fc",
+      "case_id": "pause-01",
+      "route": "decomposition_first_recursive",
+      "status": "plan_incomplete",
+      "first_blocker_stage": "SCOPE_AGGREGATION_GATE",
+      "first_blocker_reason": "PLAN_INCOMPLETE",
+      "first_blocker_detail": "REQ-002: active requirement is unassigned; REQ-005: active requirement is unassigned; REQ-001: active requirement is unassigned; unresolved blocking challenge; REQ-001: semantic obligations are incomplete (BEHAVIOR_CHANGE); REQ-002: semantic obligations are incomplete (BEHAVIOR_CHANGE); REQ-005: semantic obligations are incomplete (TEST)",
+      "worker_reached": false,
+      "awaiting_approval": false,
+      "approval_rejected": false,
+      "pre_worker_blocked": true,
+      "verified_children": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": false,
+      "model_calls_before_worker": null,
+      "seconds_before_worker_excluding_approval": null,
+      "total_model_calls": 12,
+      "elapsed_seconds": 66.35,
+      "safety_blocks": 0,
+      "unsafe_terminal": false
+    },
+    {
+      "run_id": "20260927T162654-257a95bd",
+      "case_id": "restart-01",
+      "route": "current_recursive",
+      "status": "plan_approval_required",
+      "first_blocker_stage": null,
+      "first_blocker_reason": null,
+      "first_blocker_detail": null,
+      "worker_reached": false,
+      "awaiting_approval": true,
+      "approval_rejected": false,
+      "pre_worker_blocked": false,
+      "verified_children": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": false,
+      "model_calls_before_worker": null,
+      "seconds_before_worker_excluding_approval": null,
+      "total_model_calls": 5,
+      "elapsed_seconds": 30.49,
+      "safety_blocks": 0,
+      "unsafe_terminal": false
+    },
+    {
+      "run_id": "20260927T162747-8cfa35c5",
+      "case_id": "restart-01",
+      "route": "decomposition_first_recursive",
+      "status": "plan_approval_required",
+      "first_blocker_stage": null,
+      "first_blocker_reason": null,
+      "first_blocker_detail": null,
+      "worker_reached": false,
+      "awaiting_approval": true,
+      "approval_rejected": false,
+      "pre_worker_blocked": false,
+      "verified_children": 0,
+      "verified_early_responsibilities": 0,
+      "root_verified": false,
+      "model_calls_before_worker": null,
+      "seconds_before_worker_excluding_approval": null,
+      "total_model_calls": 10,
+      "elapsed_seconds": 52.94,
+      "safety_blocks": 0,
+      "unsafe_terminal": false
+    }
+  ]
+}

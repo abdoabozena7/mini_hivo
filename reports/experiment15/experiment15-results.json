@@ -1,0 +1,3159 @@
+{
+  "experiment": 15,
+  "all_completed": true,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "fixed_semantic_evidence_policy": "strict",
+  "fixed_component_pins_valid": true,
+  "decision": "binding fix confirmed in declared challenges; no fresh grounding failure reduction demonstrated",
+  "protocol_binding_fix_confirmed": true,
+  "fresh_failure_reduction_observed": false,
+  "root_success_not_lower_by_case": true,
+  "fresh_trials": [
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T192736-5c559cfe",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 67.42,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-1\\.agent_runs\\20260928T192736-5c559cfe.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T193150-fc28b14d",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 11,
+      "tool_calls": 8,
+      "elapsed_seconds": 64.37,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-2\\.agent_runs\\20260928T193150-fc28b14d.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T193308-433da22a",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 15,
+      "tool_calls": 11,
+      "elapsed_seconds": 78.92,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-3\\.agent_runs\\20260928T193308-433da22a.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_grounded-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T192858-6666e699",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 13,
+      "tool_calls": 10,
+      "elapsed_seconds": 71.33,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-1\\.agent_runs\\20260928T192858-6666e699.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T193023-a1a3c7db",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 72.59,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-2\\.agent_runs\\20260928T193023-a1a3c7db.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_arrow",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T193441-7708cf8f",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 17,
+      "tool_calls": 13,
+      "elapsed_seconds": 89.88,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-3\\.agent_runs\\20260928T193441-7708cf8f.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_arrow\\evidence_bound-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": true,
+      "full_refresh_followed_by_legal_mutation": true,
+      "rejected_mutation_attempts": 2,
+      "rejection_reasons": [
+        "MUTATION_ANCHOR_REQUIRED",
+        "MUTATION_ANCHOR_REQUIRED"
+      ],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+          "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566",
+          "source_after_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "authorized_lines": [
+            13,
+            13
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        },
+        {
+          "tool_step": 7,
+          "request_hash": "9c6da7ea4b0f3345315a1ac7da40a7cfd1350363368a563798b9476431babd18",
+          "source_before_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+          "source_after_hash": "a9edf1ed4c03d4c31bf4fb90bbac574577ac751e65f7481abb6dc465102a92f6",
+          "authorized_lines": [
+            9,
+            9
+          ],
+          "binding_valid": true,
+          "true_region_changed": false
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 4,
+          "grounded_mutation_attempts": 2,
+          "rejected_mutation_attempts": 2,
+          "applied_mutation_attempts": 2,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 1,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                13
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');",
+                "old": "  if(event.key === 'ArrowDown') move('up');",
+                "path": "arena.html"
+              },
+              "request_hash": "61926bf46e8b4b275d9652e8c00ba88cb7a6592c255d0d4f41356c1073bc0f36",
+              "source_before_hash": "929093c174dbbc7639b64ad71750bd75032d1e9e0f19d7b99f2c85ffebe53566"
+            },
+            {
+              "tool_step": 5,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row -= 1; state.score = state.player.row; render(); if(direction === 'down') state.player.row += 1; state.score = state.player.row; render(); if(direction === 'left') state.player.col -= 1; state.score = state.player.col; render(); if(direction === 'right') state.player.col += 1; state.score = state.player.col; render(); }",
+                "old": "function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); }",
+                "path": "arena.html"
+              },
+              "request_hash": "39dbc11c73df2cc5d35d6dd7e4399d51677dd20a847bd3c86ca78b169a489c00",
+              "source_before_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559"
+            },
+            {
+              "tool_step": 7,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                9,
+                9
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "ready",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') { state.player.row -= 1; state.score = state.player.row; render(); } else if(direction === 'down') { state.player.row += 1; state.score = state.player.row; render(); } else if(direction === 'left') { state.player.col -= 1; state.score = state.player.col; render(); } else if(direction === 'right') { state.player.col += 1; state.score = state.player.col; render(); } }",
+                "old": "function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); }",
+                "path": "arena.html"
+              },
+              "request_hash": "9c6da7ea4b0f3345315a1ac7da40a7cfd1350363368a563798b9476431babd18",
+              "source_before_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559"
+            },
+            {
+              "tool_step": 8,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "document.addEventListener('keydown', function(event) {\n  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'ArrowDown') move('down');\n});",
+                "old": "document.addEventListener('keydown', function(event) {\n  if(event.key === 'ArrowDown') move('up');\n  // Extra restart key is intentionally not connected yet.\n});",
+                "path": "arena.html"
+              },
+              "request_hash": "5b73db63241c7251d0a640ba508bc3313ac0f52131de87cfd6d95027421362e5",
+              "source_before_hash": "a9edf1ed4c03d4c31bf4fb90bbac574577ac751e65f7481abb6dc465102a92f6"
+            }
+          ],
+          "refresh_observations": [
+            {
+              "tool": "read_file",
+              "target": "arena.html",
+              "file_hash": "998a894f56d8d7d73ba58fe0de1e5f9d8bc6f64b9aa7615bb425cc30ff293559",
+              "source_lines": [
+                1,
+                21
+              ],
+              "span_hash": "b2722e253076af7ffb260684551348fa37e6fd9ede87c75e007321ce1f37cfaa"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T193625-6f1e7f4e",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 72.08,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-1\\.agent_runs\\20260928T193625-6f1e7f4e.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T194029-60556c2a",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 13,
+      "tool_calls": 9,
+      "elapsed_seconds": 67.44,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-2\\.agent_runs\\20260928T194029-60556c2a.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_grounded",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T194150-1e52b592",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 14,
+      "tool_calls": 11,
+      "elapsed_seconds": 77.68,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-3\\.agent_runs\\20260928T194150-1e52b592.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_grounded-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T193751-911762a7",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 66.61,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-1\\.agent_runs\\20260928T193751-911762a7.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T193912-4f5ba4d6",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 62.51,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-2\\.agent_runs\\20260928T193912-4f5ba4d6.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "arena_q_restart",
+      "family": "browser_game",
+      "policy": "evidence_bound",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T194322-9fe39a22",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 12,
+      "tool_calls": 9,
+      "elapsed_seconds": 67.63,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-3\\.agent_runs\\20260928T194322-9fe39a22.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\arena_q_restart\\evidence_bound-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 3,
+        "model_round": 3,
+        "remaining_budget": 25,
+        "tool": "edit_file",
+        "target": "arena.html"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 3,
+      "first_legal_remaining_budget": 25,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 3,
+          "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+          "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a",
+          "source_after_hash": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+          "authorized_lines": [
+            13,
+            15
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "arena.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                13,
+                15
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  if(event.key === 'ArrowUp') move('up');\n  if(event.key === 'q' || event.key === 'Q') {\n    if (state.status === 'gameover' || state.status === 'won') {\n      restart();\n      event.preventDefault();\n    }\n  }",
+                "old": "  if(event.key === 'ArrowUp') move('up');\n  // Extra restart key is intentionally not connected yet.\n",
+                "path": "arena.html"
+              },
+              "request_hash": "c7f9ef513563907e83775557b31caa1671881e96b1bab12a781e104e525f0783",
+              "source_before_hash": "8bb33333e43d5611abfc915be87a7e25a4d2952e3aed0d45f4d8eddb2f063a3a"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_grounded",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T194443-c7498a20",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 37.64,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-1\\.agent_runs\\20260928T194443-c7498a20.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_grounded",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T194720-6fc8d9c1",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 38.82,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-2\\.agent_runs\\20260928T194720-6fc8d9c1.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_grounded",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T194813-b05b98be",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 39.36,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-3\\.agent_runs\\20260928T194813-b05b98be.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_grounded-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_grounded",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_grounded",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_bound",
+      "repeat": 1,
+      "completed": true,
+      "run_id": "20260928T194535-ca09f0da",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 38.63,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-1-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-1\\.agent_runs\\20260928T194535-ca09f0da.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-1-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_bound",
+      "repeat": 2,
+      "completed": true,
+      "run_id": "20260928T194627-cda16e7b",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 38.49,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-2-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-2\\.agent_runs\\20260928T194627-cda16e7b.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-2-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    },
+    {
+      "case_id": "node_unique",
+      "family": "node_unit_behavior",
+      "policy": "evidence_bound",
+      "repeat": 3,
+      "completed": true,
+      "run_id": "20260928T194907-5ef10942",
+      "result": "done",
+      "fixed_model_policies_authority_match": true,
+      "verification_executed": true,
+      "verification_pass": true,
+      "valid_receipt": true,
+      "receipt_validation_errors": [],
+      "child_verified": true,
+      "root_verified": true,
+      "fresh_parent_verification": true,
+      "fresh_parent_proof_covers_requirement": true,
+      "false_reject": false,
+      "acceptance_needs_oracle_audit": false,
+      "repairer_calls": 0,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "elapsed_seconds": 40.27,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "tests_unchanged": true,
+      "plan_hash_matches": true,
+      "first_blocker": {
+        "reason": "parent integration verified by real required evidence"
+      },
+      "terminal_reason": "parent integration verified by real required evidence",
+      "evidence_files": {
+        "observations": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-3-observations.json",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-3\\.agent_runs\\20260928T194907-5ef10942.jsonl",
+        "result": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1\\node_unique\\evidence_bound-3-result.json"
+      },
+      "semantic_evidence_policy": "strict",
+      "grounding_policy": "evidence_bound",
+      "first_legal_mutation": {
+        "tool_step": 4,
+        "model_round": 4,
+        "remaining_budget": 24,
+        "tool": "edit_file",
+        "target": "values.js"
+      },
+      "first_legal_mutation_reached": true,
+      "first_mutation_on_true_region": true,
+      "any_mutation_on_true_region": true,
+      "first_legal_mutation_step": 4,
+      "first_legal_remaining_budget": 24,
+      "grounding_terminal_failure": false,
+      "full_refresh_exercised": false,
+      "full_refresh_followed_by_legal_mutation": false,
+      "rejected_mutation_attempts": 0,
+      "rejection_reasons": [],
+      "verified_after_mutation": true,
+      "source_bindings": [
+        {
+          "tool_step": 4,
+          "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+          "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908",
+          "source_after_hash": "0475fff00c47fedecce83f050f45817e54d6450f59e476ba5e8a387b7a5d9145",
+          "authorized_lines": [
+            2,
+            3
+          ],
+          "binding_valid": true,
+          "true_region_changed": true
+        }
+      ],
+      "grounding": [
+        {
+          "policy": "evidence_bound",
+          "mutation_attempts": 1,
+          "grounded_mutation_attempts": 1,
+          "rejected_mutation_attempts": 0,
+          "applied_mutation_attempts": 1,
+          "first_mutation_attempt_step": 4,
+          "first_applied_mutation_step": 4,
+          "bounded_refreshes": 0,
+          "terminal_reason": null,
+          "attempts": [
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "values.js",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                2,
+                3
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "  const seen = new Set();\n  const result = [];\n  for (const item of values) {\n    // Check if the item is a primitive type (number, string, boolean, null, undefined, symbol)\n    // For simplicity and based on test cases, we treat all elements as primitives for uniqueness check.\n    // Using Set handles primitive uniqueness correctly.\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;",
+                "old": "  // Return each primitive value once, preserving its first occurrence order.\n  return [...values].sort();",
+                "path": "values.js"
+              },
+              "request_hash": "dca0a56ee4dc25731c53c9a5c4b8cb13d8d798bf808a76f609943b9bdfe576f0",
+              "source_before_hash": "6a16886e3d12391032e8d336c2855ea70b45712543617dc871231c0ed40a7908"
+            }
+          ],
+          "refresh_observations": []
+        }
+      ]
+    }
+  ],
+  "fresh_summary": {
+    "evidence_grounded": {
+      "expected_attempts": 9,
+      "completed_attempts": 9,
+      "verification_executable_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_pass_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "valid_receipt_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "child_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "root_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "false_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 104,
+      "total_tool_calls": 75,
+      "agent_tool_calls_per_root_verified": 8.33,
+      "total_elapsed_seconds": 543.73,
+      "model_calls_per_root_verified": 11.56,
+      "seconds_per_root_verified": 60.41,
+      "first_blockers": {},
+      "first_legal_mutation_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "grounding_failure_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "first_mutation_on_true_region_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "any_mutation_on_true_region_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_after_mutation_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "rejected_mutation_attempts": 0,
+      "full_refresh_exercised_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "full_refresh_followed_by_legal_mutation_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "first_legal_mutation_steps": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4
+      ],
+      "all_applied_bindings_valid": true
+    },
+    "evidence_bound": {
+      "expected_attempts": 9,
+      "completed_attempts": 9,
+      "verification_executable_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_pass_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "valid_receipt_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "child_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "root_verified_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "false_rejection_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "acceptances_needing_oracle_audit": 0,
+      "native_negative_evidence_cases": 0,
+      "repairer_run_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "test_file_mutations": 0,
+      "total_model_calls": 105,
+      "total_tool_calls": 77,
+      "agent_tool_calls_per_root_verified": 8.56,
+      "total_elapsed_seconds": 547.94,
+      "model_calls_per_root_verified": 11.67,
+      "seconds_per_root_verified": 60.88,
+      "first_blockers": {},
+      "first_legal_mutation_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "grounding_failure_rate": {
+        "numerator": 0,
+        "denominator": 9,
+        "percent": 0.0
+      },
+      "first_mutation_on_true_region_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "any_mutation_on_true_region_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "verification_after_mutation_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "rejected_mutation_attempts": 2,
+      "full_refresh_exercised_rate": {
+        "numerator": 1,
+        "denominator": 9,
+        "percent": 11.11
+      },
+      "full_refresh_followed_by_legal_mutation_rate": {
+        "numerator": 1,
+        "denominator": 9,
+        "percent": 11.11
+      },
+      "first_legal_mutation_steps": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4
+      ],
+      "all_applied_bindings_valid": true
+    }
+  },
+  "by_case": {
+    "arena_arrow": {
+      "evidence_grounded": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 38,
+        "total_tool_calls": 28,
+        "agent_tool_calls_per_root_verified": 9.33,
+        "total_elapsed_seconds": 210.71,
+        "model_calls_per_root_verified": 12.67,
+        "seconds_per_root_verified": 70.24,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 0,
+        "full_refresh_exercised_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_legal_mutation_steps": [
+          3,
+          3,
+          3
+        ],
+        "all_applied_bindings_valid": true
+      },
+      "evidence_bound": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 42,
+        "total_tool_calls": 32,
+        "agent_tool_calls_per_root_verified": 10.67,
+        "total_elapsed_seconds": 233.8,
+        "model_calls_per_root_verified": 14.0,
+        "seconds_per_root_verified": 77.93,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 2,
+        "full_refresh_exercised_rate": {
+          "numerator": 1,
+          "denominator": 3,
+          "percent": 33.33
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 1,
+          "denominator": 3,
+          "percent": 33.33
+        },
+        "first_legal_mutation_steps": [
+          3,
+          3,
+          3
+        ],
+        "all_applied_bindings_valid": true
+      }
+    },
+    "arena_q_restart": {
+      "evidence_grounded": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 39,
+        "total_tool_calls": 29,
+        "agent_tool_calls_per_root_verified": 9.67,
+        "total_elapsed_seconds": 217.2,
+        "model_calls_per_root_verified": 13.0,
+        "seconds_per_root_verified": 72.4,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 0,
+        "full_refresh_exercised_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_legal_mutation_steps": [
+          3,
+          3,
+          3
+        ],
+        "all_applied_bindings_valid": true
+      },
+      "evidence_bound": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 36,
+        "total_tool_calls": 27,
+        "agent_tool_calls_per_root_verified": 9.0,
+        "total_elapsed_seconds": 196.75,
+        "model_calls_per_root_verified": 12.0,
+        "seconds_per_root_verified": 65.58,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 0,
+        "full_refresh_exercised_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_legal_mutation_steps": [
+          3,
+          3,
+          3
+        ],
+        "all_applied_bindings_valid": true
+      }
+    },
+    "node_unique": {
+      "evidence_grounded": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 27,
+        "total_tool_calls": 18,
+        "agent_tool_calls_per_root_verified": 6.0,
+        "total_elapsed_seconds": 115.82,
+        "model_calls_per_root_verified": 9.0,
+        "seconds_per_root_verified": 38.61,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 0,
+        "full_refresh_exercised_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_legal_mutation_steps": [
+          4,
+          4,
+          4
+        ],
+        "all_applied_bindings_valid": true
+      },
+      "evidence_bound": {
+        "expected_attempts": 3,
+        "completed_attempts": 3,
+        "verification_executable_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_pass_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "valid_receipt_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "child_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "root_verified_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "false_rejection_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "acceptances_needing_oracle_audit": 0,
+        "native_negative_evidence_cases": 0,
+        "repairer_run_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "repairer_calls": 0,
+        "safety_counters": {
+          "mutation_scope_violations": 0,
+          "dnt_execution_violations": 0,
+          "execution_contract_scope_violations": 0,
+          "impact_preservation_violations": 0,
+          "invariant_violations_detected": 0,
+          "impact_out_of_scope_changes": 0
+        },
+        "test_file_mutations": 0,
+        "total_model_calls": 27,
+        "total_tool_calls": 18,
+        "agent_tool_calls_per_root_verified": 6.0,
+        "total_elapsed_seconds": 117.39,
+        "model_calls_per_root_verified": 9.0,
+        "seconds_per_root_verified": 39.13,
+        "first_blockers": {},
+        "first_legal_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "grounding_failure_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "any_mutation_on_true_region_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "verification_after_mutation_rate": {
+          "numerator": 3,
+          "denominator": 3,
+          "percent": 100.0
+        },
+        "rejected_mutation_attempts": 0,
+        "full_refresh_exercised_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "full_refresh_followed_by_legal_mutation_rate": {
+          "numerator": 0,
+          "denominator": 3,
+          "percent": 0.0
+        },
+        "first_legal_mutation_steps": [
+          4,
+          4,
+          4
+        ],
+        "all_applied_bindings_valid": true
+      }
+    }
+  },
+  "protocol_summary": {
+    "evidence_grounded": {
+      "legal_mutation_rate": {
+        "numerator": 3,
+        "denominator": 9,
+        "percent": 33.33
+      },
+      "false_authorization_rate": {
+        "numerator": 0,
+        "denominator": 24,
+        "percent": 0.0
+      },
+      "true_region_rate": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "native_verification_rate": {
+        "numerator": 3,
+        "denominator": 3,
+        "percent": 100.0
+      },
+      "scope_violations": 0,
+      "read_only_tests_changed": 0
+    },
+    "evidence_bound": {
+      "legal_mutation_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "false_authorization_rate": {
+        "numerator": 0,
+        "denominator": 24,
+        "percent": 0.0
+      },
+      "true_region_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "native_verification_rate": {
+        "numerator": 9,
+        "denominator": 9,
+        "percent": 100.0
+      },
+      "scope_violations": 0,
+      "read_only_tests_changed": 0
+    }
+  },
+  "same_protocol_input_hashes": true,
+  "historical_failure": {
+    "source": "D:\\projects\\Ai\\mini_hivo_experiment13\\suite-v1\\arena_arrow\\monotonic-3",
+    "first_legal_mutation": {
+      "tool_step": 3,
+      "model_round": 3,
+      "remaining_budget": 25,
+      "tool": "edit_file",
+      "target": "arena.html"
+    },
+    "applied_before_rollback": 2,
+    "terminal": "MUTATION_TARGET_UNRESOLVED",
+    "bounded_refreshes": 0,
+    "attempts": [
+      {
+        "tool_step": 3,
+        "tool": "edit_file",
+        "target": "arena.html",
+        "grounded": true,
+        "grounding_reason": "GROUNDED_EXACT_REPLACE",
+        "source_lines": [
+          13,
+          13
+        ],
+        "executed": true,
+        "applied": true,
+        "rejected": false
+      },
+      {
+        "tool_step": 6,
+        "tool": "edit_file",
+        "target": "arena.html",
+        "grounded": true,
+        "grounding_reason": "GROUNDED_EXACT_REPLACE",
+        "source_lines": [
+          9,
+          9
+        ],
+        "executed": true,
+        "applied": true,
+        "rejected": false
+      },
+      {
+        "tool_step": 7,
+        "tool": "edit_file",
+        "target": "arena.html",
+        "grounded": false,
+        "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+        "source_lines": null,
+        "executed": false,
+        "applied": false,
+        "rejected": true
+      },
+      {
+        "tool_step": 9,
+        "tool": "edit_file",
+        "target": "arena.html",
+        "grounded": false,
+        "grounding_reason": "MUTATION_TARGET_UNRESOLVED",
+        "source_lines": null,
+        "executed": false,
+        "applied": false,
+        "rejected": true
+      }
+    ],
+    "exact_rejected_arguments_available": false,
+    "meaning": "Two legal edits preceded a later stale-anchor rejection; full reread did not register as bounded refresh. Last rejected old/new text is unavailable."
+  },
+  "exact_historical_mutation_replay_claimed": false,
+  "default_changed": false,
+  "limits": "Constructed challenges have known reference edits and enforced refresh state. They measure authorization, not Worker success. Full reads larger than 80 lines remain ineligible refreshes. Only three frozen tasks; planning excluded.",
+  "evidence_paths": {
+    "suite": "D:\\projects\\Ai\\mini_hivo_experiment15\\suite-v1",
+    "probe": "D:\\projects\\Ai\\mini_hivo_experiment15\\binding-v2\\comparison.json"
+  }
+}

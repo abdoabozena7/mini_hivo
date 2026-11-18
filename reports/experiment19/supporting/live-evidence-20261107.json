@@ -1,0 +1,71 @@
+{
+  "experiment": 19,
+  "campaign_id": "experiment19-20-live-validation-20261106",
+  "artifacts": [
+    {
+      "artifact": "live/integrity-recovery-02/before-gate.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "e352eaacfacd496c9f93cbcf6001e6076e333f22ec3461b09dafb4bff9521869"
+    },
+    {
+      "artifact": "live/integrity-recovery-02/falsifier-before.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "d30a31749e9a0dab8789c99a57272d455839cf4bbfce8c319e77c4e551de2b3d"
+    },
+    {
+      "artifact": "live/integrity-recovery-continuation-01/provider-retention-result.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "7a7758181dd6d67e3bb6c4b8ecfcece6ddb9d4e3e71ba0ed3b72413b90ae79b4"
+    },
+    {
+      "artifact": "live/integrity-recovery-continuation-01/no-progress-stop.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "2017f40f4d90e2fae51b70d92b9db528c29c16dc72793ef40195d11f3b4a35cb"
+    },
+    {
+      "artifact": "live/integrity-recovery-continuation-01/independent-after-stop/result.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "00f653556a2032657011788b7a3943914621172ff43d8dbd9550bbc61c87dbc5"
+    },
+    {
+      "artifact": "source-before-live.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "27fbaa5d51900e440fbc1f7d31d269a3c555b11e85ce5930feb9c3bf8da58f6a"
+    },
+    {
+      "artifact": "source-before-recovery-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "14230ea1e4fd4293d3af0fb78ddc604c95f4aeb4596b3a0444a84d36cc5ddd00"
+    },
+    {
+      "artifact": "source-before-schema-retry-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "7ab9674e2d897f2fc03e72ac033c067a829c871f15041e4f28301b455de6341c"
+    },
+    {
+      "artifact": "source-before-schema-final-20261107.json",
+      "availability": "LOCAL-ONLY EVIDENCE",
+      "sha256": "736c24faec4943edf999b45589a9bbecd3d34de259dc776c119c069f5e206ad7"
+    }
+  ],
+  "final_stage_source_byte_sha256": {
+    "hivo/context.py": "64475a25dbdaf709fe2e21d951225ef1107e7842bc990fdfb081e68c1abca3a8",
+    "hivo/verification_scope.py": "c82dd16d7d1101b157ca16a973bcc723400bd7d4dcc0169270bcf39f7428a3b3",
+    "mini.py": "8d1ef41295ff0fc1643c141027991d260e59a478960da7c10940098b8861fe7b",
+    "tests/test_experiment20_child_scope.py": "458682b779e20a690dc2d790602504491364a9d60931392b028b12c3499e9502",
+    "tests/test_live_mission_retention.py": "37c3ebb044ff09003b9b9e34b76d261ac2954addfd7803bcd6dc637ca524ae45",
+    "tests/test_tool_schema_recovery_feedback.py": "0c2aa7ae77ff24c6c4f2bb59b85707730c76b6a7821abc10efb651a34fa09dac"
+  },
+  "source_scope": "Final-stage hashes, not identical code for every earlier case. Shared context/hint patches remain excluded from this update.",
+  "curation": "Derived facts and hashes only; no raw logs/game/database",
+  "observations": {
+    "raw_fail_chars": 3126,
+    "stored_fail_chars": 805,
+    "stored_passed": false,
+    "basic_web_passed": true,
+    "required_gate_passed": false,
+    "provider_requests": 18,
+    "exact_task_retained": 18,
+    "provisional_repair_writes": 5
+  }
+}

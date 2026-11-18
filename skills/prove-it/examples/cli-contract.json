@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "task_id": "cli-demo",
+  "goal": "Add 7 and 5 through the real demo CLI and observe sum 12",
+  "kind": "cli",
+  "source_paths": [
+    "demo_cli.py"
+  ],
+  "scope_rationale": "The demo has one executable source file; all output goes outside source scope.",
+  "authorization": "Execute this local arithmetic fixture only; no network, production data or external services.",
+  "requirements": [
+    {
+      "id": "R01",
+      "claim": "The CLI returns numeric sum 12 for inputs 7 and 5.",
+      "oracle": "Independent arithmetic: seven plus five is twelve; compare parsed JSON, not a success label.",
+      "failure_example": "Returning the first operand, a constant success message, or sum 13 must fail.",
+      "runtime_required": true,
+      "checks": [
+        "addition"
+      ],
+      "negative_checks": [],
+      "negative_control_exception": "This installation smoke demonstration is supplemented by the shipped harness failure-injection suite; it is not project acceptance.",
+      "review_required": false
+    }
+  ],
+  "checks": [
+    {
+      "id": "addition",
+      "description": "Execute actual CLI with two numeric operands and compare the response.",
+      "mode": "live",
+      "role": "acceptance",
+      "command": [
+        "{python}",
+        "demo_cli.py",
+        "7",
+        "5"
+      ],
+      "timeout_seconds": 10,
+      "expected_exit_codes": [
+        0
+      ],
+      "assertions": [
+        {
+          "type": "json",
+          "file": "stdout.log",
+          "pointer": "/sum",
+          "op": "eq",
+          "value": 12
+        }
+      ],
+      "artifacts": []
+    }
+  ],
+  "plan": {
+    "strategy": "serial",
+    "rationale": "One tiny executable; delegation would add overhead without independent work.",
+    "delegation": {
+      "available": false,
+      "evidence": "This demonstration runs as a single local Python process, with no agent orchestration tool."
+    },
+    "tasks": [
+      {
+        "id": "T01",
+        "title": "Verify the integrated CLI behavior",
+        "outcome": "The actual executable returns the independently expected numeric result.",
+        "owner": "coordinator",
+        "role": "integrate",
+        "execution": "serial",
+        "depends_on": [],
+        "write_scope": [],
+        "outputs": [
+          "actual process stdout and execution receipt"
+        ],
+        "requirements": [
+          "R01"
+        ],
+        "checks": [
+          "addition"
+        ],
+        "acceptance": "The process exits successfully and its JSON sum equals twelve."
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "experiment": 19,
+  "base_commit": "6ec3bda16e88af764f63ea9fc7319096ffd25cbe",
+  "dates": [
+    "2026-11-06",
+    "2026-11-07"
+  ],
+  "model": "gemma4:e4b",
+  "model_digest": "dc35e8d9c6061baa6f0fa870975ab6932e2542b579b13ea0f199fa4bb7300c9c",
+  "python": "3.11.9",
+  "policy": "current_recursive",
+  "browser_policy": "field_scoped",
+  "limits": {
+    "process_seconds": 1800,
+    "worker_steps": 28,
+    "falsifier_steps": 8,
+    "request_timeout_seconds": 600
+  },
+  "boundary": "Real production roles/tools/browser/quality/transaction; controlled movement/collection subset, not full CLI ingestion/specification/decomposition or full game",
+  "observers": "Original calls/results forwarded unchanged",
+  "checkpoints": "Actual failed receipt/mission or accepted foundation explicitly reused; fresh authorization, never counted as new scripted model evidence",
+  "mutation_safety": "Context/Impact active; ordinary execution contract null; optional progress-constrained/contract-bound activation not claimed",
+  "acceptance_observations": {
+    "long_fail_preserved": "demonstrated",
+    "basic_pass_cannot_override": "demonstrated",
+    "foundation_acceptance": "demonstrated_separate_profile",
+    "authorized_repair_writes": "demonstrated_provisional",
+    "functional_repair": "not_achieved",
+    "fresh_required_pass": "not_obtained",
+    "matching_success_supersession": "not_reached_live",
+    "repaired_transaction_acceptance": "not_demonstrated"
+  },
+  "reproduction_limit": "Raw harnesses local-only. Curated evidence review, not portable one-command live reproduction.",
+  "complete_acceptance": "Successful functional repair/fresh required verification/transaction, or accepted sequential movement/collection with retained duties and complete parent, remain mandatory."
+}

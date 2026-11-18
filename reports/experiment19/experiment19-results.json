@@ -1,0 +1,63 @@
+{
+  "experiment": 19,
+  "status": "Offline validation complete for declared matrix; no live E2E validation",
+  "baseline": "2a8b94590734cec3375047a18e0dc71df2476f85",
+  "treatment": "f8bf65ece895f70c1b572b59df229314de09afbe",
+  "protocol": {
+    "cases_per_arm": 16,
+    "negative_cases": 14,
+    "positive_cases": 2,
+    "baseline": {
+      "matching_expected": 8,
+      "false_passes": 7,
+      "false_rejections": 1
+    },
+    "treatment": {
+      "matching_expected": 16,
+      "false_passes": 0,
+      "false_rejections": 0
+    },
+    "same_input_hashes": true,
+    "model_calls": 0,
+    "browser_calls": 0
+  },
+  "selected_regressions": {
+    "suites": 9,
+    "methods": 103,
+    "experiment19_methods": 30,
+    "existing_methods": 73,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "not_a_full_suite": true
+  },
+  "historical_run010_replay": {
+    "input": "Read-only existing Run010 native line118 routes + SQLite tool events1-14 and failed event10 browser payload",
+    "baseline_passed": true,
+    "patched_passed": false,
+    "baseline_browser": [
+      "PASS"
+    ],
+    "patched_browser": [
+      "FAIL"
+    ],
+    "historical_inputs_modified": false
+  },
+  "checks": {
+    "lf_normalized_source_matches_treatment": true,
+    "unchanged_final_gate_ast": true,
+    "authority_closure_fixture_available": false
+  },
+  "limits": [
+    "No live E2E treatment run",
+    "Chronological receipt order is not independent artifact freshness",
+    "Missing historical closure fixture",
+    "Retrospective finite protocol matrix"
+  ],
+  "local_only_pilots": [
+    "protocol-v1: curated fixture did not retain overflow-causing metadata",
+    "protocol-v2: overflow also affected intended non-overflow controls; isolated those in final v3"
+  ],
+  "date": "2026-10-28",
+  "publication_normalization": "Supporting JSON uses LF via scoped attributes; v4 has the same per-case outcomes as v3."
+}

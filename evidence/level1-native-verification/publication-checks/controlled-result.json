@@ -1,0 +1,314 @@
+{
+  "verification_class": "CONTROLLED_FUNCTIONAL_REAL_GATES_AND_FILESYSTEM",
+  "request": "Create a text file named test_level_1.txt containing exactly:Hello Mini Hivo",
+  "scripted_provider_responses": 8,
+  "real_model_calls": 0,
+  "status": "done",
+  "root_verified": true,
+  "file_exists": true,
+  "actual_hex": "48656c6c6f204d696e69204869766f",
+  "exact_bytes": true,
+  "actual_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+  "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+  "impact_comparison": {
+    "status": "IMPACT_CONTRACT_PASSED",
+    "passed": true,
+    "failure_type": null,
+    "comparisons": [
+      {
+        "kind": "target",
+        "target": "test_level_1.txt",
+        "status": "EXPECTED_AND_OBSERVED",
+        "actual": [
+          {
+            "target": "test_level_1.txt",
+            "kind": "path",
+            "path": "test_level_1.txt"
+          },
+          {
+            "target": "test_level_1.txt",
+            "path": "test_level_1.txt",
+            "kind": "path"
+          }
+        ]
+      },
+      {
+        "kind": "literal_file_post_state",
+        "target": "test_level_1.txt",
+        "status": "EXPECTED_AND_OBSERVED",
+        "reason": "exact file bytes match"
+      },
+      {
+        "kind": "verification_obligation",
+        "id": "REQ-001",
+        "status": "SATISFIED"
+      },
+      {
+        "kind": "verification_obligation",
+        "id": "REQ-002",
+        "status": "SATISFIED"
+      },
+      {
+        "kind": "verification_obligation",
+        "id": "REQ-003",
+        "status": "SATISFIED"
+      }
+    ],
+    "missing": [],
+    "unexpected_related": [],
+    "out_of_scope": [],
+    "preservation_violations": [],
+    "obligations": [
+      {
+        "id": "REQ-001",
+        "category": "POST_STATE",
+        "meaning": "Create a text file.",
+        "target": "test_level_1.txt",
+        "required": true,
+        "mode": "controller",
+        "verification_kind": "existing_gate",
+        "provenance": [
+          {
+            "source_identity": "REQ-001",
+            "path": "REQ-001",
+            "location": "",
+            "evidence_kind": "USER_STATED",
+            "evidence_id": "",
+            "authority_tier": "MEDIUM",
+            "authority_score": 60,
+            "excerpt": "Create a text file."
+          }
+        ],
+        "status": "SATISFIED"
+      },
+      {
+        "id": "REQ-002",
+        "category": "POST_STATE",
+        "meaning": "The file name must be 'test_level_1.txt'.",
+        "target": "test_level_1.txt",
+        "required": true,
+        "mode": "controller",
+        "verification_kind": "existing_gate",
+        "provenance": [
+          {
+            "source_identity": "REQ-002",
+            "path": "REQ-002",
+            "location": "",
+            "evidence_kind": "USER_STATED",
+            "evidence_id": "",
+            "authority_tier": "MEDIUM",
+            "authority_score": 60,
+            "excerpt": "The file name must be 'test_level_1.txt'."
+          }
+        ],
+        "status": "SATISFIED"
+      },
+      {
+        "id": "REQ-003",
+        "category": "POST_STATE",
+        "meaning": "The content of the file must be exactly 'Hello Mini Hivo'.",
+        "target": "test_level_1.txt",
+        "required": true,
+        "mode": "controller",
+        "verification_kind": "existing_gate",
+        "provenance": [
+          {
+            "source_identity": "REQ-003",
+            "path": "REQ-003",
+            "location": "",
+            "evidence_kind": "USER_STATED",
+            "evidence_id": "",
+            "authority_tier": "MEDIUM",
+            "authority_score": 60,
+            "excerpt": "The content of the file must be exactly 'Hello Mini Hivo'."
+          }
+        ],
+        "status": "SATISFIED"
+      }
+    ],
+    "unresolved_obligations": [],
+    "conflicts": [],
+    "actual_changed_paths": [
+      "test_level_1.txt"
+    ],
+    "contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012",
+    "revision": 0,
+    "bounded": true
+  },
+  "verification_aggregation": {
+    "child_id": "ROOT",
+    "verification_routes": [
+      {
+        "kind": "LITERAL_ARTIFACT",
+        "required": true,
+        "applicable": true,
+        "target": "test_level_1.txt",
+        "reason_codes": [
+          "SOURCE_BOUND_LITERAL_POST_STATE"
+        ],
+        "evidence_refs": [
+          "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+        ],
+        "result": "PASS",
+        "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+        "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+      },
+      {
+        "kind": "SYNTAX_STATIC_GATE",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer"
+      },
+      {
+        "kind": "BROWSER",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED",
+          "NO_SUPPORTED_BROWSER_TARGET"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "requested_from_node": null,
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer",
+        "actual_result": "SKIPPED_NOT_APPLICABLE"
+      }
+    ],
+    "actual_passes": [
+      {
+        "kind": "LITERAL_ARTIFACT",
+        "required": true,
+        "applicable": true,
+        "target": "test_level_1.txt",
+        "reason_codes": [
+          "SOURCE_BOUND_LITERAL_POST_STATE"
+        ],
+        "evidence_refs": [
+          "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+        ],
+        "result": "PASS",
+        "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+        "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+      }
+    ],
+    "actual_failures": [],
+    "skipped_not_applicable": [
+      {
+        "kind": "SYNTAX_STATIC_GATE",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer"
+      },
+      {
+        "kind": "BROWSER",
+        "required": false,
+        "applicable": false,
+        "target": null,
+        "reason_codes": [
+          "VERIFIER_NOT_REQUIRED",
+          "NO_SUPPORTED_BROWSER_TARGET"
+        ],
+        "evidence_refs": [
+          "child:ROOT"
+        ],
+        "result": "SKIPPED_NOT_APPLICABLE",
+        "requested_from_node": null,
+        "resolution_status": "NOT_APPLICABLE",
+        "resolution_source": "applicability_analyzer",
+        "actual_result": "SKIPPED_NOT_APPLICABLE"
+      }
+    ],
+    "required_target_failures": [],
+    "required_routes": [
+      {
+        "kind": "LITERAL_ARTIFACT",
+        "required": true,
+        "applicable": true,
+        "target": "test_level_1.txt",
+        "reason_codes": [
+          "SOURCE_BOUND_LITERAL_POST_STATE"
+        ],
+        "evidence_refs": [
+          "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+        ],
+        "result": "PASS",
+        "expected_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+        "impact_contract_hash": "7f4c86bd8826dcde1eacdb510e8d5482bbd5bcda4e8de1a045f733ad16cec012"
+      }
+    ],
+    "invalid_receipts": [],
+    "failure_codes": [],
+    "evidence_available": true,
+    "passed": true,
+    "model_calls": 0,
+    "required_execution_verification_set": {
+      "schema_version": "V25.6",
+      "artifact_type": "RequiredExecutionVerificationSet",
+      "child_id": "ROOT",
+      "plan_id": null,
+      "plan_hash": null,
+      "verification_digest": null,
+      "coverage_hash": null,
+      "applicable_authority_ids": [],
+      "required_authority_ids": [
+        "UNRESOLVED-ROUTE-3F12DDD8B0C54379"
+      ],
+      "required_verification_authority_ids": [
+        "UNRESOLVED-ROUTE-3F12DDD8B0C54379"
+      ],
+      "approved_verification_authority_ids": [
+        "UNRESOLVED-ROUTE-3F12DDD8B0C54379"
+      ],
+      "system_authority_ids": [],
+      "optional_authority_ids": [],
+      "routes": [
+        {
+          "authority_id": "UNRESOLVED-ROUTE-3F12DDD8B0C54379",
+          "verification_id": null,
+          "oracle_id": null,
+          "oracle_hash": null,
+          "authority_type": null,
+          "authority_source": null,
+          "route_type": "LITERAL_ARTIFACT",
+          "execution_channel": null,
+          "target": "test_level_1.txt",
+          "required": true,
+          "applicable": true,
+          "route_hash": "3f12ddd8b0c54379b02902e8ece7b6a6905e8829922a76117b38103a1838e23f"
+        }
+      ],
+      "set_hash": "6001307693f220a85a9daf64ff0ffe3724ceef8e10acb6cba709fd43897d42cb",
+      "canonical_hash": "6001307693f220a85a9daf64ff0ffe3724ceef8e10acb6cba709fd43897d42cb"
+    },
+    "execution_obligation_evidence": [],
+    "all_required_passed": true
+  },
+  "falsifier_native_readbacks": 1,
+  "production_source_sha256": {
+    "mini.py": "2f1823505464543ead724168163f8158364aee9b7fcb08c27205378c77df7862",
+    "hivo/requirements.py": "d9b018027b9c6cf4eeb39036db308ad2177c5c4cba2dc86238d109b1fcc24c4a",
+    "hivo/verification_routing.py": "ba25ccf44567ba1e6b2a40b98211f09c44e9ebed5667aa48377fdec5246f16d4"
+  }
+}

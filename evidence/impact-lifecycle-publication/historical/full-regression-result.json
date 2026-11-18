@@ -1,0 +1,100 @@
+{
+  "discovered": 1718,
+  "excluded": [
+    "test_requirement_clarification.RequirementClarificationTests.test_root_brain_prompt_compacts_large_source_side_channel_without_dropping_ids"
+  ],
+  "tests_run": 1376,
+  "failure_records": 24,
+  "errors": 18,
+  "skipped": 10,
+  "failure_tests": [
+    "test_06_legacy_verification_path_remains_valid_and_distinct (test_v26_5_preverification_recovery.V265PreVerificationRecoveryTests.test_06_legacy_verification_path_remains_valid_and_distinct)",
+    "test_14_provider_free_worker_execution_replay_reaches_full_existing_gates (test_v26_5_preverification_recovery.V265PreVerificationRecoveryTests.test_14_provider_free_worker_execution_replay_reaches_full_existing_gates)",
+    "test_16_v26_4_composition_and_budgets_remain_provider_free (test_v26_5_preverification_recovery.V265PreVerificationRecoveryTests.test_16_v26_4_composition_and_budgets_remain_provider_free)",
+    "test_13_workspace_uniqueness_fixture_is_time_invariant (test_v26_6_2_active_schema_mutation_intent_reset.V2662ActiveSchemaMutationIntentTests.test_13_workspace_uniqueness_fixture_is_time_invariant)",
+    "test_35_successful_and_failed_downstream_replays_remain_provider_free (test_v26_6_no_mutation_recovery_search.V266NoMutationRecoverySearchTests.test_35_successful_and_failed_downstream_replays_remain_provider_free)",
+    "test_37_historical_fixture_and_future_live_workspace_are_not_touched_or_created (test_v26_6_no_mutation_recovery_search.V266NoMutationRecoverySearchTests.test_37_historical_fixture_and_future_live_workspace_are_not_touched_or_created)",
+    "test_01_live3_failure_envelope_is_immutable_and_valid (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_01_live3_failure_envelope_is_immutable_and_valid)",
+    "test_02_live3_failure_identity_is_preserved_exactly (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_02_live3_failure_identity_is_preserved_exactly)",
+    "test_04_live3_is_worker_recoverable_without_reapproval (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_04_live3_is_worker_recoverable_without_reapproval)",
+    "test_07_mission_stays_under_same_authority (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_07_mission_stays_under_same_authority)",
+    "test_08_recovery_authorization_is_derived_not_new_approval (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_08_recovery_authorization_is_derived_not_new_approval)",
+    "test_09_recovery_packet_is_fresh_bounded_and_complete (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_09_recovery_packet_is_fresh_bounded_and_complete)",
+    "test_10_provider_free_dispatch_reaches_injected_seam_once (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_10_provider_free_dispatch_reaches_injected_seam_once)",
+    "test_11_callback_type_error_is_not_retried (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_11_callback_type_error_is_not_retried)",
+    "test_12_authority_change_dimensions_fail_closed (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_12_authority_change_dimensions_fail_closed) (dimension='new_mutation_paths')",
+    "test_12_authority_change_dimensions_fail_closed (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_12_authority_change_dimensions_fail_closed) (dimension='dnt_changes')",
+    "test_12_authority_change_dimensions_fail_closed (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_12_authority_change_dimensions_fail_closed) (dimension='interface_semantic_changes')",
+    "test_12_authority_change_dimensions_fail_closed (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_12_authority_change_dimensions_fail_closed) (dimension='ownership_changes')",
+    "test_12_authority_change_dimensions_fail_closed (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_12_authority_change_dimensions_fail_closed) (dimension='verification_authority_changes')",
+    "test_19_known_harness_failure_is_harness_recoverable (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_19_known_harness_failure_is_harness_recoverable)",
+    "test_20_capability_floor_requires_bounded_repeated_evidence (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_20_capability_floor_requires_bounded_repeated_evidence)",
+    "test_22_positive_injected_replay_reaches_all_future_boundaries (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_22_positive_injected_replay_reaches_all_future_boundaries)",
+    "test_23_negative_injected_replay_stops_without_promotion (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_23_negative_injected_replay_stops_without_promotion)",
+    "test_25_architecture_self_test_passes_provider_free (test_v26_recovery_foundation.V26RecoveryFoundationTests.test_25_architecture_self_test_passes_provider_free)"
+  ],
+  "error_tests": [
+    "setUpClass (test_v24_4_2_current_surface_preservation_binding.CurrentSurfacePreservationBindingTests)",
+    "setUpClass (test_v24_4_3_decision_relevant_impact_choice_projection.DecisionRelevantImpactChoiceProjectionTests)",
+    "setUpClass (test_v24_4_4_challenger_review_relevant_projection.ChallengerReviewRelevantProjectionTests)",
+    "setUpClass (test_v24_4_5_canonical_final_plan_budget_closure.CanonicalFinalPlanBudgetClosureTests)",
+    "setUpClass (test_v24_4_6_live_equivalent_final_plan_bound_closure.LiveEquivalentCanonicalFinalPlanBoundClosureTests)",
+    "setUpClass (test_v25_1_approval_bound_execution_lifecycle.ApprovalBoundExecutionLifecycleTests)",
+    "setUpClass (test_v25_2_worker_execution_invariant_projection.WorkerExecutionInvariantProjectionTests)",
+    "setUpClass (test_v25_3_verification_obligation_coverage_gate.VerificationObligationCoverageGateTests)",
+    "setUpClass (test_v25_4_1_verification_coverage_artifact_propagation.VerificationCoverageArtifactPropagationTests)",
+    "setUpClass (test_v25_4_2_approved_verification_exact_routing.ApprovedVerificationExactRoutingTests)",
+    "setUpClass (test_v25_4_verification_complete_plan_revision.VerificationCompletePlanRevisionTests)",
+    "setUpClass (test_v25_5_precommit_execution_invariant_gate.PreCommitExecutionInvariantGateTests)",
+    "setUpClass (test_v25_6_execution_verification_authority_closure.V256ExecutionVerificationAuthorityClosureTests)",
+    "setUpClass (test_v25_approval_bound_execution_authorization.ApprovalBoundExecutionAuthorizationTests)",
+    "test_18_provider_free_positive_control_preserves_full_downstream_closure (test_v26_6_no_mutation_recovery_search.V266NoMutationRecoverySearchTests.test_18_provider_free_positive_control_preserves_full_downstream_closure)",
+    "test_30_provider_free_full_continuation_reaches_promotion_and_reentry (test_v26_7_progress_aware_completion_recovery.V267ProgressAwareCompletionRecoveryTests.test_30_provider_free_full_continuation_reaches_promotion_and_reentry)",
+    "test_frozen_prompt_uses_exact_bridge_identifier (test_verification_policy.VerificationPolicyTests.test_frozen_prompt_uses_exact_bridge_identifier)",
+    "test_source_ledger_preserves_exact_benchmark_bridge (test_verification_policy.VerificationPolicyTests.test_source_ledger_preserves_exact_benchmark_bridge)"
+  ],
+  "skip_reasons": [
+    [
+      "test_clock_probe_accepts_nested_split_visible_time (test_browser_checks.BrowserProbeTests.test_clock_probe_accepts_nested_split_visible_time)",
+      "Playwright Chromium is unavailable: BrowserType.launch: Executable doesn't exist at <LOCAL_PATH>\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     playwright install                                     ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+    ],
+    [
+      "test_duration_probe_applies_value_and_checks_positive_minimum (test_browser_checks.BrowserProbeTests.test_duration_probe_applies_value_and_checks_positive_minimum)",
+      "Playwright Chromium is unavailable: BrowserType.launch: Executable doesn't exist at <LOCAL_PATH>\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     playwright install                                     ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+    ],
+    [
+      "test_captured_diagnostic_responses_replay_without_provider_calls (test_impact_map_contract.ImpactMapContractTests.test_captured_diagnostic_responses_replay_without_provider_calls)",
+      "DIAGNOSTIC_LIVE-2 raw planner artifacts are not available"
+    ],
+    [
+      "test_complex_builder_uses_bounded_gemma_authored_stages (test_mini.MiniAgentRegressionTests.test_complex_builder_uses_bounded_gemma_authored_stages)",
+      "legacy deterministic stage scheduler was removed from the experimental path"
+    ],
+    [
+      "test_each_builder_stage_verifies_only_its_own_contract_slice (test_mini.MiniAgentRegressionTests.test_each_builder_stage_verifies_only_its_own_contract_slice)",
+      "node contracts replace deterministic stage slices in the experimental path"
+    ],
+    [
+      "test_exhausted_stage_gets_one_fresh_context_continuation_in_same_transaction (test_mini.MiniAgentRegressionTests.test_exhausted_stage_gets_one_fresh_context_continuation_in_same_transaction)",
+      "TASK_TOO_BROAD now re-splits through solve_task instead of continuing a hidden stage"
+    ],
+    [
+      "test_stagnant_stage_continuation_requests_model_owned_coherent_rewrite (test_mini.MiniAgentRegressionTests.test_stagnant_stage_continuation_requests_model_owned_coherent_rewrite)",
+      "duplicate continuation/rewrite scheduler is outside the research path"
+    ],
+    [
+      "test_18_positive_and_negative_existing_v26_replays_remain_provider_free (test_v26_3_recovery_strategy.V263RecoveryStrategyTests.test_18_positive_and_negative_existing_v26_replays_remain_provider_free)",
+      "historical V25.6 live-3 fixture unavailable"
+    ],
+    [
+      "test_19_positive_diversified_prefix_preserves_full_v26_closure (test_v26_3_recovery_strategy.V263RecoveryStrategyTests.test_19_positive_diversified_prefix_preserves_full_v26_closure)",
+      "historical V25.6 live-3 fixture unavailable"
+    ],
+    [
+      "test_22_positive_v26_replay_remains_provider_free_after_v264_prefix (test_v26_4_tool_contract_recovery.V264ToolContractRecoveryTests.test_22_positive_v26_replay_remains_provider_free_after_v264_prefix)",
+      "historical V25.6 live-3 fixture unavailable"
+    ]
+  ],
+  "elapsed_seconds": 82.61,
+  "exit_code": 1
+}

@@ -1,0 +1,2306 @@
+{
+  "case_id": "arena_q_restart",
+  "input_capture": "D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1-EXEC-001-handoff.json",
+  "arms": [
+    {
+      "policy": "current",
+      "model_calls": 0,
+      "repairer_calls": 0,
+      "root_verification_executed": false,
+      "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+      "subject_before": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "arena.html",
+            "exists": true,
+            "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+            "size": 1360
+          }
+        ],
+        "hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40"
+      },
+      "eligible": true,
+      "browser": {
+        "requested_from_node": "arena.html",
+        "resolved_entrypoint": "arena.html",
+        "resolution_source": "unique_root_html",
+        "resolution_status": "RESOLVED",
+        "passed": true,
+        "environment_error": false,
+        "title": "Grid Arena",
+        "url": "http://127.0.0.1:59272/arena.html",
+        "text": "playing 0\n\nUpRestart",
+        "console_errors": [],
+        "page_errors": [],
+        "network_errors": [],
+        "runtime_state": {
+          "canvasCount": 1,
+          "gameBridge": {
+            "name": "ARENA",
+            "surface_type": "existing_app_hook"
+          },
+          "debugState": null
+        },
+        "interaction_checks": [
+          {
+            "name": "keyboard_movement",
+            "executed": true,
+            "passed": true,
+            "before": {
+              "status": "playing",
+              "score": 0,
+              "player": {
+                "row": 0,
+                "col": 0
+              }
+            },
+            "after": {
+              "status": "playing",
+              "score": 1,
+              "player": {
+                "row": 1,
+                "col": 0
+              }
+            },
+            "input": "ArrowUp"
+          },
+          {
+            "name": "restart_resets_state",
+            "executed": true,
+            "passed": true,
+            "input": "q",
+            "cases": [
+              {
+                "setup": "forceCollision",
+                "precondition_met": true,
+                "before": {
+                  "status": "gameover",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "passed": true
+              },
+              {
+                "setup": "forceWin",
+                "precondition_met": true,
+                "before": {
+                  "status": "won",
+                  "score": 10,
+                  "player": {
+                    "row": 10,
+                    "col": 0
+                  }
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "passed": true
+              }
+            ]
+          },
+          {
+            "name": "goal_win_state",
+            "executed": true,
+            "passed": true,
+            "after": {
+              "status": "won",
+              "score": 10,
+              "player": {
+                "row": 10,
+                "col": 0
+              }
+            }
+          },
+          {
+            "name": "touch_control",
+            "executed": true,
+            "passed": true,
+            "before": {
+              "status": "playing",
+              "score": 0,
+              "player": {
+                "row": 0,
+                "col": 0
+              }
+            },
+            "after": {
+              "status": "playing",
+              "score": 1,
+              "player": {
+                "row": 1,
+                "col": 0
+              }
+            },
+            "input": "pointerdown"
+          }
+        ],
+        "screenshot": ".agent_evidence\\task_EXEC-001.png",
+        "failures": [],
+        "verification_profile": {
+          "kind": "game",
+          "require_title": true,
+          "require_canvas": true,
+          "require_game_bridge": true,
+          "required_interactions": [
+            "keyboard_movement",
+            "restart_resets_state",
+            "goal_win_state",
+            "touch_control"
+          ]
+        },
+        "verification_surface": {
+          "surface_type": "existing_app_hook",
+          "selected": {
+            "name": "ARENA",
+            "methods": [
+              "start",
+              "restart",
+              "move",
+              "forceCollision",
+              "forceWin"
+            ],
+            "stateKeys": [
+              "status",
+              "score",
+              "player"
+            ],
+            "score": 35
+          },
+          "candidates": [
+            {
+              "name": "ARENA",
+              "methods": [
+                "start",
+                "restart",
+                "move",
+                "forceCollision",
+                "forceWin"
+              ],
+              "stateKeys": [
+                "status",
+                "score",
+                "player"
+              ],
+              "score": 35
+            }
+          ],
+          "action_functions": [
+            "restart"
+          ],
+          "dom": {
+            "canvasCount": 1,
+            "controls": [
+              {
+                "tag": "button",
+                "id": null,
+                "text": "Up",
+                "dataMove": "up"
+              },
+              {
+                "tag": "button",
+                "id": "restart",
+                "text": "Restart",
+                "dataMove": null
+              }
+            ],
+            "liveRegions": 1
+          },
+          "required_interactions": [
+            "goal_win_state",
+            "keyboard_movement",
+            "restart_resets_state",
+            "touch_control"
+          ],
+          "executed_interactions": [
+            "keyboard_movement",
+            "restart_resets_state",
+            "goal_win_state",
+            "touch_control"
+          ],
+          "behavior_test_executed": true,
+          "all_required_executed": true
+        },
+        "behavior_test_executed": true,
+        "entry_path": "arena.html",
+        "verification_status": "PASS",
+        "verification_route": {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "arena.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:arena.html",
+            "repo:entrypoint:arena.html"
+          ],
+          "result": "PENDING",
+          "requested_from_node": "arena.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": []
+        },
+        "verification_applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "PASS",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [
+              "arena.html"
+            ],
+            "known_test_files": [],
+            "observed_file_types": [
+              "html"
+            ]
+          },
+          "verification_applicability_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+          "verification_routes_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+          "last_result": "PASS"
+        }
+      },
+      "gate": {
+        "passed": false,
+        "checks": [
+          {
+            "name": "verification_aggregation",
+            "status": "FAIL",
+            "source": "deterministic",
+            "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"arena.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:arena.html\", \"repo:entrypoint:arena.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"arena.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+          }
+        ],
+        "deterministic_failures": [
+          {
+            "name": "verification_aggregation",
+            "status": "FAIL",
+            "source": "deterministic",
+            "evidence": "{\"child_id\": \"EXEC-001\", \"failure_codes\": [\"REQUIRED_VERIFICATION_FAILED\"], \"actual_failures\": [{\"kind\": \"BROWSER\", \"required\": true, \"applicable\": true, \"target\": \"arena.html\", \"reason_codes\": [\"SUPPORTED_TARGET_PRESENT\"], \"evidence_refs\": [\"child:EXEC-001\", \"contract:requested_target:arena.html\", \"repo:entrypoint:arena.html\"], \"result\": \"INVALID_RECEIPT\", \"requested_from_node\": \"arena.html\", \"resolution_status\": \"RESOLVED\", \"resolution_source\": \"unique_root_html\", \"candidates\": [], \"actual_result\": \"PASS\"}]}"
+          }
+        ],
+        "advisory_checks": [],
+        "advisory_failures": [],
+        "verification_aggregation": {
+          "child_id": "EXEC-001",
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "INVALID_RECEIPT",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "actual_passes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            }
+          ],
+          "actual_failures": [
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "INVALID_RECEIPT",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "skipped_not_applicable": [],
+          "required_target_failures": [],
+          "required_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "INVALID_RECEIPT",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "invalid_receipts": [
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "INVALID_RECEIPT",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "failure_codes": [
+            "REQUIRED_VERIFICATION_FAILED"
+          ],
+          "evidence_available": true,
+          "passed": false,
+          "model_calls": 0,
+          "required_execution_verification_set": {
+            "schema_version": "V25.6",
+            "artifact_type": "RequiredExecutionVerificationSet",
+            "child_id": "EXEC-001",
+            "plan_id": null,
+            "plan_hash": null,
+            "verification_digest": null,
+            "coverage_hash": null,
+            "applicable_authority_ids": [],
+            "required_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "required_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "approved_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "system_authority_ids": [],
+            "optional_authority_ids": [],
+            "routes": [
+              {
+                "authority_id": "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "SYNTAX_STATIC_GATE",
+                "execution_channel": null,
+                "target": "arena.html",
+                "required": true,
+                "applicable": true,
+                "route_hash": "e915a3043aeb9e63b1000ecebee9c26d6ea014317e2d3025d6f4d67dfccfcfa9"
+              },
+              {
+                "authority_id": "UNRESOLVED-ROUTE-5ACF2F6E212B187F",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "BROWSER",
+                "execution_channel": null,
+                "target": "arena.html",
+                "required": true,
+                "applicable": true,
+                "route_hash": "5acf2f6e212b187f1d9146635be73ac24838aaa0d471302e7751304fa0b97dd6"
+              }
+            ],
+            "set_hash": "c0d40426085fc60d7505ca8bef144995b228144008e4d1ae2e784d0f79939169",
+            "canonical_hash": "c0d40426085fc60d7505ca8bef144995b228144008e4d1ae2e784d0f79939169"
+          },
+          "execution_obligation_evidence": [],
+          "all_required_passed": false
+        }
+      },
+      "child_verified": false,
+      "blocker": [
+        "REQUIRED_VERIFICATION_FAILED"
+      ],
+      "subject_after": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "arena.html",
+            "exists": true,
+            "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+            "size": 1360
+          }
+        ],
+        "hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40"
+      }
+    },
+    {
+      "policy": "compatible",
+      "model_calls": 0,
+      "repairer_calls": 0,
+      "root_verification_executed": false,
+      "input_hash": "2b8b6d9e6c402551cd9687d48de02b798f480a641ec0ae6c8eb21feb36e4bbb2",
+      "subject_before": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "arena.html",
+            "exists": true,
+            "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+            "size": 1360
+          }
+        ],
+        "hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40"
+      },
+      "eligible": true,
+      "browser": {
+        "requested_from_node": "arena.html",
+        "resolved_entrypoint": "arena.html",
+        "resolution_source": "unique_root_html",
+        "resolution_status": "RESOLVED",
+        "passed": true,
+        "environment_error": false,
+        "title": "Grid Arena",
+        "url": "http://127.0.0.1:52933/arena.html",
+        "text": "playing 0\n\nUpRestart",
+        "console_errors": [],
+        "page_errors": [],
+        "network_errors": [],
+        "runtime_state": {
+          "canvasCount": 1,
+          "gameBridge": {
+            "name": "ARENA",
+            "surface_type": "existing_app_hook"
+          },
+          "debugState": null
+        },
+        "interaction_checks": [
+          {
+            "name": "keyboard_movement",
+            "executed": true,
+            "passed": true,
+            "before": {
+              "status": "playing",
+              "score": 0,
+              "player": {
+                "row": 0,
+                "col": 0
+              }
+            },
+            "after": {
+              "status": "playing",
+              "score": 1,
+              "player": {
+                "row": 1,
+                "col": 0
+              }
+            },
+            "input": "ArrowUp"
+          },
+          {
+            "name": "restart_resets_state",
+            "executed": true,
+            "passed": true,
+            "input": "q",
+            "cases": [
+              {
+                "setup": "forceCollision",
+                "precondition_met": true,
+                "before": {
+                  "status": "gameover",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "passed": true
+              },
+              {
+                "setup": "forceWin",
+                "precondition_met": true,
+                "before": {
+                  "status": "won",
+                  "score": 10,
+                  "player": {
+                    "row": 10,
+                    "col": 0
+                  }
+                },
+                "after": {
+                  "status": "playing",
+                  "score": 0,
+                  "player": {
+                    "row": 0,
+                    "col": 0
+                  }
+                },
+                "passed": true
+              }
+            ]
+          },
+          {
+            "name": "goal_win_state",
+            "executed": true,
+            "passed": true,
+            "after": {
+              "status": "won",
+              "score": 10,
+              "player": {
+                "row": 10,
+                "col": 0
+              }
+            }
+          },
+          {
+            "name": "touch_control",
+            "executed": true,
+            "passed": true,
+            "before": {
+              "status": "playing",
+              "score": 0,
+              "player": {
+                "row": 0,
+                "col": 0
+              }
+            },
+            "after": {
+              "status": "playing",
+              "score": 1,
+              "player": {
+                "row": 1,
+                "col": 0
+              }
+            },
+            "input": "pointerdown"
+          }
+        ],
+        "screenshot": ".agent_evidence\\task_EXEC-001.png",
+        "failures": [],
+        "verification_profile": {
+          "kind": "game",
+          "require_title": true,
+          "require_canvas": true,
+          "require_game_bridge": true,
+          "required_interactions": [
+            "keyboard_movement",
+            "restart_resets_state",
+            "goal_win_state",
+            "touch_control"
+          ]
+        },
+        "verification_surface": {
+          "surface_type": "existing_app_hook",
+          "selected": {
+            "name": "ARENA",
+            "methods": [
+              "start",
+              "restart",
+              "move",
+              "forceCollision",
+              "forceWin"
+            ],
+            "stateKeys": [
+              "status",
+              "score",
+              "player"
+            ],
+            "score": 35
+          },
+          "candidates": [
+            {
+              "name": "ARENA",
+              "methods": [
+                "start",
+                "restart",
+                "move",
+                "forceCollision",
+                "forceWin"
+              ],
+              "stateKeys": [
+                "status",
+                "score",
+                "player"
+              ],
+              "score": 35
+            }
+          ],
+          "action_functions": [
+            "restart"
+          ],
+          "dom": {
+            "canvasCount": 1,
+            "controls": [
+              {
+                "tag": "button",
+                "id": null,
+                "text": "Up",
+                "dataMove": "up"
+              },
+              {
+                "tag": "button",
+                "id": "restart",
+                "text": "Restart",
+                "dataMove": null
+              }
+            ],
+            "liveRegions": 1
+          },
+          "required_interactions": [
+            "goal_win_state",
+            "keyboard_movement",
+            "restart_resets_state",
+            "touch_control"
+          ],
+          "executed_interactions": [
+            "keyboard_movement",
+            "restart_resets_state",
+            "goal_win_state",
+            "touch_control"
+          ],
+          "behavior_test_executed": true,
+          "all_required_executed": true
+        },
+        "behavior_test_executed": true,
+        "entry_path": "arena.html",
+        "verification_status": "PASS",
+        "verification_route": {
+          "kind": "BROWSER",
+          "required": true,
+          "applicable": true,
+          "target": "arena.html",
+          "reason_codes": [
+            "SUPPORTED_TARGET_PRESENT"
+          ],
+          "evidence_refs": [
+            "child:EXEC-001",
+            "contract:requested_target:arena.html",
+            "repo:entrypoint:arena.html"
+          ],
+          "result": "PENDING",
+          "requested_from_node": "arena.html",
+          "resolution_status": "RESOLVED",
+          "resolution_source": "unique_root_html",
+          "candidates": []
+        },
+        "verification_applicability": {
+          "schema_version": "V20.5A",
+          "child_id": "EXEC-001",
+          "model_calls": 0,
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PENDING",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "PASS",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS"
+            }
+          ],
+          "repository_evidence": {
+            "known_entrypoints": [
+              "arena.html"
+            ],
+            "known_test_files": [],
+            "observed_file_types": [
+              "html"
+            ]
+          },
+          "verification_applicability_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+          "verification_routes_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+          "last_result": "PASS"
+        }
+      },
+      "gate": {
+        "passed": true,
+        "checks": [],
+        "deterministic_failures": [],
+        "advisory_checks": [],
+        "advisory_failures": [],
+        "verification_aggregation": {
+          "child_id": "EXEC-001",
+          "verification_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "PASS",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS",
+              "semantic_evidence": {
+                "required_requirement_ids": [
+                  "REQ-001"
+                ],
+                "covered_requirement_ids": [
+                  "REQ-001"
+                ],
+                "record_hashes": [
+                  "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781",
+                  "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7",
+                  "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419",
+                  "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047",
+                  "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                ]
+              }
+            }
+          ],
+          "actual_passes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "PASS",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS",
+              "semantic_evidence": {
+                "required_requirement_ids": [
+                  "REQ-001"
+                ],
+                "covered_requirement_ids": [
+                  "REQ-001"
+                ],
+                "record_hashes": [
+                  "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781",
+                  "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7",
+                  "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419",
+                  "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047",
+                  "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                ]
+              }
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [],
+          "required_target_failures": [],
+          "required_routes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "result": "PASS",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "result": "PASS",
+              "requested_from_node": "arena.html",
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "candidates": [],
+              "actual_result": "PASS",
+              "semantic_evidence": {
+                "required_requirement_ids": [
+                  "REQ-001"
+                ],
+                "covered_requirement_ids": [
+                  "REQ-001"
+                ],
+                "record_hashes": [
+                  "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781",
+                  "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7",
+                  "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419",
+                  "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047",
+                  "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                ]
+              }
+            }
+          ],
+          "invalid_receipts": [],
+          "failure_codes": [],
+          "evidence_available": true,
+          "passed": true,
+          "model_calls": 0,
+          "semantic_browser_evidence": {
+            "arena.html": {
+              "status": "PASS",
+              "required_requirement_ids": [
+                "REQ-001"
+              ],
+              "covered_requirement_ids": [
+                "REQ-001"
+              ],
+              "claim_decisions": [
+                {
+                  "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                  "requirement_id": "REQ-001",
+                  "assertion": {
+                    "name": "browser_contract",
+                    "parameters": {}
+                  },
+                  "result": "PASS",
+                  "record_hashes": [
+                    "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781"
+                  ]
+                },
+                {
+                  "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                  "requirement_id": "REQ-001",
+                  "assertion": {
+                    "name": "keyboard_movement",
+                    "parameters": {}
+                  },
+                  "result": "PASS",
+                  "record_hashes": [
+                    "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7"
+                  ]
+                },
+                {
+                  "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                  "requirement_id": "REQ-001",
+                  "assertion": {
+                    "name": "restart_resets_state",
+                    "parameters": {
+                      "input": "q",
+                      "terminal_cases": [
+                        "forceCollision",
+                        "forceWin"
+                      ]
+                    }
+                  },
+                  "result": "PASS",
+                  "record_hashes": [
+                    "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419"
+                  ]
+                },
+                {
+                  "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                  "requirement_id": "REQ-001",
+                  "assertion": {
+                    "name": "goal_win_state",
+                    "parameters": {}
+                  },
+                  "result": "PASS",
+                  "record_hashes": [
+                    "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047"
+                  ]
+                },
+                {
+                  "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                  "requirement_id": "REQ-001",
+                  "assertion": {
+                    "name": "touch_control",
+                    "parameters": {}
+                  },
+                  "result": "PASS",
+                  "record_hashes": [
+                    "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                  ]
+                }
+              ],
+              "canonical_evidence_records": [
+                {
+                  "artifact_type": "CanonicalEvidenceRecord",
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "browser_contract",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ],
+                  "result": "PASS",
+                  "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                  "provenance": {
+                    "tool": "verify_web_app",
+                    "source": "controller_child_browser",
+                    "executed": true
+                  },
+                  "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "record_hash": "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781"
+                },
+                {
+                  "artifact_type": "CanonicalEvidenceRecord",
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "keyboard_movement",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ],
+                  "result": "PASS",
+                  "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                  "provenance": {
+                    "tool": "verify_web_app",
+                    "source": "controller_child_browser",
+                    "executed": true
+                  },
+                  "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "record_hash": "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7"
+                },
+                {
+                  "artifact_type": "CanonicalEvidenceRecord",
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "restart_resets_state",
+                    "parameters": {
+                      "input": "q",
+                      "terminal_cases": [
+                        "forceCollision",
+                        "forceWin"
+                      ]
+                    }
+                  },
+                  "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ],
+                  "result": "PASS",
+                  "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                  "provenance": {
+                    "tool": "verify_web_app",
+                    "source": "controller_child_browser",
+                    "executed": true
+                  },
+                  "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "record_hash": "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419"
+                },
+                {
+                  "artifact_type": "CanonicalEvidenceRecord",
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "goal_win_state",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ],
+                  "result": "PASS",
+                  "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                  "provenance": {
+                    "tool": "verify_web_app",
+                    "source": "controller_child_browser",
+                    "executed": true
+                  },
+                  "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "record_hash": "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047"
+                },
+                {
+                  "artifact_type": "CanonicalEvidenceRecord",
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "touch_control",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ],
+                  "result": "PASS",
+                  "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                  "provenance": {
+                    "tool": "verify_web_app",
+                    "source": "controller_child_browser",
+                    "executed": true
+                  },
+                  "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "record_hash": "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                }
+              ],
+              "required_claims": [
+                {
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "browser_contract",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ]
+                },
+                {
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "keyboard_movement",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ]
+                },
+                {
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "restart_resets_state",
+                    "parameters": {
+                      "input": "q",
+                      "terminal_cases": [
+                        "forceCollision",
+                        "forceWin"
+                      ]
+                    }
+                  },
+                  "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ]
+                },
+                {
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "goal_win_state",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ]
+                },
+                {
+                  "child_id": "EXEC-001",
+                  "requirement_id": "REQ-001",
+                  "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                  "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                  "target": "arena.html",
+                  "surface_id": "file:arena.html",
+                  "assertion": {
+                    "name": "touch_control",
+                    "parameters": {}
+                  },
+                  "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                  "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                  "subject_paths": [
+                    "arena.html"
+                  ]
+                }
+              ],
+              "tool_used_as_identity": false
+            }
+          },
+          "required_execution_verification_set": {
+            "schema_version": "V25.6",
+            "artifact_type": "RequiredExecutionVerificationSet",
+            "child_id": "EXEC-001",
+            "plan_id": null,
+            "plan_hash": null,
+            "verification_digest": null,
+            "coverage_hash": null,
+            "applicable_authority_ids": [],
+            "required_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "required_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "approved_verification_authority_ids": [
+              "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+              "UNRESOLVED-ROUTE-5ACF2F6E212B187F"
+            ],
+            "system_authority_ids": [],
+            "optional_authority_ids": [],
+            "routes": [
+              {
+                "authority_id": "UNRESOLVED-ROUTE-E915A3043AEB9E63",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "SYNTAX_STATIC_GATE",
+                "execution_channel": null,
+                "target": "arena.html",
+                "required": true,
+                "applicable": true,
+                "route_hash": "e915a3043aeb9e63b1000ecebee9c26d6ea014317e2d3025d6f4d67dfccfcfa9"
+              },
+              {
+                "authority_id": "UNRESOLVED-ROUTE-5ACF2F6E212B187F",
+                "verification_id": null,
+                "oracle_id": null,
+                "oracle_hash": null,
+                "authority_type": null,
+                "authority_source": null,
+                "route_type": "BROWSER",
+                "execution_channel": null,
+                "target": "arena.html",
+                "required": true,
+                "applicable": true,
+                "route_hash": "5acf2f6e212b187f1d9146635be73ac24838aaa0d471302e7751304fa0b97dd6"
+              }
+            ],
+            "set_hash": "c0d40426085fc60d7505ca8bef144995b228144008e4d1ae2e784d0f79939169",
+            "canonical_hash": "c0d40426085fc60d7505ca8bef144995b228144008e4d1ae2e784d0f79939169"
+          },
+          "execution_obligation_evidence": [],
+          "all_required_passed": true
+        }
+      },
+      "commit_status": "done",
+      "receipt": {
+        "schema_version": "V21.5B",
+        "artifact_type": "VerifiedChildReceipt",
+        "child_id": "EXEC-001",
+        "parent_id": "ROOT",
+        "verified": true,
+        "receipt_status": "VERIFIED",
+        "verification_status": "passed",
+        "terminal_child_status": "done",
+        "verification_failure_reasons": [],
+        "child_authority_hash": "88fb604b5897d0dc70f72249574804b8a96bd91df0a48556b9ec944d7581bdff",
+        "authority": {
+          "execution_contract_id": "EXEC-001",
+          "execution_contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+          "plan_id": "PLAN-0A23AED5C55B",
+          "plan_hash": "0a23aed5c55b893028a6ce989073e5ad82be88ca278942f8f4fb023802589c7f",
+          "parent_contract_hash": null
+        },
+        "parent_contract_hash": null,
+        "plan_hash": "0a23aed5c55b893028a6ce989073e5ad82be88ca278942f8f4fb023802589c7f",
+        "mutation_paths": [
+          "arena.html"
+        ],
+        "verification_applicability_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+        "verification_routes_hash": "d31cc82dfc8e8337917f78bd3a8763caad19533da720746e2b85ac74c58d2e86",
+        "verification_routes": [
+          {
+            "kind": "SYNTAX_STATIC_GATE",
+            "required": true,
+            "applicable": true,
+            "target": "arena.html",
+            "result": "PASS",
+            "reason_codes": [
+              "SUPPORTED_SOURCE_PRESENT",
+              "CONTRACT_REQUIRES_SYNTAX"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:mutation_paths"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "contract_source_paths"
+          },
+          {
+            "kind": "BROWSER",
+            "required": true,
+            "applicable": true,
+            "target": "arena.html",
+            "result": "PASS",
+            "reason_codes": [
+              "SUPPORTED_TARGET_PRESENT"
+            ],
+            "evidence_refs": [
+              "child:EXEC-001",
+              "contract:requested_target:arena.html",
+              "repo:entrypoint:arena.html"
+            ],
+            "resolution_status": "RESOLVED",
+            "resolution_source": "unique_root_html",
+            "requested_from_node": "arena.html"
+          }
+        ],
+        "required_execution_verification_set": null,
+        "execution_verification_closure": null,
+        "execution_verification_closure_hash": null,
+        "browser": {
+          "required": true,
+          "applicable": true,
+          "resolved_target": "arena.html",
+          "result": "PASS",
+          "verifier_invoked": true
+        },
+        "verification_aggregation": {
+          "passed": true,
+          "evidence_available": true,
+          "failure_codes": [],
+          "actual_passes": [
+            {
+              "kind": "SYNTAX_STATIC_GATE",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "result": "PASS",
+              "reason_codes": [
+                "SUPPORTED_SOURCE_PRESENT",
+                "CONTRACT_REQUIRES_SYNTAX"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:mutation_paths"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "contract_source_paths"
+            },
+            {
+              "kind": "BROWSER",
+              "required": true,
+              "applicable": true,
+              "target": "arena.html",
+              "result": "PASS",
+              "reason_codes": [
+                "SUPPORTED_TARGET_PRESENT"
+              ],
+              "evidence_refs": [
+                "child:EXEC-001",
+                "contract:requested_target:arena.html",
+                "repo:entrypoint:arena.html"
+              ],
+              "resolution_status": "RESOLVED",
+              "resolution_source": "unique_root_html",
+              "requested_from_node": "arena.html"
+            }
+          ],
+          "actual_failures": [],
+          "skipped_not_applicable": [],
+          "required_execution_verification_set_hash": null,
+          "execution_verification_closure": null
+        },
+        "verification_evidence": [
+          {
+            "tool": "read_candidate_span",
+            "target": "arena.html",
+            "result": "[lines 5-19 of 20] 5: <script> 6: let state; 7: function render() { document.getElementById('state').textContent = state.status + ' ' + state.score; } 8: function restart() { state = {status:'playing', score:0, player:{row:0,col:0}}; render(); } 9: function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); } 10: function forceCollision() { state.status='gameover'; render(); } 11: function forceWin() { state.status='won'; state.score=10; state.player.row=10; render(); } 12: document.addEventListener('keydown', function(event) { 13: if(event.key === 'ArrowUp') move('up'); 14: // Extra restart key is intentionally not connected yet. 15: }); 16: document.querySelector('[data-move=\"up\"]').addEventListener('pointerdown', () => move('up')); 17: document.getElementById('restart').addEventListener('c..."
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"a7feb3e228b1cec887047f1a503430bc8cc172a1033ec1b394c1ca651c82e96b\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The candidate span provides context on the existing game state management, event listeners, and the `restart` function. I have enough information to implement the Q key listener while respecting the existing structure and preserving functionality.\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_resolutions\": [], \"working_evidence_chars\": 308, \"working_evidence_count\": 1, \"working_evidence_limit\": 4200}"
+          },
+          {
+            "tool": "edit_file",
+            "target": "arena.html",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1\\arena.html (1 replacement(s)) (managed backup: .agent_backups\\20260928T140220-9bcca71f\\arena.html)"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:53653/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:50687/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:53297/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "read_file",
+            "target": "arena.html",
+            "result": "<!doctype html> <html><head><title>Grid Arena</title></head><body> <canvas width=\"320\" height=\"200\"></canvas><p id=\"state\" aria-live=\"polite\"></p> <button data-move=\"up\">Up</button><button id=\"restart\">Restart</button> <script> let state; function render() { document.getElementById('state').textContent = state.status + ' ' + state.score; } function restart() { state = {status:'playing', score:0, player:{row:0,col:0}}; render(); } function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); } function forceCollision() { state.status='gameover'; render(); } function forceWin() { state.status='won'; state.score=10; state.player.row=10; render(); } document.addEventListener('keydown', function(event) { if(event.key === 'ArrowUp') move('up'); if(event.key === 'q' || event.key === 'Q') { if (state.s..."
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:55431/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:63014/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28"
+            }
+          }
+        ],
+        "required_evidence": [
+          {
+            "tool": "read_candidate_span",
+            "target": "arena.html",
+            "result": "[lines 5-19 of 20] 5: <script> 6: let state; 7: function render() { document.getElementById('state').textContent = state.status + ' ' + state.score; } 8: function restart() { state = {status:'playing', score:0, player:{row:0,col:0}}; render(); } 9: function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); } 10: function forceCollision() { state.status='gameover'; render(); } 11: function forceWin() { state.status='won'; state.score=10; state.player.row=10; render(); } 12: document.addEventListener('keydown', function(event) { 13: if(event.key === 'ArrowUp') move('up'); 14: // Extra restart key is intentionally not connected yet. 15: }); 16: document.querySelector('[data-move=\"up\"]').addEventListener('pointerdown', () => move('up')); 17: document.getElementById('restart').addEventListener('c..."
+          },
+          {
+            "tool": "context_sufficiency_check",
+            "target": "-",
+            "result": "{\"anchor_hash\": \"a7feb3e228b1cec887047f1a503430bc8cc172a1033ec1b394c1ca651c82e96b\", \"context_status\": \"sufficient\", \"contradictions\": [], \"errors\": [], \"evidence\": [], \"evidence_items_dropped\": 0, \"failure_code\": null, \"final\": true, \"history\": null, \"lifecycle_state\": \"MUTATION_ALLOWED\", \"max_requests_per_round\": 3, \"max_rounds\": 3, \"mutation_allowed\": true, \"needed_evidence\": [], \"reason\": \"The candidate span provides context on the existing game state management, event listeners, and the `restart` function. I have enough information to implement the Q key listener while respecting the existing structure and preserving functionality.\", \"request_count\": 0, \"requires_re_evaluation\": false, \"round\": 0, \"semantic_resolutions\": [], \"working_evidence_chars\": 308, \"working_evidence_count\": 1, \"working_evidence_limit\": 4200}"
+          },
+          {
+            "tool": "edit_file",
+            "target": "arena.html",
+            "result": "edited file: D:\\projects\\Ai\\mini_hivo_experiment12\\suite-v1\\arena_q_restart\\current-1\\arena.html (1 replacement(s)) (managed backup: .agent_backups\\20260928T140220-9bcca71f\\arena.html)"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:53653/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:50687/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:53297/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "read_file",
+            "target": "arena.html",
+            "result": "<!doctype html> <html><head><title>Grid Arena</title></head><body> <canvas width=\"320\" height=\"200\"></canvas><p id=\"state\" aria-live=\"polite\"></p> <button data-move=\"up\">Up</button><button id=\"restart\">Restart</button> <script> let state; function render() { document.getElementById('state').textContent = state.status + ' ' + state.score; } function restart() { state = {status:'playing', score:0, player:{row:0,col:0}}; render(); } function move(direction) { if(state.status !== 'playing') return; if(direction === 'up') state.player.row += 1; state.score = state.player.row; render(); } function forceCollision() { state.status='gameover'; render(); } function forceWin() { state.status='won'; state.score=10; state.player.row=10; render(); } document.addEventListener('keydown', function(event) { if(event.key === 'ArrowUp') move('up'); if(event.key === 'q' || event.key === 'Q') { if (state.s..."
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:55431/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "run_file",
+            "target": "arena.html",
+            "result": "{\"requested_from_node\": \"arena.html\", \"resolved_entrypoint\": \"arena.html\", \"resolution_source\": \"unique_root_html\", \"resolution_status\": \"RESOLVED\", \"passed\": true, \"environment_error\": false, \"title\": \"Grid Arena\", \"url\": \"http://127.0.0.1:63014/arena.html\", \"text\": \"playing 0\\n\\nUpRestart\", \"console_errors\": [], \"page_errors\": [], \"network_errors\": [], \"runtime_state\": {\"canvasCount\": 1, \"gameBridge\": null, \"debugState\": null}, \"interaction_checks\": [], \"screenshot\": \".agent_evidence\\\\task_run_file.png\", \"failures\": [], \"verification_profile\": {\"kind\": \"web\", \"require_title\": true, \"require_canvas\": false, \"require_game_bridge\": false, \"required_interactions\": []}, \"entry_path\": \"arena.html\"}"
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c"
+            }
+          },
+          {
+            "tool": "verify_web_app",
+            "target": "arena.html",
+            "result": {
+              "passed": true,
+              "canonical_record_hash": "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793",
+              "requirement_id": "REQ-001",
+              "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28"
+            }
+          }
+        ],
+        "coverage": {
+          "plan_node_ids": [
+            "NODE-001"
+          ],
+          "owned_plan_node_ids": [
+            "NODE-001"
+          ],
+          "responsibility_units": [
+            "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls."
+          ]
+        },
+        "verified_subject_state_hash": "4cabaee492d5ac645c046de1c9d25ae9682cd59538f19f6772a7b887ee1e793b",
+        "verified_subject_state": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T140220-9bcca71f/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "50687/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "53297/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "53653/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "55431/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "63014/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "arena.html",
+              "exists": true,
+              "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+              "size": 1360
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/arena_q_restart/current-1/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            }
+          ],
+          "hash": "4cabaee492d5ac645c046de1c9d25ae9682cd59538f19f6772a7b887ee1e793b"
+        },
+        "evidence_dependency_fingerprint": {
+          "schema_version": "V21.5B",
+          "paths": [
+            {
+              "path": ".agent_backups/20260928T140220-9bcca71f/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "50687/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "53297/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "53653/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "55431/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "63014/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            },
+            {
+              "path": "arena.html",
+              "exists": true,
+              "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+              "size": 1360
+            },
+            {
+              "path": "projects/Ai/mini_hivo_experiment12/suite-v1/arena_q_restart/current-1/arena.html",
+              "exists": false,
+              "sha256": null,
+              "size": 0
+            }
+          ],
+          "hash": "4cabaee492d5ac645c046de1c9d25ae9682cd59538f19f6772a7b887ee1e793b"
+        },
+        "provenance": {
+          "source": "deterministic_stage5a_verified_semantics",
+          "model_calls": 0,
+          "raw_worker_transcript_included": false,
+          "memory_promotion": false
+        },
+        "receipt_hash": "ecb8202ca78f54ed817e666f3e681326435b02b41c5a4c99cd743e2a49c70325",
+        "covered_node_ids": [
+          "NODE-001"
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "verification_evidence_hash": "5ba6e86b543b9d0ada631bba0be422ce46dd47e684feba2cf779bf8a86cbfe1e",
+        "subject_after_hash": "4cabaee492d5ac645c046de1c9d25ae9682cd59538f19f6772a7b887ee1e793b",
+        "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+        "semantic_browser_evidence": {
+          "arena.html": {
+            "status": "PASS",
+            "required_requirement_ids": [
+              "REQ-001"
+            ],
+            "covered_requirement_ids": [
+              "REQ-001"
+            ],
+            "claim_decisions": [
+              {
+                "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                "requirement_id": "REQ-001",
+                "assertion": {
+                  "name": "browser_contract",
+                  "parameters": {}
+                },
+                "result": "PASS",
+                "record_hashes": [
+                  "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781"
+                ]
+              },
+              {
+                "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                "requirement_id": "REQ-001",
+                "assertion": {
+                  "name": "keyboard_movement",
+                  "parameters": {}
+                },
+                "result": "PASS",
+                "record_hashes": [
+                  "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7"
+                ]
+              },
+              {
+                "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                "requirement_id": "REQ-001",
+                "assertion": {
+                  "name": "restart_resets_state",
+                  "parameters": {
+                    "input": "q",
+                    "terminal_cases": [
+                      "forceCollision",
+                      "forceWin"
+                    ]
+                  }
+                },
+                "result": "PASS",
+                "record_hashes": [
+                  "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419"
+                ]
+              },
+              {
+                "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                "requirement_id": "REQ-001",
+                "assertion": {
+                  "name": "goal_win_state",
+                  "parameters": {}
+                },
+                "result": "PASS",
+                "record_hashes": [
+                  "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047"
+                ]
+              },
+              {
+                "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                "requirement_id": "REQ-001",
+                "assertion": {
+                  "name": "touch_control",
+                  "parameters": {}
+                },
+                "result": "PASS",
+                "record_hashes": [
+                  "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+                ]
+              }
+            ],
+            "canonical_evidence_records": [
+              {
+                "artifact_type": "CanonicalEvidenceRecord",
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "browser_contract",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ],
+                "result": "PASS",
+                "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                "provenance": {
+                  "tool": "verify_web_app",
+                  "source": "controller_child_browser",
+                  "executed": true
+                },
+                "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "record_hash": "9cbf6c747e1674c2e2c14033be28346c7b1aecd018cebf3334730c9ee0250781"
+              },
+              {
+                "artifact_type": "CanonicalEvidenceRecord",
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "keyboard_movement",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ],
+                "result": "PASS",
+                "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                "provenance": {
+                  "tool": "verify_web_app",
+                  "source": "controller_child_browser",
+                  "executed": true
+                },
+                "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "record_hash": "735de67f50168d995f9926b68b78b1b7ed97fee90f41b09e435423c2adfd75b7"
+              },
+              {
+                "artifact_type": "CanonicalEvidenceRecord",
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "restart_resets_state",
+                  "parameters": {
+                    "input": "q",
+                    "terminal_cases": [
+                      "forceCollision",
+                      "forceWin"
+                    ]
+                  }
+                },
+                "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ],
+                "result": "PASS",
+                "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                "provenance": {
+                  "tool": "verify_web_app",
+                  "source": "controller_child_browser",
+                  "executed": true
+                },
+                "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "record_hash": "d87c13a4977a66ce7bf62722a3b03161feebcf2e81bd83304e1b1705629db419"
+              },
+              {
+                "artifact_type": "CanonicalEvidenceRecord",
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "goal_win_state",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ],
+                "result": "PASS",
+                "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                "provenance": {
+                  "tool": "verify_web_app",
+                  "source": "controller_child_browser",
+                  "executed": true
+                },
+                "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "record_hash": "f71858ae37c08214aba1e4bd7a7ea700288e2338c9aaadd4c2399b4634a20047"
+              },
+              {
+                "artifact_type": "CanonicalEvidenceRecord",
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "touch_control",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ],
+                "result": "PASS",
+                "raw_result_hash": "a4a665ccb77347483a29ae8c9abd171fdfc0c9e69857ee449848852d8a7f90ed",
+                "provenance": {
+                  "tool": "verify_web_app",
+                  "source": "controller_child_browser",
+                  "executed": true
+                },
+                "subject_before_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_after_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "record_hash": "db9db4a3612f95b67a43a7bf9176c7edfea407b0dc22380f621040bb0c493793"
+              }
+            ],
+            "required_claims": [
+              {
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "browser_contract",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-05be79af5380caf5acdb73f335a72c9a67dffabb70ef2b71f7c7c2f8bd334193",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ]
+              },
+              {
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "keyboard_movement",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-6038ef85e63ba83256ab6f11524d88a821e610583374ee04232cdb88e0d1aeda",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ]
+              },
+              {
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "restart_resets_state",
+                  "parameters": {
+                    "input": "q",
+                    "terminal_cases": [
+                      "forceCollision",
+                      "forceWin"
+                    ]
+                  }
+                },
+                "obligation_id": "CLAIM-979fb774d5bb39017e5aab0525e99f9a0bf677ea3f5f74afc5ac8312c63fde6e",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ]
+              },
+              {
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "goal_win_state",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-0f1d78aa001cc07fe2686bd6f03baf63bf792f581c1325394117f373bacafc7c",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ]
+              },
+              {
+                "child_id": "EXEC-001",
+                "requirement_id": "REQ-001",
+                "requirement_text_hash": "ced924bcf70a6170091ccfb6814121b310394b45cfeec0797ea31aaaf15b7df7",
+                "contract_hash": "22d32f17a06610a175aab5d9f4d148f99970628748d63655cf7b529c3a9009ac",
+                "target": "arena.html",
+                "surface_id": "file:arena.html",
+                "assertion": {
+                  "name": "touch_control",
+                  "parameters": {}
+                },
+                "obligation_id": "CLAIM-401b6177be29a938e3a1697747f00ee3f6450d48097124b4a3070fdd11b96f28",
+                "subject_hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40",
+                "subject_paths": [
+                  "arena.html"
+                ]
+              }
+            ],
+            "tool_used_as_identity": false
+          }
+        },
+        "semantic_requirements": [
+          {
+            "requirement_id": "REQ-001",
+            "text": "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls.",
+            "provenance": "USER_STATED",
+            "status": "active"
+          }
+        ],
+        "semantic_evidence_hash": "2bec7be22d6bc5f6854cda390f6e3c2ddcaabd9c42b7b44dc6fcf5a72e4c7bb1"
+      },
+      "receipt_validation": {
+        "valid": true,
+        "verified": true,
+        "errors": [],
+        "fresh": true
+      },
+      "child_verified": true,
+      "impact_comparison": {
+        "status": "IMPACT_CONTRACT_PASSED",
+        "passed": true,
+        "failure_type": null,
+        "comparisons": [
+          {
+            "kind": "target",
+            "target": "arena.html",
+            "status": "EXPECTED_AND_OBSERVED",
+            "actual": [
+              {
+                "target": "arena.html",
+                "kind": "path",
+                "path": "arena.html"
+              },
+              {
+                "target": "arena.html",
+                "path": "arena.html",
+                "kind": "path"
+              }
+            ]
+          },
+          {
+            "kind": "verification_obligation",
+            "id": "impact-obligation-1",
+            "status": "SATISFIED"
+          }
+        ],
+        "missing": [],
+        "unexpected_related": [],
+        "out_of_scope": [],
+        "preservation_violations": [],
+        "obligations": [
+          {
+            "id": "impact-obligation-1",
+            "category": "BEHAVIOR",
+            "meaning": "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls.",
+            "target": "",
+            "required": true,
+            "verification_kind": "existing_gate",
+            "mode": "controller",
+            "status": "SATISFIED",
+            "provenance": [
+              {
+                "source_identity": "controller:approved-task-contract",
+                "path": "controller:approved-task-contract",
+                "location": "EXEC-001",
+                "evidence_kind": "approved_task_contract",
+                "evidence_id": "",
+                "authority_tier": "HIGH",
+                "authority_score": 100,
+                "excerpt": "Allow the Q key to restart the arena game after game over or win, while preserving existing keyboard and touch controls."
+              }
+            ]
+          }
+        ],
+        "unresolved_obligations": [],
+        "conflicts": [],
+        "actual_changed_paths": [
+          "arena.html"
+        ],
+        "contract_hash": "cc8b8efe9f65502c2235ece3570bc37f93a1618fc276891ea852833f13b25ad6",
+        "revision": 0,
+        "bounded": true
+      },
+      "subject_after": {
+        "schema_version": "V21.5B",
+        "paths": [
+          {
+            "path": "arena.html",
+            "exists": true,
+            "sha256": "ef267190084f358a56aeaa7d46ade8674f9936b54d8728f466cc9c9c89d2f6ba",
+            "size": 1360
+          }
+        ],
+        "hash": "4847b4a9cebddf76d9afc387b5b9259687f4d2ba687bd385cb0fd8ac95a8dc40"
+      }
+    }
+  ]
+}

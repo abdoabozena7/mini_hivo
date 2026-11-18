@@ -1,0 +1,230 @@
+{
+  "hash_policy": "original_sha256 identifies preserved raw source bytes; publication_sha256 identifies canonical-LF sanitized derivative bytes. Verify publication_sha256 against actual staged Git blobs before publishing; embedded contract hashes are original identities, not authorization for sanitized receipts.",
+  "files": [
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_level1_native_verification-final.log",
+      "original_sha256": "d9f0e9caee040d770ebe5af2b5c398364c2fe34ea99bc9102a6eb00bd936f0aa",
+      "publication_path": "test_level1_native_verification-final.log",
+      "publication_sha256": "ea73fa3d6c058b9aa074e92f7b9cdc726707fb5a9f83dcbf2a0e60ee8d88bea0",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_greenfield_impact_lifecycle.log",
+      "original_sha256": "4c7cce7cdf80eca14567c592dfe4eaf5f7d76b48c707f5c7de4dcfcc87488d81",
+      "publication_path": "test_greenfield_impact_lifecycle.log",
+      "publication_sha256": "0c654989a616b4f8da7c4e33385de1f71b259101f095f3f684227780e9f56945",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_pre_mutation_impact.log",
+      "original_sha256": "00c3260ac9a79eae90aee89db92ffa98e4d1aaa826974e79967ffa0fcd3948da",
+      "publication_path": "test_pre_mutation_impact.log",
+      "publication_sha256": "3ac63d4220dbf890d6532c700980b6965c9cd7f668338392e7b24ac5d0d0148c",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_context_sufficiency_gate.log",
+      "original_sha256": "0fae7f722c590a37c171a147ab04eb65c7caddcf7803f8e943cf9897e38180a2",
+      "publication_path": "test_context_sufficiency_gate.log",
+      "publication_sha256": "b0a9df191b9b2e94a9818c2251167603b91121fe2a821be0fd396039276853b1",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_verification_applicability.log",
+      "original_sha256": "180b78260ffc63ba4407792a79a1807829ceb3ea336bab520c4155376c6b1a1f",
+      "publication_path": "test_verification_applicability.log",
+      "publication_sha256": "cc653ce6acbf46c28a427a72ac49e9a98bf816d4c1feb2add759b799c18b181f",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_verification_policy.log",
+      "original_sha256": "20d73599f0475b1919357814d64ed4b00c65f2df2c74b3b20ea18756f191703e",
+      "publication_path": "test_verification_policy.log",
+      "publication_sha256": "e155a9c858a5d20f8111e810a7f9db8e21c36b4998495a85bd4dfa1e34cb76e9",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_authorityall.log",
+      "original_sha256": "af5c7a36285c09e361a82225e20390f9830d4d66b15964b95ec113ee77bf3bde",
+      "publication_path": "test_authorityall.log",
+      "publication_sha256": "1b08e5027c84a87f7f7f99e3a89f6ff0be87f56db80f70f6cfc32306204ae1f3",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_experimentall.log",
+      "original_sha256": "72dc1b47019c2f2334c838b78e967efc3ea9581e59cf384f193cdd6067adaadb",
+      "publication_path": "test_experimentall.log",
+      "publication_sha256": "aad504e2a0db1fc4ba69c17e1bcedb90778d8184752be29a0f7625dba4007f9d",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/test_adaptive_architecture.log",
+      "original_sha256": "1cbd0e65cb27b1656c40aa5b4696c5470e2f2bf2cec0cf71a7bfeadca4e9bbbb",
+      "publication_path": "test_adaptive_architecture.log",
+      "publication_sha256": "bc4d8ec29b1516ef53525c148af6b2a394b73999173de4b5350878205ba92860",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/controlled-replay/result.json",
+      "original_sha256": "66429bd41956060e70c74e0c93ceabf49c7552c23a084bb7f0d0507805da826b",
+      "publication_path": "controlled-replay/result.json",
+      "publication_sha256": "349562f36c956030f0e2fa9d97a08651581c3e5dbdea94394092ec74a7b38f01",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/controlled-replay.log",
+      "original_sha256": "18a9647667258312f47cc1fba595220620a51be78fa83a37a2769db3a1af2334",
+      "publication_path": "controlled-replay.log",
+      "publication_sha256": "3ec9761d3b5b00239dee398cfeaa87e5d023416c43c37ad0775006ef0e131512",
+      "transform": "UTF-8 path substitution and LF canonicalization; outcomes unchanged"
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-investigation/live-replay/result.json",
+      "original_sha256": "9ca8af6ac2c4548856fd10f2d49744dabcdac7122395993c858bb0de3e061187",
+      "publication_path": "live-result.json",
+      "publication_sha256": "b16b4c473f32b2ed65bbe1583d00a0ec49f23402ebc1db0d4b6a56e13d57e319",
+      "transform": "omit absolute command paths; augment with read-only trace/SQLite observations and explicit interruption limits; publication bytes canonicalized to LF before staging",
+      "additional_original_sources": [
+        {
+          "path": "audit_runs/20261021-workspace-audit/level1-investigation/live-replay/workspace/.agent_runs/20261021T223144-04cab4b6.jsonl",
+          "sha256": "56da2039a31e19bc8e45055eb730f0f15763c4a995e1cab9de6cd4bee2c6c60f"
+        },
+        {
+          "path": "audit_runs/20261021-workspace-audit/level1-investigation/live-replay/workspace/.hivo/memory.sqlite3",
+          "sha256": "e3ad8c30e89442cb1e040c64d2b4aa4e6783896861eddb7747f3a13bd4b9d008"
+        }
+      ]
+    },
+    {
+      "original_path": "list/project-9/.agent_experiment.jsonl",
+      "original_sha256": "f4e67524bebd45810d5f89b7f61f5a38efa548bd215e754e96eea8a9d8f3fab0",
+      "additional_original_sources": [
+        {
+          "path": "list/project-9/.agent_host_preflight.json",
+          "sha256": "445399d48f23c32b2a5fb088347b83b06d666843df9c9a8c551933af69773880"
+        },
+        {
+          "path": "list/project-9/test_level_1.txt",
+          "sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb"
+        },
+        {
+          "path": "list/project-9/.agent_runs/20261021T224333-21e91d97.jsonl",
+          "sha256": "bd7f0501e7ee22297e3d71a18a2c48f12870202a8d0005c425d83a093ef95934"
+        },
+        {
+          "path": "list/project-9/.hivo/memory.sqlite3",
+          "sha256": "64551c5718604543de59464ee9d9690cf4dbea301d5e3b65e59d6a8a095b7402"
+        },
+        {
+          "path": "list/project-9/.hivo/memory.sqlite3-shm",
+          "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+        },
+        {
+          "path": "list/project-9/.hivo/memory.sqlite3-wal",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "publication_path": "live-completed-result.json",
+      "publication_sha256": "15dcfbd2c0407c834396600ca9bf001efb990abc3a2cd852b1a85c13ca0d4b8b",
+      "transform": "Selected completed-run metrics, read-only SQLite and trace observations, independent exact-byte file readback; omit personal paths and host inventories; LF JSON. No execution result rewritten.; publication bytes canonicalized to LF before staging"
+    },
+    {
+      "original_path": "list/project-9/test_level_1.txt",
+      "original_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "publication_path": "artifacts/test_level_1.txt",
+      "publication_sha256": "77fb7dd877d96222a20e410e6fd91151acca5a6bc5ee8f86e7a3f4499a5f6bdb",
+      "transform": "Byte-identical copy of the independently verified successful Level 1 output; 15 bytes with no newline."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/controlled-replay.log",
+      "original_sha256": "18a9647667258312f47cc1fba595220620a51be78fa83a37a2769db3a1af2334",
+      "publication_path": "publication-checks/controlled-replay.log",
+      "publication_sha256": "3ec9761d3b5b00239dee398cfeaa87e5d023416c43c37ad0775006ef0e131512",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_adaptive_architecture.log",
+      "original_sha256": "289ba3ab22c48ddbde224c6f3ff836cb535e44401ca745d8a04ef4bb9d07facb",
+      "publication_path": "publication-checks/test_adaptive_architecture.log",
+      "publication_sha256": "77feeedcf674e82054190dddeefbfe700f0052748201f9f956f3091087d8d633",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_authorityall.log",
+      "original_sha256": "3881030305852b378a586e82dee8e5ceaf4ef3aa52344896a8c96e6bbbf74108",
+      "publication_path": "publication-checks/test_authorityall.log",
+      "publication_sha256": "d5091e2a655dde383cdf0c6ad25eeb001b505abe18faa6594816df1d9fe8565e",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_context_sufficiency_gate.log",
+      "original_sha256": "a5421557d438fa4934010b7f7ccf557a74df27480b682449677e83b23243da08",
+      "publication_path": "publication-checks/test_context_sufficiency_gate.log",
+      "publication_sha256": "cb2fe979bc5a64a0c0787b7a504f59ae2f6d91e50e5b7bc1144ebc602779aab3",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_experimentall.log",
+      "original_sha256": "ca0139e5a37579263aed04889a263a999c0b1e77292b0fdbdc85515f468ab60f",
+      "publication_path": "publication-checks/test_experimentall.log",
+      "publication_sha256": "ffa1d1f2f8ea63fd3b1019c8686ae5a67d63faaddd799e9a97012b66a4119b56",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_greenfield_impact_lifecycle.log",
+      "original_sha256": "5df3560a2e7bb82fdec46957fffee1c6da492a6891da5a28eff56bc977a8eeb1",
+      "publication_path": "publication-checks/test_greenfield_impact_lifecycle.log",
+      "publication_sha256": "1e4368157594ffcc345d5553468c15ea41513bb38fdf3e702faf22f8cf08863c",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_level1_native_verification.log",
+      "original_sha256": "7f3d50f5b9f12a00ee331206a87662fbe2bd2574667f7fc7634461e2c9c28927",
+      "publication_path": "publication-checks/test_level1_native_verification.log",
+      "publication_sha256": "30fc35d16c1d72d838064cc5416f81bdd4a62a3dde18f01b8bea7e35de17efa5",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_model_policy.log",
+      "original_sha256": "8c0f965a0edf67a427bfc2fb0bd40c41f81a35114a5af6cfa8551dcae7c0bd2e",
+      "publication_path": "publication-checks/test_model_policy.log",
+      "publication_sha256": "d341e4ae611f57b53a8a2919afd64606acd8980816da62cc37bd150510684022",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_pre_mutation_impact.log",
+      "original_sha256": "ddbf7d1cbfabd9e8edd9717f0be8fa245d208135764dc265e76c74d004b287cb",
+      "publication_path": "publication-checks/test_pre_mutation_impact.log",
+      "publication_sha256": "4f21ce23e13978df9d0dce849b5f953903025deb7c7dfc5fa5b26e6028971047",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_project_understanding.log",
+      "original_sha256": "4973da496af818450835cb0eed4aaef48d1df801634bd9685b802b11f8d2f907",
+      "publication_path": "publication-checks/test_project_understanding.log",
+      "publication_sha256": "e5d58ed6577642c31ea50ffee026edc93be6c4625a11bb93b20a6f1abfc4cff1",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_verification_applicability.log",
+      "original_sha256": "8fae84c6aff860e94b44816a112ece0f15bbc7fd726357b52eb76ed36e9b0953",
+      "publication_path": "publication-checks/test_verification_applicability.log",
+      "publication_sha256": "8fc0608acd52075ff3d70680bd0c940fa545e9a91a0c86cd114edd94c20e12ca",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/test_verification_policy.log",
+      "original_sha256": "68986e2ec10691127164eaea95044b9718855732d101ddf9b7db04bd3d811238",
+      "publication_path": "publication-checks/test_verification_policy.log",
+      "publication_sha256": "641b896c66869406c7f3f0fda6b379ed07676b5c038a8268c83f951c36687b54",
+      "transform": "Path substitution and LF normalization; preserve all case statuses and suite summaries."
+    },
+    {
+      "original_path": "audit_runs/20261021-workspace-audit/level1-publication/controlled-replay/result.json",
+      "original_sha256": "66429bd41956060e70c74e0c93ceabf49c7552c23a084bb7f0d0507805da826b",
+      "publication_path": "publication-checks/controlled-result.json",
+      "publication_sha256": "349562f36c956030f0e2fa9d97a08651581c3e5dbdea94394092ec74a7b38f01",
+      "transform": "Controlled provider-free result export, canonical LF; no personal paths present."
+    }
+  ]
+}

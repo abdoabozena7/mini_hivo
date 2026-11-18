@@ -1,0 +1,1018 @@
+{
+  "experiment": 16,
+  "completed_attempts": 6,
+  "model": "gemma4:e4b",
+  "worker_budget": 28,
+  "fixed_stack": {
+    "planning_route": "decomposition_first_recursive",
+    "mission_advice_policy": "contract_fallback",
+    "worker_progress_policy": "progress_constrained",
+    "mutation_grounding_policy": "evidence_bound",
+    "target_locator_policy": "evidence_directed",
+    "verification_environment_policy": "resolved",
+    "verification_surface_policy": "discovery",
+    "child_receipt_policy": "atomic_verified",
+    "integration_target_policy": "resolved",
+    "semantic_evidence_policy": "strict"
+  },
+  "milestone_counts": {
+    "timer_pause": {
+      "contract_ready": 3,
+      "worker_started": 3,
+      "context_sufficient": 3,
+      "target_localized": 3,
+      "first_legal_mutation": 3,
+      "mutation_committed": 3,
+      "verification_applicable": 0,
+      "verification_started": 2,
+      "child_verified": 0
+    },
+    "python_clamp": {
+      "contract_ready": 3,
+      "worker_started": 3,
+      "context_sufficient": 0,
+      "target_localized": 0,
+      "first_legal_mutation": 0,
+      "mutation_committed": 0,
+      "verification_applicable": 0,
+      "verification_started": 0,
+      "child_verified": 0
+    }
+  },
+  "first_blocker_counts": {
+    "timer_pause": {
+      "mutation_grounding_after_worker": 1,
+      "child_verification_profile_mismatch": 2
+    },
+    "python_clamp": {
+      "pre_mutation_context_or_impact": 3
+    }
+  },
+  "same_first_blocker_phase_across_domains": false,
+  "shared_first_blocker_phases": [],
+  "safety_counters": {
+    "mutation_scope_violations": 0,
+    "dnt_execution_violations": 0,
+    "execution_contract_scope_violations": 0,
+    "impact_preservation_violations": 0,
+    "invariant_violations_detected": 0,
+    "impact_out_of_scope_changes": 0
+  },
+  "protected_tests_unchanged": true,
+  "trial_results": [
+    {
+      "case_id": "timer_pause",
+      "repeat": 1,
+      "run_id": "20261003T183758-18d41f49",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": true,
+        "target_localized": true,
+        "first_legal_mutation": true,
+        "mutation_committed": true,
+        "verification_applicable": false,
+        "verification_started": false,
+        "child_verified": false
+      },
+      "verification_applicability": "not_evaluated_for_child",
+      "child_applicability_artifacts": 0,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 2,
+      "child_browser_failure_codes": [],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": false,
+      "profile_diagnostic": null,
+      "formal_child_verifier_invoked": false,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 73.045,
+        "model_calls": 24,
+        "stage": "MUTATION_GROUNDING",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "first_causal_failure_event": {
+        "time": "2026-10-03T18:39:11.423",
+        "run_id": "20261003T183758-18d41f49",
+        "kind": "mutation_target_unresolved",
+        "task_id": "EXEC-001",
+        "tool_steps_used": 22,
+        "grounding": {
+          "policy": "evidence_bound",
+          "mutation_attempts": 16,
+          "grounded_mutation_attempts": 12,
+          "rejected_mutation_attempts": 4,
+          "applied_mutation_attempts": 3,
+          "first_mutation_attempt_step": 3,
+          "first_applied_mutation_step": 3,
+          "bounded_refreshes": 3,
+          "terminal_reason": "MUTATION_TARGET_UNRESOLVED",
+          "attempts": [
+            {
+              "tool_step": 3,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                11,
+                11
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "function pause() { if(interval!==null) { clearInterval(interval); interval=null; /* Store current time for resume */ } }",
+                "old": "function pause() { /* Pause is not connected to the running interval yet. */ }",
+                "path": "timer.html"
+              },
+              "request_hash": "ee437213441edaf91e39db18fca7973a06d04ece4d315a61de37f76737eb79d0",
+              "source_before_hash": "84fa3f7e5ef89445b6628a5d1b4f37501e7f68cfe318c5ea3d28dd5ac67a371d"
+            },
+            {
+              "tool_step": 4,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+              "refresh_state_before": null,
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "be039373cc9a3c63846c842844fe89df626988f086d945fab25ae36913daaa29"
+            },
+            {
+              "tool_step": 6,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "ready",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "be039373cc9a3c63846c842844fe89df626988f086d945fab25ae36913daaa29"
+            },
+            {
+              "tool_step": 7,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                11,
+                11
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function pause() { if(interval!==null) { clearInterval(interval); interval=null; window.pausedTime = remaining; } }",
+                "old": "function pause() { if(interval!==null) { clearInterval(interval); interval=null; /* Store current time for resume */ } }",
+                "path": "timer.html"
+              },
+              "request_hash": "ce4cdb9418288db5f2d35717f854727fc4f29062e082286375dc96d93ca5d5ae",
+              "source_before_hash": "be039373cc9a3c63846c842844fe89df626988f086d945fab25ae36913daaa29"
+            },
+            {
+              "tool_step": 8,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 10,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "ready",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 11,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 12,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 13,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 14,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 15,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 16,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 17,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": false,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "97a2c5040bf6f8864a54329562710b82b5e39b8c618e860edc63ad706d4f6438",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 19,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": true,
+              "grounding_reason": "GROUNDED_EXACT_REPLACE",
+              "source_lines": [
+                10,
+                10
+              ],
+              "executed": true,
+              "applied": true,
+              "rejected": false,
+              "evidence_reason": "GROUNDED_EXACT_REPLACE",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; if (window.pausedTime !== undefined) { remaining = window.pausedTime; } interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "b3622a066ff27ab1f4eb0113e30556784a3d4942e5eedc7dabbd60c446e110ef",
+              "source_before_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559"
+            },
+            {
+              "tool_step": 20,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_ANCHOR_REQUIRED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+              "refresh_state_before": "used",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; if (window.pausedTime !== undefined) { remaining = window.pausedTime; } interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "b3622a066ff27ab1f4eb0113e30556784a3d4942e5eedc7dabbd60c446e110ef",
+              "source_before_hash": "e5397a5f2e5cfcd8cc114bdd3ce96dda398f099c620d764445fcd874d469212f"
+            },
+            {
+              "tool_step": 22,
+              "tool": "edit_file",
+              "target": "timer.html",
+              "grounded": false,
+              "grounding_reason": "MUTATION_TARGET_UNRESOLVED",
+              "source_lines": null,
+              "executed": false,
+              "applied": false,
+              "rejected": true,
+              "evidence_reason": "REPLACE_NOT_FOUND",
+              "refresh_state_before": "ready",
+              "request": {
+                "expected_replacements": 1,
+                "new": "function start() { if(interval!==null) return; if (window.pausedTime !== undefined) { remaining = window.pausedTime; } interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "old": "function start() { if(interval!==null) return; interval=setInterval(()=>{remaining=Math.max(0,remaining-1);render();},1000); }",
+                "path": "timer.html"
+              },
+              "request_hash": "b3622a066ff27ab1f4eb0113e30556784a3d4942e5eedc7dabbd60c446e110ef",
+              "source_before_hash": "e5397a5f2e5cfcd8cc114bdd3ce96dda398f099c620d764445fcd874d469212f"
+            }
+          ],
+          "refresh_observations": [
+            {
+              "tool": "read_file",
+              "target": "timer.html",
+              "file_hash": "be039373cc9a3c63846c842844fe89df626988f086d945fab25ae36913daaa29",
+              "source_lines": [
+                1,
+                17
+              ],
+              "span_hash": "3d4d663ae40a192fea7f8cdd87f178af7d91a599aa6fccfeee527919b47e3f73"
+            },
+            {
+              "tool": "read_file",
+              "target": "timer.html",
+              "file_hash": "a22c2443a91df3d302433b333eab62324af842530945677316b451b9f3897559",
+              "source_lines": [
+                1,
+                17
+              ],
+              "span_hash": "918de3430f81fd91767453a2b9797388cd8339225943c2fb7e7d932e2897e087"
+            },
+            {
+              "tool": "read_file",
+              "target": "timer.html",
+              "file_hash": "e5397a5f2e5cfcd8cc114bdd3ce96dda398f099c620d764445fcd874d469212f",
+              "source_lines": [
+                1,
+                17
+              ],
+              "span_hash": "84fc06d181097a1ccf5bfbdd6ee982ccc8f94b237edf2b95984c581e788e8688"
+            }
+          ]
+        }
+      },
+      "first_blocker_phase": "mutation_grounding_after_worker",
+      "terminal_blocker_phase": "mutation_grounding_after_worker",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 73.06,
+          "model_calls": 24,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": 3,
+      "applied_mutations": 3,
+      "rejected_mutation_attempts": 4,
+      "last_rejected_evidence_reason": "REPLACE_NOT_FOUND",
+      "no_op_executed_attempts": 9,
+      "bounded_refreshes": 3,
+      "full_refreshes": 3,
+      "worker_tool_steps": 22,
+      "context_decisions": [
+        {
+          "context_status": "sufficient",
+          "mutation_authorized": true,
+          "lifecycle_state": "MUTATION_ALLOWED"
+        }
+      ],
+      "context_mutation_authorizations": 1,
+      "impact_contract_authorizations": 1,
+      "locator_candidate_count": 1,
+      "source_read_count": 4,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-1",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-1\\.agent_runs\\20261003T183758-18d41f49.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-1-boundary-trace.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 2,
+      "run_id": "20261003T184041-9dc07807",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": true,
+        "target_localized": true,
+        "first_legal_mutation": true,
+        "mutation_committed": true,
+        "verification_applicable": false,
+        "verification_started": true,
+        "child_verified": false
+      },
+      "verification_applicability": "child_surface_unavailable",
+      "child_applicability_artifacts": 1,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 11,
+      "child_browser_failure_codes": [
+        "missing_canvas",
+        "missing_game_bridge",
+        "missing_interaction",
+        "verification_surface_unavailable"
+      ],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": true,
+      "profile_diagnostic": {
+        "actual_kind": "game",
+        "without_execution_contract_hash_kind": "timer",
+        "hash_contains_3d": true,
+        "hash_only_causes_game_profile": true
+      },
+      "formal_child_verifier_invoked": true,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 82.175,
+        "model_calls": 20,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "VERIFIER_UNAVAILABLE",
+        "detail": "verification failed: VERIFIER_UNAVAILABLE"
+      },
+      "first_causal_failure_event": {
+        "time": "2026-10-03T18:42:03.982",
+        "run_id": "20261003T184041-9dc07807",
+        "kind": "verification_failure_classified",
+        "task_id": "EXEC-001",
+        "status": "VERIFIER_UNAVAILABLE",
+        "gate_checks": [
+          "browser_contract"
+        ]
+      },
+      "first_blocker_phase": "child_verification_profile_mismatch",
+      "terminal_blocker_phase": "child_verification_profile_mismatch",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 82.189,
+          "model_calls": 20,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": 3,
+      "applied_mutations": 3,
+      "rejected_mutation_attempts": 1,
+      "last_rejected_evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+      "no_op_executed_attempts": 1,
+      "bounded_refreshes": 1,
+      "full_refreshes": 1,
+      "worker_tool_steps": 14,
+      "context_decisions": [
+        {
+          "context_status": "sufficient",
+          "mutation_authorized": true,
+          "lifecycle_state": "MUTATION_ALLOWED"
+        }
+      ],
+      "context_mutation_authorizations": 1,
+      "impact_contract_authorizations": 1,
+      "locator_candidate_count": 1,
+      "source_read_count": 5,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-2",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-2\\.agent_runs\\20261003T184041-9dc07807.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-2-boundary-trace.json"
+      }
+    },
+    {
+      "case_id": "timer_pause",
+      "repeat": 3,
+      "run_id": "20261003T184219-3c3dcb47",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": true,
+        "target_localized": true,
+        "first_legal_mutation": true,
+        "mutation_committed": true,
+        "verification_applicable": false,
+        "verification_started": true,
+        "child_verified": false
+      },
+      "verification_applicability": "child_surface_unavailable",
+      "child_applicability_artifacts": 1,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 11,
+      "child_browser_failure_codes": [
+        "missing_canvas",
+        "missing_game_bridge",
+        "missing_interaction",
+        "verification_surface_unavailable"
+      ],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": true,
+      "profile_diagnostic": {
+        "actual_kind": "game",
+        "without_execution_contract_hash_kind": "timer",
+        "hash_contains_3d": true,
+        "hash_only_causes_game_profile": true
+      },
+      "formal_child_verifier_invoked": true,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 213.807,
+        "model_calls": 62,
+        "stage": "MUTATION_GROUNDING",
+        "reason": "MUTATION_TARGET_UNRESOLVED",
+        "detail": "MUTATION_TARGET_UNRESOLVED: bounded source refresh and one retry did not establish an exact current mutation span"
+      },
+      "first_causal_failure_event": {
+        "time": "2026-10-03T18:44:59.728",
+        "run_id": "20261003T184219-3c3dcb47",
+        "kind": "verification_failure_classified",
+        "task_id": "EXEC-001",
+        "status": "VERIFIER_UNAVAILABLE",
+        "gate_checks": [
+          "browser_contract"
+        ]
+      },
+      "first_blocker_phase": "child_verification_profile_mismatch",
+      "terminal_blocker_phase": "mutation_grounding_after_worker",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 213.821,
+          "model_calls": 62,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": 3,
+      "applied_mutations": 11,
+      "rejected_mutation_attempts": 9,
+      "last_rejected_evidence_reason": "MUTATION_ANCHOR_REQUIRED",
+      "no_op_executed_attempts": 5,
+      "bounded_refreshes": 6,
+      "full_refreshes": 6,
+      "worker_tool_steps": 49,
+      "context_decisions": [
+        {
+          "context_status": "sufficient",
+          "mutation_authorized": true,
+          "lifecycle_state": "MUTATION_ALLOWED"
+        },
+        {
+          "context_status": "sufficient",
+          "mutation_authorized": true,
+          "lifecycle_state": "MUTATION_ALLOWED"
+        },
+        {
+          "context_status": "sufficient",
+          "mutation_authorized": true,
+          "lifecycle_state": "MUTATION_ALLOWED"
+        }
+      ],
+      "context_mutation_authorizations": 3,
+      "impact_contract_authorizations": 3,
+      "locator_candidate_count": 3,
+      "source_read_count": 17,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-3",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-3\\.agent_runs\\20261003T184219-3c3dcb47.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\timer_pause\\evidence_bound-3-boundary-trace.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 1,
+      "run_id": "20261003T183926-7e043cce",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": false,
+        "target_localized": false,
+        "first_legal_mutation": false,
+        "mutation_committed": false,
+        "verification_applicable": false,
+        "verification_started": false,
+        "child_verified": false
+      },
+      "verification_applicability": "not_evaluated_for_child",
+      "child_applicability_artifacts": 0,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 0,
+      "child_browser_failure_codes": [],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": false,
+      "profile_diagnostic": null,
+      "formal_child_verifier_invoked": false,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 22.024,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "first_causal_failure_event": null,
+      "first_blocker_phase": "pre_mutation_context_or_impact",
+      "terminal_blocker_phase": "pre_mutation_context_or_impact",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 22.038,
+          "model_calls": 2,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": null,
+      "applied_mutations": 0,
+      "rejected_mutation_attempts": 0,
+      "last_rejected_evidence_reason": null,
+      "no_op_executed_attempts": 0,
+      "bounded_refreshes": 0,
+      "full_refreshes": 0,
+      "worker_tool_steps": 0,
+      "context_decisions": [],
+      "context_mutation_authorizations": 0,
+      "impact_contract_authorizations": 0,
+      "locator_candidate_count": 2,
+      "source_read_count": 0,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-1",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-1\\.agent_runs\\20261003T183926-7e043cce.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-1-boundary-trace.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 2,
+      "run_id": "20261003T184004-98661046",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": false,
+        "target_localized": false,
+        "first_legal_mutation": false,
+        "mutation_committed": false,
+        "verification_applicable": false,
+        "verification_started": false,
+        "child_verified": false
+      },
+      "verification_applicability": "not_evaluated_for_child",
+      "child_applicability_artifacts": 0,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 0,
+      "child_browser_failure_codes": [],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": false,
+      "profile_diagnostic": null,
+      "formal_child_verifier_invoked": false,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 22.106,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "first_causal_failure_event": null,
+      "first_blocker_phase": "pre_mutation_context_or_impact",
+      "terminal_blocker_phase": "pre_mutation_context_or_impact",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 22.12,
+          "model_calls": 2,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": null,
+      "applied_mutations": 0,
+      "rejected_mutation_attempts": 0,
+      "last_rejected_evidence_reason": null,
+      "no_op_executed_attempts": 0,
+      "bounded_refreshes": 0,
+      "full_refreshes": 0,
+      "worker_tool_steps": 0,
+      "context_decisions": [],
+      "context_mutation_authorizations": 0,
+      "impact_contract_authorizations": 0,
+      "locator_candidate_count": 2,
+      "source_read_count": 0,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-2",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-2\\.agent_runs\\20261003T184004-98661046.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-2-boundary-trace.json"
+      }
+    },
+    {
+      "case_id": "python_clamp",
+      "repeat": 3,
+      "run_id": "20261003T184607-b6713c63",
+      "result_status": "failed",
+      "milestones": {
+        "contract_ready": true,
+        "worker_started": true,
+        "context_sufficient": false,
+        "target_localized": false,
+        "first_legal_mutation": false,
+        "mutation_committed": false,
+        "verification_applicable": false,
+        "verification_started": false,
+        "child_verified": false
+      },
+      "verification_applicability": "not_evaluated_for_child",
+      "child_applicability_artifacts": 0,
+      "root_applicability_artifacts": 1,
+      "native_verifier_invocations_any_role": 0,
+      "child_browser_failure_codes": [],
+      "child_browser_environment_errors": 0,
+      "child_browser_game_profile_mismatch": false,
+      "profile_diagnostic": null,
+      "formal_child_verifier_invoked": false,
+      "first_blocker": {
+        "kind": "BLOCKED",
+        "elapsed_seconds": 23.078,
+        "model_calls": 2,
+        "stage": "CHILD_VERIFICATION",
+        "reason": "CONTEXT_INSUFFICIENT",
+        "detail": "pre-mutation impact contract was not accepted; Worker cannot proceed to mutation"
+      },
+      "first_causal_failure_event": null,
+      "first_blocker_phase": "pre_mutation_context_or_impact",
+      "terminal_blocker_phase": "pre_mutation_context_or_impact",
+      "secondary_parent_blockers": [
+        {
+          "kind": "BLOCKED",
+          "elapsed_seconds": 23.092,
+          "model_calls": 2,
+          "stage": "PARENT_INTEGRATION",
+          "reason": "INTEGRATION_NOT_READY",
+          "detail": "approved plan execution graph is not ready for parent integration"
+        }
+      ],
+      "first_legal_mutation_step": null,
+      "applied_mutations": 0,
+      "rejected_mutation_attempts": 0,
+      "last_rejected_evidence_reason": null,
+      "no_op_executed_attempts": 0,
+      "bounded_refreshes": 0,
+      "full_refreshes": 0,
+      "worker_tool_steps": 0,
+      "context_decisions": [],
+      "context_mutation_authorizations": 0,
+      "impact_contract_authorizations": 0,
+      "locator_candidate_count": 2,
+      "source_read_count": 0,
+      "child_verified_receipt": false,
+      "root_verified": false,
+      "repairer_calls": 0,
+      "safety_counters": {
+        "mutation_scope_violations": 0,
+        "dnt_execution_violations": 0,
+        "execution_contract_scope_violations": 0,
+        "impact_preservation_violations": 0,
+        "invariant_violations_detected": 0,
+        "impact_out_of_scope_changes": 0
+      },
+      "protected_tests_unchanged": true,
+      "evidence": {
+        "workspace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-3",
+        "events": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-3\\.agent_runs\\20261003T184607-b6713c63.jsonl",
+        "boundary_trace": "D:\\projects\\Ai\\mini_hivo_experiment16\\suite-v1\\python_clamp\\evidence_bound-3-boundary-trace.json"
+      }
+    }
+  ],
+  "limits": "Frozen approved contracts exclude planning. Three fresh runs per task are descriptive, not reliability estimates. A ROOT applicability artifact is never counted as child eligibility. A native verifier call during Worker execution is separate from formal child verification.",
+  "production_changed": false,
+  "default_changed": false
+}
