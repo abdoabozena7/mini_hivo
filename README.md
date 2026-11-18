@@ -60,6 +60,21 @@ blocked task, and `2` for setup/preflight errors. Baseline batch runs also
 remain noninteractive; an unresolved clarification is not silently approved.
 `--no-bootstrap` disables automatic dependency installation.
 
+For a bounded local experiment, apply the same limits to each comparison arm:
+
+```powershell
+.\.venv\Scripts\python.exe mini.py --workspace D:\cases\trial --prompt-file D:\cases\prompt.txt --no-bootstrap --max-model-calls 24 --max-tool-calls 32 --max-elapsed-seconds 150
+```
+
+The limits are optional and shared across task roles, including generation
+retries and model-proposed tool batches. Elapsed time is an admission deadline
+for the task after startup/preflight, not a process supervisor for operations
+already in flight. Deterministic controller checks are not model-proposed tool
+calls. On a budget stop, the active transaction rolls back; already committed
+child work is not undone. Run metrics retain attempted generation counts and
+the input/output token counts Ollama actually reported, with missing counts
+separate. Token counts are telemetry, not a token cap.
+
 Run the deterministic regression and architecture checks without a live model:
 
 ```powershell
@@ -87,6 +102,13 @@ These checks do not permit inline code, invented test-runner reports, or
 expected values that override a source-bound observable. New, unverified,
 model-owned drafts may use the existing coherent-revision policy; user-owned,
 verified, and approved-contract files retain their mutation protections.
+
+For a new project's simple, standalone request to create a named `.txt` file
+`containing exactly:...`, a fresh source-bound readback can replace model
+review if it covers the entire request. Use a single token or quote a
+multiword payload to make the boundary explicit. The final evidence and
+impact gates still run. Broader tasks and requests with extra requirements
+keep their existing verification path.
 
 ## Architecture
 

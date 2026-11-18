@@ -323,12 +323,6 @@ def _kind_for_goal(text: str) -> str:
     return DIRECT_IMPLEMENTATION
 
 
-def _identifier_candidates(text: str) -> list[str]:
-    values = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?", str(text or ""))
-    ignored = {"change", "update", "modify", "implement", "preserve", "behavior", "public", "return", "value", "type", "state", "task"}
-    return _unique((item for item in values if item.casefold() not in ignored and len(item) > 2), MAX_IMPACT_TARGETS)
-
-
 def _target_record(value: Any, *, default_kind: str = DIRECT_IMPLEMENTATION, required: bool = True, fallback_source: Mapping[str, Any] | None = None) -> dict[str, Any]:
     raw = value if isinstance(value, Mapping) else {"target": value}
     target = _text(raw.get("target") or raw.get("symbol") or raw.get("name") or raw.get("path") or "", MAX_IMPACT_PATH)
@@ -504,7 +498,6 @@ def build_pre_mutation_impact_contract(
             or execution.get("impact_targets")
             or []
         )
-    had_explicit_targets = bool(target_values)
     if isinstance(target_values, (str, Mapping)):
         target_values = [target_values]
     targets = [
@@ -522,15 +515,6 @@ def build_pre_mutation_impact_contract(
             targets.append(_target_record({"target": allowed, "path": allowed, "kind": "path"}, default_kind=DIRECT_IMPLEMENTATION, required=False, fallback_source=anchor_source))
         if len(targets) >= MAX_IMPACT_TARGETS:
             break
-    if not targets:
-        for candidate in _identifier_candidates(intent_text):
-            # A task-derived symbol is a semantic hint when the approved
-            # mutation path is already authoritative.  Explicit target records
-            # remain required and are audited exactly.
-            targets.append(_target_record(candidate, default_kind=kind, required=had_explicit_targets or not allowed_paths, fallback_source=anchor_source))
-            if len(targets) >= MAX_IMPACT_TARGETS:
-                break
-
     # A small deterministic neighborhood discovers known consumers, contracts,
     # exports, and state relations.  These are expectations for the contract,
     # not raw context for the Worker.

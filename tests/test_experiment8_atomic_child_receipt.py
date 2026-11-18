@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -5,9 +6,11 @@ import unittest
 from unittest.mock import patch
 
 import mini
-from hivo.atomic_child_receipt import create_atomic_child_receipt, validate_atomic_child_receipt
+from hivo.atomic_child_receipt import (
+    create_atomic_child_receipt, persist_atomic_child_receipt, validate_atomic_child_receipt,
+)
 from hivo.integration_gate import create_verified_child_receipt, assess_integration_readiness, canonical_hash
-from hivo.verification_routing import build_required_execution_verification_set
+from hivo.verification_routing import aggregate_verification_evidence, build_required_execution_verification_set
 
 
 class AtomicChildReceiptTests(unittest.TestCase):
@@ -63,6 +66,85 @@ class AtomicChildReceiptTests(unittest.TestCase):
         self.aggregation["passed"] = True
         self.assertFalse(self.receipt(scope_violations=1)["verified"])
         self.assertFalse(self.receipt(authority_valid=False)["verified"])
+
+    def test_terminal_failure_is_not_overridden_by_older_passing_route(self):
+        terminal_browser = {"verification_status": "FAIL", "resolved_entrypoint": "index.html"}
+        terminal = aggregate_verification_evidence(self.artifact, self.evidence, terminal_browser)
+        self.assertFalse(terminal["passed"])
+        self.result["verification_aggregation"] = terminal
+
+        run, _ = self.invoke_mark()
+
+        self.assertEqual(self.result["status"], "failed")
+        self.assertFalse(run["child_receipts"]["EXEC-001"]["verified"])
+        self.assertNotIn("verified_child_receipt_path", self.result)
+        self.assertFalse((self.workspace / ".agent_evidence").exists())
+        self.assertFalse(any(e["kind"] == "CHILD_VERIFIED" for e in run.get("experiment_events", [])))
+
+    def test_terminal_gate_browser_and_legacy_failures_each_block_construction(self):
+        for field, failure in (
+            ("gate", {"passed": False, "verification_aggregation": self.aggregation}),
+            ("browser", {"verification_status": "FAIL", "passed": True}),
+            ("verification", {"status": "FAILED"}),
+        ):
+            with self.subTest(field=field):
+                result = {**self.result, field: failure}
+                receipt = create_atomic_child_receipt(self.task, result, workspace=self.workspace)
+                self.assertFalse(receipt["verified"])
+                with self.assertRaisesRegex(ValueError, "invalid verified child receipt"):
+                    persist_atomic_child_receipt(receipt, self.workspace)
+        self.assertFalse((self.workspace / ".agent_evidence").exists())
+
+    def test_passing_routes_need_matching_executed_passes(self):
+        for passes in ([], [dict(route, target="other.html") for route in self.routes]):
+            with self.subTest(passes=passes):
+                aggregation = {**self.aggregation, "actual_passes": passes}
+                receipt = create_atomic_child_receipt(
+                    self.task, self.result, workspace=self.workspace, verification_aggregation=aggregation)
+                self.assertFalse(receipt["verified"])
+                self.assertFalse(validate_atomic_child_receipt(receipt, workspace=self.workspace)["valid"])
+
+    def test_saved_receipt_rechecks_terminal_aggregation_and_route_outcomes(self):
+        for field, value in (
+            ("terminal_child_status", "failed"),
+            ("verification_status", "failed"),
+            ("verification_aggregation", {**self.receipt()["verification_aggregation"], "passed": False}),
+            ("verification_routes", [self.routes[0], dict(self.routes[1], result="FAIL")]),
+        ):
+            with self.subTest(field=field):
+                receipt = self.receipt()
+                receipt[field] = copy.deepcopy(value)
+                receipt["receipt_hash"] = canonical_hash({k: v for k, v in receipt.items() if k != "receipt_hash"})
+                checked = validate_atomic_child_receipt(receipt, workspace=self.workspace)
+                self.assertFalse(checked["valid"])
+                self.assertTrue(checked["errors"])
+                with self.assertRaisesRegex(ValueError, "invalid verified child receipt"):
+                    persist_atomic_child_receipt(receipt, self.workspace)
+        self.assertFalse((self.workspace / ".agent_evidence").exists())
+
+    def test_malformed_receipt_returns_field_error_before_writing(self):
+        for field, value in (
+            ("coverage", ["NODE-001"]),
+            ("verification_evidence", {"tool": "verify_web_app"}),
+            ("semantic_browser_evidence", ["index.html"]),
+            ("evidence_dependency_fingerprint", {"paths": None}),
+        ):
+            with self.subTest(field=field):
+                receipt = self.receipt()
+                receipt[field] = value
+                receipt["receipt_hash"] = canonical_hash({k: v for k, v in receipt.items() if k != "receipt_hash"})
+                checked = validate_atomic_child_receipt(receipt, workspace=self.workspace)
+                self.assertFalse(checked["valid"])
+                self.assertIn(field, "; ".join(checked["errors"]))
+                with self.assertRaisesRegex(ValueError, "invalid verified child receipt"):
+                    persist_atomic_child_receipt(receipt, self.workspace)
+        self.assertFalse((self.workspace / ".agent_evidence").exists())
+
+    def test_historical_tool_failure_does_not_override_valid_terminal_outcome(self):
+        self.evidence.insert(0, dict(self.evidence[0], result='{"passed":false}'))
+        receipt = self.receipt()
+        stored = Path(persist_atomic_child_receipt(receipt, self.workspace))
+        self.assertEqual(json.loads(stored.read_text(encoding="utf-8")), receipt)
 
     def test_evidence_coverage_and_subject_tampering_rejected_even_if_rehashed(self):
         for field, value in (("verification_evidence_hash", "bad"), ("covered_node_ids", []),

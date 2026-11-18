@@ -384,8 +384,8 @@ def _append_candidate_text(candidate, text):
     candidate["_raw_text"] = f"{current} {text}".strip()
 
 
-def literal_file_request(text):
-    """Recognize an explicit single-file request; never guess executable code or paths."""
+def literal_file_request(text, *, closed_text=False):
+    """Recognize a literal file; closed text requires a .txt basename and an explicit payload."""
     text = str(text or "").strip()
     if "\r" in text or "\n" in text:
         return None
@@ -422,8 +422,14 @@ def literal_file_request(text):
             content = quoted[1]
         elif any(quote in content for quote in ("'", '"', '`')):
             return None
+        elif closed_text and len(content.split()) != 1:
+            return None
         name = filename(match)
+        if closed_text and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*\.txt", name, re.IGNORECASE):
+            return None
         return {"name": name, "content": content, "kind": "text"} if name else None
+    if closed_text:
+        return None
     match = re.fullmatch(
         prefix + rf"(?:exactly\s+)?(?:the\s+text\s+)?(?P<content>{token})\s*\.?\s*",
         text, re.IGNORECASE,

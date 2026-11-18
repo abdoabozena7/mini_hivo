@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 
@@ -76,6 +77,71 @@ class EvidencePolicyTests(unittest.TestCase):
 
         evidence = [{"tool": "verify_web_app", "target": "index.html", "result": '{"passed": false}'}]
         self.assertEqual(len(unresolved_tool_failures(evidence)), 1)
+
+    def test_later_unavailable_or_refused_attempt_keeps_the_concrete_failure(self):
+        from hivo.evidence import evidence_for_review, latest_verification_evidence, unresolved_tool_failures
+
+        failure = {"tool": "run_command", "target": "python check.py", "result": "[exit_code=1]\n1 failed"}
+        for result in (
+            '{"verification_status": "NOT_RUN"}',
+            "error: command refused: executable unavailable",
+            {"environment_error": True, "passed": False},
+            {"status": "BLOCKED", "passed": True},
+            "could not run the check; an earlier attempt passed",
+        ):
+            with self.subTest(result=result):
+                later = {**failure, "result": result}
+                history = [failure, later]
+                self.assertEqual(latest_verification_evidence(history), history)
+                self.assertIn(failure, unresolved_tool_failures(history))
+                self.assertEqual(evidence_for_review(history), history)
+
+    def test_current_proof_discards_stale_pass_but_carries_failure_across_a_mutation(self):
+        from hivo.evidence import current_verification_evidence, unresolved_tool_failures
+
+        failure = {"tool": "run_command", "target": "python check.py", "result": "[exit_code=1]"}
+        stale = {**failure, "target": "python old_smoke.py", "result": "[exit_code=0]"}
+        mutation = {"tool": "edit_file", "target": "app.py", "result": "edited app.py"}
+        unrelated_pass = {**stale, "target": "python other_check.py"}
+        unavailable = {**failure, "result": {"verification_status": "NOT_RUN"}}
+        history = [stale, failure, mutation, unrelated_pass, unavailable]
+        original = copy.deepcopy(history)
+
+        current = current_verification_evidence(history)
+        self.assertEqual(current, [failure, mutation, unrelated_pass, unavailable])
+        self.assertEqual(unresolved_tool_failures(current), [failure])
+        self.assertEqual(history, original)
+
+        repair_pass = {**failure, "result": "[exit_code=0]"}
+        current = current_verification_evidence(history + [repair_pass])
+        self.assertNotIn(failure, current)
+        self.assertNotIn(stale, current)
+        self.assertEqual(unresolved_tool_failures(current), [])
+
+    def test_browser_pass_cannot_clear_a_different_profile_role_or_oracle(self):
+        from hivo.evidence import unresolved_tool_failures
+
+        receipt = {"passed": False, "verification_profile": {"kind": "game"}, "oracle_id": "game-check"}
+        failed = {"tool": "verify_web_app", "target": "index.html", "role": "Falsifier", "result": receipt}
+        matched = {**failed, "result": {**receipt, "passed": True}}
+        mismatched = [
+            {**matched, "role": "Builder"},
+            {**matched, "result": {**matched["result"], "verification_profile": {"kind": "web"}}},
+            {**matched, "result": {**matched["result"], "oracle_id": "other-check"}},
+        ]
+        for newer in mismatched:
+            with self.subTest(newer=newer):
+                self.assertEqual(unresolved_tool_failures([failed, newer]), [failed])
+        self.assertEqual(unresolved_tool_failures([failed, matched]), [])
+
+    def test_a_later_unavailable_attempt_does_not_resurrect_a_resolved_failure(self):
+        from hivo.evidence import latest_verification_evidence, unresolved_tool_failures
+
+        failure = {"tool": "run_command", "target": "python check.py", "result": "[exit_code=1]"}
+        positive = {**failure, "result": "[exit_code=0]"}
+        later = {**failure, "result": '{"verification_status": "NOT_RUN"}'}
+        self.assertEqual(latest_verification_evidence([failure, positive, later]), [later])
+        self.assertEqual(unresolved_tool_failures([failure, positive, later]), [])
 
     def test_review_projection_omits_resolved_and_non_mutating_edit_errors(self):
         from hivo.evidence import evidence_for_review

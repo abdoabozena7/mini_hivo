@@ -77,7 +77,7 @@ class Level1NativeVerificationTests(unittest.TestCase):
                                 for row in gate['verification_aggregation']['actual_passes']))
             return gate
 
-        with patch.object(mini, 'ask_ollama', side_effect=provider), \
+        with patch.object(mini, 'ask_ollama', side_effect=provider) as ask, \
              patch.object(mini, 'evidence_gate', side_effect=check_gate), \
              patch.object(mini.subprocess, 'run', side_effect=AssertionError('no shell execution')):
             result, _ = mini.run_baseline_request(self.goal, {}, contract_override=self.contract,
@@ -88,6 +88,7 @@ class Level1NativeVerificationTests(unittest.TestCase):
                             for transcript, _ in observations))
         self.assertTrue(any('run_command' not in tools and 'run_file' in tools
                             for _, tools in observations[3:]))
+        self.assertIn("Falsifier", [call.kwargs["role"] for call in ask.call_args_list])
         self.assertEqual(mini.RUN['impact_contract_authorizations'], 1)
 
     def test_ignoring_native_guidance_stops_before_budget_exhaustion(self):
@@ -158,27 +159,63 @@ class Level1NativeVerificationTests(unittest.TestCase):
             evidence = mini._source_acceptance_evidence(self.task)
             self.assertTrue(evidence)
             self.assertIs(json.loads(evidence[0]["result"])["passed"], expected)
+        (self.root / "test_level_1.txt").unlink()
+        missing = json.loads(mini._source_acceptance_evidence(self.task)[0]["result"])
+        self.assertFalse(missing["passed"])
+        self.assertEqual(missing["verification_kind"], "LITERAL_ARTIFACT")
+        self.assertIn("does not exist", missing["error"])
 
-    def test_prompt_file_source_reaches_controller_proof_when_models_only_read_the_file(self):
-        self.goal = "Create proof.txt containing exactly:MERGE_READY\n"
+    def run_closed_literal_leaf(self, supplied_text, extra_criterion=None):
+        self.goal = 'Create proof.txt containing exactly:"Ready for review."\n'
         self.contract = mini.get_goal_contract(self.goal, interactive=False)
-        replies = [
+        if extra_criterion:
+            self.contract["success_criteria"] = [*self.contract["success_criteria"], extra_criterion]
+        builder_replies = iter([
             self.call("context_sufficiency_check", context_status="sufficient",
                       reason="The source explicitly supplies the file and exact content."),
-            self.call("write_file", path="proof.txt", content="MERGE_READY"),
+            self.call("write_file", path="proof.txt", content=supplied_text),
             {"role": "assistant", "content": "Created the file.", "tool_calls": []},
+        ])
+        falsifier_replies = iter([
             self.call("read_file", path="proof.txt"),
             {"role": "assistant", "content": "Read the file.", "tool_calls": []},
-        ]
-        with patch.object(mini, "ask_ollama", side_effect=replies):
+        ])
+
+        def provider(_messages, *, role, **_kwargs):
+            if role == "Repairer":
+                self.assertEqual((self.root / "proof.txt").read_bytes(), supplied_text.encode("utf-8"))
+                return {"role": "assistant", "content": "Cannot complete the repair.", "tool_calls": []}
+            return next({"Builder": builder_replies, "Falsifier": falsifier_replies}[role])
+
+        with patch.object(mini, "ask_ollama", side_effect=provider) as ask:
             result, _ = mini.run_baseline_request(self.goal, {}, contract_override=self.contract,
                                                 repo_snapshot={"files": []}, finish=False)
+        return result, [call.kwargs["role"] for call in ask.call_args_list]
+
+    def test_closed_literal_uses_real_readback_without_a_model_falsifier(self):
+        result, roles = self.run_closed_literal_leaf("Ready for review.")
         self.assertEqual(result["status"], "done", result)
-        self.assertEqual((self.root / "proof.txt").read_bytes(), b"MERGE_READY")
+        self.assertEqual((self.root / "proof.txt").read_bytes(), b"Ready for review.")
+        self.assertTrue(roles)
+        self.assertNotIn("Falsifier", roles)
         self.assertTrue(any(
             item["tool"] == "run_file" and json.loads(item["result"]).get("passed")
             for item in result["falsifier"]["tool_evidence"]
         ))
+        self.assertTrue(result["impact_comparison"]["passed"])
+
+    def test_wrong_closed_literal_does_not_get_verified_or_persist(self):
+        result, roles = self.run_closed_literal_leaf("Ready for review")
+        self.assertEqual(result["status"], "failed", result)
+        self.assertFalse(mini.RUN["root_verified"])
+        self.assertIn("Repairer", roles)
+        self.assertNotIn("Falsifier", roles)
+        self.assertFalse((self.root / "proof.txt").exists())
+
+    def test_extra_success_criterion_keeps_model_falsification(self):
+        result, roles = self.run_closed_literal_leaf("Ready for review.", "Check the response requirements.")
+        self.assertEqual(result["status"], "done", result)
+        self.assertIn("Falsifier", roles)
 
 
 if __name__ == '__main__':

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import mini
+from hivo import execution_contracts as execution
 
 
 class _FakeHTTPResponse:
@@ -166,6 +167,105 @@ class StructuredWorkerContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "done")
         self.assertEqual(result["structured_response"], {"answer": "prose-safe"})
         self.assertEqual(request.call_count, 1)
+
+
+class FileTargetIntentTests(unittest.TestCase):
+    def test_repair_intent_binds_to_the_affected_file(self):
+        cases = (
+            ("Fix a typo in the status printed by status.py. It must print READY.", "status.py", "Fix"),
+            ("Repair the output in `src/status.py`.", "src/status.py", "Repair"),
+            ("In `status.py`, correct the typo.", "status.py", "correct"),
+            ("status.py must be repaired.", "status.py", "repaired"),
+        )
+        for text, path, verb in cases:
+            with self.subTest(text=text):
+                references = execution.code_location_references(text, include_action=True)
+                self.assertEqual(
+                    [(ref["path"], ref["classification"], ref["intent"], ref["action"]) for ref in references],
+                    [(path, "CODE_PATH", "MUTATION", verb)],
+                )
+
+    def test_read_only_and_unrelated_paths_are_not_repair_targets(self):
+        cases = (
+            ("Correct the label in status.py using example.py.",
+             [("status.py", "MUTATION"), ("example.py", "REUSE")]),
+            ("Fix status.py after inspecting rules.py.",
+             [("status.py", "MUTATION"), ("rules.py", "INSPECTION")]),
+            ("Inspect rules.py and reuse example.py.",
+             [("rules.py", "INSPECTION"), ("example.py", "REUSE")]),
+            ("Update status.py based on example.py.",
+             [("status.py", "MUTATION"), ("example.py", "UNKNOWN")]),
+            ("Fix the problem described in example.py.",
+             [("example.py", "UNKNOWN")]),
+            ("Example.py is background for the update.",
+             [("Example.py", "UNKNOWN")]),
+            ("Fix the startup behavior. It is described in example.py.",
+             [("example.py", "UNKNOWN")]),
+            ("Update status.py and config.py.",
+             [("status.py", "MUTATION"), ("config.py", "MUTATION")]),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    [(ref["path"], ref["intent"]) for ref in execution.code_location_references(text)],
+                    expected,
+                )
+
+    def test_negated_action_does_not_inherit_or_suppress_another_clause(self):
+        cases = (
+            ("Do not fix rules.py; repair status.py.", "status.py", "MUTATION"),
+            ("Do not edit rules.py and then fix status.py.", "status.py", "MUTATION"),
+            ("Do not edit rules.py or change defaults.py.", "defaults.py", "UNKNOWN"),
+            ("Fix status.py without correcting rules.py.", "rules.py", "UNKNOWN"),
+        )
+        for text, second_path, second_intent in cases:
+            with self.subTest(text=text):
+                expected = [("rules.py", "UNKNOWN"), (second_path, second_intent)]
+                if second_path == "rules.py":
+                    expected = [("status.py", "MUTATION"), ("rules.py", "UNKNOWN")]
+                self.assertEqual(
+                    [(ref["path"], ref["intent"]) for ref in execution.code_location_references(text)],
+                    expected,
+                )
+
+    def test_repair_advice_cannot_expand_or_override_contract_authority(self):
+        contract = {
+            "responsibility_type": execution.MUTATION,
+            "plan_hash": "approved-hash",
+            "allowed_mutation_paths": ["status.py"],
+            "allowed_inspection_paths": ["rules.py", "example.py"],
+            "global_do_not_touch": ["rules.py"],
+        }
+        checked = execution.sanitize_mission_advice({
+            "objective": "Fix the typo in status.py based on example.py; inspect rules.py.",
+            "allowed_mutation_paths": ["status.py", "example.py", "rules.py"],
+        }, contract)
+        self.assertTrue(checked["valid"], checked)
+        mission = execution.hydrate_worker_mission(contract, checked["advice"], [])
+        self.assertEqual(mission["targets"], ["status.py"])
+        self.assertEqual(mission["allowed_inspection_paths"], ["rules.py", "example.py"])
+        self.assertEqual(mission["do_not_touch"], ["rules.py"])
+        self.assertEqual(mission["approved_plan_hash"], "approved-hash")
+
+        for path, rejection in (
+            ("rules.py", "DNT_PATH_MUTATION"),
+            ("example.py", "UNAPPROVED_PATH_MUTATION"),
+        ):
+            with self.subTest(path=path):
+                denied = execution.sanitize_mission_advice(
+                    {"objective": f"Fix the typo in {path}."}, contract,
+                )
+                self.assertFalse(denied["valid"], denied)
+                self.assertEqual(
+                    [item["rejection_reason"] for item in denied["semantic_path_candidates_rejected"]],
+                    [rejection],
+                )
+
+        verify_only = dict(contract, responsibility_type=execution.VERIFY_ONLY)
+        denied = execution.sanitize_mission_advice(
+            {"objective": "Repair status.py."}, verify_only,
+        )
+        self.assertFalse(denied["valid"], denied)
 
 
 if __name__ == "__main__":

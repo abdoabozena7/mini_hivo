@@ -248,9 +248,13 @@ class GreenfieldContextProgressTests(unittest.TestCase):
                      {"role": "assistant", "content": "Cannot complete safely.", "tool_calls": []}]
         result = self.run_greenfield_worker(script=lambda *_: responses.pop(0))
         self.assertTrue(result["impact_authorized"])
-        # Legacy greenfield scope is enforced at precommit, not per write.
-        # A synthetic passing verification input must not override that audit.
-        self.assertTrue((self.root / "unrelated.txt").exists())
+        path = self.root / "unrelated.txt"
+        self.assertFalse(path.exists())
+        self.assertTrue(any("outside the accepted impact mutation paths" in e["result"]
+                            for e in result["tool_evidence"]))
+        # A late write observed after the guarded tool must still fail precommit.
+        mini._transaction_capture(path)
+        path.write_text("late unrelated write", encoding="utf-8")
         commit = mini._commit_verified_leaf(
             self.task, self.contract, result, {}, {}, {"passed": True}, {},
         )

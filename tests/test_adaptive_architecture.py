@@ -2204,6 +2204,7 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             }],
         }
         terminal = {"role": "assistant", "content": "verified", "tool_calls": []}
+        contract = {**self.contract(), "allowed_mutation_paths": ["app.py"]}
         with patch.object(
             mini, "ask_ollama",
             side_effect=[
@@ -2215,10 +2216,10 @@ class AdaptiveArchitectureTests(unittest.TestCase):
             return_value={"status": "skipped", "summary": "deterministic test", "memory": {}},
         ), patch.object(mini, "optional_browser_check", return_value=None):
             result_a = mini.execute_strategy_attempt(
-                task, self.contract(), self.strategy_pair()[0], failure, {}, {}, attempt_index=0,
+                task, contract, self.strategy_pair()[0], failure, {}, {}, attempt_index=0,
             )
             result_b = mini.execute_strategy_attempt(
-                task, self.contract(), self.strategy_pair()[1], failure, {}, {}, attempt_index=1,
+                task, contract, self.strategy_pair()[1], failure, {}, {}, attempt_index=1,
             )
 
         for call_index in (2, 7):
