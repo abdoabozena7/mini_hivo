@@ -143,6 +143,18 @@ _EXISTING_TARGET_RE = re.compile(
     r"\b(?:fix|modify|refactor|migrate|update|change)\s+(?:the\s+)?current\s+\w+",
     re.IGNORECASE,
 )
+# The opening construction directive describes the project being requested.
+# Feature requirements later in that request may legitimately say delete,
+# update, replace, or current without referring to an existing codebase.
+_CONSTRUCTION_REQUEST_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:build|create|develop|make|generate)\b", re.IGNORECASE,
+)
+_REPOSITORY_EDIT_RE = re.compile(
+    r"(?:^|[.!?;\n]|\b(?:then|also|and)\b)\s*(?:fix|refactor|migrate)\b|"
+    r"\b(?:fix|modify|refactor|migrate|update|change|replace|delete|remove)\s+"
+    r"(?:the\s+)?`?[A-Za-z_][\w./\\-]*\.[A-Za-z0-9]{1,10}\b",
+    re.IGNORECASE,
+)
 _DECLARATION_RE = re.compile(
     r"(?:\bclass\s+([A-Za-z_$][\w$]*)|\bdef\s+([A-Za-z_$][\w$]*)\s*\(|"
     r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\binterface\s+([A-Za-z_$][\w$]*)|"
@@ -375,6 +387,13 @@ def classify_project_mode(raw_goal, inventory=None):
         mode = EXISTING_PROJECT
     elif _GREENFIELD_RE.search(text) or (_EMPTY_BUILD_RE.search(text) and not _EXISTING_TARGET_RE.search(text)):
         reason = "the workspace is empty and the request is explicitly greenfield"
+        mode = NEW_PROJECT
+    elif (inventory.get("status", REPOSITORY_EMPTY) == REPOSITORY_EMPTY
+          and not inventory.get("truncated")
+          and _CONSTRUCTION_REQUEST_RE.match(text)
+          and not _EXISTING_TARGET_RE.search(text)
+          and not _REPOSITORY_EDIT_RE.search(text)):
+        reason = "the empty workspace has a construction request, not an existing-project edit"
         mode = NEW_PROJECT
     elif _MODIFICATION_RE.search(text):
         reason = "the request assumes an existing implementation but no project files were observed"

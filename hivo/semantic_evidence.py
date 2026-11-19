@@ -595,6 +595,18 @@ class SemanticEvidenceResolver:
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         target_symbol = _primary_symbol(str(request.get("target", "")), request_kind)
+        # A narrow definition request may name a whole source file rather than
+        # a language symbol (for example a stylesheet or document). Only an
+        # exact file already admitted by the inspection boundary qualifies.
+        # Ordinary source is not promoted to an authoritative API contract.
+        requested_path = str(request.get("target", "")).strip().replace("\\", "/")
+        if request_kind == SYMBOL_DEFINITION and requested_path == path and lines:
+            records.append(self._record(
+                request=request, request_kind=request_kind, path=path,
+                line_number=1, lines=lines, role="symbol_definition",
+                facts=(f"current source contents of {path}",), score=100,
+                relationship="defines_file", source_kind="source_excerpt",
+            ))
         lookup_symbols = list(symbols)
         if target_symbol and target_symbol.casefold() not in {item.casefold() for item in lookup_symbols}:
             lookup_symbols.append(target_symbol)

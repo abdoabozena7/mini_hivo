@@ -240,7 +240,9 @@ class GreenfieldContextProgressTests(unittest.TestCase):
         result = self.run_greenfield_worker(script=lambda *_: responses.pop(0))
         self.assertTrue(result["impact_authorized"])
         self.assertFalse(escaped.exists())
-        self.assertTrue(any("outside the workspace" in e["result"] for e in result["tool_evidence"]))
+        self.assertTrue(any("outside the workspace" in e["result"] or
+                            "UNEXPECTED_AND_OUT_OF_SCOPE" in e["result"]
+                            for e in result["tool_evidence"]))
 
     def test_unrelated_candidate_cannot_cross_the_real_precommit_boundary(self):
         responses = [tool_call("context_sufficiency_check", {"context_status": "sufficient"}),
@@ -248,9 +250,11 @@ class GreenfieldContextProgressTests(unittest.TestCase):
                      {"role": "assistant", "content": "Cannot complete safely.", "tool_calls": []}]
         result = self.run_greenfield_worker(script=lambda *_: responses.pop(0))
         self.assertTrue(result["impact_authorized"])
-        # Legacy greenfield scope is enforced at precommit, not per write.
-        # A synthetic passing verification input must not override that audit.
-        self.assertTrue((self.root / "unrelated.txt").exists())
+        # Assigned scope now blocks this write before mutation. Independently
+        # exercise the precommit backstop against an externally introduced edit.
+        self.assertFalse((self.root / "unrelated.txt").exists())
+        mini._transaction_capture(self.root / "unrelated.txt")
+        (self.root / "unrelated.txt").write_text("external unauthorized edit")
         commit = mini._commit_verified_leaf(
             self.task, self.contract, result, {}, {}, {"passed": True}, {},
         )

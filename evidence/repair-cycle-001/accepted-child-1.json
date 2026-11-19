@@ -1,0 +1,150 @@
+{
+  "run": "live-007",
+  "run_id": "20261118T162614-b7a0b6c8",
+  "status": "manually_stopped_after_accepted_child_1",
+  "root_acceptance": false,
+  "head": "667d6143e77b2494ee6e286d91ea73c53696eaa2",
+  "model": "gemma4:e4b",
+  "prompt_sha256": "2132536fd2df4a18c39f434dc43e4344034ed892c8640e94a98a103a82dd5b36",
+  "source_unchanged_during_run": true,
+  "artifacts": [
+    {
+      "path": "index.html",
+      "owner": "model",
+      "first_run_id": "20261118T162614-b7a0b6c8",
+      "last_run_id": "20261118T162614-b7a0b6c8",
+      "verified": 1,
+      "content_sha256": "c7bf2f535158828853c2561ef1e1c0bb75f9708dbd3bde2e988f3d8c79a4d26e",
+      "created_at": "2026-11-18T14:37:47+00:00",
+      "updated_at": "2026-11-18T14:47:37+00:00",
+      "actual_sha256": "c7bf2f535158828853c2561ef1e1c0bb75f9708dbd3bde2e988f3d8c79a4d26e",
+      "persisted_hash_matches": true
+    },
+    {
+      "path": "style.css",
+      "owner": "model",
+      "first_run_id": "20261118T162614-b7a0b6c8",
+      "last_run_id": "20261118T162614-b7a0b6c8",
+      "verified": 1,
+      "content_sha256": "9ad0720bd5ad5681703010f703761fd5ae047b7fb36cd21ad5cfcecce6d5ea3b",
+      "created_at": "2026-11-18T14:40:46+00:00",
+      "updated_at": "2026-11-18T14:47:37+00:00",
+      "actual_sha256": "9ad0720bd5ad5681703010f703761fd5ae047b7fb36cd21ad5cfcecce6d5ea3b",
+      "persisted_hash_matches": true
+    },
+    {
+      "path": "app.js",
+      "owner": "model",
+      "first_run_id": "20261118T162614-b7a0b6c8",
+      "last_run_id": "20261118T162614-b7a0b6c8",
+      "verified": 1,
+      "content_sha256": "db67e57a20d091a7cd7cfbc859b069b7dd79b7431c9f9dfd0f8d79d3d7b68c56",
+      "created_at": "2026-11-18T14:41:17+00:00",
+      "updated_at": "2026-11-18T14:47:37+00:00",
+      "actual_sha256": "db67e57a20d091a7cd7cfbc859b069b7dd79b7431c9f9dfd0f8d79d3d7b68c56",
+      "persisted_hash_matches": true
+    }
+  ],
+  "verification": [
+    {
+      "event_id": 5,
+      "role": "Builder",
+      "tool": "run_file",
+      "passed": true,
+      "profile": {
+        "kind": "web",
+        "require_title": true,
+        "require_canvas": false,
+        "require_game_bridge": false,
+        "required_interactions": []
+      },
+      "failures": [],
+      "screenshot": ".agent_evidence\\task_run_file.png"
+    },
+    {
+      "event_id": 7,
+      "role": "Falsifier",
+      "tool": "run_file",
+      "passed": true,
+      "profile": {
+        "kind": "web",
+        "require_title": true,
+        "require_canvas": false,
+        "require_game_bridge": false,
+        "required_interactions": []
+      },
+      "failures": [],
+      "screenshot": ".agent_evidence\\task_run_file.png"
+    },
+    {
+      "event_id": 11,
+      "role": "Falsifier",
+      "tool": "verify_web_app",
+      "passed": true,
+      "profile": {
+        "kind": "web",
+        "require_title": true,
+        "require_canvas": false,
+        "require_game_bridge": false,
+        "required_interactions": []
+      },
+      "failures": [],
+      "screenshot": ".agent_evidence\\task_1.png"
+    }
+  ],
+  "repairer_exercised": false,
+  "historical_evidence_integrity": [
+    {
+      "run": "todo-20261118-103737",
+      "files_checked": 14,
+      "changed": []
+    },
+    {
+      "run": "todo-20261118-123923",
+      "files_checked": 9,
+      "changed": []
+    },
+    {
+      "run": "todo-20261118-143414",
+      "files_checked": 10,
+      "changed": []
+    }
+  ],
+  "provenance": {
+    "type": "curated derivative of preserved local accepted-milestone.json and SQLite/native trace",
+    "original_sha256": "9b9172fe9aab82b456701919959e9889c9d108f211bb672e0d889f6a24b60178",
+    "trace_filename": "20261118T162614-b7a0b6c8.jsonl",
+    "impact_audit_trace_line": 104,
+    "transaction_commit_trace_line": 106,
+    "raw_evidence": "LOCAL-ONLY EVIDENCE; raw databases, logs and generated application are not published",
+    "scope": "Accepted structure/styling child only; app.js is a placeholder. Root and functional application acceptance not demonstrated."
+  },
+  "impact_audits": [
+    {
+      "time": "2026-11-18T16:47:37.087",
+      "run_id": "20261118T162614-b7a0b6c8",
+      "kind": "impact_contract_compared",
+      "task_id": "1",
+      "status": "IMPACT_CONTRACT_PASSED",
+      "changed_paths": [
+        "index.html",
+        "style.css",
+        "app.js"
+      ],
+      "missing": 0,
+      "unexpected_related": 0,
+      "out_of_scope": 0,
+      "preservation_violations": 0,
+      "mutation_authorized": true
+    }
+  ],
+  "transaction_commit": {
+    "task_id": "1",
+    "time": "2026-11-18T16:47:37.125",
+    "changed": [
+      "app.js",
+      "index.html",
+      "style.css"
+    ]
+  }
+}

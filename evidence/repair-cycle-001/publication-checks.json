@@ -1,0 +1,45 @@
+{
+  "scope": "selected offline integration/regression cohort; not live E2E or full suite",
+  "modules": [
+    "test_repair_cycle_001",
+    "test_project_mode_intent",
+    "test_greenfield_context_progress",
+    "test_greenfield_impact_lifecycle",
+    "test_pre_mutation_impact",
+    "test_context_sufficiency_gate",
+    "test_dependency_aware_scheduler",
+    "test_repair_impact_anchor",
+    "test_project_understanding",
+    "test_ingestion_integration",
+    "test_semantic_evidence_resolver",
+    "test_project_world_model",
+    "test_execution_contracts",
+    "test_core_integration",
+    "test_verified_child_integration",
+    "test_impact_planning",
+    "test_impact_map_contract",
+    "test_verification_outcome_integrity",
+    "test_experiment20_child_scope",
+    "test_authority_fail_closed",
+    "test_authority_drift",
+    "test_adaptive_architecture",
+    "test_run4_scope_regression",
+    "test_browser_requirement_authority"
+  ],
+  "tests_run": 517,
+  "failures": [],
+  "errors": [],
+  "skipped": [
+    [
+      "test_captured_diagnostic_responses_replay_without_provider_calls (test_impact_map_contract.ImpactMapContractTests.test_captured_diagnostic_responses_replay_without_provider_calls)",
+      "DIAGNOSTIC_LIVE-2 raw planner artifacts are not available"
+    ]
+  ],
+  "successful": true,
+  "runtime_sha256": {
+    "mini.py": "9787c587ddf44046021cd7a69db29d0e736f739234efa77adbe9534327bca0d6",
+    "hivo/project_understanding.py": "27a49ecfd7cba7717c005a7155dba3f8a5ff65e877f2623f0bc8cb5c6bd4f949",
+    "hivo/semantic_evidence.py": "f82b1490fa44f609496296d0c58c8c137bcf36ae7db37ac4dfdfb6917029e689",
+    "hivo/verification_scope.py": "14cab028d5ff267230e97c1c8d65d23937cd45d0b149328a8ed5a768170ea0ec"
+  }
+}

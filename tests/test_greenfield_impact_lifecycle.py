@@ -194,7 +194,10 @@ class GreenfieldImpactLifecycleTests(unittest.TestCase):
                 self.assertFalse(impact.accept_pre_mutation_impact_contract(candidate)['accepted'])
         compound = dict(self.contract, original_goal=self.goal + ' Also change another file.')
         candidate = mini._prepare_task_impact_contract(mini.root_task_from_contract(compound), compound)
-        self.assertFalse(candidate.get('scope_required', False))
+        # Compound requests must not inherit a one-file literal completion
+        # hash. General greenfield assignments now also require bounded scope.
+        self.assertFalse(any('post_state_sha256' in target for target in candidate['expected_targets']))
+        self.assertFalse(impact.accept_pre_mutation_impact_contract(candidate)['accepted'])
 
     def test_rejection_is_not_generic_missing_context_diagnosis(self):
         diagnosis = mini.diagnose_failure(self.task, {'status': 'failed', 'failure_type': impact.IMPACT_INVALID})

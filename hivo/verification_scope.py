@@ -8,7 +8,7 @@ import copy
 from dataclasses import replace
 import re
 
-from hivo.verification import infer_web_profile
+from hivo.verification import infer_web_profile, _profile_semantic_text
 
 
 PATTERNS = {
@@ -119,7 +119,16 @@ def scoped_profile(goal, contract, *, classification_policy="current", completed
         full.update(source)
         for field in ("requirements", "success_criteria", "constraints"):
             full[field] = list(dict.fromkeys(_strings(contract.get(field, [])) + _strings(source.get(field, []))))
-    profile = infer_web_profile(goal, full, classification_policy=classification_policy)
+    # Runtime contracts acquire routing receipts, hashes and diagnostics during
+    # verification. These must never become new requirements (e.g. "3d" in a
+    # SHA256 turning an ordinary web app into a game). Preserve the chosen
+    # policy and source obligations, but classify only their semantic values.
+    intent = copy.deepcopy(full)
+    intent["requirements"] = [
+        item for field in ("requirements", "verification_requirements")
+        for item in (full.get(field) if isinstance(full.get(field), list) else [])]
+    semantic_text = _profile_semantic_text(goal, intent)
+    profile = infer_web_profile(semantic_text, {}, classification_policy=classification_policy)
     scope = contract.get("child_browser_scope")
     if (not root_source and isinstance(scope, dict) and scope.get("version") == 1
             and scope.get("kind") == "game" and scope.get("goal") == contract.get("goal")

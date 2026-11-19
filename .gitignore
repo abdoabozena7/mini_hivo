@@ -1,6 +1,17 @@
 __pycache__/
 *.py[cod]
 *.backup_*
+/.venv/
+/venv/
+/.env
+/.env.*
+!/.env.example
+node_modules/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/models/
+/ollama_models/
 
 # Runtime provenance and browser/visual verification artifacts.
 .agent_runs/

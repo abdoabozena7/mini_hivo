@@ -950,6 +950,8 @@ def select_local_ollama_model(explicit=None):
 # WORKSPACE TOOLS AND SAFETY
 # ---------------------------------------------------------------------------
 
+VERIFICATION_EXECUTABLES = frozenset({"python", "python3", "py", "node", "npm", "npx", "pytest", "git", "g++", "clang++", "tsc"})
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "context_sufficiency_check",
@@ -1011,7 +1013,11 @@ TOOLS = [
                        "required": ["path"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
-        "name": "run_command", "description": "Run an allowlisted verification command inside the workspace.",
+        "name": "run_command", "description": (
+            "Run a verification command inside the workspace. Allowed executables: "
+            + ", ".join(sorted(VERIFICATION_EXECUTABLES))
+            + ". Use list_files/read_file for inspection, not shell inventory or echo commands. "
+              "Use run_file or verify_web_app to verify an artifact. Shell composition and inline code are forbidden."),
         "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
                        "required": ["command"], "additionalProperties": False},
     }},
@@ -1790,6 +1796,8 @@ def run_file(path):
                 ),
                 ensure_ascii=False,
             )
+        elif ext == ".css":
+            return "[not_applicable] CSS is not executable; verify its owning HTML with verify_web_app. This is not a passing verification receipt."
         else:
             return f"error: unsupported file type for running: {ext}"
         result = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=30)
@@ -1815,7 +1823,7 @@ def _validated_command_parts(command):
     if not parts:
         return None, "empty command"
     executable = Path(parts[0]).stem.lower()
-    allowed = {"python", "python3", "py", "node", "npm", "npx", "pytest", "git", "g++", "clang++", "tsc"}
+    allowed = VERIFICATION_EXECUTABLES
     if executable not in allowed:
         return None, f"executable '{executable}' is not in the verification allowlist"
     if executable in {"python", "python3", "py"} and "-c" in parts:
@@ -2199,7 +2207,8 @@ def _impact_gate_mutation_guard(name, role="System", target=None):
     if not issue and target is not None:
         allowed = ACTIVE_IMPACT_CONTRACT.get("authorized_mutation_paths", [])
         relative = _normalized_workspace_relative_path(target)
-        outside = (relative not in allowed if ACTIVE_IMPACT_CONTRACT.get("scope_required")
+        outside = (relative not in {str(path).replace("\\", "/").casefold() for path in allowed}
+                   if ACTIVE_IMPACT_CONTRACT.get("scope_required")
                    else not stage10_impact._allowed_path(relative, allowed))
         if allowed and outside:
             issue = (f"error: {stage10_impact.UNEXPECTED_AND_OUT_OF_SCOPE}: "
@@ -2364,6 +2373,60 @@ def _impact_post_mutation_check(contract, *, verification_result=None,
     return comparison
 
 
+def _greenfield_concrete_paths(values):
+    """Resolve file-shaped controller assignments, never semantic scope labels.
+
+    Extensionless new files use an explicit relative path (e.g. ./Buildfile).
+    The mission compiler supplies paths before dispatch, not from Worker writes.
+    """
+    paths = []
+    for raw in (values if isinstance(values, list) else [])[:stage10_impact.MAX_IMPACT_CHANGED_PATHS]:
+        if not isinstance(raw, str) or not raw.strip() or any(c in raw for c in "\n\r*?<>|\0"):
+            continue
+        value = raw.strip().replace("\\", "/")
+        if ":" in value or Path(value).is_absolute() or ".." in Path(value).parts:
+            continue
+        target = safe_path(value)
+        if target is None:
+            continue
+        if not ("/" in value or Path(value).suffix or target.is_file()) or target.is_dir():
+            continue
+        relative = target.relative_to(Path(WORKSPACE).resolve()).as_posix()
+        if relative == "." or any(p.casefold() in {".git", ".hivo"} or p.casefold().startswith(".agent") for p in Path(relative).parts):
+            continue
+        if relative not in paths:
+            paths.append(relative)
+    return paths
+
+
+def _greenfield_creation_context(task_id, candidate):
+    """Explain observed creation state without inventing source or authorization."""
+    if RUN.get("project_mode") != NEW_PROJECT or not isinstance(candidate, dict):
+        return ""
+    if candidate.get("scope_source") != "controller_child_assignment":
+        return ""
+    states = []
+    for relative in candidate.get("authorized_mutation_paths", []):
+        target = safe_path(relative)
+        if target is not None:
+            states.append({"path": relative, "observed_state": "present: inspect before editing" if target.exists()
+                           else "absent: assigned new artifact, no existing definition"})
+    task = TASKS.get(str(task_id), {})
+    packet = {"assignment": states, "local_goal": task.get("goal"),
+              "local_done_when": task.get("done_when", []),
+              "expected_outcome": (task.get("worker_mission") or {}).get("expected_outcome")}
+    return (
+        "GREENFIELD CREATION CONTEXT (controller assignment and current filesystem observation):\n"
+        + json.dumps(packet, ensure_ascii=False) + "\n"
+        "Absent assigned files are outputs to CREATE from this local mission, not missing repository definitions. "
+        "Do not request their pre-existing symbol definitions or source contents; those do not exist yet. "
+        "Use the supplied mission and source requirements to implement the assigned artifacts. "
+        "Present files, external APIs, dependencies and genuinely unspecified interfaces still require evidence. "
+        "This packet is not a sufficiency decision or mutation authorization: evaluate context honestly, "
+        "submit the context check, and obey the Impact Contract. Do not implement another child's work."
+    )
+
+
 def _prepare_task_impact_contract(task, contract=None):
     """Build the bounded candidate before the Worker context is compiled."""
     if not isinstance(task, dict):
@@ -2373,6 +2436,7 @@ def _prepare_task_impact_contract(task, contract=None):
     # A named literal artifact has source-defined scope even in an empty repo.
     # This is local contract compilation, not existing-repository impact planning.
     literal = None
+    greenfield_paths = None
     if (RUN.get("project_mode") == NEW_PROJECT and not isinstance(explicit, dict)
             and not _current_execution_contract(task)):
         source = contract if isinstance(contract, dict) else {}
@@ -2391,6 +2455,35 @@ def _prepare_task_impact_contract(task, contract=None):
                 "post_state_sha256": hashlib.sha256(literal["content"].encode("utf-8")).hexdigest(),
             }] if relative else []
             task["scope_hint"] = list(effective["allowed_mutation_paths"])
+        else:
+            # A child assignment is the controller's local file scope. Do not
+            # drop it and promote ordinary words in its goal to required symbols.
+            mission = task.get("worker_mission") or {}
+            # scope_hint is also used for semantic responsibilities. A compiled
+            # concrete mission is the executable assignment, subject to any
+            # genuine path restrictions on the child and outer contract.
+            child_paths = _greenfield_concrete_paths(task.get("scope_hint", []))
+            mission_paths = _greenfield_concrete_paths(mission.get("targets", []))
+            declared = child_paths or mission_paths
+            if child_paths and mission_paths and any(
+                    path.casefold() not in {p.casefold() for p in child_paths} for path in mission_paths):
+                declared = []  # A compiler cannot expand an explicit child path assignment.
+            greenfield_paths = []  # Missing assignment is not permission to infer scope from prose.
+            task["greenfield_inspection_paths"] = list(effective.get(
+                "allowed_inspection_paths", task.get("dependency_inspection_paths", [])))
+            for relative in declared:
+                outer = effective.get("allowed_mutation_paths", [])
+                if "allowed_mutation_paths" in effective and not stage4._structural_path_is_within(relative, outer):
+                    continue
+                if relative not in greenfield_paths:
+                    greenfield_paths.append(relative)
+            effective = copy.deepcopy(effective)
+            effective["allowed_mutation_paths"] = greenfield_paths
+            # Allowed files are not automatically all required mutations.
+            # Explicit expected targets/semantic obligations remain intact.
+            task["greenfield_inspection_paths"] = list(effective.get(
+                "allowed_inspection_paths", list(dict.fromkeys(
+                    greenfield_paths + list(task.get("dependency_inspection_paths", []))))))
     mutation_required = not bool(task.get("verification_only"))
     if isinstance(effective, dict) and "worker_required" in effective:
         mutation_required = bool(effective.get("worker_required"))
@@ -2431,6 +2524,11 @@ def _prepare_task_impact_contract(task, contract=None):
                             "excerpt": record["text"]}],
         } for record in records[:stage10_impact.MAX_IMPACT_OBLIGATIONS]]
         candidate = stage10_impact.PreMutationImpactContract(stage10_impact._refresh_contract_hash(candidate))
+    elif greenfield_paths is not None:
+        candidate["scope_required"] = True
+        candidate["scope_source"] = "controller_child_assignment"
+        candidate["authorized_inspection_paths"] = task["greenfield_inspection_paths"]
+        candidate = stage10_impact.PreMutationImpactContract(stage10_impact._refresh_contract_hash(candidate))
     task["impact_contract_candidate"] = copy.deepcopy(candidate)
     task["impact_contract_status"] = stage10_impact.IMPACT_INCOMPLETE
     task["impact_contract_hash"] = candidate.get("contract_hash")
@@ -2443,6 +2541,9 @@ def _prepare_task_impact_contract(task, contract=None):
         contract_id=candidate.get("contract_id"),
         contract_hash=candidate.get("contract_hash"),
         target_count=len(candidate.get("expected_targets", []) or []),
+        assigned_mutation_paths=list(candidate.get("authorized_mutation_paths", [])),
+        expected_target_paths=[item.get("path") or item.get("target")
+                               for item in candidate.get("expected_targets", []) if isinstance(item, dict)],
         obligation_count=len(candidate.get("verification_obligations", []) or []),
         mutation_required=mutation_required,
     )
@@ -11224,6 +11325,13 @@ Prepare the Worker so it can execute the stated plan without rediscovering the w
 State what to implement, where it belongs, which verified interfaces/facts to reuse, concrete project-specific rules,
 mistakes to avoid, and how deterministic verification will establish completion. Do not invent unsupported features.
 The goal anchor must remain compatible with the root project goal. Return only the compact structured mission.
+For NEW_PROJECT nodes, targets must name concrete workspace-relative files for this child, not semantic labels,
+interface names or descriptions. Use ./name for new extensionless files. Respect explicit assigned file paths;
+do not include work owned by a different child. scope_hint may describe a responsibility rather than a path.
+Make this milestone independently executable: include the permitted local companion artifacts that are runtime
+prerequisites of its verification, even if their later behavior is implemented by another sequential child.
+Do not emit a plan that loads a missing future asset and cannot pass its own checks. Never expand explicit child
+or approved-contract boundaries; unresolved prerequisite ownership must be reported rather than invented.
 
 BOUNDED COMPILER CONTEXT:
 {_compact_mission_compiler_context(context)}"""
@@ -11811,12 +11919,17 @@ def _children_validator(data):
     children = data["children"]
     if not 2 <= len(children) <= MAX_CHILDREN:
         return False
-    for child in children:
+    for position, child in enumerate(children, 1):
         if not isinstance(child, dict) or not isinstance(child.get("goal"), str) or not child["goal"].strip():
             return False
         if (not isinstance(child.get("done_when"), list) or not child.get("done_when")
                 or not all(isinstance(item, str) and item.strip() for item in child.get("done_when", []))
                 or not isinstance(child.get("scope_hint"), list)):
+            return False
+        dependencies = child.get("depends_on", [])
+        if (not isinstance(dependencies, list) or any(
+                not isinstance(dep, str) or dep not in {str(i) for i in range(1, position)}
+                for dep in dependencies)):
             return False
     return True
 
@@ -11826,8 +11939,9 @@ def children_schema():
         "type": "object", "properties": {
             "goal": {"type": "string"}, "done_when": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 6},
             "scope_hint": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+            "depends_on": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_CHILDREN},
         },
-        "required": ["goal", "done_when", "scope_hint"], "additionalProperties": False,
+        "required": ["goal", "done_when", "scope_hint", "depends_on"], "additionalProperties": False,
     }
     return {"type": "object", "properties": {
         "children": {"type": "array", "items": child, "minItems": 2, "maxItems": MAX_CHILDREN}},
@@ -12027,7 +12141,9 @@ PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}"""
         if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
     )
     prompt_text = f"""Split CURRENT NODE into 2-4 SMALL STRUCTURED SEQUENTIAL child contracts for the pinned weak local model.
-Each child supplies only goal, done_when, scope_hint. Children together must preserve the parent goal.
+Each child supplies goal, done_when, scope_hint, and depends_on. Children together must preserve the parent goal.
+Also supply depends_on: earlier sibling ordinal strings (for example ["1"]), or [] only for independent work.
+Declare dependencies when a child needs artifacts or interfaces produced by an earlier child; order alone is not a dependency.
 Prefer independently verifiable milestones. Sequential children MAY touch the same file; never create parallel ownership assumptions.
 Do not create arbitrary microtasks like 'write import' or 'create variable' unless previous failure proves larger scope is still too broad.
 For an approved existing-project plan, every child must stay inside its plan nodes; do not invent mutation surfaces.
@@ -12059,6 +12175,10 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
         child_id = str(index) if task["id"] == "ROOT" else f"{task['id']}.{index}"
         child = make_task(child_id, spec["goal"], task["depth"] + 1, task["id"],
                           spec.get("done_when", []), spec.get("scope_hint", []))
+        if "depends_on" in spec:
+            child["depends_on"] = [
+                dep if task["id"] == "ROOT" else f"{task['id']}.{dep}"
+                for dep in spec["depends_on"]]
         if isinstance(approved_plan, dict):
             attach_approved_plan_to_task(child, approved_plan, spec.get("plan_node_ids"))
             child["plan_requirement_ids"] = list(spec.get("requirement_ids", []))
@@ -12086,6 +12206,7 @@ def _compact_decomposition_spec(spec):
         "goal": compact_text(spec.get("goal", ""), 420),
         "done_when": bounded_list(spec.get("done_when", []), 6, 220),
         "scope_hint": bounded_list(spec.get("scope_hint", []), 6, 140),
+        "depends_on": list(spec.get("depends_on", [])),
     }
 
 
@@ -13915,6 +14036,31 @@ def _recovery_strategy_state_for_execution(value, tool_schemas, target=None):
     return stage6d.initialize_recovery_no_mutation_search_state(state)
 
 
+def _failed_verification_handoff(evidence):
+    """A real failed structured check can be handed to Falsifier, never to acceptance."""
+    for row in unresolved_tool_failures(evidence):
+        if row.get("tool") not in {"verify_web_app", "run_file", "run_command"}:
+            continue
+        index = next((i for i, item in enumerate(evidence) if item is row), -1)
+        if any(item.get("tool") in MUTATION_TOOLS and not evidence_result_failed(item.get("result", ""))
+               and not result_is_tool_rejection(item.get("result", "")) for item in evidence[index + 1:]):
+            continue  # A mutation requires fresh verification; do not relabel an old receipt as current.
+        native_exit = re.match(r"^\[exit_code=(\d+)\]", str(row.get("result", "")).strip())
+        if native_exit and int(native_exit.group(1)) != 0:
+            return row
+        try:
+            payload = json.loads(str(row.get("result", "")))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("passed") is not False or payload.get("environment_error"):
+            continue
+        route = payload.get("verification_route")
+        if isinstance(route, dict) and route.get("required") is False:
+            continue
+        return row
+    return None
+
+
 def verification_failure_signature(result):
     try:
         payload = json.loads(str(result))
@@ -14453,6 +14599,9 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             messages[0]["content"] = str(messages[0].get("content", "")) + " " + system_prompt
         else:
             messages.insert(0, {"role": "system", "content": system_prompt})
+    creation_context = _greenfield_creation_context(task_id, impact_candidate) if role in {"Builder", "Repairer"} else ""
+    if creation_context:
+        extra_context = creation_context + "\n\n" + str(extra_context or "")
     durable = relevant_memory_context(f"{role} {task_text}", role=role, memory=memory, max_chars=1200)
     context = "\n\n".join(item for item in (extra_context, durable) if item)
     if context:
@@ -14487,6 +14636,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     summary = ""
     status = "unknown"
     execution_budget_exhausted = False
+    impact_scope_refusals = 0
+    impact_scope_terminal = False
     offered_tools = tools_for_role(role, tool_policy=tool_policy)
     if locator is not None and locator.candidates:
         offered_tools = [item for item in offered_tools
@@ -14784,6 +14935,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 and previous.get("role") == "tool"
                 and not last_tool_verified
             ):
+                failed_check = _failed_verification_handoff(evidence)
+                if (failed_check is not None and (context_gate is None or context_gate.mutation_allowed)
+                        and (not impact_required or ACTIVE_IMPACT_CONTRACT is not None)):
+                    status = "verification_failed"
+                    summary = "Executable verification failed; hand off the preserved failure for independent review and bounded repair."
+                    record_run_event("worker_failed_verification_handoff", task_id=task_id, role=role,
+                                     target=failed_check.get("target"), tool=failed_check.get("tool"),
+                                     failure_type="IMPLEMENTATION_ERROR")
+                    break
                 messages.append({
                     "role": "user",
                     "content": (
@@ -15384,6 +15544,15 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 break
 
             if context_tool_call:
+                if (context_tool_result.get("final") and
+                        context_tool_result.get("failure_code") == CONTEXT_INSUFFICIENT_FAILURE):
+                    status = "failed"
+                    summary = "CONTEXT_INSUFFICIENT: " + str(context_tool_result.get("reason", ""))
+                    record_run_event("context_terminal_stop", task_id=task_id, role=role,
+                                     failure_code=CONTEXT_INSUFFICIENT_FAILURE,
+                                     tool_steps_used=len(evidence))
+                    stop = True
+                    break
                 if (role == "Builder" and progress is None and recovery_state is None
                         and repeated_sufficient_context_checks >= NO_PROGRESS_LIMIT):
                     # Greenfield Workers need not have a Stage 4A contract.
@@ -15417,10 +15586,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     "role": "system", "content": system_prompt,
                 }, {
                     "role": "user",
-                    "content": compact_text(
-                        base_worker_prompt + "\n\nCONTEXT GATE UPDATE:\n" + context_feedback,
-                        MAX_WORKER_MISSION_CHARS,
-                    ),
+                    "content": base_worker_prompt,
+                }, {
+                    "role": "user",
+                    "content": "CONTEXT GATE UPDATE:\n" + context_feedback,
                 }]
                 context_reanchor_after_tool = True
                 break
@@ -15666,6 +15835,19 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stop = True
                     break
 
+            if impact_mutation_blocked and stage10_impact.UNEXPECTED_AND_OUT_OF_SCOPE in str(result):
+                impact_scope_refusals += 1
+                if impact_scope_refusals >= 3:
+                    impact_scope_terminal = True
+                    status = "failed"
+                    summary = (f"{stage10_impact.IMPACT_INVALID}: repeated writes outside the accepted "
+                               "controller assignment; inspect the scope contract, not task size")
+                    record_run_event("impact_scope_retry_exhausted", task_id=task_id, role=role,
+                                     contract_hash=(ACTIVE_IMPACT_CONTRACT or {}).get("contract_hash"),
+                                     refusals=impact_scope_refusals)
+                    stop = True
+                    break
+
             if role == "Builder" and name in {"write_file", "edit_file", "edit_file_range"} and tool_result_failed(result) and not context_mutation_blocked:
                 mutation_failure_counts[str(target)] = mutation_failure_counts.get(str(target), 0) + 1
                 if recovery_state is not None and recovery_observation is not None and (
@@ -15830,6 +16012,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
         "syntax_validation_failures": list(verification_cycle["syntax_failures"].values()),
         "mutation_failures": mutation_failure_records,
         "failure_type": (
+            stage10_impact.IMPACT_INVALID if impact_scope_terminal else
+            "IMPLEMENTATION_ERROR" if status == "verification_failed" else
             recovery_terminal_state if recovery_terminal_state else
             MUTATION_TARGET_UNRESOLVED if grounding_terminal else
             WORKER_NO_MUTATION_PROGRESS if progress_terminal else
@@ -16817,6 +17001,9 @@ def _browser_syntax_failures(workspace, entrypoint, requested_from_node=None):
 
 
 def verify_browser_application(requested_path=None, task_id="ROOT", profile=None, evidence=None):
+    if profile is None:
+        active = ACTIVE_TOOL_CONTRACT or RUN.get("source_contract") or {}
+        profile = _scoped_browser_profile(str(active.get("goal") or "web"), active)
     """Syntax-gate, resolve, then verify the application through its HTML entrypoint."""
     target_evidence = dict(evidence or {})
     target_evidence["requested_from_node"] = requested_path
@@ -17003,7 +17190,7 @@ def task_risk(task_text):
 
 
 def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_context=""):
-    if task_risk(task.get("goal", "")) == "low" or builder_result.get("status") != "done":
+    if task_risk(task.get("goal", "")) == "low" or builder_result.get("status") not in {"done", "verification_failed"}:
         return {"status": "skipped", "summary": "low-risk leaf", "tool_evidence": [], "memory": memory}
     RUN["falsifier_calls"] += 1
     event(f"[FALSIFY {task['id']}]", role="Falsifier", task=task["id"], action="adversarial verification")
@@ -19850,7 +20037,8 @@ def repair_task(task, contract, failure_evidence, memory, node_context, parent_g
             "constraints": (contract or {}).get("constraints", []) if isinstance(contract, dict) else [],
             "allowed_inspection_paths": (worker_execution_contract or {}).get(
                 "allowed_inspection_paths",
-                (contract or {}).get("allowed_inspection_paths", []) if isinstance(contract, dict) else [],
+                (contract or {}).get("allowed_inspection_paths", task.get("greenfield_inspection_paths", []))
+                if isinstance(contract, dict) else task.get("greenfield_inspection_paths", []),
             ),
             "group_goal": task.get("semantic_group_goal"),
             "group_invariant": task.get("semantic_group_invariant"),
@@ -19975,9 +20163,14 @@ def prepare_worker_mission_context(task, contract, repo_snapshot, parent_summary
         execution_contract=execution_contract,
         advice_policy=RUN.get("mission_advice_policy", "strict"),
     )
+    task["worker_mission"] = copy.deepcopy(mission)
+    task["dependency_inspection_paths"] = list(dict.fromkeys(
+        path for item in dependency_summaries or [] if isinstance(item, dict)
+        for path in item.get("changed_files", []) if isinstance(path, str)))
     RUN["worker_missions_executed"] = RUN.get("worker_missions_executed", 0) + 1
     record_run_event(
         "worker_mission_ready", task_id=task.get("id"),
+        assigned_targets=bounded_list(mission.get("targets", []), 12, 180),
         goal_anchor=compact_text(mission.get("goal_anchor") or mission.get("goal", ""), 300),
         target_count=len(mission.get("targets", [])),
         execution_contract_id=(execution_contract or {}).get("execution_contract_id"),
@@ -20051,6 +20244,13 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             }],
         }
     impact_candidate = _prepare_task_impact_contract(task, contract)
+    if (isinstance(impact_candidate, dict)
+            and impact_candidate.get("scope_source") == "controller_child_assignment"
+            and task.get("impact_contract_required") and not impact_candidate.get("authorized_mutation_paths")):
+        return {"status": "failed", "failure_type": stage10_impact.IMPACT_INCOMPLETE,
+                "orchestration_failure": stage10_impact.IMPACT_INCOMPLETE,
+                "summary": "No concrete authorized file assignment could be compiled; Worker was not dispatched.",
+                "memory": memory, "impact_contract": impact_candidate}
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
                                       parent_summary, dependency_summaries, task.get("failure_evidence"),
                                       strategy_context=strategy_context,
@@ -20069,6 +20269,8 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         "execution_contract_child": task.get("execution_contract_child"),
     }
     ACTIVE_TOOL_CONTRACT.update(_active_plan_tool_contract_fields(task))
+    if task.get("greenfield_inspection_paths") is not None:
+        ACTIVE_TOOL_CONTRACT["allowed_inspection_paths"] = list(task["greenfield_inspection_paths"])
     ACTIVE_TOOL_CONTRACT = _task_web_verification_contract(task, ACTIVE_TOOL_CONTRACT)
     worker_execution_contract = _current_execution_contract(task)
     builder = execute_agent_task(
@@ -20201,6 +20403,13 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             "summary": compact_text(repaired.get("summary", ""), MAX_NODE_SUMMARY_CHARS),
             "tool_steps_used": int(repaired.get("tool_steps_used", 0) or 0),
         })
+        if str(repaired.get("failure_type", "")).startswith("IMPACT_CONTRACT_"):
+            rollback_transaction()
+            return {"status": "failed", "failure_type": repaired["failure_type"],
+                    "summary": repaired.get("summary", "Repairer impact authorization failed"),
+                    "memory": memory, "repair_history": repair_history, "repairer": repaired,
+                    "mutation_failures": repair_mutation_failures,
+                    "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(repaired))}
         if repaired["status"] == "provider_failure":
             rollback_transaction()
             return {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": repaired["summary"],
@@ -22898,6 +23107,9 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
             if _scheduler_result_is_success(dependency_result) and dependency_id not in completed_dependency_ids:
                 child_dependencies.append(_scheduler_dependency_summary(dependency_task, dependency_result))
                 completed_dependency_ids.add(dependency_id)
+        # A previous child may have committed or rolled back. Never hand its
+        # successor a cached pre-execution view of those artifacts.
+        repo_snapshot = inspect_repository()
         result = solve_task(
             child, depth + 1, contract, memory, repo_snapshot,
             parent_summary=child_parent, dependency_summaries=child_dependencies,

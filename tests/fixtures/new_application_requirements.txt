@@ -1,0 +1,13 @@
+Build a complete, working To-Do List web application using plain HTML, CSS, and JavaScript.
+
+Requirements:
+1. Create `index.html`, `style.css`, and `app.js`.
+2. Display a task list with a text input and Add button.
+3. Allow users to add non-empty tasks.
+4. Allow users to mark tasks as complete or incomplete.
+5. Allow users to delete tasks.
+6. Save tasks in `localStorage` so they survive page refresh.
+7. Show a helpful empty-state message when no tasks exist.
+8. Use a clean, responsive interface that works on desktop and mobile.
+9. Do not use external libraries, frameworks, or a backend.
+10. Deliver a working application that can be opened through `index.html`.

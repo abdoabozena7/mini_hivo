@@ -262,6 +262,13 @@ class WorkerEvidenceBoundaryTests(unittest.TestCase):
         if explicit_target:
             # Controller-declared expected file, not a fabricated accepted contract.
             self.fixture.contract["expected_targets"]=[{"target":"artifact.txt","path":"artifact.txt"}]
+        else:
+            # Ordinary words in a goal are no longer mandatory mutation
+            # targets. Keep this negative control grounded in a real explicit
+            # requirement inside the assigned scope that the Worker omits.
+            self.fixture.task["scope_hint"].append("required-proof.txt")
+            self.fixture.contract["expected_targets"]=[{
+                "target":"required-proof.txt","path":"required-proof.txt","required":True}]
         builder=self.fixture.run_greenfield_worker()
         self.fixture.task["impact_contract"]=copy.deepcopy(builder["impact_contract"])
         path=self.fixture.root/"artifact.txt"

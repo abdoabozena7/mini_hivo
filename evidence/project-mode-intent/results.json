@@ -1,0 +1,72 @@
+{
+  "update": "R_UPDATE_003",
+  "date": "2026-11-18",
+  "base_commit": "667d6143e77b2494ee6e286d91ea73c53696eaa2",
+  "status": "offline validated; live rerun pending",
+  "original_run_id": "20261118T101729-c6e86150",
+  "prompt_sha256": "2132536fd2df4a18c39f434dc43e4344034ed892c8640e94a98a103a82dd5b36",
+  "original_evidence_unchanged": true,
+  "before": {
+    "project_mode": "EXISTING_PROJECT",
+    "inventory": "REPOSITORY_EMPTY",
+    "requirements_retained": 11,
+    "stage": "repository reconnaissance",
+    "error": "required existing-project repository evidence is unavailable",
+    "deterministic_reproduction": {
+      "methods": 9,
+      "failure_entries": 8,
+      "note": "Includes subtest failures, not eight independent failing methods. Final cohort adds inventory safety and mixed-request controls."
+    }
+  },
+  "after": {
+    "project_mode": "NEW_PROJECT",
+    "stage2": "ready",
+    "task_brain_requirements": 11,
+    "source_ledger_unchanged": true,
+    "live_inference": false,
+    "application_generation": "not run",
+    "final_acceptance": "not tested"
+  },
+  "suites": [
+    {
+      "suite": "test_project_mode_intent.py",
+      "tests_run": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "successful": true
+    },
+    {
+      "suite": "test_project_understanding.py",
+      "tests_run": 32,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "successful": true
+    },
+    {
+      "suite": "test_ingestion_integration.py",
+      "tests_run": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "successful": true
+    },
+    {
+      "suite": "test_greenfield_impact_lifecycle.py",
+      "tests_run": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "successful": true
+    }
+  ],
+  "total_test_methods": 69,
+  "compiled_modules": 71,
+  "source_sha256": {
+    "hivo\\project_understanding.py": "27a49ecfd7cba7717c005a7155dba3f8a5ff65e877f2623f0bc8cb5c6bd4f949",
+    "tests\\test_project_mode_intent.py": "fde98d5ce90097eca43fe35c2b8a6bd950c067d00519054d2fed48ca13ce03d2",
+    "tests\\fixtures\\new_application_requirements.txt": "2132536fd2df4a18c39f434dc43e4344034ed892c8640e94a98a103a82dd5b36"
+  },
+  "validation_boundary": "Real deterministic classification, filesystem inventory, Stage 2, Task Brain and existing safety/regression checks. Specification supplied by fixture; model entry points blocked. No live planning/Worker execution."
+}
