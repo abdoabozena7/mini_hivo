@@ -6,6 +6,7 @@ The source baseline was Kareem's integration PR [#1](https://github.com/abdoaboz
 
 **Current checkpoint:** the November 18, 2026 To-Do live campaign reached an **accepted, retained foundation child** in Run 7. Full To-Do application behavior and root acceptance have not been established.
 
+- [Development Journal — versioned status and engineering roadmaps](MINI_HIVO_DEV_JOURNAL/README.md)
 - [Detailed repair report](updates/REPAIR_CYCLE_001.md)
 - [Curated Run 7 evidence](evidence/repair-cycle-001/accepted-child-1.json)
 - [Publication regression results](evidence/repair-cycle-001/publication-checks.json)

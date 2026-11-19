@@ -13,3 +13,6 @@ updates/R_UPDATE_002.md text eol=lf
 # Preserve the original live prompt's exact CRLF bytes and recorded digest.
 tests/fixtures/new_application_requirements.txt -text whitespace=cr-at-eol
 evidence/repair-cycle-001/** text eol=lf
+
+# Preserve versioned journal PDFs as exact binary artifacts.
+MINI_HIVO_DEV_JOURNAL/*.pdf binary
