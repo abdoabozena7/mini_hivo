@@ -1,6 +1,6 @@
 # Mini Hivo development instructions
 
-These repository-wide instructions apply to future work in this checkout. Read applicable nested instructions before editing a subtree. Keep this file as the single repository-level workflow; link supporting templates instead of duplicating its rules.
+These repository-wide instructions apply to future work in this checkout. Read applicable nested instructions before editing a subtree. Keep this file as the single repository-level workflow; link supporting templates instead of duplicating its rules. For the project North Star and Swarm/Recursive role charter, consult [docs/PROJECT_GOAL.md](docs/PROJECT_GOAL.md) and [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md).
 
 ## Workspace, scope and Git
 

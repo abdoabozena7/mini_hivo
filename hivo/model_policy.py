@@ -5,10 +5,78 @@ role routing, and silent fallbacks would make the result impossible to
 attribute, so every model-backed role is pinned here.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
+import re
 
 
 GEMMA_MODEL = "gemma4:e4b"
+GENERATIVE_CAPABILITIES = frozenset({"completion", "chat"})
+
+_MODEL_SEGMENT_RE = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_VALID_OLLAMA_MODEL_RE = re.compile(
+    rf"^(?:{_MODEL_SEGMENT_RE}/)?{_MODEL_SEGMENT_RE}(?::{_MODEL_SEGMENT_RE})?$"
+)
+
+
+def normalize_requested_model_name(
+    requested: str | None,
+    default: str = GEMMA_MODEL,
+) -> str:
+    """Normalize an Ollama model identifier and reject unsafe or malformed names."""
+    if requested is not None and not isinstance(requested, str):
+        raise ValueError("requested model name must be a string or None")
+    if not isinstance(default, str):
+        raise ValueError("default model name must be a string")
+
+    candidate = default.strip() if requested is None or not requested.strip() else requested.strip()
+    if not candidate:
+        raise ValueError("model name must not be empty")
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in candidate):
+        raise ValueError(
+            f"invalid model name {requested!r}: whitespace and control characters are not allowed"
+        )
+    if "://" in candidate:
+        raise ValueError(
+            f"invalid model name {requested!r}: URL schemes are not allowed"
+        )
+    if "\\" in candidate or ".." in candidate:
+        raise ValueError(
+            f"invalid model name {requested!r}: path separators and traversal segments are not allowed"
+        )
+    if not _VALID_OLLAMA_MODEL_RE.fullmatch(candidate):
+        raise ValueError(
+            f"invalid model name {requested!r}: expected 'model[:tag]' or 'namespace/model[:tag]'"
+        )
+    return candidate
+
+
+def validate_generative_model_capabilities(
+    model_name: str,
+    capabilities: list[str] | tuple[str, ...] | set[str] | None,
+) -> None:
+    """Verify that non-empty Ollama capabilities include generative text/chat completion."""
+    if capabilities is None:
+        return
+    if isinstance(capabilities, (str, bytes)) or not isinstance(capabilities, Collection):
+        raise ValueError("capabilities must be a collection of strings or None")
+
+    normalized = sorted({
+        str(item).strip().lower()
+        for item in capabilities
+        if item is not None and str(item).strip()
+    })
+    if not normalized:
+        return
+    if GENERATIVE_CAPABILITIES.intersection(normalized):
+        return
+
+    raise ValueError(
+        f"model {model_name!r} reports capabilities {normalized} without text/chat "
+        f"'completion' support (e.g., encoder/classifier/embedding-only model) and "
+        f"cannot run generative coding roles; choose a generative Ollama model such as "
+        f"{GEMMA_MODEL!r}"
+    )
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 
@@ -19,7 +20,7 @@ def preflight_command(parts, workspace, *, platform=None, which=None):
     which = shutil.which if which is None else which
     parts = list(parts)
     executable = Path(parts[0]).stem.casefold()
-    if executable == "npm" and len(parts) > 1 and parts[1] in {"test", "run"}:
+    if executable == "npm" and len(parts) > 1 and parts[1] in {"test", "run", "start"}:
         package_path = Path(workspace) / "package.json"
         if not package_path.is_file():
             return {"status": VERIFICATION_NOT_APPLICABLE,
@@ -29,14 +30,22 @@ def preflight_command(parts, workspace, *, platform=None, which=None):
         except (OSError, ValueError) as exc:
             return {"status": VERIFIER_UNAVAILABLE,
                     "reason": f"package.json cannot be read: {exc}", "command": parts}
-        script = "test" if parts[1] == "test" else (parts[2] if len(parts) > 2 else "")
+        script = parts[1] if parts[1] in {"test", "start"} else (parts[2] if len(parts) > 2 else "")
         if not script or not isinstance(package.get("scripts"), dict) or not package["scripts"].get(script):
             return {"status": VERIFICATION_NOT_APPLICABLE,
                     "reason": f"package.json has no {script or 'requested'} script", "command": parts}
     candidates = [parts[0]]
     if platform == "nt" and executable in {"npm", "npx"}:
         candidates = [executable + ".cmd", executable + ".exe"]
-    resolved = next((match for name in candidates if (match := which(name))), None)
+    resolved = next(
+        (
+            match for name in candidates
+            if (match := which(name)) and not (platform == "nt" and "windowsapps" in str(match).casefold())
+        ),
+        None,
+    )
+    if not resolved and platform == "nt" and executable in {"python", "python3"} and which is shutil.which:
+        resolved = sys.executable
     if not resolved:
         return {"status": VERIFIER_UNAVAILABLE,
                 "reason": f"executable {parts[0]} is unavailable", "command": parts}

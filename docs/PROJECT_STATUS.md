@@ -1,17 +1,17 @@
 # Mini Hivo — architecture and feature status
 
-Checkpoint: 2026-11-17. This page tracks capabilities, not individual defects. The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, and the [live end-to-end checkpoint](LIVE_E2E_VALIDATION.md) records the subsequent source-to-output repairs and acceptance.
+Checkpoint: 2026-11-21. This page tracks capabilities, not individual defects. The core thesis and North Star are in [PROJECT_GOAL.md](PROJECT_GOAL.md); the complete Swarm & Recursive role charter is in [AGENT_ARCHITECTURE.md](AGENT_ARCHITECTURE.md). The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, and the [live end-to-end checkpoint](LIVE_E2E_VALIDATION.md) records the subsequent source-to-output repairs and acceptance.
 
 ## What exists in the code
 
 | Capability | Status | Main implementation |
 |---|---|---|
-| Local CLI, numbered project workspaces, pinned `gemma4:e4b` transport, bounded context, and persistent SQLite run/task memory | Implemented | `mini.py`, `hivo/projects.py`, `hivo/model_policy.py`, `hivo/http_client.py`, `hivo/context.py`, `hivo/memory.py` |
+| Local CLI, numbered project workspaces, single-model-per-run generative Ollama policy (`gemma4:e4b` default), bounded context, persistent SQLite run/task memory, and structured JSON deliverable reports | Implemented | `mini.py`, `hivo/projects.py`, `hivo/model_policy.py`, `hivo/deliverable_report.py`, `hivo/http_client.py`, `hivo/context.py`, `hivo/memory.py` |
 | Calm animated terminal, persistent named sessions, native scoped decisions and complete private diagnostics | Implemented; actual ConPTY/local-model acceptance | `hivo/sessions.py`, `hivo/terminal_ui.py`, `mini.py`; [guide](TERMINAL_SESSIONS.md), [measured update](../updates/R_UPDATE_004.md) |
 | Source requirement ledger, clarification, repository reconnaissance, Project Brain, and temporary Task Brain | Implemented | `hivo/requirements.py`, `hivo/project_understanding.py`, `hivo/reentry.py` |
 | Impact Map, challenge, minimal change plan, explicit approval, and immutable execution contracts | Implemented | `hivo/impact_planning.py`, `hivo/execution_contracts.py`, `hivo/approval_bound_execution.py` |
-| Recursive task decomposition, scoped Worker missions, dependency scheduling, mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
-| Browser/unit verification routing, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
+| Recursive task decomposition, scoped Worker missions, Evidence-Licensed Granularity & Tool-Contract Recovery Gate (*Before You Split*), mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/evidence_licensed_gate.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
+| Domain quality rubrics, Three.js/ES-module/WebGL canvas quality checks, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/quality_rubric.py`, `hivo/playbooks.py`, `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
 | Experiment runners, deterministic regression tests, paired reports and saved result summaries | Reports archived through Experiment 22 across separately identified workstreams; original histories integrated without rewriting | `scripts/`, `tests/`, `reports/` |
 
 “Implemented” means a code path and focused tests exist. It does **not** claim reliable end-to-end completion for every project or that an experimental policy is the default.

@@ -1,0 +1,13 @@
+Create a complete standalone 3D browser game in `index.html` titled "Neon Starfighter 3D" using Three.js loaded directly inside `<script type="module">` via `import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';` (no build step, no external local `.js` files, and never call `console.error`).
+
+All design choices are fixed (ask no clarification questions):
+1. Render a full-viewport Three.js WebGL scene (`#050816` background, `new THREE.GridHelper(24, 24, 0x00f5ff, 0x1e293b)`, glowing starfield `THREE.Points`, `THREE.AmbientLight` + `THREE.DirectionalLight`, angled camera at `(0, 9, 14)` looking at `(0, 0, 0)`).
+2. Render a glowing cyan starship (`THREE.ConeGeometry` + `THREE.BoxGeometry` wings with `emissive` glow) at `(0, 0.5, 0)` and 8 rotating golden energy crystals (`THREE.OctahedronGeometry` placed at radius >= 4 from `(0, 0, 0)`), animated continuously with `requestAnimationFrame`.
+3. Show a sleek sci-fi HTML HUD overlay with title "Neon Starfighter 3D", live Score, Crystals Collected, Status badge, WASD / Arrow Keys legend, and clickable Start / Reset buttons.
+4. Support WASD / Arrow keys to fly the starship smoothly across the X/Z plane, collecting energy crystals (+10 score when within 1.5 units and respawning the crystal at a new random X/Z radius >= 4).
+5. Expose `window.AGENT_GAME` synchronously at module load with:
+   - `getState()` returning plain JSON `{ status, score, collected, player: { x, z }, position: { x, y, z } }`
+   - `start()` setting `status = "playing"`
+   - `restart()` resetting `score = 0`, `collected = 0`, ship position to `(0, 0.5, 0)`, and `status = "playing"`
+   - `move(direction)` (`"up"`, `"down"`, `"left"`, `"right"`) deterministically moving the ship by `1.0` unit and syncing its 3D mesh position
+   - `forceCollect()` adding `10` to `score` and incrementing `collected` by `1`

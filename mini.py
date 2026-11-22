@@ -32,6 +32,15 @@ from hivo.python_checks import check_source_assertion, runtime_documentation, so
 from hivo.dependency_schedule import ambiguous_child_ids, order_children
 from hivo.failure_decision import BROWSER_VERIFICATION_STAGNATION
 from hivo.failure_decision import MUTATION_ARGUMENT_RETRIES_EXHAUSTED, classify_mutation_exhaustion
+from hivo.deliverable_report import build_deliverable_run_report, write_deliverable_run_report
+from hivo.evidence_licensed_gate import ATTRIBUTABLE_CORRECTION_CLASSES
+from hivo.evidence_licensed_gate import REQUIRE_SAME_AUTHORITY_CORRECTION
+from hivo.evidence_licensed_gate import STOP_IMMEDIATELY
+from hivo.evidence_licensed_gate import build_immediate_mutation_hint
+from hivo.evidence_licensed_gate import build_same_authority_correction_brief
+from hivo.evidence_licensed_gate import classify_failure_episode
+from hivo.evidence_licensed_gate import extract_text_tool_call_fallback
+from hivo.evidence_licensed_gate import license_granularity_decision
 from hivo.provider_usage import record_provider_usage
 from hivo.run_budget import RunBudget, RunBudgetExceeded
 from hivo.context import compact_messages
@@ -49,6 +58,7 @@ from hivo.host_preflight import failed_host_preflight_result, format_host_prefli
 from hivo.http_client import HttpTransportError, get_json as http_get_json, post_json as http_post_json
 from hivo.memory import MemoryStore
 from hivo.model_policy import GEMMA_MODEL, SingleModelPolicy
+from hivo.model_policy import normalize_requested_model_name, validate_generative_model_capabilities
 from hivo.mutation_grounding import MutationGrounding, MUTATION_TARGET_UNRESOLVED
 from hivo.target_locator import TargetLocator
 from hivo.worker_progress import NO_PROGRESS_LIMIT, WorkerProgress
@@ -58,6 +68,7 @@ from hivo import integration_targets
 from hivo import evidence_compatibility as semantic_evidence
 from hivo import evidence_monotonic
 from hivo.playbooks import classify_project, playbook_context
+from hivo.quality_rubric import BROWSER_CANVAS_QUALITY_JS, detect_threejs_or_3d, quality_rubric_context
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
 from hivo import project_brain_refs as core1_brain_refs
@@ -965,9 +976,11 @@ def select_local_ollama_model(explicit=None):
     by_name = {(item.get("name") or item.get("model")): item for item in models}
     if required not in by_name:
         raise RuntimeError(f"required local model '{required}' was not found. Run `ollama pull {required}`.")
+    capabilities = fetch_model_capabilities(required)
+    validate_generative_model_capabilities(required, capabilities)
     MODEL = required
     MODEL_TASK_CAPACITY = infer_model_capacity(by_name[required])
-    MODEL_CAPABILITIES = fetch_model_capabilities(required)
+    MODEL_CAPABILITIES = capabilities
     VISION_MODEL = required if "vision" in MODEL_CAPABILITIES else ""
     ROUTER_MODEL = required
     FALLBACK_MODEL = ""
@@ -1132,6 +1145,9 @@ def tool_argument_error(name, args):
         if not valid_type:
             invalid.append(f"{key} must be {expected_type}")
             continue
+        if key == "path" and expected_type == "string" and not value.strip():
+            invalid.append("path must be a non-empty file path")
+            continue
         if expected_type == "integer":
             minimum = spec.get("minimum")
             maximum = spec.get("maximum")
@@ -1291,6 +1307,7 @@ class _InlineJavaScript(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=False)
         self.scripts = []
+        self.importmaps = []
         self._active = None
 
     def handle_starttag(self, tag, attrs):
@@ -1298,7 +1315,9 @@ class _InlineJavaScript(HTMLParser):
             return
         attrs = dict(attrs)
         script_type = str(attrs.get("type") or "").split(";", 1)[0].strip().casefold()
-        if "src" not in attrs and script_type in {
+        if "src" not in attrs and script_type == "importmap":
+            self._active = ("importmap", [])
+        elif "src" not in attrs and script_type in {
             "", "module", "text/javascript", "application/javascript",
             "text/ecmascript", "application/ecmascript",
         }:
@@ -1313,8 +1332,37 @@ class _InlineJavaScript(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "script" and self._active is not None:
             mode, parts = self._active
-            self.scripts.append((mode, "".join(parts)))
+            if mode == "importmap":
+                self.importmaps.append("".join(parts))
+            else:
+                self.scripts.append((mode, "".join(parts)))
             self._active = None
+
+
+def _js_validation_mode(target, text):
+    suffix = target.suffix.casefold()
+    if suffix == ".mjs":
+        return "module"
+    if suffix == ".cjs":
+        return "commonjs"
+    pkg_type = None
+    if WORKSPACE is not None:
+        pkg = Path(WORKSPACE) / "package.json"
+        if pkg.is_file():
+            try:
+                pkg_type = str(json.loads(pkg.read_text(encoding="utf-8")).get("type") or "").lower()
+            except (OSError, ValueError, TypeError):
+                pkg_type = None
+    if pkg_type == "module":
+        return "module"
+    if pkg_type == "commonjs":
+        return "commonjs"
+    if re.search(
+        r"(?:^|\n)\s*(?:import\s+(?:[\w*{]|\s*['\"])|export\s+(?:default|const|let|var|function|class|\{))",
+        text,
+    ):
+        return "module"
+    return "commonjs"
 
 
 def source_validation_error(target, content):
@@ -1332,11 +1380,21 @@ def source_validation_error(target, content):
         except (ValueError, TypeError) as exc:
             return f"JSON syntax validation failed: {exc}"
         return None
-    scripts = [("module" if suffix == ".mjs" else "commonjs", text)] if suffix in {".js", ".mjs", ".cjs"} else []
+    scripts = [(_js_validation_mode(target, text), text)] if suffix in {".js", ".mjs", ".cjs"} else []
     if suffix in {".html", ".htm"}:
         parser = _InlineJavaScript()
         parser.feed(text)
         parser.close()
+        for raw_map in parser.importmaps:
+            try:
+                parsed_map = json.loads(raw_map)
+            except (ValueError, TypeError) as exc:
+                return (
+                    f"HTML importmap JSON syntax validation failed (close </script> immediately "
+                    f"after the JSON object before opening <script type='module'>): {exc}"
+                )
+            if not isinstance(parsed_map, dict) or not isinstance(parsed_map.get("imports"), dict):
+                return "HTML importmap JSON syntax validation failed: must be an object with an 'imports' map"
         scripts = parser.scripts
         classic = [source for mode, source in scripts if mode == "commonjs"]
         scripts = [item for item in scripts if item[0] == "module"]
@@ -1632,10 +1690,10 @@ def write_file(path, content, role="System"):
     target = safe_path(path)
     if target is None:
         return f"error: '{path}' is outside the workspace."
-    if role == "Repairer":
-        return "error: Repairer cannot replace files with write_file; use focused edits"
     transaction_snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(target))
     created_here = bool(transaction_snapshot and not transaction_snapshot.get("existed"))
+    if role == "Repairer" and not created_here:
+        return "error: Repairer cannot replace files with write_file; use focused edits"
     resumable = False
     if target.exists() and role == "Builder" and not created_here:
         store = get_memory_store()
@@ -1651,6 +1709,16 @@ def write_file(path, content, role="System"):
             pre_state_bytes = target.read_bytes()
         except OSError:
             pre_state_bytes = None
+    if (
+        created_here
+        and pre_state_bytes is not None
+        and len(pre_state_bytes) >= 500
+        and len(str(content or "").strip()) < 120
+    ):
+        return (
+            f"error: refusing to replace {len(pre_state_bytes)}-byte draft '{path}' with an empty "
+            "or truncated stub; submit the complete file content; file was not changed"
+        )
     gate_issue = _precommit_invariant_feedback(
         target, content, tool_name="write_file", pre_state_bytes=pre_state_bytes,
     )
@@ -1881,9 +1949,17 @@ def run_file(path, *, function=None, arguments=None, expected=None):
                 return f"compile error:\n{build.stderr}"
             cmd = [str(exe)]
         elif ext in (".html", ".htm"):
+            active_contract = ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {}
+            profile = (
+                _scoped_browser_profile(
+                    str(active_contract.get("goal") or "web"), active_contract, path,
+                )
+                if isinstance(active_contract, dict) and active_contract
+                else None
+            )
             return json.dumps(
                 verify_browser_application(
-                    path, "run_file", evidence={"requested_from_node": path},
+                    path, "run_file", profile=profile, evidence={"requested_from_node": path},
                 ),
                 ensure_ascii=False,
             )
@@ -1926,8 +2002,16 @@ def _validated_command_parts(command):
         subcommand = next((part for part in parts[1:] if not part.startswith("-")), "")
         if subcommand not in {"status", "diff", "log", "show", "ls-files", "rev-parse"}:
             return None, f"git subcommand '{subcommand}' is not read-only"
+    if executable in {"python", "python3", "py"} and "http.server" in lower:
+        return None, "long-running dev servers are not allowed from run_command; use verify_web_app to serve and verify browser applications"
     if executable == "npm" and any(word in parts[1:] for word in ("install", "uninstall", "publish", "link")):
         return None, "package mutation is not allowed from run_command"
+    if executable == "npm":
+        npm_tokens = [part.lower() for part in parts[1:] if not part.startswith("-")]
+        if npm_tokens[:1] in (["start"], ["dev"], ["serve"]) or npm_tokens[:2] in (
+            ["run", "start"], ["run", "dev"], ["run", "serve"],
+        ):
+            return None, "long-running dev servers are not allowed from run_command; use verify_web_app to serve and verify browser applications"
     if executable == "npx":
         requested = next((Path(part).stem.lower() for part in parts[1:] if not part.startswith("-")), "")
         if requested not in {"eslint", "tsc", "vitest", "jest", "playwright", "vite"}:
@@ -1990,6 +2074,12 @@ def run_command(command, *, expected_exit_code=None, expected_stdout=None):
         if preflight["status"] == verification_env.VERIFIER_UNAVAILABLE:
             return f"error: VERIFIER_UNAVAILABLE: {preflight['reason']}"
         parts = preflight["command"]
+    elif os.name == "nt" and Path(parts[0]).stem.casefold() in {"npm", "npx", "python3"}:
+        preflight = verification_env.preflight_command(parts, WORKSPACE)
+        if preflight["status"] == verification_env.VERIFICATION_NOT_APPLICABLE:
+            return f"[not_applicable] VERIFICATION_NOT_APPLICABLE: {preflight['reason']}"
+        if preflight.get("resolved_executable"):
+            parts = preflight["command"]
     try:
         result = subprocess.run(parts, shell=False, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
         if resolved_policy:
@@ -2023,6 +2113,21 @@ def run_command(command, *, expected_exit_code=None, expected_stdout=None):
         return f"tool error: {exc}"
 
 
+def _repairer_can_rewrite_sole_new_draft():
+    if RUN.get("project_mode") != NEW_PROJECT or WORKSPACE is None:
+        return False
+    snapshots = (ACTIVE_TRANSACTION or {}).get("files", {})
+    if not snapshots or any(snap.get("existed", True) for snap in snapshots.values()):
+        return False
+    existing_outside = [
+        item for item in inspect_repository().get("files", [])
+        if isinstance(item, dict) and item.get("path")
+        and safe_path(item["path"]) is not None
+        and str(safe_path(item["path"])) not in snapshots
+    ]
+    return not existing_outside
+
+
 def tools_for_role(role, tool_policy=None, recovery_strategy=None):
     """Return the role tools, optionally projected for one recovery epoch.
 
@@ -2035,6 +2140,8 @@ def tools_for_role(role, tool_policy=None, recovery_strategy=None):
         base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     elif role == "Repairer":
         allowed = {"edit_file", "edit_file_range", "read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
+        if _repairer_can_rewrite_sole_new_draft():
+            allowed = allowed | {"write_file"}
         base = [tool for tool in TOOLS if tool["function"]["name"] in allowed]
     elif tool_policy == "coherent_rewrite":
         allowed = {"write_file", "read_file", "read_file_range", "list_files", "run_file", "run_command", "verify_web_app"}
@@ -2164,7 +2271,8 @@ def _impact_effective_contract(value):
 
 def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
                                  context_anchor=None, execution_contract=None,
-                                 mutation_required=True):
+                                 mutation_required=True, task_scope_hint=None,
+                                 mission_targets=None):
     if isinstance(candidate, dict):
         return copy.deepcopy(candidate)
     active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
@@ -2190,7 +2298,17 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
         "allowed_mutation_paths", "expected_targets", "impact_targets",
     )):
         targets = {}
-        for requirement in [task["goal"], *list(task["done_when"] or [])]:
+        is_greenfield_child = (
+            str(task_id) != "ROOT"
+            and RUN.get("project_mode") == NEW_PROJECT
+            and not effective.get("execution_contract_id")
+        )
+        primary_sources = (
+            [task["goal"], *list(task_scope_hint or [])]
+            if is_greenfield_child
+            else [task["goal"], *list(task["done_when"] or [])]
+        )
+        for requirement in primary_sources:
             text = requirement.get("text", "") if isinstance(requirement, dict) else str(requirement)
             for reference in stage4.code_location_references(text, effective):
                 if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
@@ -2206,9 +2324,96 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
                         "excerpt": text,
                     }],
                 })
+        if not targets and is_greenfield_child:
+            for requirement in list(task["done_when"] or []):
+                text = requirement.get("text", "") if isinstance(requirement, dict) else str(requirement)
+                for reference in stage4.code_location_references(text, effective):
+                    if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
+                        continue
+                    path = _normalized_workspace_relative_path(reference["path"])
+                    if not path:
+                        continue
+                    targets.setdefault(path.casefold(), {
+                        "target": path, "path": path, "kind": "path",
+                        "provenance": [{
+                            "source_identity": "controller:task-contract",
+                            "location": str(task_id), "evidence_kind": "task_requirement",
+                            "excerpt": text,
+                        }],
+                    })
+        if (
+            not targets
+            and RUN.get("project_mode") == NEW_PROJECT
+            and not effective.get("execution_contract_id")
+        ):
+            for raw_hint in [*(task_scope_hint or []), *(mission_targets or [])]:
+                ref = stage4.classify_code_location_reference(str(raw_hint or ""), effective)
+                if not ref or ref.get("classification") != "CODE_PATH":
+                    continue
+                path = _normalized_workspace_relative_path(ref["path"])
+                if not path:
+                    continue
+                targets.setdefault(path.casefold(), {
+                    "target": path, "path": path, "kind": "path",
+                    "provenance": [{
+                        "source_identity": "controller:task-contract",
+                        "location": str(task_id), "evidence_kind": "greenfield_mission_target",
+                        "excerpt": str(raw_hint),
+                    }],
+                })
+            if not targets:
+                source_contract = RUN.get("source_contract") if isinstance(RUN.get("source_contract"), dict) else {}
+                fallback_texts = [
+                    anchor.get("root_goal") or "",
+                    effective.get("original_goal") or effective.get("goal") or "",
+                    *(effective.get("requirements") or []),
+                    *(source_contract.get("requirements") or []),
+                ]
+                for item in fallback_texts:
+                    text = item.get("text", "") if isinstance(item, dict) else str(item or "")
+                    for reference in stage4.code_location_references(text, effective):
+                        if reference.get("classification") != "CODE_PATH" or reference.get("intent") != "MUTATION":
+                            continue
+                        path = _normalized_workspace_relative_path(reference["path"])
+                        if not path:
+                            continue
+                        targets.setdefault(path.casefold(), {
+                            "target": path, "path": path, "kind": "path",
+                            "provenance": [{
+                                "source_identity": "controller:task-contract",
+                                "location": str(task_id), "evidence_kind": "greenfield_root_contract",
+                                "excerpt": text[:240],
+                            }],
+                        })
+            declared_source_paths = {p.casefold() for p, _req in _source_creation_requirements()}
+            if (
+                not targets
+                and "index.html" in declared_source_paths
+                and classify_project(
+                    effective or {"goal": str(anchor.get("root_goal") or task_text or "")}
+                ) in {"web_game", "web_app"}
+            ):
+                targets["index.html"] = {
+                    "target": "index.html", "path": "index.html", "kind": "path",
+                    "provenance": [{
+                        "source_identity": "controller:task-contract",
+                        "location": str(task_id), "evidence_kind": "greenfield_web_entrypoint",
+                        "excerpt": str(anchor.get("root_goal") or task_text or "")[:240],
+                    }],
+                }
         if targets:
             task["expected_targets"] = list(targets.values())
-            task["allowed_mutation_paths"] = [item["path"] for item in targets.values()]
+            allowed_list = [item["path"] for item in targets.values()]
+            if (
+                RUN.get("project_mode") == NEW_PROJECT
+                and not effective.get("execution_contract_id")
+                and str(task_id) != "ROOT"
+            ):
+                for declared_path, _req in _source_creation_requirements():
+                    norm = _normalized_workspace_relative_path(declared_path)
+                    if norm and norm.casefold() not in {p.casefold() for p in allowed_list}:
+                        allowed_list.append(norm)
+            task["allowed_mutation_paths"] = allowed_list
     return stage10_impact.build_pre_mutation_impact_contract(
         task,
         task_id=task_id,
@@ -2540,7 +2745,7 @@ def _impact_post_mutation_check(contract, *, verification_result=None,
     return comparison
 
 
-def _prepare_task_impact_contract(task, contract=None):
+def _prepare_task_impact_contract(task, contract=None, worker_mission=None):
     """Build the bounded candidate before the Worker context is compiled."""
     if not isinstance(task, dict):
         return None
@@ -2586,6 +2791,8 @@ def _prepare_task_impact_contract(task, contract=None):
         },
         execution_contract=effective,
         mutation_required=mutation_required,
+        task_scope_hint=task.get("scope_hint") if isinstance(task, dict) else None,
+        mission_targets=(worker_mission or {}).get("targets") if isinstance(worker_mission, dict) else None,
     )
     if literal:
         # Bind every retained requirement to a concrete implementation and
@@ -2893,7 +3100,32 @@ def _context_sufficiency_tool(args, role="System", task_id="ROOT"):
             "anchor_hash": snapshot["anchor_hash"],
         }
     else:
-        result = gate.evaluate(args)
+        if (
+            RUN.get("project_mode") == NEW_PROJECT
+            and gate.mutation_allowed
+            and bool((ACTIVE_TRANSACTION or {}).get("files"))
+            and str((args or {}).get("context_status") or "").strip().lower() == "insufficient"
+        ):
+            snapshot = gate.snapshot()
+            result = {
+                "decision_valid": True,
+                "context_status": "sufficient",
+                "lifecycle_state": snapshot["state"],
+                "mutation_allowed": True,
+                "reason": (
+                    "Context gate is already MUTATION_ALLOWED for this new-project draft and no external repository "
+                    "files exist. Inspect your draft with read_file/read_file_range, apply the fix from the "
+                    "verification repair_hints using write_file or edit_file, and re-run verify_web_app."
+                ),
+                "errors": [],
+                "failure_code": None,
+                "final": True,
+                "round": snapshot["round"],
+                "request_count": snapshot["request_count"],
+                "anchor_hash": snapshot["anchor_hash"],
+            }
+        else:
+            result = gate.evaluate(args)
     _record_context_sufficiency_result(task_id, role, result)
     return _context_result_json(result)
 
@@ -3115,6 +3347,13 @@ def _world_model_revalidate_after_files(changed_paths, *, phase="commit"):
     return {"revalidated": [item for item in results if item.get("resolution_status") == "resolved"], "targets": results}
 
 
+_EXPLICIT_SENTENCE_CREATION_PREFIX_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:create|build|write|develop|implement|generate)\b"
+    r"(?![^.!?;:\n]{0,220}\b(?:based\s+on|copied\s+from|fix|modify|refactor|migrate)\b)",
+    re.IGNORECASE,
+)
+
+
 def _source_creation_requirements():
     records = list(ledger_requirements(RUN.get("source_requirement_ledger")))
     source = RUN.get("source_contract") or {}
@@ -3123,16 +3362,28 @@ def _source_creation_requirements():
         records.insert(0, {
             "requirement_id": "SOURCE-GOAL", "text": original[0], "provenance": USER_STATED,
         })
+    seen = set()
     for requirement in records:
         if requirement.get("provenance") not in {USER_STATED, USER_CONFIRMED}:
             continue
-        for reference in stage4.code_location_references(
-            str(requirement.get("text", "")), include_action=True,
-        ):
+        req_text = str(requirement.get("text", ""))
+        refs = stage4.code_location_references(req_text, include_action=True)
+        for reference in refs:
             if (reference.get("classification") == "CODE_PATH"
                     and reference.get("intent") == "MUTATION"
                     and reference.get("action", "").casefold().startswith(("creat", "writ"))):
-                yield reference["path"], requirement
+                key = (reference["path"].casefold(), requirement.get("requirement_id"))
+                if key not in seen:
+                    seen.add(key)
+                    yield reference["path"], requirement
+        if _EXPLICIT_SENTENCE_CREATION_PREFIX_RE.search(req_text):
+            first_sentence = re.split(r"(?:[.!?](?:\s|$)|[;\n])", req_text, maxsplit=1)[0]
+            for reference in stage4.code_location_references(first_sentence, include_action=True):
+                if reference.get("classification") == "CODE_PATH" and reference.get("intent") != "REUSE":
+                    key = (reference["path"].casefold(), requirement.get("requirement_id"))
+                    if key not in seen:
+                        seen.add(key)
+                        yield reference["path"], requirement
 
 
 def _new_artifact_context_evidence(request):
@@ -3174,6 +3425,7 @@ def _new_artifact_context_evidence(request):
         absence = (
             f"{relative} does not exist in the current workspace. Its existing definition or test "
             "is not a prerequisite: the source requirement explicitly asks this task to create it. "
+            "Submit context_sufficiency_check with context_status='sufficient' now so write_file unlocks. "
             "No implementation or verification is being claimed."
         )
         evidence = [{
@@ -3522,7 +3774,10 @@ def _stage4_inspection_guard(name, args):
 def run_tool(name, args, role="System"):
     if role == "Falsifier" and name in {"write_file", "edit_file", "edit_file_range", "backup_file"}:
         return "error: Falsifier is read-only and may not modify files"
-    if role == "Repairer" and name in {"write_file", "backup_file"}:
+    if role == "Repairer" and (
+        name == "backup_file"
+        or (name == "write_file" and not _repairer_can_rewrite_sole_new_draft())
+    ):
         return "error: Repairer may only make focused edits"
     issue = tool_argument_error(name, args)
     if issue:
@@ -5070,11 +5325,22 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
     estimate = estimate_context_tokens(provider_messages)
     RUN["peak_estimated_context_tokens"] = max(RUN.get("peak_estimated_context_tokens", 0), estimate)
     DASHBOARD["context"] = estimate
+    builder_predict = (
+        6144
+        if (
+            role == "Builder"
+            and isinstance(tools, list)
+            and any(isinstance(t, dict) and t.get("function", {}).get("name") == "write_file" for t in tools)
+            and isinstance(RUN, dict)
+            and RUN.get("project_mode") == NEW_PROJECT
+        )
+        else 4096
+    )
     payload = {
         "model": requested_model, "messages": provider_messages, "stream": False, "keep_alive": "10m",
         "options": {
             "num_ctx": context_window,
-            "num_predict": {"Builder": 4096, "Repairer": 3072, "Falsifier": 1536,
+            "num_predict": {"Builder": builder_predict, "Repairer": 3072, "Falsifier": 1536,
                             "Coordinator": 1536, "Quality": 1536, "Specifier": 1536,
                             "MissionCompiler": 1536, "Clarifier": 1536,
                             "RequirementExtractor": 1536, "ReconAgent": 1024,
@@ -12267,24 +12533,42 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
             }
     if str(task.get("id", "")) == "ROOT" and "TASK_FIT" not in RUN.setdefault("control_flow", []):
         RUN["control_flow"].append("TASK_FIT")
-    if (str(task.get("id", "")) == "ROOT" and RUN.get("project_mode") == NEW_PROJECT
+    if (RUN.get("project_mode") == NEW_PROJECT
             and not isinstance(execution_contract, dict) and not force_smaller
             and not task.get("initial_result")):
         declared_paths = sorted({path for path, _requirement in _source_creation_requirements()})
-        structural_fit = stage4.analyze_structural_fit({
-            "worker_required": True, "allowed_mutation_paths": declared_paths,
-        })
-        if structural_fit["non_test_mutation_path_count"] == 1:
-            record_run_event(
-                "source_creation_structural_fit", task_id=task.get("id"),
-                paths=declared_paths, structural_fit=structural_fit,
-            )
-            return {
-                "decision": "execute",
-                "reason": "one source-declared implementation owner and its tests; measure bounded execution before splitting",
-                "structural_fit": structural_fit,
-                "fit_scope": "SOURCE_CREATION_NOT_APPROVED_EXECUTION",
-            }
+        if str(task.get("id", "")) == "ROOT":
+            structural_fit = stage4.analyze_structural_fit({
+                "worker_required": True, "allowed_mutation_paths": declared_paths,
+            })
+            if structural_fit["non_test_mutation_path_count"] == 1:
+                record_run_event(
+                    "source_creation_structural_fit", task_id=task.get("id"),
+                    paths=declared_paths, structural_fit=structural_fit,
+                )
+                return {
+                    "decision": "execute",
+                    "reason": "one source-declared implementation owner and its tests; measure bounded execution before splitting",
+                    "structural_fit": structural_fit,
+                    "fit_scope": "SOURCE_CREATION_NOT_APPROVED_EXECUTION",
+                }
+        elif depth >= 1 and len(declared_paths) >= 2:
+            child_paths = sorted({
+                ref["path"]
+                for raw in [*(task.get("scope_hint") or []), task.get("goal", "")]
+                for ref in stage4.code_location_references(str(raw))
+                if ref.get("classification") == "CODE_PATH"
+            })
+            child_fit = stage4.analyze_structural_fit({
+                "worker_required": True, "allowed_mutation_paths": child_paths,
+            })
+            if child_fit["non_test_mutation_path_count"] <= 2:
+                return {
+                    "decision": "execute",
+                    "reason": "bounded greenfield child module milestone; execute before splitting deeper",
+                    "structural_fit": child_fit,
+                    "fit_scope": "GREENFIELD_CHILD_MODULE",
+                }
     remaining = MAX_TOTAL_TASKS - RUN.get("tasks_created", 0)
     if depth >= MAX_DEPTH or remaining < 2:
         return {"decision": "execute", "reason": "hard budget reached"}
@@ -12576,11 +12860,19 @@ PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}"""
         stage3.decomposition_plan_packet(approved_plan)
         if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
     )
+    game_scope_guidance = (
+        "\nFor a new browser game, give each child concise canonical done_when statements matching ONLY that child's duty: "
+        "'The page renders without browser errors.' (foundation), 'Keyboard movement works inside arena bounds.' (movement), "
+        "'Collecting coins updates the score.' / 'Obstacle collision causes game over.' (mechanics), "
+        "'Restart resets the round.' / 'Winning stops movement and scoring.' / 'Best score persists across reload.' (flow)."
+        if RUN.get("project_mode") == NEW_PROJECT and classify_project(contract) == "web_game"
+        else ""
+    )
     prompt_text = f"""Split CURRENT NODE into 2-4 SMALL STRUCTURED SEQUENTIAL child contracts for the pinned weak local model.
 Each child supplies only goal, done_when, scope_hint. Children together must preserve the parent goal.
 Prefer independently verifiable milestones. Sequential children MAY touch the same file; never create parallel ownership assumptions.
 Do not create arbitrary microtasks like 'write import' or 'create variable' unless previous failure proves larger scope is still too broad.
-For an approved existing-project plan, every child must stay inside its plan nodes; do not invent mutation surfaces.
+For an approved existing-project plan, every child must stay inside its plan nodes; do not invent mutation surfaces.{game_scope_guidance}
 {('The failed parent still exceeded capacity: make each child materially smaller in simultaneous reasoning/context.' if force_smaller else '')}
 ROOT CONTRACT: {compact_contract(contract)}
 APPROVED PLAN EXECUTION CONTRACT: {json.dumps(approved_plan_packet, ensure_ascii=False, default=str)}
@@ -14220,9 +14512,18 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
                     "expected strings include exact punctuation):\n"
                     + json.dumps(source_cases, ensure_ascii=False) + "\n\n"
                 )
+    rubric_section = ""
+    if not isinstance(execution_contract, dict):
+        rubric_text = quality_rubric_context(
+            root_contract if isinstance(root_contract, dict) else {"goal": task.get("goal", "")},
+            task_goal=str(task.get("goal", "")),
+        )
+        if rubric_text:
+            rubric_section = f"{rubric_text}\n\n"
     packet = (
         f"{root_contract_section}"
         f"{source_acceptance_section}"
+        f"{rubric_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
         f"{brain_section}"
         f"{execution_contract_section}"
@@ -14281,7 +14582,27 @@ def _literal_artifact_verification_paths():
             and item.get("post_state_sha256")]
 
 
-def tool_recovery_hint(tool_name, result, repeated_failures):
+def _mutation_hint_target_state(target, role="Builder"):
+    state = {"path": str(target or ""), "exists": False, "line_count": None, "draft_writable": False}
+    if WORKSPACE is None or not target or str(target) == "-":
+        return state
+    resolved = safe_path(target)
+    if resolved is None:
+        return state
+    try:
+        if resolved.is_file():
+            state["exists"] = True
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+            state["line_count"] = len(text.splitlines()) or (1 if text else 0)
+            snapshot = (ACTIVE_TRANSACTION or {}).get("files", {}).get(str(resolved))
+            created_here = bool(snapshot and not snapshot.get("existed", True))
+            state["draft_writable"] = bool(role in {"Builder", "Repairer"} and created_here)
+    except OSError:
+        pass
+    return state
+
+
+def tool_recovery_hint(tool_name, result, repeated_failures, args=None, role="Builder"):
     lower = str(result).casefold()
     if tool_name == "run_command" and "inline python is not allowed" in lower:
         return (
@@ -14289,6 +14610,27 @@ def tool_recovery_hint(tool_name, result, repeated_failures):
             "the public function identifier, a JSON arguments array, and the expected JSON return value. "
             "For a test suite, run the existing unittest file instead. No inline source will be executed."
         )
+    if tool_name == "run_command" and str(result).strip().startswith("{"):
+        try:
+            cmd_payload = json.loads(str(result))
+        except (TypeError, ValueError):
+            cmd_payload = None
+        if (
+            isinstance(cmd_payload, dict)
+            and cmd_payload.get("passed") is False
+            and cmd_payload.get("exit_code") == cmd_payload.get("expected_exit_code", 0)
+            and isinstance(cmd_payload.get("stdout"), str)
+            and isinstance(cmd_payload.get("expected_stdout"), str)
+        ):
+            actual_out = cmd_payload["stdout"]
+            expected_out = cmd_payload["expected_stdout"]
+            if actual_out != expected_out and actual_out.rstrip("\r\n") == expected_out.rstrip("\r\n"):
+                return (
+                    "STDOUT NEWLINE MISMATCH: Your command exited 0 and stdout matched expected_stdout except for "
+                    f"the trailing newline (`stdout={json.dumps(actual_out)}`). Do NOT edit the code to strip print()'s "
+                    f"newline unless the prompt explicitly forbids a newline; re-run run_command with "
+                    f"expected_stdout={json.dumps(actual_out)} (or omit expected_stdout)."
+                )
     if tool_name == "run_command" and result_is_tool_rejection(result):
         paths = _literal_artifact_verification_paths()
         if paths:
@@ -14304,6 +14646,39 @@ def tool_recovery_hint(tool_name, result, repeated_failures):
         return "Line numbers are stale or invalid. Re-read a current bounded range and confirm the reported total before editing."
     if repeated_failures >= 2 and "syntax validation failed" in lower:
         return "Re-read the enclosing block and submit one smaller syntactically complete replacement; avoid a syntactically incomplete fragment and include its closing delimiter."
+    if (
+        tool_name in {"verify_web_app", "run_file"}
+        and int(repeated_failures or 0) >= 1
+        and tool_result_failed(result)
+    ):
+        try:
+            payload = json.loads(str(result)) if not isinstance(result, dict) else result
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict) and payload.get("repair_hints"):
+            hints = [str(item) for item in payload["repair_hints"][:4] if item]
+            if hints:
+                return (
+                    "Browser verification failed. Do NOT call context_sufficiency_check or re-run verify_web_app "
+                    "without modifying the code first! Update `index.html` now (using write_file on your draft or "
+                    "edit_file/edit_file_range) to apply these exact fixes, THEN re-run verify_web_app:\n- "
+                    + "\n- ".join(hints)
+                )
+    if tool_name in MUTATION_TOOLS and int(repeated_failures or 0) >= 1:
+        raw_target = (args or {}).get("path") if isinstance(args, dict) else ""
+        target_state = _mutation_hint_target_state(raw_target, role=role)
+        immediate = build_immediate_mutation_hint(
+            tool_name,
+            args if isinstance(args, dict) else None,
+            str(result),
+            target_path=str(raw_target or ""),
+            target_exists=bool(target_state["exists"]),
+            target_line_count=target_state["line_count"],
+            draft_writable=bool(target_state["draft_writable"]),
+            repeated_count=int(repeated_failures or 1),
+        )
+        if immediate:
+            return immediate
     return ""
 
 
@@ -14555,6 +14930,9 @@ def verification_failure_digest(result, limit=1800):
     for failure in payload.get("failures", []):
         if isinstance(failure, dict):
             lines.append(f"- failure {failure.get('code', 'unknown')}: {failure.get('evidence', '')}")
+    for hint in (payload.get("repair_hints") or [])[:4]:
+        if hint:
+            lines.append(f"- repair_hint: {hint}")
     if payload.get("environment_error"):
         lines.append(f"- environment: {payload.get('evidence', 'browser environment unavailable')}")
     return compact_text("\n".join(lines), limit)
@@ -15001,6 +15379,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             " COHERENT DRAFT REVISION: write_file may revise only your own current unverified model-created "
             "drafts. Use complete coherent files instead of fragile exact/range edits. Read the current draft "
             "before revising it and preserve the whole source contract. User-owned or verified files remain protected."
+            " Keep each write_file concise (<155 lines, minimal comments) so the tool JSON never exceeds 4,096 tokens."
         )
     if context_gate is not None:
         system_prompt += (
@@ -15283,21 +15662,28 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             textual_call = re.match(
                 r"\s*(?:```(?:python|py)?\s*)?([A-Za-z_]\w*)\s*\(", content,
             )
-            if (role in {"Builder", "Repairer"} and textual_call is not None
-                    and textual_call.group(1) in offered_names
+            json_text_calls = (
+                extract_text_tool_call_fallback(content, offered_names)
+                if role in {"Builder", "Repairer"} and textual_call is None else []
+            )
+            reanchor_tool_name = (
+                textual_call.group(1) if textual_call is not None and textual_call.group(1) in offered_names
+                else (json_text_calls[0]["function"]["name"] if json_text_calls else None)
+            )
+            if (role in {"Builder", "Repairer"} and reanchor_tool_name is not None
                     and no_tool_reanchors == 0 and _step + 1 < max(1, int(step_budget))):
                 no_tool_reanchors = 1
                 RUN["worker_tool_format_reanchors"] = RUN.get("worker_tool_format_reanchors", 0) + 1
                 record_run_event(
                     "worker_tool_call_format_reanchored", role=role, task_id=task_id,
-                    tool=textual_call.group(1), step=int(_step) + 1,
+                    tool=reanchor_tool_name, step=int(_step) + 1,
                 )
                 messages.append({
                     "role": "user",
                     "content": (
-                        f"You wrote {textual_call.group(1)}(...) as text; no tool was executed. "
+                        f"You wrote {reanchor_tool_name}(...) as message text; no tool was executed. "
                         "Invoke the offered tool through the native tool-calling interface with JSON arguments. "
-                        "Do not print a Python call or describe it as completed. All runtime gates still apply."
+                        "Do not print a Python/JSON call in content or describe it as completed. All runtime gates still apply."
                     ),
                 })
                 continue
@@ -15597,6 +15983,23 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             impact_mutation_blocked = False
             if context_mutation_issue:
                 result = context_mutation_issue
+            elif (
+                name in offered_names
+                and name in MUTATION_TOOLS
+                and not str(args.get("path") or "").strip()
+                and ACTIVE_IMPACT_CONTRACT is not None
+                and stage10_impact.impact_mutation_block_reason(
+                    ACTIVE_IMPACT_CONTRACT, required=True, world_model=_world_model_for_workspace(),
+                ) is None
+                and tool_argument_error(name, args) is not None
+            ):
+                argument_issue = tool_argument_error(name, args)
+                if argument_issue and "incomplete or truncated" in argument_issue.casefold():
+                    argument_issue += (
+                        " Your response hit the 4,096-token output limit. Keep the file concise "
+                        "(~135-155 lines total, minimal comments) so the complete tool JSON fits."
+                    )
+                result = argument_issue
             else:
                 impact_mutation_issue = _impact_gate_mutation_guard(
                     name, role=role, target=target,
@@ -16391,7 +16794,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             hint = (
                 ""
                 if special_observation is not None
-                else tool_recovery_hint(name, result, repeated_failures[failure_key])
+                else tool_recovery_hint(name, result, repeated_failures[failure_key], args=args, role=role)
             )
             if hint:
                 messages.append({"role": "user", "content": hint})
@@ -16437,7 +16840,31 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stop = True
                     break
 
-            if role == "Builder" and name == "verify_web_app" and tool_result_failed(result):
+            if role == "Builder" and changed_file and not tool_result_failed(result):
+                stagnant_verifications = 0
+                last_verification_signature = ()
+                if (name == "write_file"
+                        and str(target).casefold().endswith((".html", ".htm"))
+                        and "verify_web_app" in offered_names):
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"HTML ARTIFACT WRITTEN ({target}): Call verify_web_app(path={json.dumps(str(target))}) "
+                            "next to verify the live browser application (do not call npm install or npm start)."
+                        ),
+                    })
+
+            if (role == "Builder" and name in {"read_file", "read_file_range"}
+                    and stagnant_verifications >= 1):
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "BROWSER REPAIR REMINDER: You already ran browser verification on the unchanged file and it failed. "
+                        "Apply a concrete code fix using write_file, edit_file, or edit_file_range BEFORE calling verify_web_app or run_file again."
+                    ),
+                })
+
+            if role == "Builder" and _browser_tool_request(name, args) and tool_result_failed(result):
                 signature = verification_failure_signature(result)
                 if signature and signature == last_verification_signature:
                     stagnant_verifications += 1
@@ -16451,7 +16878,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stop = True
                     break
 
-            if (role in {"Builder", "Repairer"} and name == "verify_web_app"
+            if (role in {"Builder", "Repairer"} and _browser_tool_request(name, args)
                     and not tool_result_failed(result)
                     and verification_outcome(result) == VERIFICATION_PASS):
                 status = "done"
@@ -16669,6 +17096,52 @@ def _implicit_favicon_console_error(error, document_url, declared_icon=False):
             and not source.query)
 
 
+def _acyclic_browser_value(value, _seen=None, _depth=0):
+    """Project CDP-returned JS values into acyclic, JSON-safe Python dicts.
+
+    Models frequently expose Three.js Object3D/Mesh instances inside
+    AGENT_GAME.getState(), whose .parent/.children cycle causes Python != and
+    json.dumps to fail with RecursionError/ValueError. Project Object3D-like
+    dicts to their {x, y, z} coordinates and break cycles deterministically.
+    """
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:500]
+    seen = set() if _seen is None else _seen
+    obj_id = id(value)
+    if obj_id in seen:
+        return "<circular>"
+    if _depth >= 5:
+        return "<truncated>"
+    next_seen = seen | {obj_id}
+    if isinstance(value, dict):
+        pos = value.get("position")
+        if (
+            isinstance(pos, dict)
+            and id(pos) not in seen
+            and (
+                value.get("isObject3D") is True
+                or "matrixWorld" in value
+                or ("parent" in value and "children" in value)
+            )
+        ):
+            return {
+                key: _acyclic_browser_value(pos.get(key), next_seen, _depth + 1)
+                for key in ("x", "y", "z")
+                if key in pos
+            }
+        out = {}
+        for index, (k, v) in enumerate(value.items()):
+            if index >= 32:
+                break
+            out[str(k)[:80]] = _acyclic_browser_value(v, next_seen, _depth + 1)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_acyclic_browser_value(item, next_seen, _depth + 1) for item in list(value)[:32]]
+    return str(value)[:240]
+
+
 def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement=""):
     RUN["browser_checks"] += 1
     ok, detail = ensure_browser(False)
@@ -16680,6 +17153,10 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
     console_errors, page_errors, network_errors = [], [], []
     console_error_details = []
     explicit_favicon_requests = []
+    title = ""
+    text = ""
+    runtime_state = {"canvasCount": 0, "gameBridge": None, "debugState": None}
+    interaction_checks = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(**browser_launch_kwargs())
@@ -16698,6 +17175,27 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
             page.on("response", lambda response: network_errors.append(f"{response.status} {response.url}")
                     if response.status >= 400 and not response.url.endswith("/favicon.ico") else None)
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            if not (profile and profile.kind == "timer"):
+                has_external_or_module_script = bool(page.evaluate(
+                    """() => Boolean(document.querySelector('script[type="module" i], script[type="importmap" i], script[src^="http" i]'))"""
+                ))
+                if has_external_or_module_script:
+                    try:
+                        page.wait_for_load_state("load", timeout=8000)
+                    except Exception:
+                        pass
+                    ready_expr = (
+                        f"() => Boolean({GAME_BRIDGE_EXPRESSION})"
+                        if (profile and profile.require_game_bridge)
+                        else f"() => Boolean(({GAME_BRIDGE_EXPRESSION}) || document.querySelector('canvas'))"
+                    )
+                    for _ in range(16):
+                        if page_errors or console_error_details:
+                            break
+                        ready = bool(page.evaluate(ready_expr))
+                        if ready:
+                            break
+                        page.wait_for_timeout(250)
             page.wait_for_timeout(500)
             declared_icon = page.locator('link[rel~="icon" i]').count() > 0
             declared_favicon_resource = page.evaluate("""() =>
@@ -16707,14 +17205,28 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                 })""")
             title = page.title()
             text = page.locator("body").inner_text(timeout=5000)[:4000]
-            runtime_state = page.evaluate(f"""() => {{
+            runtime_state = _acyclic_browser_value(page.evaluate(f"""() => {{
                 const bridge = {GAME_BRIDGE_EXPRESSION} || null;
                 const state = bridge && typeof bridge.getState === 'function' ? bridge.getState() : null;
                 return {{canvasCount: document.querySelectorAll('canvas').length,
                         gameBridge: bridge ? {{name: {json.dumps(GAME_BRIDGE_NAME)}, state}} : null,
                         debugState: state}};
-            }}""")
+            }}"""))
+            canvas_quality = page.evaluate(BROWSER_CANVAS_QUALITY_JS)
+            if isinstance(canvas_quality, dict):
+                canvas_quality["requiresThreeWebGL"] = bool(
+                    detect_threejs_or_3d(ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {})
+                )
+            runtime_state["canvasMetrics"] = canvas_quality
             interaction_checks = []
+            def _check_entry(check_name, passed_flag, *, before=None, after=None):
+                entry = {"name": check_name, "passed": bool(passed_flag)}
+                if not passed_flag:
+                    if before is not None:
+                        entry["before"] = before
+                    if after is not None:
+                        entry["after"] = after
+                return entry
             discover_game = (RUN.get("verification_surface_policy") == "discovery"
                              and profile is not None and profile.kind == "game")
             verification_surface = None
@@ -16731,80 +17243,161 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                 bridge_expr = GAME_BRIDGE_EXPRESSION
                 page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
                 page.wait_for_timeout(100)
-                before_move = page.evaluate(f"() => ({bridge_expr}).getState()")
+                before_move = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
                 moved_with_bridge = page.evaluate(
-                    f"() => {{ const game={bridge_expr}; if (typeof game.move === 'function') "
-                    "{ game.move('up'); return true; } return false; }"
+                    f"""() => {{ const game={bridge_expr}; if (typeof game.move === 'function') {{
+                        const safeProj = (v) => {{
+                            if (v == null || typeof v !== 'object') return v;
+                            if (v.isObject3D || ('parent' in v && 'children' in v) || 'matrixWorld' in v) {{
+                                const p = v.position || v;
+                                return {{ x: p.x, y: p.y, z: p.z }};
+                            }}
+                            const seen = new WeakSet();
+                            try {{
+                                return JSON.parse(JSON.stringify(v, (_k, val) => {{
+                                    if (val && typeof val === 'object') {{
+                                        if (seen.has(val)) return '[Circular]';
+                                        seen.add(val);
+                                    }}
+                                    return val;
+                                }}));
+                            }} catch {{
+                                return {{ x: v.x, y: v.y, z: v.z }};
+                            }}
+                        }};
+                        const snap = () => {{
+                            try {{
+                                if (!game.getState) return null;
+                                const s = game.getState() || {{}};
+                                return JSON.stringify([s.score, safeProj(s.player), safeProj(s.position)]);
+                            }} catch {{
+                                return null;
+                            }}
+                        }};
+                        const b = snap();
+                        for (const dir of ['up', 'right', 'forward']) {{
+                            game.move(dir);
+                            const nextSnap = snap();
+                            if (b !== null && nextSnap !== null && nextSnap !== b) return true;
+                        }}
+                        return true;
+                    }} return false; }}"""
                 )
                 if not moved_with_bridge:
-                    page.keyboard.press("ArrowUp")
-                page.wait_for_timeout(650)
-                moved_state = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    page.keyboard.down("ArrowUp")
+                    page.wait_for_timeout(200)
+                    page.keyboard.up("ArrowUp")
+                page.wait_for_timeout(300)
+                moved_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
                 moved = moved_state != before_move and (
                     moved_state.get("score", 0) > (before_move or {}).get("score", -1)
                     or moved_state.get("player") != (before_move or {}).get("player")
                     or moved_state.get("position") != (before_move or {}).get("position")
                 )
-                interaction_checks.append({"name": "keyboard_movement", "passed": bool(moved),
-                                           "before": before_move, "after": moved_state})
+                if not moved:
+                    for key_probe in ("ArrowUp", "ArrowRight", "KeyW", "KeyD"):
+                        page.keyboard.down(key_probe)
+                        page.wait_for_timeout(180)
+                        page.keyboard.up(key_probe)
+                        page.wait_for_timeout(80)
+                        moved_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                        moved = moved_state != before_move and (
+                            moved_state.get("score", 0) > (before_move or {}).get("score", -1)
+                            or moved_state.get("player") != (before_move or {}).get("player")
+                            or moved_state.get("position") != (before_move or {}).get("position")
+                        )
+                        if moved:
+                            break
+                interaction_checks.append(_check_entry("keyboard_movement", bool(moved),
+                                                       before=before_move, after=moved_state))
 
-                if page.evaluate(f"() => typeof ({bridge_expr}).forceCollect === 'function'"):
-                    before_collect = page.evaluate(f"() => ({bridge_expr}).getState()")
+                req_interactions = set(profile.required_interactions) if profile else set()
+                if (not profile or "collection_updates_state" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).forceCollect === 'function'"):
+                    before_collect = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     page.evaluate(f"() => ({bridge_expr}).forceCollect()")
                     page.wait_for_timeout(100)
-                    after_collect = page.evaluate(f"() => ({bridge_expr}).getState()")
+                    after_collect = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     collected = (
                         after_collect.get("score", 0) > (before_collect or {}).get("score", -1)
                         or after_collect.get("collected") != (before_collect or {}).get("collected")
                         or after_collect.get("energy") != (before_collect or {}).get("energy")
                     )
-                    interaction_checks.append({"name": "collection_updates_state", "passed": bool(collected),
-                                               "before": before_collect, "after": after_collect})
+                    interaction_checks.append(_check_entry("collection_updates_state", bool(collected),
+                                                           before=before_collect, after=after_collect))
 
-                if page.evaluate(f"() => typeof ({bridge_expr}).forceCollision === 'function'"):
+                if (not profile or "collision_game_over" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).forceCollision === 'function'"):
                     page.evaluate(f"() => ({bridge_expr}).forceCollision()")
                     page.wait_for_timeout(150)
-                    state = page.evaluate(f"() => ({bridge_expr}).getState()")
-                    interaction_checks.append({
-                        "name": "collision_game_over",
-                        "passed": str(state.get("status", "")).lower() in {"gameover", "game-over", "lost", "dead"},
-                        "after": state,
-                    })
+                    state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    interaction_checks.append(_check_entry(
+                        "collision_game_over",
+                        str(state.get("status", "")).lower().replace("_", "-") in {"gameover", "game-over", "lost", "dead"},
+                        after=state,
+                    ))
 
-                if page.evaluate(f"() => typeof ({bridge_expr}).restart === 'function'"):
-                    page.evaluate(f"() => ({bridge_expr}).restart()")
+                if (not profile or "restart_resets_state" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).restart === 'function'"):
+                    immediate_restart = _acyclic_browser_value(page.evaluate(
+                        f"() => {{ const game={bridge_expr}; game.restart(); return game.getState ? game.getState() : null; }}"
+                    ))
                     page.wait_for_timeout(150)
-                    state = page.evaluate(f"() => ({bridge_expr}).getState()")
-                    interaction_checks.append({
-                        "name": "restart_resets_state",
-                        "passed": str(state.get("status", "")).lower() not in {"gameover", "game-over", "lost", "dead"}
-                                  and state.get("score") == 0,
-                        "after": state,
-                    })
+                    state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    score_was_reset = (
+                        (isinstance(immediate_restart, dict) and immediate_restart.get("score") == 0)
+                        or state.get("score") == 0
+                    )
+                    interaction_checks.append(_check_entry(
+                        "restart_resets_state",
+                        str(state.get("status", "")).lower().replace("_", "-") not in {"gameover", "game-over", "lost", "dead"}
+                        and score_was_reset,
+                        after=state,
+                    ))
 
-                if page.evaluate(f"() => typeof ({bridge_expr}).forceWin === 'function'"):
+                if (not profile or "goal_win_state" in req_interactions or "score_persistence" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).forceWin === 'function'"):
+                    page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
+                    page.wait_for_timeout(50)
                     page.evaluate(f"() => ({bridge_expr}).forceWin()")
                     page.wait_for_timeout(150)
-                    win_state = page.evaluate(f"() => ({bridge_expr}).getState()")
-                    interaction_checks.append({
-                        "name": "goal_win_state",
-                        "passed": str(win_state.get("status", "")).lower() in {"won", "win", "complete", "completed"},
-                        "after": win_state,
-                    })
-                    best_before = win_state.get("best")
+                    win_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    interaction_checks.append(_check_entry(
+                        "goal_win_state",
+                        str(win_state.get("status", "")).lower().replace("_", "-") in {"won", "win", "complete", "completed", "victory"},
+                        after=win_state,
+                    ))
+                    def _best_score_value(state_obj):
+                        if not isinstance(state_obj, dict):
+                            return None
+                        for candidate_key in ("best", "bestScore", "best_score", "highScore", "high_score"):
+                            raw_val = state_obj.get(candidate_key)
+                            if raw_val is not None:
+                                try:
+                                    return float(raw_val)
+                                except (TypeError, ValueError):
+                                    return None
+                        return None
+
+                    best_before = _best_score_value(win_state)
                     if best_before is not None:
                         page.reload(wait_until="domcontentloaded", timeout=15000)
+                        if not (profile and profile.kind == "timer") and has_external_or_module_script:
+                            try:
+                                page.wait_for_load_state("load", timeout=8000)
+                            except Exception:
+                                pass
+                            for _ in range(10):
+                                if bool(page.evaluate(f"() => Boolean({GAME_BRIDGE_EXPRESSION})")):
+                                    break
+                                page.wait_for_timeout(200)
                         page.wait_for_timeout(350)
-                        persisted = page.evaluate(f"""() => {{
+                        persisted = _acyclic_browser_value(page.evaluate(f"""() => {{
                             const game = {GAME_BRIDGE_EXPRESSION};
                             return game && typeof game.getState === 'function' ? game.getState() : null;
-                        }}""")
-                        best_after = (persisted or {}).get("best")
-                        interaction_checks.append({
-                            "name": "score_persistence",
-                            "passed": best_after is not None and best_after >= best_before,
-                            "before": best_before, "after": best_after,
-                        })
+                        }}"""))
+                        best_after = _best_score_value(persisted)
+                        interaction_checks.append(_check_entry(
+                            "score_persistence",
+                            best_after is not None and best_after >= best_before,
+                            before=best_before, after=best_after,
+                        ))
 
                 touch_required = bool(profile and "touch_control" in profile.required_interactions)
                 if touch_required:
@@ -16822,15 +17415,15 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                             if (game && typeof game.restart === 'function') game.restart();
                             if (game && typeof game.start === 'function') game.start();
                         }}""")
-                        before_touch = page.evaluate(f"""() => {{
+                        before_touch = _acyclic_browser_value(page.evaluate(f"""() => {{
                             const game = {GAME_BRIDGE_EXPRESSION};
                             return game && game.getState ? game.getState() : null;
-                        }}""")
+                        }}"""))
                         button.click(); page.wait_for_timeout(650)
-                        after_touch = page.evaluate(f"""() => {{
+                        after_touch = _acyclic_browser_value(page.evaluate(f"""() => {{
                             const game = {GAME_BRIDGE_EXPRESSION};
                             return game && game.getState ? game.getState() : null;
-                        }}""")
+                        }}"""))
                         interaction_checks.append({"name": "touch_control", "passed": after_touch != before_touch,
                                                    "before": before_touch, "after": after_touch})
                     else:
@@ -16845,8 +17438,12 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
             browser.close()
         ignored_console_errors = [error for error in console_error_details
                                   if _implicit_favicon_console_error(error, url, declared_icon)]
-        console_errors = [error["text"] for error in console_error_details
-                          if not _implicit_favicon_console_error(error, url, declared_icon)]
+        console_errors = list(dict.fromkeys(
+            error["text"] for error in console_error_details
+            if not _implicit_favicon_console_error(error, url, declared_icon)
+        ))[:8]
+        page_errors = list(dict.fromkeys(page_errors))[:8]
+        network_errors = list(dict.fromkeys(network_errors))[:8]
         snapshot = {"passed": False, "environment_error": False, "title": title, "url": url, "text": text,
                     "console_errors": console_errors, "page_errors": page_errors, "network_errors": network_errors,
                     "ignored_console_errors": ignored_console_errors,
@@ -16869,7 +17466,25 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                 })
         return result
     except Exception as exc:
-        return {"passed": False, "environment_error": True, "evidence": str(exc)}
+        err_text = str(exc)
+        if "Page.evaluate:" in err_text or "Evaluation failed:" in err_text:
+            effective = profile or infer_web_profile("web", {})
+            js_err_snapshot = {
+                "passed": False,
+                "environment_error": False,
+                "title": title,
+                "url": url,
+                "text": text,
+                "console_errors": [item["text"] for item in console_error_details if isinstance(item, dict) and item.get("text")],
+                "page_errors": [*page_errors, err_text[:500]],
+                "network_errors": list(network_errors),
+                "ignored_console_errors": [],
+                "runtime_state": runtime_state,
+                "interaction_checks": list(interaction_checks),
+                "screenshot": str(screenshot.relative_to(WORKSPACE)) if screenshot.exists() else "",
+            }
+            return evaluate_web_snapshot(js_err_snapshot, effective)
+        return {"passed": False, "environment_error": True, "evidence": err_text}
 
 
 def browser_workspace_snapshot(path="index.html", task_id="ROOT", profile=None,
@@ -17893,6 +18508,9 @@ def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_con
         }
     instruction = (
         f"BUILDER SUMMARY: {compact_text(builder_result.get('summary', ''), 700)}\n"
+        "ROLE CONSTRAINT: You are strictly READ-ONLY. Never call write_file, edit_file, or edit_file_range; "
+        "only read_file, list_files, search_text, run_file, run_command, and verify_web_app are available. "
+        "For HTML/browser applications, verify with verify_web_app and read_file (never pass function=... to run_file on HTML files).\n"
         "Actively try to falsify success using current files. Run relevant tests/commands/browser interactions. "
         "For normal/high risk, attempt at most 1-2 cheap edge-case probes (boundary/invalid/reload/repeated action/alternate viewport) when useful. "
         "Do not modify application files. Concrete executable failures matter; narrative suspicion is advisory."
@@ -17903,8 +18521,9 @@ def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_con
         " For required invalid-input rejection, assert the intended nonzero exit with run_command's "
         "expected_exit_code='nonzero'; do not report the requested rejection itself as a defect."
     )
+    falsifier_context = re.sub(r"QUALITY RUBRIC \([^)]+\):.*?\n\n", "", str(node_context or ""), flags=re.S)
     result = execute_agent_task(
-        instruction, memory, role="Falsifier", task_id=task["id"], extra_context=node_context,
+        instruction, memory, role="Falsifier", task_id=task["id"], extra_context=falsifier_context,
     )
     result["tool_evidence"] = list(result.get("tool_evidence", [])) + source_evidence
     if unresolved_tool_failures(result.get("tool_evidence", [])):
@@ -20983,7 +21602,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
                 "evidence": compact_text(str(exc), 700),
             }],
         }
-    impact_candidate = _prepare_task_impact_contract(task, contract)
+    impact_candidate = _prepare_task_impact_contract(task, contract, worker_mission=worker_mission)
     node_context = build_node_context(task, contract, get_memory_store(), repo_snapshot,
                                       parent_summary, dependency_summaries, task.get("failure_evidence"),
                                       strategy_context=strategy_context,
@@ -21070,6 +21689,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             "memory": memory, "builder": builder,
             "worker_progress": builder.get("worker_progress"),
             "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
+            "mutation_failures": _mutation_failure_records(builder),
         }
     if builder.get("failure_type") == CONTEXT_DECISION_MISSING:
         rollback_transaction()
@@ -21088,6 +21708,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
             "memory": memory, "builder": builder,
             "worker_progress": builder.get("worker_progress"),
             "failure_evidence": _compact_failure_evidence(_worker_failure_evidence(builder)),
+            "mutation_failures": _mutation_failure_records(builder),
         }
     if builder.get("failure_type") == MUTATION_TARGET_UNRESOLVED:
         rollback_transaction()
@@ -21369,7 +21990,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
                 "evidence": compact_text(str(exc), 700),
             }],
         }
-    impact_candidate = _prepare_task_impact_contract(task, contract)
+    impact_candidate = _prepare_task_impact_contract(task, contract, worker_mission=worker_mission)
     node_context = build_node_context(
         task, contract, get_memory_store(), repo_snapshot,
         parent_summary, dependency_summaries, task.get("failure_evidence"),
@@ -23979,7 +24600,12 @@ def _execute_children(task, children, depth, contract, memory, repo_snapshot, pa
         _update_resplit_outcome(task, children, completed, parent_result)
         _record_task_failure(task, parent_result, phase="child_result")
         alternative = None
-        if not _scheduler_result_is_dependency_blocked(failed_result):
+        child_license = (failed_result or {}).get("granularity_license")
+        allow_backtrack = (
+            True if not isinstance(child_license, dict)
+            else child_license.get("decision") not in {"STOP_IMMEDIATELY", "REQUIRE_SAME_AUTHORITY_CORRECTION"}
+        )
+        if not _scheduler_result_is_dependency_blocked(failed_result) and allow_backtrack:
             alternative = _backtrack_decomposition(
                 task, depth, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
                 failed_child, failed_result, fit_decider, leaf_executor, aggregator,
@@ -24364,6 +24990,85 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
     except ProviderError as exc:
         leaf = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
     memory = leaf.get("memory", memory)
+
+    if leaf.get("status") != "done":
+        approval_bound_leaf = bool(RUN.get("approval_bound_lifecycle"))
+        real_leaf_runner = leaf_executor is None
+        episode, license_decision = _record_evidence_licensed_gate(
+            task,
+            leaf,
+            correction_attempted=bool(task.get("_evidence_licensed_correction_used")) or not real_leaf_runner,
+            approval_bound=approval_bound_leaf,
+            can_split=can_split,
+        )
+        if (
+            license_decision.get("decision") == REQUIRE_SAME_AUTHORITY_CORRECTION
+            and real_leaf_runner
+            and not leaf.get("repairer")
+            and episode.get("episode_class") in ATTRIBUTABLE_CORRECTION_CLASSES
+            and leaf.get("failure_type") in {
+                MUTATION_ARGUMENT_RETRIES_EXHAUSTED,
+                WORKER_NO_MUTATION_PROGRESS,
+                BROWSER_VERIFICATION_STAGNATION,
+                "TASK_TOO_BROAD",
+                EXECUTION_BUDGET_EXHAUSTED,
+                MUTATION_TARGET_UNRESOLVED,
+                NO_EXECUTION_PROGRESS,
+                "IMPLEMENTATION_ERROR",
+            }
+        ):
+            task["_evidence_licensed_correction_used"] = True
+            RUN["evidence_licensed_corrections"] = RUN.get("evidence_licensed_corrections", 0) + 1
+            correction_brief = build_same_authority_correction_brief(
+                episode,
+                target_states=_target_states_for_episode(episode),
+                allow_draft_rewrite=bool(RUN.get("project_mode") == NEW_PROJECT and not approval_bound_leaf),
+            )
+            retry_task = copy.deepcopy(task)
+            retry_evidence = list(retry_task.get("failure_evidence", []) or [])
+            retry_evidence.append({
+                "tool": str(episode.get("earliest_tool") or "controller"),
+                "target": str(episode.get("earliest_target") or "-"),
+                "result": correction_brief,
+            })
+            retry_task["failure_evidence"] = retry_evidence[-4:]
+            event(f"[EVIDENCE-LICENSED CORRECTION {label}] {episode.get('episode_class')}",
+                  role="Coordinator", task=label, action="same-authority correction")
+            try:
+                corrected = executor(
+                    retry_task, contract, memory, inspect_repository(),
+                    parent_summary, dependency_summaries,
+                )
+            except ProviderError as exc:
+                corrected = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+            leaf = corrected
+            memory = leaf.get("memory", memory)
+            if leaf.get("status") == "done":
+                RUN["evidence_licensed_recoveries"] = RUN.get("evidence_licensed_recoveries", 0) + 1
+            else:
+                episode, license_decision = _record_evidence_licensed_gate(
+                    task,
+                    leaf,
+                    correction_attempted=True,
+                    approval_bound=approval_bound_leaf,
+                    can_split=can_split,
+                )
+        elif license_decision.get("decision") == REQUIRE_SAME_AUTHORITY_CORRECTION:
+            episode, license_decision = _record_evidence_licensed_gate(
+                task,
+                leaf,
+                correction_attempted=True,
+                approval_bound=approval_bound_leaf,
+                can_split=can_split,
+            )
+
+        if license_decision.get("decision") == STOP_IMMEDIATELY and leaf.get("status") != "done":
+            _record_task_failure(task, leaf, phase="leaf")
+            leaf["memory"] = memory
+            _mark_task_result(task, leaf)
+            event(f"[FAILED {label}]", task=label, action="evidence-licensed immediate stop")
+            return leaf
+
     is_too_broad = (
         (
             leaf.get("status") == "too_broad"
@@ -24425,6 +25130,64 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
         event(f"[FAILED {label}]", task=label, action="leaf failed")
     return leaf
 
+
+def _has_remaining_run_budget() -> bool:
+    if ACTIVE_RUN_BUDGET is None:
+        return True
+    snap = ACTIVE_RUN_BUDGET.snapshot()
+    rem_sec = snap.get("remaining_seconds")
+    if rem_sec is not None and rem_sec <= 0:
+        return False
+    max_models = snap.get("max_model_calls")
+    if max_models is not None and int(snap.get("model_calls") or 0) >= int(max_models):
+        return False
+    max_tools = snap.get("max_tool_calls")
+    if max_tools is not None and int(snap.get("tool_calls") or 0) >= int(max_tools):
+        return False
+    return True
+
+
+def _target_states_for_episode(episode: dict) -> list[dict]:
+    targets = []
+    earliest = episode.get("earliest_target")
+    if earliest:
+        targets.append(str(earliest))
+    states = []
+    for raw in targets[:4]:
+        info = _mutation_hint_target_state(raw, role="Builder")
+        states.append({
+            "path": str(raw),
+            "exists": bool(info["exists"]),
+            "line_count": info["line_count"],
+        })
+    return states
+
+
+def _record_evidence_licensed_gate(task, leaf_result, *, correction_attempted, approval_bound, can_split):
+    episode = classify_failure_episode(leaf_result, task=task)
+    license_decision = license_granularity_decision(
+        episode,
+        correction_attempted=bool(correction_attempted),
+        budget_remaining=_has_remaining_run_budget(),
+        approval_bound=bool(approval_bound),
+        can_split=bool(can_split),
+    )
+    leaf_result["evidence_licensed_episode"] = episode
+    leaf_result["granularity_license"] = license_decision
+    RUN.setdefault("evidence_licensed_episodes", []).append({
+        "task_id": str((task or {}).get("id", "")),
+        "episode_class": episode.get("episode_class"),
+        "decision": license_decision.get("decision"),
+        "correction_attempted": bool(correction_attempted),
+    })
+    record_run_event(
+        "evidence_licensed_gate",
+        task_id=str((task or {}).get("id", "")),
+        episode_class=episode.get("episode_class"),
+        decision=license_decision.get("decision"),
+        correction_attempted=bool(correction_attempted),
+    )
+    return episode, license_decision
 
 # ---------------------------------------------------------------------------
 # RUN MODES / FAIR CONTROL
@@ -30914,9 +31677,11 @@ def parse_args():
         "auto", "baseline", "recursive", "current_recursive",
         "decomposition_first_recursive",
     ), default="auto")
-    parser.add_argument("--model", choices=(GEMMA_MODEL, "gpt-oss:20b-cloud"),
-                        help=f"Pin every role to this model (default: {GEMMA_MODEL})")
+    parser.add_argument("--model", default=None, metavar="MODEL",
+                        help=f"Pin every role to one installed generative Ollama model (default: {GEMMA_MODEL})")
     parser.add_argument("--prompt-file")
+    parser.add_argument("--json-report", metavar="PATH",
+                        help="Write a structured privacy-safe JSON deliverable run report to PATH")
     parser.add_argument("--max-model-calls", type=int, help="Admit at most this many task generation requests, including retries")
     parser.add_argument("--max-tool-calls", type=int, help="Admit at most this many model-proposed tool calls")
     parser.add_argument("--max-elapsed-seconds", type=float, help="Task admission deadline; excludes startup preflight")
@@ -31062,9 +31827,10 @@ def main():
         raise SystemExit(0 if ok else 1)
     if not ensure_dependencies(auto_install=not args.no_bootstrap):
         raise SystemExit(2)
-    MODEL_POLICY = SingleModelPolicy(args.model or GEMMA_MODEL)
     try:
-        selected_model = MODEL_POLICY.validate(args.model)
+        normalized_model = normalize_requested_model_name(args.model, default=GEMMA_MODEL)
+        MODEL_POLICY = SingleModelPolicy(normalized_model)
+        selected_model = MODEL_POLICY.validate(args.model.strip() if isinstance(args.model, str) and args.model.strip() else None)
     except ValueError as exc:
         print(f"[SETUP_ERROR] {exc}")
         raise SystemExit(2)
@@ -31096,6 +31862,13 @@ def main():
                 print("terminal: HOST_PREFLIGHT_FAILED")
             else:
                 print(f"[SETUP_ERROR] {exc}")
+            raise SystemExit(2)
+        try:
+            validate_generative_model_capabilities(
+                selected_model, fetch_model_capabilities(selected_model),
+            )
+        except ValueError as exc:
+            print(f"[SETUP_ERROR] {exc}")
             raise SystemExit(2)
         HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
         print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
@@ -31241,8 +32014,22 @@ def main():
     if args.prompt_file:
         path = Path(args.prompt_file).expanduser().resolve()
         result = handle(path.read_text(encoding="utf-8"), interactive=False)
-        if result.get("status") != "done":
-            raise SystemExit(1)
+        exit_code = 0 if result.get("status") == "done" else 1
+        if getattr(args, "json_report", None):
+            report_payload = build_deliverable_run_report(
+                run_id=str(RUN_ID or RUN.get("run_id") or ""),
+                model=str(selected_model),
+                mode=str(RUN.get("selected_mode") or args.mode),
+                status=str(result.get("status") or "failed"),
+                exit_code=exit_code,
+                summary=str(result.get("summary") or ""),
+                workspace=Path(WORKSPACE),
+                run_metrics=RUN,
+                task_ledger=TASKS,
+            )
+            write_deliverable_run_report(report_payload, Path(args.json_report).expanduser().resolve())
+        if exit_code != 0:
+            raise SystemExit(exit_code)
         return
     while True:
         try:

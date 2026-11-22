@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -10,23 +11,25 @@ PLAYBOOKS: dict[str, tuple[str, ...]] = {
     "web_game": (
         "Build one playable vertical slice before visual polish.",
         "Keep update/render/input/game-state boundaries explicit and testable.",
-        "Expose deterministic state and interaction adapters for independent browser verification.",
-        "Verify movement, failure/restart, requested scoring or collection, and mobile input when relevant.",
+        "For Three.js/3D in no-build HTML, declare <script type=\"importmap\"> before <script type=\"module\">, use modern r160 *Geometry classes (never *BufferGeometry), add multi-light scene depth, and style html/body to 100% height so <canvas> is never 0x0.",
+        "Expose deterministic window.AGENT_GAME state and interaction adapters (getState, start, restart, move, plus forceCollect/forceCollision/forceWin when relevant) for independent browser verification.",
+        "Include a clean HTML HUD overlay and verify movement, failure/restart, requested scoring or collection, and mobile input when relevant.",
     ),
     "web_app": (
         "Establish the real data/state flow before styling secondary surfaces.",
         "For a new no-build browser app, keep markup, styles, and behavior in separate small local files unless the request explicitly requires one file.",
-        "Implement loading, empty, error, and success behavior where relevant.",
-        "Verify primary keyboard/pointer flows and responsive layout in a real browser.",
+        "Use semantic accessible controls (<button>, labeled inputs with validation bounds), a non-empty <title>, and zero console/page/network errors.",
+        "Implement loading, empty, error, persistence, and reduced-motion behavior where relevant.",
+        "Verify primary keyboard/pointer flows and 390px responsive layout with no horizontal overflow in a real browser.",
     ),
     "api": (
         "Define request, response, validation, and failure contracts before adding endpoints.",
-        "Keep transport, business logic, and persistence boundaries testable.",
-        "Run automated happy-path and invalid-input checks.",
+        "Keep transport, business logic, and persistence boundaries testable and free of unhandled 500 tracebacks.",
+        "Run automated happy-path, not-found, and invalid-input checks.",
     ),
     "cli": (
-        "Separate argument parsing, domain behavior, and output formatting.",
-        "Verify help, success, invalid input, and exit codes through real commands.",
+        "Separate argument parsing, domain behavior, and deterministic stdout/stderr formatting.",
+        "Verify --help, success, boundary/empty input, invalid arguments, and exit codes through real commands.",
     ),
     "library": (
         "Preserve the public API and isolate implementation details.",
@@ -47,27 +50,48 @@ PLAYBOOKS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _item_text(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("text") or item.get("description") or "")
+    return str(item)
+
+
 def _contract_text(contract: dict[str, Any]) -> str:
     return " ".join(
         [str(contract.get("goal", ""))]
-        + [str(item) for item in contract.get("requirements", [])]
-        + [str(item) for item in contract.get("constraints", [])]
+        + [_item_text(item) for item in contract.get("requirements", [])]
+        + [_item_text(item) for item in contract.get("constraints", [])]
     ).casefold()
+
+
+def _has_marker(text: str, marker: str) -> bool:
+    if marker == "3d":
+        return bool(re.search(r"(?<![0-9a-f])\b3d\b(?![0-9a-f])", text))
+    if marker in {"cli", "api", "csv", "etl", "sdk", "docs"}:
+        return bool(re.search(rf"\b{re.escape(marker)}\b", text))
+    return marker in text
 
 
 def classify_project(contract: dict[str, Any]) -> str:
     text = _contract_text(contract)
     profiles = (
-        ("web_game", ("browser game", "web game", "three.js", "webgl", "collision", "physics", "لعبة")),
+        ("web_game", (
+            "browser game", "web game", "3d game", "canvas game", "arcade", "three.js", "threejs",
+            "webgl", "orbitcontrols", "hovercraft", "starfighter", "لعبة",
+        )),
         ("api", ("rest api", "http api", "endpoint", "fastapi", "flask api", "express api", "واجهة برمجة")),
         ("cli", ("command line", "cli", "terminal utility", "argparse", "أداة سطر")),
         ("data", ("data pipeline", "dataset", "etl", "csv", "pandas", "تحليل بيانات")),
-        ("web_app", ("web app", "website", "dashboard", "landing page", "html", "react", "موقع")),
         ("library", ("library", "package", "sdk", "module", "مكتبة")),
+        ("web_game", ("3d", "solar", "orbit", "simulator", "canvas")),
+        ("web_app", (
+            "web app", "website", "dashboard", "landing page", "focus timer",
+            "pomodoro", "countdown timer", "html", "react", "موقع",
+        )),
         ("documentation", ("readme", "documentation", "docs", "typo", "توثيق")),
     )
     for profile, markers in profiles:
-        if any(marker in text for marker in markers):
+        if any(_has_marker(text, marker) for marker in markers):
             return profile
     return "general"
 

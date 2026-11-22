@@ -1,0 +1,63 @@
+# Sanitized derivative excerpt: lines 1..55 of retained local run log live-threejs-e2e-verified-v9.log
+# Run ID: 20261122T035103-a23aed75 | Model: gemma4:e4b | Mode: recursive | Exit code: 0
+# Original full log: 111,832 bytes | original_sha256: 4abe3a513dbd254a6be30df09c65c42abf501a4353b5439bdc6df1d7650788c4
+# Original raw lines 1..55 slice: 6,604 bytes | original_slice_sha256: 8aff0d19aae42273111fbcccb78fb3c19a49e64527a36d06d7e9f1b3d50f20cf
+# Sanitization: stripped UTF-8 BOM, normalized CRLF to LF, replaced local workspace path with
+# <workspace>/workspace-threejs-e2e-verified-v9, and redacted host RAM/GPU inventory lines per AGENTS.md.
+# Note: Because of sanitization and LF normalization, this file has a distinct sanitized_sha256 recorded in README.md.
+
+workspace set to: <workspace>/workspace-threejs-e2e-verified-v9
+
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: gemma4:e4b
+Completed canary calls: 3/3
+System RAM: <redacted-host-ram>
+GPU: <redacted-local-gpu>
+Warnings: none
+Starting HIVO...
+[MODEL] gemma4:e4b
+[PROVIDER] local Ollama only
+[CAPACITY] 1/4 (PARAMETER-SIZE HEURISTIC; NOT A BENCHMARK)
+[ROOT] Create a complete standalone 3D browser game in `index.html` titled "Neon Starfighter 3D" using Three.js loaded directly inside `<script type="module">` via `import * as THREE f...
+[FIT ROOT] EXECUTE
+[BUILDER] ROOT executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 675}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 22322}
+[TOOL] write_file index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 443}
+[TOOL] run_command npm install
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 444}
+[TOOL] run_command npm start
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 417, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 19153}
+[TOOL] write_file index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 320}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 420}
+[TOOL] list_files -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 440}
+[TOOL] read_file index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 447}
+[TOOL] verify_web_app index.html
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 2213, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "length", "has_error": false, "body_chars": 6255}
+[TOOL] write_file -
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 317}
+[VERIFY ROOT] PASS
+[ROOT VERIFIED] PASS
+[DONE ROOT]
+[FINAL] done
+
+[TASK TREE]
+ROOT Create a complete standalone 3D browser game in `index.html` titled "Neon Starfighter 3D"... PASS
+
+[RESPLIT METRICS]
+failed_nodes_resplit: 0
+resplit_nodes_with_any_verified_child: 0
+resplit_nodes_fully_recovered: 0
+granularity_rescue_rate: 0%
+
+[DECOMPOSITION / STRATEGY SEARCH METRICS]
+terminal_too_broad_nodes: 0
+decomposition_backtracks: 0

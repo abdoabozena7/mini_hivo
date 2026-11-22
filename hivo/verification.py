@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 import json
 import re
 
+from hivo.quality_rubric import diagnose_browser_failures
+
 
 GAME_BRIDGE_NAME = "AGENT_GAME"
 GAME_BRIDGE_EXPRESSION = f"window.{GAME_BRIDGE_NAME}"
@@ -19,6 +21,13 @@ class WebVerificationProfile:
 
 
 _INTERACTION_EXPECTATIONS = {
+    "keyboard_movement": "Calling window.AGENT_GAME.start() then move('up') (or ArrowUp) must observably change getState().player or getState().position.",
+    "collection_updates_state": "window.AGENT_GAME.forceCollect() must increment getState().score, getState().collected, or getState().energy.",
+    "collision_game_over": "window.AGENT_GAME.forceCollision() must set getState().status to 'gameover' (or 'game-over'/'game_over').",
+    "restart_resets_state": "window.AGENT_GAME.restart() must reset getState().score to 0 and set status out of gameover (e.g. 'playing' or 'ready').",
+    "goal_win_state": "window.AGENT_GAME.forceWin() must unconditionally transition getState().status to 'won' (even right after restart()).",
+    "score_persistence": "Best score must be persisted in localStorage and exposed as numeric getState().best across page reload.",
+    "touch_control": "At 390x844 mobile viewport, a visible touch control ([data-direction] or .touch-controls button) must update getState() on click.",
     "timer_start_changes_visible_time": "Start must make the visible MM:SS countdown decrease under an advanced browser clock.",
     "timer_pause_freezes_visible_time": "Pause must freeze the already-started visible countdown without resetting it.",
     "timer_reset_restores_visible_time": "Reset must restore the configured phase duration and remain usable after Start/Pause.",
@@ -72,7 +81,9 @@ def infer_web_profile(task_text: str, contract: dict | None = None,
         combined = _profile_semantic_text(task_text, contract)
     else:
         raise ValueError("unknown verification classification policy")
-    game = any(word in combined for word in ("game", "3d", "webgl", "three.js", "hovercraft"))
+    game = any(word in combined for word in (
+        "game", "3d", "webgl", "three.js", "threejs", "orbitcontrols", "hovercraft",
+    ))
     timer = not game and any(word in combined for word in (
         "timer", "countdown", "pomodoro", "focus timer", "مؤقت", "عد تنازلي",
     ))
@@ -158,8 +169,27 @@ def evaluate_web_snapshot(snapshot: dict, profile: WebVerificationProfile) -> di
         fail("source_dump", "the rendered body looks like source code or placeholder content")
 
     runtime = snapshot.get("runtime_state") or {}
-    if profile.require_canvas and int(runtime.get("canvasCount") or 0) < 1:
+    canvas_count = int(runtime.get("canvasCount") or 0)
+    canvas_metrics = runtime.get("canvasMetrics")
+    if profile.require_canvas and canvas_count < 1:
         fail("missing_canvas", "a 3D/game contract requires at least one rendered canvas")
+    elif profile.require_canvas and canvas_count >= 1 and isinstance(canvas_metrics, dict):
+        max_width = float(canvas_metrics.get("maxWidth") or 0)
+        max_height = float(canvas_metrics.get("maxHeight") or 0)
+        if max_width < 64 or max_height < 64:
+            fail(
+                "zero_size_canvas",
+                f"rendered canvas dimensions are too small ({max_width:g}x{max_height:g}px; expected >= 64x64px)",
+            )
+        if (
+            canvas_metrics.get("requiresThreeWebGL") is True
+            and canvas_metrics.get("hasWebGL") is False
+            and not canvas_metrics.get("hasImportMap")
+        ):
+            fail(
+                "missing_webgl_context",
+                "a Three.js/3D WebGL contract cannot be satisfied by a 2D canvas without Three.js/WebGL",
+            )
     bridge = runtime.get("gameBridge") or runtime.get("debugState")
     if profile.require_game_bridge and not bridge:
         fail("missing_game_bridge", f"{GAME_BRIDGE_EXPRESSION} verification bridge is unavailable")
@@ -172,9 +202,14 @@ def evaluate_web_snapshot(snapshot: dict, profile: WebVerificationProfile) -> di
         elif not check.get("passed"):
             fail("failed_interaction", f"browser interaction failed: {name}")
 
-    return {
+    result = {
         **snapshot,
         "passed": not failures,
         "failures": failures,
         "verification_profile": asdict(profile),
     }
+    if failures:
+        result["repair_hints"] = diagnose_browser_failures(result)
+    else:
+        result.pop("repair_hints", None)
+    return result

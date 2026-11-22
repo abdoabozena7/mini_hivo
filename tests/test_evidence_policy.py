@@ -134,6 +134,60 @@ class EvidencePolicyTests(unittest.TestCase):
                 self.assertEqual(unresolved_tool_failures([failed, newer]), [failed])
         self.assertEqual(unresolved_tool_failures([failed, matched]), [])
 
+    def test_post_mutation_falsifier_pass_clears_pre_mutation_builder_failure_with_matching_profile(self):
+        from hivo.evidence import current_verification_evidence
+
+        profile = {"kind": "game", "required_interactions": ["keyboard_movement", "score_persistence"]}
+        pre_fail = {
+            "tool": "verify_web_app", "target": "index.html", "role": "Builder",
+            "result": {"passed": False, "verification_profile": profile},
+        }
+        mutation = {"tool": "write_file", "target": "index.html", "result": "wrote file: index.html"}
+        post_falsifier_pass = {
+            "tool": "verify_web_app", "target": "index.html", "role": "Falsifier",
+            "result": {"passed": True, "verification_profile": profile},
+        }
+        current = current_verification_evidence([pre_fail, mutation, post_falsifier_pass])
+        self.assertNotIn(pre_fail, current)
+        self.assertIn(post_falsifier_pass, current)
+        # Mismatched weaker profile from Falsifier does NOT clear pre_fail:
+        weaker = {
+            "tool": "verify_web_app", "target": "index.html", "role": "Falsifier",
+            "result": {"passed": True, "verification_profile": {"kind": "web"}},
+        }
+        self.assertIn(pre_fail, current_verification_evidence([pre_fail, mutation, weaker]))
+
+    def test_same_role_executed_browser_pass_clears_earlier_syntax_gate_failure(self):
+        from hivo.evidence import current_verification_evidence, unresolved_tool_failures
+
+        syntax_gate_fail = {
+            "tool": "verify_web_app", "target": "index.html", "role": "Builder",
+            "result": {
+                "passed": False, "environment_error": False, "syntax_failure": True,
+                "resolution_status": "NOT_ATTEMPTED_SYNTAX_FAILURE",
+            },
+        }
+        mutation = {"tool": "write_file", "target": "index.html", "result": "wrote file: index.html"}
+        executed_pass = {
+            "tool": "verify_web_app", "target": "index.html", "role": "Builder",
+            "result": {
+                "passed": True, "environment_error": False,
+                "verification_profile": {"kind": "game", "required_interactions": ["keyboard_movement"]},
+            },
+        }
+        current = current_verification_evidence([syntax_gate_fail, mutation, executed_pass])
+        self.assertEqual(unresolved_tool_failures(current), [])
+
+    def test_structured_pass_is_not_poisoned_by_nested_optional_false_or_ignored_text(self):
+        from hivo.evidence import result_failed
+
+        passing_json = (
+            '{"passed": true, "verification_status": "PASS", "environment_error": false, '
+            '"ignored_console_errors": [{"text": "SyntaxError in ignored"}], '
+            '"interaction_checks": [{"name": "optional", "passed": false}]}'
+        )
+        self.assertFalse(result_failed(passing_json))
+
     def test_a_later_unavailable_attempt_does_not_resurrect_a_resolved_failure(self):
         from hivo.evidence import latest_verification_evidence, unresolved_tool_failures
 

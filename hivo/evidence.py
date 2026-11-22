@@ -97,15 +97,22 @@ def result_failed(result: object) -> bool:
     text = str(result).strip()
     lower = text.lower()
     if isinstance(result, dict):
-        if structured_verification_outcome(result) == "FAIL":
+        outcome = structured_verification_outcome(result)
+        if outcome == "FAIL" or result.get("environment_error") is True:
             return True
+        if outcome == "PASS":
+            return False
     elif text.startswith("{"):
         try:
             payload = json.loads(text)
         except (TypeError, ValueError):
             payload = None
-        if isinstance(payload, dict) and structured_verification_outcome(payload) == "FAIL":
-            return True
+        if isinstance(payload, dict):
+            outcome = structured_verification_outcome(payload)
+            if outcome == "FAIL" or payload.get("environment_error") is True:
+                return True
+            if outcome == "PASS":
+                return False
     if lower.startswith((
         "error:", "error writing file:", "error reading file:",
         "tool error:", "compile error:", "traceback",
@@ -218,10 +225,30 @@ def latest_verification_evidence(evidence: list[dict]) -> list[dict]:
             continue
         if _is_comparable_executed_pass(result, payload):
             outstanding.pop(key, None)
+            if tool in {"verify_web_app", "run_file"} and isinstance(payload.get("verification_profile"), dict):
+                role_str = str(item.get("role") or "")
+                identity = key[4]
+                for old_key, old_idx in list(outstanding.items()):
+                    if (old_key[0], old_key[1], old_key[2], old_key[4]) == (tool, str(item.get("target", "-")), role_str, identity):
+                        old_payload = _verification_payload(evidence[old_idx].get("result", ""))
+                        if old_payload.get("syntax_failure") is True:
+                            outstanding.pop(old_key, None)
+                            latest.pop(old_key, None)
         elif result_failed(result):
             outstanding[key] = index
     kept = set(latest.values()) | set(outstanding.values())
     return [item for index, item in enumerate(evidence) if index in kept]
+
+
+def _role_neutral_verification_key(item, payload):
+    tool, target = str(item.get("tool", "")), str(item.get("target", "-"))
+    profile = payload.get("verification_profile")
+    browser = tool == "verify_web_app" or isinstance(profile, dict)
+    identity = tuple(
+        str(payload.get(key) or item.get(key) or "")
+        for key in ("authority_id", "verification_id", "oracle_id", "oracle_hash")
+    )
+    return (tool, target, json.dumps(profile, sort_keys=True) if browser else "", identity)
 
 
 def current_verification_evidence(evidence: list[dict]) -> list[dict]:
@@ -234,7 +261,28 @@ def current_verification_evidence(evidence: list[dict]) -> list[dict]:
                 last_mutation = index
     if last_mutation < 0:
         return list(evidence)
-    unresolved = {id(item) for item in unresolved_tool_failures(evidence)}
+    post_mutation_falsifier_passes = set()
+    for index, item in enumerate(evidence):
+        if index <= last_mutation or str(item.get("tool", "")) not in VERIFICATION_TOOLS:
+            continue
+        if str(item.get("role") or "") != "Falsifier":
+            continue
+        res = item.get("result", "")
+        if result_not_applicable(res) or result_is_tool_rejection(res):
+            continue
+        payload = _verification_payload(res)
+        if _is_comparable_executed_pass(res, payload):
+            post_mutation_falsifier_passes.add(_role_neutral_verification_key(item, payload))
+    unresolved = {
+        id(item)
+        for item in unresolved_tool_failures(evidence)
+        if not (
+            evidence.index(item) < last_mutation
+            and str(item.get("role") or "") == "Builder"
+            and _role_neutral_verification_key(item, _verification_payload(item.get("result", "")))
+            in post_mutation_falsifier_passes
+        )
+    }
     return [
         item for index, item in enumerate(evidence)
         if index > last_mutation or item.get("tool") not in VERIFICATION_TOOLS or id(item) in unresolved

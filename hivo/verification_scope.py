@@ -37,6 +37,38 @@ FOUNDATION = re.compile(
     r"(?:has (?:a )?title and (?:a )?canvas|"
     r"(?:loads|opens|renders)(?: correctly| without (?:browser|page) errors)?|is visible)\.?", re.I)
 
+_FOUNDATION_DISQUALIFIERS = re.compile(
+    r"\b(?:unspecified|satisfies|everything|complete|entire|all\s+requirements|"
+    r"agent_game|getstate|bridge|behavior|behaviors|mechanic|mechanics|"
+    r"movement|move|keyboard|arrow|wasd|collect\w*|score|scoring|pickup|"
+    r"collision|collid\w*|obstacle|game[-_ ]?over|restart|reset\w*|persist\w*|"
+    r"localstorage|touch|win|won|winning)\b",
+    re.I,
+)
+_FOUNDATION_SUBJECT = re.compile(
+    r"\b(?:index\.html|html5?|page|document|canvas|viewport|scene|camera|"
+    r"renderer|webgl2?|three\.?js|import\s*map|importmap|lighting|lights?|"
+    r"grid|starfield|stars|background|environment|geometry|mesh(?:es)?|hud|style)\b",
+    re.I,
+)
+_FOUNDATION_PREDICATE = re.compile(
+    r"\b(?:renders?|rendered|loads?|loaded|opens?|initiali[sz]e[ds]?|"
+    r"configured|created|displayed|visible|present|exists?|set\s*up|setup|"
+    r"fills?|resizes?|responsive|valid|without\s+(?:any\s+)?(?:console|page|browser|runtime)?\s*errors?)\b",
+    re.I,
+)
+
+
+def _is_foundation_condition(text: str) -> bool:
+    stripped = text.strip()
+    if FOUNDATION.fullmatch(stripped):
+        return True
+    if not stripped or len(stripped) > 240:
+        return False
+    if _FOUNDATION_DISQUALIFIERS.search(stripped):
+        return False
+    return bool(_FOUNDATION_SUBJECT.search(stripped) and _FOUNDATION_PREDICATE.search(stripped))
+
 
 def _strings(values):
     if not isinstance(values, list):
@@ -87,7 +119,7 @@ def scope_contract(task, contract, source_contract):
     for condition in conditions:
         names = {name for name, pattern in CLAUSES.items() if re.fullmatch(pattern, condition.strip(), re.I)}
         explicit_bridge = bool(re.fullmatch(r"expose AGENT_GAME with getState\(\)\.?", condition.strip(), re.I))
-        if not names and not explicit_bridge and not FOUNDATION.fullmatch(condition.strip()):
+        if not names and not explicit_bridge and not _is_foundation_condition(condition):
             return result  # Unsupported prose cannot silently reduce checks.
         required.update(names)
         bridge = bridge or explicit_bridge

@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from hivo.evidence import latest_verification_evidence, structured_verification_outcome
+from hivo.evidence import latest_verification_evidence, result_is_tool_rejection, structured_verification_outcome
 
 
 FOCUSED_TEST = "FOCUSED_TEST"
@@ -1625,6 +1625,8 @@ def _evidence_is_related(route: dict[str, Any], item: dict[str, Any]) -> bool:
     tool = str(item.get("tool", ""))
     if tool not in {"run_file", "run_command", "verify_web_app"}:
         return False
+    if result_is_tool_rejection(item.get("result", "")):
+        return False
     target = _path(route.get("target")) if route.get("target") else ""
     observed_target = _evidence_target(item)
     if target and observed_target:
@@ -1664,6 +1666,8 @@ def _evidence_matches(route: dict, item: dict) -> bool:
         return identity_matches
     tool = str(item.get("tool", ""))
     if tool not in {"run_file", "run_command", "verify_web_app"}:
+        return False
+    if result_is_tool_rejection(item.get("result", "")):
         return False
     if route.get("kind") == BROWSER:
         expected = _path(route.get("target"))
@@ -2227,6 +2231,7 @@ def _aggregate_verification_routes(
             # Only equivalent, explicitly role-bound browser receipts supersede
             # each other. A weaker profile or another role's failure stays live.
             latest = {}
+            superseded_syntax_keys = set()
             for index, item in enumerate(matched):
                 value = item.get("result")
                 try:
@@ -2241,9 +2246,29 @@ def _aggregate_verification_routes(
                 # same role, matched target and exact verification profile.
                 outcome, available = _parse_result(value)
                 equivalent = role and isinstance(profile, dict) and available and outcome in {PASS, FAIL}
+                if equivalent and outcome == PASS:
+                    superseded_syntax_keys.add((str(role), _evidence_target(item), index))
                 key = (str(role), _evidence_target(item), json.dumps(profile, sort_keys=True)) if equivalent else (index,)
                 latest[key] = (index, item)
-            matched = [item for index, item in sorted(latest.values(), key=lambda pair: pair[0])]
+            filtered = []
+            for index, item in sorted(latest.values(), key=lambda pair: pair[0]):
+                value = item.get("result")
+                try:
+                    payload = value if isinstance(value, dict) else json.loads(str(value))
+                except (TypeError, ValueError):
+                    payload = {}
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("syntax_failure") is True
+                    and item.get("role")
+                    and any(
+                        r == str(item.get("role")) and t == _evidence_target(item) and pass_idx > index
+                        for r, t, pass_idx in superseded_syntax_keys
+                    )
+                ):
+                    continue
+                filtered.append(item)
+            matched = filtered
         states = [
             _parse_result(item.get("result"))[0]
             for item in matched

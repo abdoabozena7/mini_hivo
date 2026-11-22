@@ -143,6 +143,22 @@ _EXISTING_TARGET_RE = re.compile(
     r"\b(?:fix|modify|refactor|migrate|update|change)\s+(?:the\s+)?current\s+\w+",
     re.IGNORECASE,
 )
+_PRIMARY_GREENFIELD_PRODUCT_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:build|create|develop|write|make|generate)\s+"
+    r"(?:a|an)\s+(?:[A-Za-z0-9_./+-]+(?:,\s*|\s+)){0,8}"
+    r"(?:app|application|game|website|web\s+page|page|dashboard|simulator|"
+    r"editor|timer|cli|script|tool|utility|service|api|library)\b",
+    re.IGNORECASE,
+)
+_EXISTING_REPAIR_CLAUSE_RE = re.compile(
+    r"(?:^|[.!?;:\n]\s*)(?:please\s+)?(?:fix|modify|refactor|migrate|patch|repair|"
+    r"change|replace|remove|delete)\b|"
+    r"\b(?:existing|legacy)\s+\w+|"
+    r"\bbackward[- ]compatible\b|"
+    r"\b(?:fix|modify|refactor|migrate|update|change|preserve|reuse|keep|extend)\s+"
+    r"(?:the\s+)?(?:current|existing|legacy)\s+\w+",
+    re.IGNORECASE,
+)
 _DECLARATION_RE = re.compile(
     r"(?:\bclass\s+([A-Za-z_$][\w$]*)|\bdef\s+([A-Za-z_$][\w$]*)\s*\(|"
     r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\binterface\s+([A-Za-z_$][\w$]*)|"
@@ -375,6 +391,9 @@ def classify_project_mode(raw_goal, inventory=None):
         mode = EXISTING_PROJECT
     elif _GREENFIELD_RE.search(text) or (_EMPTY_BUILD_RE.search(text) and not _EXISTING_TARGET_RE.search(text)):
         reason = "the workspace is empty and the request is explicitly greenfield"
+        mode = NEW_PROJECT
+    elif _PRIMARY_GREENFIELD_PRODUCT_RE.search(text) and not _EXISTING_REPAIR_CLAUSE_RE.search(text):
+        reason = "the workspace is empty and the request creates a new standalone product without existing-code repair clauses"
         mode = NEW_PROJECT
     elif _MODIFICATION_RE.search(text):
         reason = "the request assumes an existing implementation but no project files were observed"

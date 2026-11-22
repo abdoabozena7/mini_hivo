@@ -62,3 +62,15 @@ class IngestionIntegrationTests(unittest.TestCase):
     def test_actual_repository_contents_take_precedence(self):
         inventory={"files":[{"path":"index.html"}],"meaningful_files":["index.html"]}
         self.assertEqual(u.classify_project_mode("Build a game in an empty workspace.", inventory)["project_mode"],u.EXISTING_PROJECT)
+
+    def test_greenfield_product_spec_with_ui_status_and_state_update_words_is_new_project(self):
+        spec = (
+            "Create a complete, self-contained single-file 3D browser game in index.html using Three.js. "
+            "Show the current Status badge and live Score in the HUD, updating best score in localStorage."
+        )
+        self.assertEqual(u.classify_project_mode(spec)["project_mode"], u.NEW_PROJECT)
+        mixed = (
+            "Create a complete single-file 3D browser game in index.html. "
+            "Fix the existing SettingsService."
+        )
+        self.assertEqual(u.classify_project_mode(mixed)["project_mode"], u.EXISTING_PROJECT)

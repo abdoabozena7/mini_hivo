@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Starfighter 3D</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background-color: #050816; }
+        #game-container { position: relative; width: 100%; height: 100%; }
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            color: #00ffff;
+            font-family: 'Courier New', Courier, monospace;
+            pointer-events: none; /* Allows clicks to pass through to canvas if needed, but we handle buttons separately */
+            z-index: 10;
+        }
+        .hud-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        .hud-title {
+            font-size: 2.5em;
+            text-shadow: 0 0 10px #00ffff;
+        }
+        .hud-stats span {
+            margin-right: 25px;
+            font-size: 1.2em;
+        }
+        #status-badge {
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: background-color 0.3s;
+        }
+        .status-playing { background-color: #00ff00; color: #050816; }
+        .status-paused { background-color: #ffaa00; color: #050816; }
+        .status-gameover { background-color: #ff0000; color: white; }
+        .status-won { background-color: #00aa00; color: white; }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 30px;
+            border-radius: 10px;
+            display: flex;
+            gap: 30px;
+            pointer-events: all; /* Re-enable pointer events for buttons */
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        }
+        .control-group button {
+            background: #00ffff;
+            color: #050816;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+        .control-group button:hover {
+            background: #00e0e0;
+        }
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            right: 30px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            color: #aaa;
+            font-size: 0.9em;
+        }
+    </style>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+</head>
+<body>
+    <div id="game-container">
+        <div id="hud">
+            <div class="hud-section">
+                <div class="hud-title">Neon Starfighter 3D</div>
+                <div class="hud-stats">
+                    <span>SCORE: <span id="score-display">0</span></span>
+                    <span>CRYSTALS: <span id="collected-display">0</span></span>
+                </div>
+            </div>
+            <div class="hud-section">
+                <div id="status-badge" class="status-paused">PAUSED</div>
+            </div>
+        </div>
+        <div id="controls">
+            <div class="control-group">
+                <button id="start-button">START GAME</button>
+                <button id="reset-button">RESET</button>
+            </div>
+        </div>
+        <div class="legend">
+            <strong>Controls:</strong><br>
+            WASD / Arrows: Move<br>
+            (Click Start/Reset to begin)
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+        // --- GAME STATE MANAGEMENT ---
+        const GAME_STATE = {
+            status: "paused", // "paused", "playing", "gameover", "won"
+            score: 0,
+            collected: 0,
+            player: { x: 0, z: 0 }, // Player's relative position for HUD/State
+            position: new THREE.Vector3(0, 0.5, 0), // Actual 3D position
+            tick: 0
+        };
+
+        const AGENT_GAME = {
+            getState: () => {
+                return JSON.parse(JSON.stringify({
+                    status: GAME_STATE.status,
+                    score: GAME_STATE.score,
+                    collected: GAME_STATE.collected,
+                    player: { x: GAME_STATE.player.x, z: GAME_STATE.player.z },
+                    position: { x: GAME_STATE.position.x, y: GAME_STATE.position.y, z: GAME_STATE.position.z },
+                    tick: GAME_STATE.tick
+                }));
+            },
+            start: () => {
+                if (GAME_STATE.status !== "playing") {
+                    GAME_STATE.status = "playing";
+                    document.getElementById('status-badge').className = 'status-playing';
+                    document.getElementById('status-badge').textContent = 'PLAYING';
+                    // Start the animation loop if not already running
+                    if (!window.animationFrameId) {
+                        animate();
+                    }
+                }
+            },
+            restart: () => {
+                GAME_STATE.score = 0;
+                GAME_STATE.collected = 0;
+                GAME_STATE.player = { x: 0, z: 0 };
+                GAME_STATE.position.set(0, 0.5, 0);
+                GAME_STATE.status = "playing";
+                document.getElementById('status-badge').className = 'status-playing';
+                document.getElementById('status-badge').textContent = 'PLAYING';
+
+                // Reset visual elements
+                scene.getObjectByName('playerShip').position.set(0, 0.5, 0);
+                crystals.forEach(c => c.visible = true);
+
+                // Update HUD
+                updateHUD();
+
+                // Restart loop
+                if (!window.animationFrameId) {
+                    animate();
+                }
+            },
+            move: (direction) => {
+                if (GAME_STATE.status !== "playing") return;
+                const speed = 0.15;
+                let newX = GAME_STATE.position.x;
+                let newZ = GAME_STATE.position.z;
+
+                switch (direction) {
+                    case 'forward':
+                        newZ -= speed;
+                        break;
+                    case 'backward':
+                        newZ += speed;
+                        break;
+                    case 'left':
+                        newX -= speed;
+                        break;
+                    case 'right':
+                        newX += speed;
+                        break;
+                }
+
+                // Clamp movement to a reasonable area (e.g., -20 to 20)
+                const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+                GAME_STATE.position.x = clamp(newX, -25, 25);
+                GAME_STATE.position.z = clamp(newZ, -25, 25);
+
+                GAME_STATE.player.x = GAME_STATE.position.x;
+                GAME_STATE.player.z = GAME_STATE.position.z;
+            },
+            forceCollect: () => {
+                if (GAME_STATE.status !== "playing") return;
+                GAME_STATE.score += 10;
+                GAME_STATE.collected += 1;
+                updateHUD();
+                // Logic to respawn crystals would go here in a full game loop
+            },
+            forceCollision: () => {
+                GAME_STATE.status = "gameover";
+                document.getElementById('status-badge').className = 'status-gameover';
+                document.getElementById('status-badge').textContent = 'GAME OVER';
+                // Stop animation loop
+                window.animationFrameId = null;
+            },
+            forceWin: () => {
+                GAME_STATE.status = "won";
+                document.getElementById('status-badge').className = 'status-won';
+                document.getElementById('status-badge').textContent = 'VICTORY!';
+                // Stop animation loop
+                window.animationFrameId = null;
+            }
+        };
+
+        window.AGENT_GAME = AGENT_GAME;
+
+        // --- SCENE SETUP ---
+        let scene, camera, renderer;
+        let playerShip, crystals = [];
+        let gridHelper, starfield;
+        const container = document.getElementById('game-container');
+
+        function initScene() {
+            // 1. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x050816, 1);
+            container.appendChild(renderer.domElement);
+
+            // 2. Scene
+            scene = new THREE.Scene();
+
+            // 3. Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 9, 14);
+            camera.lookAt(0, 0, 0);
+
+            // 4. Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 2); // Soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(1, 10, 10);
+            scene.add(directionalLight);
+
+            // 5. Grid Helper
+            gridHelper = new THREE.GridHelper(24, 24, 0x00f5ff, 0x1e293b);
+            scene.add(gridHelper);
+
+            // 6. Starfield (THREE.Points)
+            const starGeometry = new THREE.BufferGeometry();
+            const starCount = 10000;
+            const positions = [];
+            for (let i = 0; i < starCount; i++) {
+                // Spread stars across a large area
+                positions.push((Math.random() - 0.5) * 100);
+                positions.push((Math.random() - 0.5) * 100);
+                positions.push((Math.random() - 0.5) * 100);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 });
+            starfield = new THREE.Points(starGeometry, starMaterial);
+            scene.add(starfield);
+
+            // 7. Player Ship (Glowing Cyan)
+            const shipBody = new THREE.Mesh(
+                new THREE.ConeGeometry(0.5, 1.5, 3),
+                new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.5 })
+            );
+            shipBody.rotation.x = Math.PI / 2; // Pointing along Z axis initially
+            shipBody.name = 'playerShip';
+
+            const wingGeometry = new THREE.BoxGeometry(1.5, 0.2, 0.5);
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.0 });
+            const wingL = new THREE.Mesh(wingGeometry, wingMaterial);
+            wingL.position.set(-1.2, 0, 0);
+            const wingR = new THREE.Mesh(wingGeometry, wingMaterial);
+            wingR.position.set(1.2, 0, 0);
+
+            const shipGroup = new THREE.Group();
+            shipGroup.add(shipBody);
+            shipGroup.add(wingL);
+            shipGroup.add(wingR);
+            playerShip = shipGroup;
+            playerShip.position.set(0, 0.5, 0);
+            scene.add(playerShip);
+
+            // 8. Energy Crystals (Golden Octahedrons)
+            const crystalGeometry = new THREE.OctahedronGeometry(1, 1);
+            const crystalMaterial = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.8 });
+
+            const crystalPositions = [
+                { x: 5, z: 5 }, { x: -5, z: 5 }, { x: 5, z: -5 }, { x: -5, z: -5 },
+                { x: 8, z: 0 }, { x: -8, z: 0 }, { x: 0, z: 8 }, { x: 0, z: -8 }
+            ];
+
+            crystalPositions.forEach(pos => {
+                const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
+                crystal.position.set(pos.x, 1, pos.z);
+                crystal.userData = { collected: false, initialPos: new THREE.Vector3(pos.x, 1, pos.z) };
+                scene.add(crystal);
+                crystals.push(crystal);
+            });
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('keydown', onKeyDown, false);
+            document.getElementById('start-button').addEventListener('click', () => AGENT_GAME.start());
+            document.getElementById('reset-button').addEventListener('click', () => AGENT_GAME.restart());
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- INPUT HANDLING ---
+        const keysPressed = {};
+        function onKeyDown(event) {
+            if (GAME_STATE.status !== "playing") return;
+
+            let direction = null;
+            switch (event.key) {
+                case 'w':
+                case 'ArrowUp':
+                    direction = 'forward';
+                    break;
+                case 's':
+                case 'ArrowDown':
+                    direction = 'backward';
+                    break;
+                case 'a':
+                case 'ArrowLeft':
+                    direction = 'left';
+                    break;
+                case 'd':
+                case 'ArrowRight':
+                    direction = 'right';
+                    break;
+                default:
+                    return;
+            }
+
+            // Prevent default scrolling behavior
+            event.preventDefault();
+
+            // Simple state machine for movement: only process movement if a direction is found
+            if (direction) {
+                AGENT_GAME.move(direction);
+            }
+        }
+
+        // --- GAME LOOP & ANIMATION ---
+        let lastMoveTime = 0;
+        const MOVE_DEBOUNCE = 100; // ms to prevent rapid movement spamming
+
+        function animate(time) {
+            window.animationFrameId = requestAnimationFrame(animate);
+
+            GAME_STATE.tick++;
+
+            // 1. Player Movement Update (Visual Sync)
+            // The AGENT_GAME.move() updates the state, we sync the visual object here.
+            playerShip.position.x = GAME_STATE.position.x;
+            playerShip.position.z = GAME_STATE.position.z;
+
+            // 2. Crystal Animation & Collision Check
+            crystals.forEach((crystal, index) => {
+                if (GAME_STATE.status !== "playing" || crystal.userData.collected) {
+                    crystal.visible = false;
+                    return;
+                }
+
+                // Rotation
+                crystal.rotation.x += 0.01;
+                crystal.rotation.y += 0.015;
+
+                // Simple pulsing effect
+                const scale = 1 + Math.sin(time * 0.005 + index) * 0.1;
+                crystal.scale.set(scale, scale, scale);
+
+                // Collision Check (Simplified: Check distance to player)
+                const distance = crystal.position.distanceTo(playerShip.position);
+                if (distance < 3.5) {
+                    // Collision detected!
+                    if (!crystal.userData.collected) {
+                        AGENT_GAME.forceCollect();
+                        crystal.userData.collected = true;
+                        crystal.visible = false;
+                        // Respawn logic (simple: just hide it for now, full respawn handled by reset/next round)
+                    }
+                } else {
+                    crystal.visible = true;
+                }
+            });
+
+            // 3. Starfield Movement (Parallax/Drift)
+            starfield.position.y = Math.sin(GAME_STATE.tick * 0.001) * 5;
+            starfield.position.x = Math.cos(GAME_STATE.tick * 0.0005) * 5;
+
+            // 4. Render
+            renderer.render(scene, camera);
+
+            // 5. Update HUD (Only if status is playing)
+            if (GAME_STATE.status === "playing") {
+                updateHUD();
+            }
+        }
+
+        // --- UTILITY FUNCTIONS ---
+        function updateHUD() {
+            document.getElementById('score-display').textContent = GAME_STATE.score;
+            document.getElementById('collected-display').textContent = GAME_STATE.collected;
+        }
+
+        // --- INITIALIZATION ---
+        initScene();
+
+        // Initial HUD setup
+        updateHUD();
+
+        // Set initial status badge text
+        document.getElementById('status-badge').textContent = 'PAUSED';
+
+    </script>
+</body>
+</html>

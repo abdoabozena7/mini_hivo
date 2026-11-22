@@ -6,6 +6,11 @@ evidence/impact-lifecycle-publication/** text eol=lf
 
 # Level 1 curated evidence and workflow documentation use canonical LF bytes.
 evidence/level1-native-verification/** text eol=lf
+evidence/threejs-weak-model-swarm/*.md text eol=lf
+evidence/threejs-weak-model-swarm/*.txt text eol=lf
+evidence/threejs-weak-model-swarm/*.json text eol=lf
+evidence/threejs-weak-model-swarm/*.html text eol=lf
 AGENTS.md text eol=lf
 updates/UPDATE_TEMPLATE.md text eol=lf
 updates/R_UPDATE_002.md text eol=lf
+updates/R_UPDATE_008.md text eol=lf

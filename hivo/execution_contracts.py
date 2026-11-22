@@ -2931,6 +2931,14 @@ def _advice_path_is_under_root(path, root):
     return bool(target and parent and (target == parent or target.startswith(parent + "/")))
 
 
+_JS_ECOSYSTEM_LIBRARY_NAMES = frozenset({
+    "three.js", "node.js", "vue.js", "react.js", "next.js", "nuxt.js",
+    "express.js", "chart.js", "d3.js", "p5.js", "babylon.js", "pixi.js",
+    "matter.js", "anime.js", "tone.js", "cannon.js", "phaser.js",
+    "alpine.js", "solid.js", "ember.js", "backbone.js", "hls.js", "pdf.js",
+})
+
+
 def classify_code_location_reference(value, contract=None):
     """Classify one lexical candidate using repository/path evidence.
 
@@ -2946,6 +2954,11 @@ def classify_code_location_reference(value, contract=None):
     known_roots = _advice_known_repository_roots(contract)
     suffix = normalized.rsplit("/", 1)[-1]
     extension = suffix.rsplit(".", 1)[-1] if "." in suffix else ""
+    is_bare_library_name = (
+        "/" not in normalized
+        and not _EXPLICIT_RELATIVE_PATH_RE.match(raw_token.replace("\\", "/"))
+        and normalized in _JS_ECOSYSTEM_LIBRARY_NAMES
+    )
     basis = None
     if normalized.rstrip("/") in {item.rstrip("/") for item in known_paths}:
         basis = "CANONICAL_PATH"
@@ -2955,6 +2968,8 @@ def classify_code_location_reference(value, contract=None):
         basis = "ABSOLUTE_PATH"
     elif _EXPLICIT_RELATIVE_PATH_RE.match(raw_token.replace("\\", "/")):
         basis = "EXPLICIT_RELATIVE_PATH"
+    elif is_bare_library_name:
+        basis = None
     elif extension in _CODE_PATH_EXTENSIONS:
         basis = "FILE_EXTENSION"
     elif any(_advice_path_is_under_root(normalized, root) for root in known_roots):
@@ -2963,7 +2978,7 @@ def classify_code_location_reference(value, contract=None):
         "text": raw_token,
         "path": token,
         "classification": "CODE_PATH" if basis else "AMBIGUOUS_TEXT",
-        "confidence_basis": basis or "BARE_SLASH_COMPOUND",
+        "confidence_basis": basis or ("ECOSYSTEM_LIBRARY_NAME" if is_bare_library_name else "BARE_SLASH_COMPOUND"),
     }
 
 

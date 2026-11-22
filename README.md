@@ -1,5 +1,7 @@
 # Mini Hivo
 
+**North Star & Architecture:** [project goal and graduation thesis](docs/PROJECT_GOAL.md) · [swarm and recursive agent charter](docs/AGENT_ARCHITECTURE.md)
+
 **Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md) · [Karim PR integration](updates/R_UPDATE_003.md).
 
 Latest: [quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md),
@@ -8,10 +10,13 @@ Latest: [quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md
 The [publication addendum](reports/integration/karim-pr1/publication.json)
 records the actual merged GitHub PR, preserved ancestry and final-main replay.
 
-Mini Hivo is a local coding-agent orchestrator pinned to one model:
-`gemma4:e4b`. Every model-backed role uses that exact model. Cross-model
-routing and fallback are intentionally disabled so experiment results remain
-attributable.
+Mini Hivo is an architecture-first local coding-agent orchestrator designed to
+amplify small/weak local models through recursive Swarm roles, evidence-licensed
+recovery, domain quality rubrics, and independent deterministic/browser
+verification. By default, every role is pinned to one model (`gemma4:e4b`),
+and `--model <MODEL>` can pin any installed generative Ollama model across all
+roles. Cross-model routing and silent fallback remain disabled so results stay
+scientifically attributable.
 
 ## Run
 
@@ -49,10 +54,11 @@ old line-oriented interface and workspace prompt. Existing legacy contents
 directly under `list/` still migrate once into `list/project-1`.
 
 For a noninteractive run, supply an existing workspace directory and a UTF-8
-prompt file:
+prompt file (optionally emitting a structured privacy-safe JSON deliverable
+report via `--json-report`):
 
 ```powershell
-.\.venv\Scripts\python.exe mini.py --mode recursive --workspace D:\cases\new-project --prompt-file D:\cases\prompt.txt --no-bootstrap
+.\.venv\Scripts\python.exe mini.py --mode recursive --workspace D:\cases\new-project --prompt-file D:\cases\prompt.txt --json-report D:\cases\run-report.json --no-bootstrap
 ```
 
 Batch execution exits with `0` only for `done`, `1` for an unsuccessful or
