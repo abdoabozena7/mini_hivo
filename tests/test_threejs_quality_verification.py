@@ -3,6 +3,8 @@ import unittest
 from hivo.playbooks import classify_project, playbook_context
 from hivo.quality_rubric import (
     BROWSER_CANVAS_QUALITY_JS,
+    _QUALITY_RUBRICS,
+    build_six_angle_qa_checklist,
     detect_quality_domain,
     detect_threejs_or_3d,
     diagnose_browser_failures,
@@ -82,10 +84,113 @@ class ThreeJsQualityRubricTests(unittest.TestCase):
             "forceCollect()",
             "forceCollision()",
             "forceWin()",
+            "requestAnimationFrame(animate)",
+            "init()",
+            "paused",
+            ">= 4",
+            "top-left",
+            "top-right",
+            "bottom-center",
+            "bottom-right",
         )
         for fragment in required_fragments:
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, rubric)
+
+    def test_six_angle_qa_checklist_and_raw_rubrics_stay_within_character_budgets(self):
+        expected_angles = (
+            "1. Functionality",
+            "2. Preservation",
+            "3. Interface/DOM Binding",
+            "4. Error/Input Resilience",
+            "5. Visual/HUD Non-Overlap & Initial Render",
+            "6. State Reset & Single-RAF Hygiene",
+        )
+        for domain in ("threejs_3d", "web_game", "web_app", "cli", "api", "general"):
+            with self.subTest(domain=domain):
+                self.assertLess(len(_QUALITY_RUBRICS[domain]), 1300)
+                checklist = build_six_angle_qa_checklist(domain)
+                self.assertTrue(checklist.strip())
+                self.assertLessEqual(len(checklist), 600)
+                for angle in expected_angles:
+                    self.assertIn(angle, checklist)
+
+    def test_initial_frame_blank_and_hud_overlap_evaluation_and_repair_hints(self):
+        profile = infer_web_profile("Build a 3D Three.js hovercraft game", {})
+        base_checks = [{"name": name, "passed": True} for name in profile.required_interactions]
+
+        def eval_metrics(metrics, target_profile=profile):
+            return evaluate_web_snapshot({
+                "title": "3D Hovercraft",
+                "text": "Score: 0 | Controls: WASD",
+                "console_errors": [],
+                "page_errors": [],
+                "network_errors": [],
+                "runtime_state": {
+                    "canvasCount": 1,
+                    "canvasMetrics": metrics,
+                    "gameBridge": {"name": GAME_BRIDGE_NAME, "state": {"status": "ready"}},
+                },
+                "interaction_checks": base_checks if target_profile is profile else [],
+            }, target_profile)
+
+        blank_eval = eval_metrics({
+            "count": 1,
+            "maxWidth": 1024,
+            "maxHeight": 768,
+            "visibleCount": 1,
+            "initialFrameBlank": True,
+        })
+        self.assertFalse(blank_eval["passed"])
+        self.assertTrue(any(
+            item["code"] == "blank_initial_canvas" and "init()" in item["evidence"]
+            for item in blank_eval["failures"]
+        ))
+        self.assertTrue(any(
+            "renderer.render(scene, camera)" in hint
+            and "requestAnimationFrame(animate)" in hint
+            and "init()" in hint
+            for hint in blank_eval.get("repair_hints", [])
+        ))
+
+        rendered_eval = eval_metrics({
+            "count": 1,
+            "maxWidth": 1024,
+            "maxHeight": 768,
+            "visibleCount": 1,
+            "initialFrameBlank": False,
+        })
+        self.assertTrue(rendered_eval["passed"])
+        self.assertEqual(rendered_eval["failures"], [])
+        self.assertNotIn("repair_hints", rendered_eval)
+
+        omitted_eval = eval_metrics({
+            "count": 1,
+            "maxWidth": 1024,
+            "maxHeight": 768,
+            "visibleCount": 1,
+        })
+        self.assertTrue(omitted_eval["passed"])
+        self.assertEqual(omitted_eval["failures"], [])
+
+        non_canvas_profile = infer_web_profile("Build a static portfolio page", {})
+        self.assertFalse(non_canvas_profile.require_canvas)
+        non_canvas_blank = eval_metrics({"count": 0, "initialFrameBlank": True}, non_canvas_profile)
+        self.assertTrue(non_canvas_blank["passed"])
+
+        fallback_overlap = eval_metrics({
+            "count": 1,
+            "maxWidth": 1024,
+            "maxHeight": 768,
+            "visibleCount": 1,
+            "hudOverlapCount": 1,
+        })
+        self.assertFalse(fallback_overlap["passed"])
+        self.assertTrue(any(
+            item["code"] == "hud_layout_overlap"
+            and item["evidence"] == "overlapping HUD/control elements: overlap detected"
+            for item in fallback_overlap["failures"]
+        ))
 
     def test_diagnose_browser_failures_translates_root_causes_into_repair_hints(self):
         bare_three = diagnose_browser_failures({
@@ -348,6 +453,153 @@ class BrowserCanvasQualityPlaywrightTests(unittest.TestCase):
                 }, profile)
                 self.assertTrue(working_eval["passed"], working_eval)
                 self.assertEqual(working_eval["failures"], [])
+                self.assertEqual(working_metrics["hudOverlapCount"], 0)
+                self.assertEqual(working_metrics["hudOverlaps"], [])
+            finally:
+                browser.close()
+
+    def test_hud_bounding_box_overlap_vs_non_overlapping_corners_in_chromium(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("Playwright is not installed")
+
+        profile = infer_web_profile("Build a 3D Three.js scene with keyboard movement", {})
+
+        with sync_playwright() as playwright:
+            browser = self._launch_browser(playwright)
+            try:
+                overlap_page = browser.new_page(viewport={"width": 1024, "height": 768})
+                overlap_page.set_content("""
+                    <!doctype html>
+                    <html>
+                    <head>
+                        <title>Overlapping HUD 3D Scene</title>
+                        <style>
+                            html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+                            #scene { display: block; width: 100vw; height: 100vh; }
+                            #stats {
+                                position: absolute; top: 20px; right: 20px;
+                                width: 180px; height: 70px; padding: 8px;
+                            }
+                            #controls {
+                                position: absolute; top: 20px; right: 20px;
+                                width: 180px; height: 70px; padding: 8px;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <canvas id="scene" width="1024" height="768"></canvas>
+                        <div id="stats">Score: 0 | Best: 10</div>
+                        <div id="controls">WASD / Arrows to pilot</div>
+                    </body>
+                    </html>
+                """)
+                overlap_metrics = overlap_page.evaluate(BROWSER_CANVAS_QUALITY_JS)
+                self.assertGreaterEqual(overlap_metrics["hudOverlapCount"], 1)
+                self.assertIn("#stats vs #controls", overlap_metrics["hudOverlaps"])
+
+                overlap_eval = evaluate_web_snapshot({
+                    "title": overlap_page.title(),
+                    "text": overlap_page.locator("body").inner_text(),
+                    "console_errors": [],
+                    "page_errors": [],
+                    "network_errors": [],
+                    "runtime_state": {
+                        "canvasCount": overlap_metrics["count"],
+                        "canvasMetrics": overlap_metrics,
+                        "gameBridge": {"name": GAME_BRIDGE_NAME, "state": {"status": "ready"}},
+                    },
+                    "interaction_checks": [{"name": "keyboard_movement", "passed": True}],
+                }, profile)
+                self.assertFalse(overlap_eval["passed"])
+                self.assertTrue(any(
+                    f["code"] == "hud_layout_overlap"
+                    and "#stats" in f["evidence"]
+                    and "#controls" in f["evidence"]
+                    for f in overlap_eval["failures"]
+                ))
+                self.assertTrue(any(
+                    "hud_layout_overlap" in hint
+                    and "#stats" in hint
+                    and "top-left" in hint
+                    and "flex" in hint
+                    for hint in overlap_eval.get("repair_hints", [])
+                ))
+
+                clean_page = browser.new_page(viewport={"width": 1024, "height": 768})
+                clean_page.set_content("""
+                    <!doctype html>
+                    <html>
+                    <head>
+                        <title>Clean Corners 3D Scene</title>
+                        <style>
+                            html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+                            #scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+                            #stats { position: absolute; top: 20px; left: 20px; padding: 8px 12px; }
+                            #legend { position: absolute; top: 20px; right: 20px; padding: 8px 12px; }
+                            #actions {
+                                position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+                                display: flex; gap: 10px; align-items: center; padding: 6px 10px;
+                            }
+                            #telemetry { position: absolute; bottom: 20px; right: 20px; padding: 8px 12px; }
+                            #gameover-modal {
+                                position: absolute; top: 20px; left: 20px; width: 220px; height: 90px;
+                                opacity: 0; pointer-events: none;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <canvas id="scene" width="1024" height="768"></canvas>
+                        <div id="stats">Score: 0 | Best: 0</div>
+                        <div id="legend">Controls: WASD / Arrows</div>
+                        <div id="actions" class="button-bar">
+                            <button id="start-btn" type="button">Start</button>
+                            <button id="pause-btn" type="button">Pause</button>
+                            <button id="restart-btn" type="button">Restart</button>
+                        </div>
+                        <div id="telemetry">Speed: 12 m/s</div>
+                        <div id="gameover-modal"><button id="retry-btn" type="button">Retry</button></div>
+                    </body>
+                    </html>
+                """)
+                clean_metrics = clean_page.evaluate(BROWSER_CANVAS_QUALITY_JS)
+                self.assertEqual(clean_metrics["hudOverlapCount"], 0, clean_metrics)
+                self.assertEqual(clean_metrics["hudOverlaps"], [])
+                self.assertEqual(clean_metrics["interactiveControlCount"], 3)
+
+                clean_eval = evaluate_web_snapshot({
+                    "title": clean_page.title(),
+                    "text": clean_page.locator("body").inner_text(),
+                    "console_errors": [],
+                    "page_errors": [],
+                    "network_errors": [],
+                    "runtime_state": {
+                        "canvasCount": clean_metrics["count"],
+                        "canvasMetrics": {**clean_metrics, "initialFrameBlank": False},
+                        "gameBridge": {"name": GAME_BRIDGE_NAME, "state": {"status": "ready"}},
+                    },
+                    "interaction_checks": [{"name": "keyboard_movement", "passed": True}],
+                }, profile)
+                self.assertTrue(clean_eval["passed"], clean_eval)
+                self.assertEqual(clean_eval["failures"], [])
+
+                blank_initial_eval = evaluate_web_snapshot({
+                    "title": clean_page.title(),
+                    "text": clean_page.locator("body").inner_text(),
+                    "console_errors": [],
+                    "page_errors": [],
+                    "network_errors": [],
+                    "runtime_state": {
+                        "canvasCount": clean_metrics["count"],
+                        "canvasMetrics": {**clean_metrics, "initialFrameBlank": True},
+                        "gameBridge": {"name": GAME_BRIDGE_NAME, "state": {"status": "ready"}},
+                    },
+                    "interaction_checks": [{"name": "keyboard_movement", "passed": True}],
+                }, profile)
+                self.assertFalse(blank_initial_eval["passed"])
+                self.assertTrue(any(f["code"] == "blank_initial_canvas" for f in blank_initial_eval["failures"]))
+                self.assertTrue(any("init()" in hint for hint in blank_initial_eval.get("repair_hints", [])))
             finally:
                 browser.close()
 

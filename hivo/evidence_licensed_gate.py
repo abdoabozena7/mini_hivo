@@ -1615,6 +1615,9 @@ def _extract_candidate_json_text(content: str) -> str | None:
     if not stripped:
         return None
 
+    if stripped.startswith("<tool_call>") and stripped.endswith("</tool_call>"):
+        stripped = stripped[len("<tool_call>"):-len("</tool_call>")].strip()
+
     # Pure JSON object or JSON array with zero surrounding prose.
     if (stripped.startswith("{") and stripped.endswith("}")) or (
         stripped.startswith("[") and stripped.endswith("]")

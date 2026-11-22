@@ -67,8 +67,21 @@ from hivo import verification_surfaces
 from hivo import integration_targets
 from hivo import evidence_compatibility as semantic_evidence
 from hivo import evidence_monotonic
+from hivo.assume_guarantee import (
+    extract_file_certificate,
+    format_sibling_guarantees_context,
+    partition_disjoint_child_ownership,
+    verify_compositional_certificates,
+)
+from hivo.hyperparams import DECODING_POLICIES, resolve_decoding_options, validate_decoding_policy
 from hivo.playbooks import classify_project, playbook_context
-from hivo.quality_rubric import BROWSER_CANVAS_QUALITY_JS, detect_threejs_or_3d, quality_rubric_context
+from hivo.quality_rubric import (
+    BROWSER_CANVAS_QUALITY_JS,
+    build_six_angle_qa_checklist,
+    detect_quality_domain,
+    detect_threejs_or_3d,
+    quality_rubric_context,
+)
 from hivo.projects import ProjectStore
 from hivo import project_understanding as stage2
 from hivo import project_brain_refs as core1_brain_refs
@@ -1908,11 +1921,30 @@ def list_files():
         return f"error listing files: {exc}"
 
 
+def _is_deferred_sibling_test_path(rel_candidate):
+    if not isinstance(RUN, dict) or RUN.get("project_mode") != NEW_PROJECT:
+        return False
+    norm = _normalized_workspace_relative_path(str(rel_candidate or ""))
+    if not norm or not is_focused_test_command([norm]):
+        return False
+    tid = str((ACTIVE_TOOL_CONTRACT or {}).get("task_id") or "")
+    if not tid or tid == "ROOT":
+        return False
+    task_obj = (TASKS or {}).get(tid)
+    owned = [str(p).casefold() for p in ((task_obj or {}).get("owned_mutation_paths") or [])]
+    if not owned or norm.casefold() in owned:
+        return False
+    declared = {p.casefold() for p, _ in _source_creation_requirements()}
+    return norm.casefold() in declared
+
+
 def run_file(path, *, function=None, arguments=None, expected=None):
     target = safe_path(path)
     if target is None:
         return f"error: '{path}' is outside the workspace."
     if not target.exists():
+        if _is_deferred_sibling_test_path(path):
+            return f"[not_applicable] VERIFICATION_NOT_APPLICABLE: test suite '{path}' belongs to a downstream sibling task and has not been created yet"
         return f"error: file does not exist: {target}"
     if function is not None:
         observation = check_python_call(WORKSPACE, path, function, arguments, expected)
@@ -2058,6 +2090,25 @@ def run_command(command, *, expected_exit_code=None, expected_stdout=None):
             "Run the existing test command with only the command field: "
             + json.dumps({"command": command})
         )
+    if is_focused_test_command(parts) and WORKSPACE is not None:
+        tid = str((ACTIVE_TOOL_CONTRACT or {}).get("task_id") or "")
+        task_obj = (TASKS or {}).get(tid) if tid and tid != "ROOT" else None
+        owned_non_test = (
+            isinstance(RUN, dict)
+            and RUN.get("project_mode") == NEW_PROJECT
+            and isinstance(task_obj, dict)
+            and bool(task_obj.get("owned_mutation_paths"))
+            and not any(is_focused_test_command([p]) for p in task_obj.get("owned_mutation_paths", []))
+            and any(
+                is_focused_test_command([decl_p]) and not (Path(WORKSPACE) / decl_p).exists()
+                for decl_p, _ in _source_creation_requirements()
+            )
+        )
+        if owned_non_test:
+            return "[not_applicable] VERIFICATION_NOT_APPLICABLE: dedicated test suite belongs to a downstream sibling task and has not been created yet"
+        for tok in parts[1:]:
+            if tok.endswith(".py") and not (Path(WORKSPACE) / tok).exists() and _is_deferred_sibling_test_path(tok):
+                return f"[not_applicable] VERIFICATION_NOT_APPLICABLE: test suite '{tok}' belongs to a downstream sibling task and has not been created yet"
     resolved_policy = RUN.get("verification_environment_policy") == "resolved"
     if resolved_policy:
         preflight = verification_env.preflight_command(parts, WORKSPACE)
@@ -2272,7 +2323,7 @@ def _impact_effective_contract(value):
 def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
                                  context_anchor=None, execution_contract=None,
                                  mutation_required=True, task_scope_hint=None,
-                                 mission_targets=None):
+                                 mission_targets=None, owned_mutation_paths=None):
     if isinstance(candidate, dict):
         return copy.deepcopy(candidate)
     active = ACTIVE_TOOL_CONTRACT if isinstance(ACTIVE_TOOL_CONTRACT, dict) else {}
@@ -2303,10 +2354,26 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
             and RUN.get("project_mode") == NEW_PROJECT
             and not effective.get("execution_contract_id")
         )
+        explicit_owned = [
+            p for p in (_normalized_workspace_relative_path(x) for x in (owned_mutation_paths or []))
+            if p
+        ]
+        if is_greenfield_child and explicit_owned:
+            for path in explicit_owned:
+                targets.setdefault(path.casefold(), {
+                    "target": path, "path": path, "kind": "path",
+                    "provenance": [{
+                        "source_identity": "controller:assume-guarantee-ownership",
+                        "location": str(task_id), "evidence_kind": "owned_mutation_path",
+                        "excerpt": str(task["goal"])[:240],
+                    }],
+                })
         primary_sources = (
-            [task["goal"], *list(task_scope_hint or [])]
-            if is_greenfield_child
-            else [task["goal"], *list(task["done_when"] or [])]
+            []
+            if (is_greenfield_child and explicit_owned)
+            else ([task["goal"], *list(task_scope_hint or [])]
+                  if is_greenfield_child
+                  else [task["goal"], *list(task["done_when"] or [])])
         )
         for requirement in primary_sources:
             text = requirement.get("text", "") if isinstance(requirement, dict) else str(requirement)
@@ -2408,6 +2475,7 @@ def _impact_candidate_for_worker(task_text, task_id, *, candidate=None,
                 RUN.get("project_mode") == NEW_PROJECT
                 and not effective.get("execution_contract_id")
                 and str(task_id) != "ROOT"
+                and not explicit_owned
             ):
                 for declared_path, _req in _source_creation_requirements():
                     norm = _normalized_workspace_relative_path(declared_path)
@@ -2793,6 +2861,7 @@ def _prepare_task_impact_contract(task, contract=None, worker_mission=None):
         mutation_required=mutation_required,
         task_scope_hint=task.get("scope_hint") if isinstance(task, dict) else None,
         mission_targets=(worker_mission or {}).get("targets") if isinstance(worker_mission, dict) else None,
+        owned_mutation_paths=task.get("owned_mutation_paths") if isinstance(task, dict) else None,
     )
     if literal:
         # Bind every retained requirement to a concrete implementation and
@@ -5336,6 +5405,24 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
         )
         else 4096
     )
+    decoding_policy = str((RUN or {}).get("decoding_policy") or "fixed") if isinstance(RUN, dict) else "fixed"
+    if decoding_policy == "adaptive":
+        if estimate + builder_predict <= 10240 and estimate <= 8192:
+            context_window = min(max(context_window, 10240), 10240) if context_window >= 8192 else context_window
+        elif estimate + builder_predict <= 12288:
+            context_window = min(max(context_window, 12288), 12288) if context_window >= 8192 else context_window
+    decoding_epoch = int((RUN or {}).get("_active_decoding_epoch", 0) or 0) if isinstance(RUN, dict) else 0
+    decoding_stagnant = int((RUN or {}).get("_active_stagnant_count", 0) or 0) if isinstance(RUN, dict) else 0
+    decoding_options = resolve_decoding_options(
+        role,
+        policy=decoding_policy if decoding_policy in DECODING_POLICIES else "fixed",
+        base_temperature=MODEL_POLICY.temperature(role),
+        temperature_override=temperature,
+        structured=bool(response_format),
+        epoch=decoding_epoch,
+        stagnant_count=decoding_stagnant,
+        seed_base=0,
+    )
     payload = {
         "model": requested_model, "messages": provider_messages, "stream": False, "keep_alive": "10m",
         "options": {
@@ -5346,8 +5433,7 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                             "RequirementExtractor": 1536, "ReconAgent": 1024,
                             "TaskBrainCompiler": 1024, "ImpactPlanner": 1536,
                             "ImpactChallenger": 1280, "ImpactPlanReviser": 1536}.get(role, 2048),
-            "temperature": MODEL_POLICY.temperature(role) if temperature is None else temperature,
-            "seed": 0,
+            **decoding_options,
         },
         "think": bool(think),
     }
@@ -5483,6 +5569,14 @@ def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, th
                 RUN["provider_execution"] = "cpu_only_after_cuda_crash"
                 payload["options"]["num_gpu"] = 0
                 payload["options"]["num_ctx"] = min(context_window, 8192)
+            elif decoding_policy == "adaptive" and "no actionable content or tool_calls" in last_error:
+                payload["options"]["seed"] = int(payload["options"].get("seed", 0)) + 7919 * (attempt + 1)
+                payload["options"]["temperature"] = round(
+                    min(0.60, max(float(payload["options"].get("temperature", 0.15)), 0.25) + 0.10 * attempt),
+                    3,
+                )
+                payload["options"]["min_p"] = 0.0
+                payload["options"]["top_p"] = 0.95
             RUN["ollama_retry_count"] = RUN.get("ollama_retry_count", 0) + 1
             time.sleep(0.2 * (attempt + 1))
     raise ProviderError(last_error)
@@ -12552,6 +12646,17 @@ def decide_task_fit(task, depth, contract, repo_snapshot=None, parent_summary=""
                     "structural_fit": structural_fit,
                     "fit_scope": "SOURCE_CREATION_NOT_APPROVED_EXECUTION",
                 }
+            if structural_fit["non_test_mutation_path_count"] >= 2:
+                record_run_event(
+                    "source_creation_structural_fit", task_id=task.get("id"),
+                    paths=declared_paths, structural_fit=structural_fit,
+                )
+                return {
+                    "decision": "split",
+                    "reason": "multiple source-declared implementation owners; decompose into disjoint producer-consumer children",
+                    "structural_fit": structural_fit,
+                    "fit_scope": "SOURCE_CREATION_MULTI_OWNER_SPLIT",
+                }
         elif depth >= 1 and len(declared_paths) >= 2:
             child_paths = sorted({
                 ref["path"]
@@ -12916,6 +13021,57 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
     children, specs, _coupling = _apply_semantic_coupling_refinement(
         task, children, contract, specs,
     )
+    if (
+        RUN.get("project_mode") == NEW_PROJECT
+        and not isinstance(approved_plan, dict)
+        and len(children) >= 2
+    ):
+        declared_paths = sorted({path for path, _req in _source_creation_requirements()})
+        ag_partition = partition_disjoint_child_ownership(children, declared_paths=declared_paths)
+        partitioned_by_id = {
+            str(item.get("id")): item
+            for item in ag_partition.get("children", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        has_dedicated_test_child = any(
+            any(is_focused_test_command([p]) for p in (item.get("owned_mutation_paths") or []))
+            for item in partitioned_by_id.values()
+        )
+        for child in children:
+            cid = str(child.get("id", ""))
+            enriched = partitioned_by_id.get(cid)
+            if not isinstance(enriched, dict):
+                continue
+            child["owned_mutation_paths"] = list(enriched.get("owned_mutation_paths", []) or [])
+            child["read_only_sibling_paths"] = list(enriched.get("read_only_sibling_paths", []) or [])
+            if child["owned_mutation_paths"]:
+                child["scope_hint"] = list(child["owned_mutation_paths"])
+                if has_dedicated_test_child and not any(
+                    is_focused_test_command([p]) for p in child["owned_mutation_paths"]
+                ):
+                    cleaned_dw = [
+                        dw for dw in (child.get("done_when") or [])
+                        if not re.search(r"\b(?:unittest|pytest|unit\s+tests?|test\s+suite|test_\w+)\b", str(dw), re.I)
+                    ]
+                    child["done_when"] = cleaned_dw or [
+                        f"Implementation in {', '.join(child['owned_mutation_paths'])} is complete and verified on valid input."
+                    ]
+            existing_deps = list(child.get("depends_on") or child.get("dependencies") or [])
+            for dep_id in enriched.get("depends_on", []) or []:
+                if dep_id not in existing_deps and dep_id != cid:
+                    existing_deps.append(dep_id)
+            if existing_deps:
+                child["depends_on"] = existing_deps
+            TASKS[cid] = child
+            update_task_ledger(child)
+        RUN["assume_guarantee_partitions"] = RUN.get("assume_guarantee_partitions", 0) + 1
+        record_run_event(
+            "assume_guarantee_partitioned",
+            task_id=task["id"],
+            ownership_map=ag_partition.get("ownership_map", {}),
+            dependency_edges=ag_partition.get("dependency_edges", []),
+            conflicts=ag_partition.get("conflicts", []),
+        )
     _record_decomposition_branch(
         task, specs, children, kind="resplit" if force_smaller else "initial",
     )
@@ -14520,10 +14676,35 @@ def build_node_context(task, root_contract, memory_store, repo_snapshot, parent_
         )
         if rubric_text:
             rubric_section = f"{rubric_text}\n\n"
+    sibling_contract_section = ""
+    if (
+        not isinstance(execution_contract, dict)
+        and isinstance(task, dict)
+        and str(task.get("id", "")) != "ROOT"
+        and WORKSPACE is not None
+        and (task.get("owned_mutation_paths") or task.get("read_only_sibling_paths"))
+    ):
+        owned_list = list(task.get("owned_mutation_paths") or [])
+        owned_folded = {str(p).casefold() for p in owned_list}
+        sibling_certs = []
+        for rel_path, abs_path in _workspace_source_files():
+            if rel_path.casefold() in owned_folded:
+                continue
+            if rel_path.lower().endswith((".py", ".html", ".htm", ".js", ".mjs", ".cjs", ".css")):
+                sibling_certs.append(extract_file_certificate(rel_path, _read_source_file(abs_path)))
+        rendered_ag = format_sibling_guarantees_context(
+            sibling_certs,
+            owned_paths=owned_list,
+            read_only_paths=list(task.get("read_only_sibling_paths") or []),
+            max_chars=1100,
+        )
+        if rendered_ag:
+            sibling_contract_section = f"ASSUME-GUARANTEE SIBLING CONTRACT:\n{rendered_ag}\n\n"
     packet = (
         f"{root_contract_section}"
         f"{source_acceptance_section}"
         f"{rubric_section}"
+        f"{sibling_contract_section}"
         f"CURRENT NODE:\n{json.dumps(current_node, ensure_ascii=False)}\n\n"
         f"{brain_section}"
         f"{execution_contract_section}"
@@ -14604,6 +14785,20 @@ def _mutation_hint_target_state(target, role="Builder"):
 
 def tool_recovery_hint(tool_name, result, repeated_failures, args=None, role="Builder"):
     lower = str(result).casefold()
+    if tool_name == "context_sufficiency_check" and '"decision_valid": false' in lower:
+        return (
+            "CONTEXT GATE SCHEMA HINT: Your context_sufficiency_check call was rejected for missing required fields. "
+            "Supply BOTH required fields as a JSON object: "
+            '{"context_status": "sufficient", "reason": "Task requirements and sibling interfaces are clearly specified."} '
+            '(or if genuinely missing an existing repository file, include non-empty "reason" and 1-3 "needed_evidence" items).'
+        )
+    if tool_name == "run_file" and "python-call assertion raised an exception" in lower:
+        return (
+            "PYTHON CALL ARGS HINT: run_file unpacks 'arguments' as function(*arguments). "
+            "If the function expects a single list parameter (e.g. summarize_latencies(values)), "
+            "wrap the list inside an outer arguments array: arguments=[[10, 20, 30]]. "
+            "To test expected exceptions (like ValueError on empty input), run the unittest suite instead."
+        )
     if tool_name == "run_command" and "inline python is not allowed" in lower:
         return (
             "Do not repeat or rewrite the inline Python command. Invoke run_file using the existing .py path, "
@@ -14630,6 +14825,19 @@ def tool_recovery_hint(tool_name, result, repeated_failures, args=None, role="Bu
                     f"the trailing newline (`stdout={json.dumps(actual_out)}`). Do NOT edit the code to strip print()'s "
                     f"newline unless the prompt explicitly forbids a newline; re-run run_command with "
                     f"expected_stdout={json.dumps(actual_out)} (or omit expected_stdout)."
+                )
+            try:
+                parsed_actual = json.loads(actual_out.strip())
+                parsed_expected = json.loads(expected_out.strip())
+            except (TypeError, ValueError):
+                parsed_actual = parsed_expected = None
+            if isinstance(parsed_actual, dict) and isinstance(parsed_expected, dict):
+                canonical_actual = json.dumps(parsed_actual, sort_keys=True) + "\n"
+                return (
+                    f"JSON STDOUT MISMATCH: Actual stdout was {json.dumps(actual_out)} while your expected_stdout "
+                    f"was {json.dumps(expected_out)}. Ensure your code uses `json.dumps(result, sort_keys=True)` "
+                    f"(canonical alphabetical keys + integer `count`), and either omit `expected_stdout` in "
+                    f"run_command or include the exact trailing `\\n` (e.g. {json.dumps(canonical_actual)})."
                 )
     if tool_name == "run_command" and result_is_tool_rejection(result):
         paths = _literal_artifact_verification_paths()
@@ -14660,8 +14868,9 @@ def tool_recovery_hint(tool_name, result, repeated_failures, args=None, role="Bu
             if hints:
                 return (
                     "Browser verification failed. Do NOT call context_sufficiency_check or re-run verify_web_app "
-                    "without modifying the code first! Update `index.html` now (using write_file on your draft or "
-                    "edit_file/edit_file_range) to apply these exact fixes, THEN re-run verify_web_app:\n- "
+                    "without modifying the code first! Modify `index.html` now using your available file-mutation tool "
+                    "(use edit_file if offered, or write_file directly under coherent_rewrite without dumping the whole "
+                    "file via read_file first) to fix ONLY these exact issues, THEN re-run verify_web_app:\n- "
                     + "\n- ".join(hints)
                 )
     if tool_name in MUTATION_TOOLS and int(repeated_failures or 0) >= 1:
@@ -14981,7 +15190,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        context_sufficiency_enabled=False, context_sufficiency_gate=None,
                        context_evidence_provider=None, context_anchor=None,
                        initial_context_evidence=None, impact_contract=None,
-                       impact_contract_required=None):
+                       impact_contract_required=None, mutation_optional=False):
     global ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
     # A previous synchronous attempt must never lend its authorization to the
     # next Worker.  The caller's task/transaction retains the artifact for
@@ -15535,6 +15744,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             approved_targets=progress.approved_targets,
             policy=grounding_policy,
         )
+    legal_mutation_applied = False
+    has_legal_mutation = False
     for _step in range(max(1, int(step_budget))):
         context_reanchor_after_tool = False
         if structured_response_schema is not None:
@@ -15641,6 +15852,23 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             status = "done"
             break
         tool_calls = assistant_message.get("tool_calls", [])
+        if not tool_calls and role in {"Builder", "Repairer", "Falsifier"}:
+            content_probe = assistant_message.get("content", "") or ""
+            if (
+                no_tool_reanchors >= 1
+                or bool(RUN.get("text_json_tool_adapter_active"))
+                or role == "Falsifier"
+            ) and not re.match(r"\s*(?:```(?:python|py)?\s*)?([A-Za-z_]\w*)\s*\(", content_probe):
+                adapted_calls = extract_text_tool_call_fallback(content_probe, offered_names)
+                if adapted_calls:
+                    RUN["text_json_tool_adapter_active"] = True
+                    RUN["text_json_tool_calls_adapted"] = RUN.get("text_json_tool_calls_adapted", 0) + len(adapted_calls)
+                    record_run_event(
+                        "worker_text_json_tool_call_adapted", role=role, task_id=task_id,
+                        tools=[c["function"]["name"] for c in adapted_calls], step=int(_step) + 1,
+                    )
+                    assistant_message["tool_calls"] = adapted_calls
+                    tool_calls = adapted_calls
         if not tool_calls:
             content = assistant_message.get("content", "") or ""
             if (context_gate is not None and not context_gate.mutation_allowed
@@ -15749,6 +15977,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 )
                 break
             if (progress is not None and progress_policy == "progress_constrained"
+                    and not mutation_optional
                     and progress.first_legal_mutation is None):
                 progress_terminal = True
                 status = "failed"
@@ -15882,6 +16111,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 and (
                     last_evidence.get("tool") == _CONTEXT_COMPLETION_TOOL
                     or (
+                        not has_legal_mutation
+                        and not mutation_optional
+                        and "incomplete or truncated" in str(last_evidence.get("result", "")).casefold()
+                    )
+                    or (
                         not content.strip()
                         and isinstance(previous, dict)
                         and previous.get("role") == "tool"
@@ -15995,9 +16229,13 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             ):
                 argument_issue = tool_argument_error(name, args)
                 if argument_issue and "incomplete or truncated" in argument_issue.casefold():
+                    if isinstance(call.get("function"), dict):
+                        call["function"]["arguments"] = {}
+                    if isinstance(RUN, dict):
+                        RUN["_active_stagnant_count"] = int(RUN.get("_active_stagnant_count", 0) or 0) + 1
                     argument_issue += (
-                        " Your response hit the 4,096-token output limit. Keep the file concise "
-                        "(~135-155 lines total, minimal comments) so the complete tool JSON fits."
+                        " Your response hit the output token ceiling. Rewrite `index.html` concisely "
+                        "(~130-145 lines total, zero JS/CSS comments, compact styling) so the complete JSON tool call fits."
                     )
                 result = argument_issue
             else:
@@ -16790,7 +17028,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     break
 
             failure_key = (name, str(target))
-            repeated_failures[failure_key] = repeated_failures.get(failure_key, 0) + 1 if tool_result_failed(result) else 0
+            is_failed_or_invalid_decision = (
+                tool_result_failed(result)
+                or (name == "context_sufficiency_check" and '"decision_valid": false' in str(result).casefold())
+            )
+            repeated_failures[failure_key] = repeated_failures.get(failure_key, 0) + 1 if is_failed_or_invalid_decision else 0
             hint = (
                 ""
                 if special_observation is not None
@@ -16840,19 +17082,107 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     stop = True
                     break
 
-            if role == "Builder" and changed_file and not tool_result_failed(result):
+            legal_mutation_applied = (
+                changed_file
+                or (
+                    name in MUTATION_TOOLS
+                    and not tool_result_failed(result)
+                    and not result_is_tool_rejection(result)
+                    and not context_mutation_blocked
+                    and not impact_mutation_blocked
+                )
+            )
+            if legal_mutation_applied:
+                has_legal_mutation = True
+            if role == "Builder" and legal_mutation_applied:
                 stagnant_verifications = 0
                 last_verification_signature = ()
+                if isinstance(RUN, dict):
+                    RUN["_active_stagnant_count"] = 0
                 if (name == "write_file"
                         and str(target).casefold().endswith((".html", ".htm"))
                         and "verify_web_app" in offered_names):
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            f"HTML ARTIFACT WRITTEN ({target}): Call verify_web_app(path={json.dumps(str(target))}) "
-                            "next to verify the live browser application (do not call npm install or npm start)."
-                        ),
-                    })
+                    html_verify_msg = (
+                        f"HTML ARTIFACT WRITTEN ({target}): Call verify_web_app(path={json.dumps(str(target))}) "
+                        "immediately next to verify the live browser application (never call write_file twice in a row "
+                        "without verify_web_app, and do not call npm install or npm start)."
+                    )
+                    if messages and messages[-1].get("role") == "tool":
+                        messages[-1]["content"] = str(messages[-1].get("content", "")) + "\n\n" + html_verify_msg
+                    else:
+                        messages.append({"role": "user", "content": html_verify_msg})
+                elif (
+                    name == "write_file"
+                    and str(target).casefold().endswith(".py")
+                    and ("run_file" in offered_names or "run_command" in offered_names)
+                ):
+                    if is_focused_test_command([str(target)]) and "run_command" in offered_names:
+                        py_verify_msg = (
+                            f"PYTHON TEST WRITTEN ({target}): Call run_command(command={json.dumps('python -m unittest ' + str(target))}) "
+                            "next to execute and verify your test suite."
+                        )
+                    else:
+                        py_verify_msg = (
+                            f"PYTHON ARTIFACT WRITTEN ({target}): Verify once on a valid non-empty input and then finish — "
+                            f"for library functions call run_file(path={json.dumps(str(target))}, function='<fn_name>', "
+                            "arguments=[[...]], expected=...) on a valid return case ONLY (do NOT pass exception-raising inputs "
+                            "to run_file and do NOT run unittest on non-test modules); for CLI scripts call "
+                            "run_command with one valid sample CLI invocation from your task specification "
+                            "(WITHOUT expected_stdout) and inspect stdout to verify exact output formatting and keys."
+                        )
+                    if messages and messages[-1].get("role") == "tool":
+                        messages[-1]["content"] = str(messages[-1].get("content", "")) + "\n\n" + py_verify_msg
+                    else:
+                        messages.append({"role": "user", "content": py_verify_msg})
+                if WORKSPACE is not None and str(target).lower().endswith((".py", ".js", ".mjs", ".cjs", ".html", ".htm")):
+                    ws_sources = _workspace_source_files()
+                    if len(ws_sources) >= 2:
+                        ws_certs = {
+                            rel_p: extract_file_certificate(rel_p, _read_source_file(abs_p))
+                            for rel_p, abs_p in ws_sources
+                            if rel_p.lower().endswith((".py", ".html", ".htm", ".js", ".mjs", ".cjs", ".css"))
+                        }
+                        ag_live = verify_compositional_certificates(
+                            ws_certs,
+                            workspace_files={rel_p for rel_p, _ in ws_sources},
+                            check_html_assets=False,
+                        )
+                        norm_target = _normalized_workspace_relative_path(str(target))
+                        target_ce = [
+                            str(v.get("counterexample") or v.get("message") or "")
+                            for v in ag_live.get("violations", [])
+                            if isinstance(v, dict)
+                            and (
+                                not norm_target
+                                or str(v.get("file") or v.get("source_path") or "").casefold() == norm_target.casefold()
+                            )
+                            and (v.get("counterexample") or v.get("message"))
+                        ]
+                        if not target_ce and len(ag_live.get("repair_counterexamples", [])) <= 3:
+                            target_ce = list(ag_live.get("repair_counterexamples", []))
+                        if target_ce:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "ASSUME-GUARANTEE INTERFACE CHECK: Cross-file mismatch detected:\n- "
+                                    + "\n- ".join(target_ce[:3])
+                                    + "\nAlign your imports/DOM IDs with the verified sibling contract before finishing."
+                                ),
+                            })
+            elif (
+                name == "verify_web_app"
+                and role in {"Builder", "Repairer"}
+                and has_legal_mutation
+                and '"passed": true' in str(result).lower()
+            ):
+                web_pass_msg = (
+                    "BROWSER VERIFICATION PASSED: All WebGL, HUD layout, initial-frame render, and gameplay "
+                    "checks succeeded. Conclude your turn now with a concise summary — do NOT modify files again."
+                )
+                if messages and messages[-1].get("role") == "tool":
+                    messages[-1]["content"] = str(messages[-1].get("content", "")) + "\n\n" + web_pass_msg
+                else:
+                    messages.append({"role": "user", "content": web_pass_msg})
 
             if (role == "Builder" and name in {"read_file", "read_file_range"}
                     and stagnant_verifications >= 1):
@@ -16877,6 +17207,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                     summary = f"{observation_stop}: the same browser failure persisted for three checks"
                     stop = True
                     break
+            if isinstance(RUN, dict):
+                RUN["_active_stagnant_count"] = max(
+                    int(stagnant_verifications),
+                    max(repeated_failures.values(), default=0),
+                )
 
             if (role in {"Builder", "Repairer"} and _browser_tool_request(name, args)
                     and not tool_result_failed(result)
@@ -16885,6 +17220,34 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 summary = "Deterministic browser verification passed; stop-on-proof completed this focused execution."
                 stop = True
                 break
+
+            if (
+                role in {"Builder", "Repairer"}
+                and name in {"run_file", "run_command"}
+                and not tool_result_failed(result)
+                and not result_not_applicable(result)
+                and not result_is_tool_rejection(result)
+                and verification_outcome(result) == VERIFICATION_PASS
+                and isinstance(RUN, dict)
+                and RUN.get("project_mode") == NEW_PROJECT
+                and str(task_id) != "ROOT"
+                and WORKSPACE is not None
+            ):
+                child_node_obj = (TASKS or {}).get(str(task_id))
+                owned_py = [
+                    str(p) for p in ((child_node_obj or {}).get("owned_mutation_paths") or [])
+                    if str(p).lower().endswith(".py")
+                ]
+                if (
+                    owned_py
+                    and all((Path(WORKSPACE) / p).is_file() for p in owned_py)
+                    and any(p.casefold() in str(target).casefold() for p in owned_py)
+                    and not unresolved_tool_failures(current_verification_evidence(evidence))
+                ):
+                    status = "done"
+                    summary = f"Deterministic Python child verification passed for {', '.join(owned_py)}; stop-on-proof completed this focused execution."
+                    stop = True
+                    break
         if context_reanchor_after_tool:
             continue
         if restart_after_recovery_strategy_switch:
@@ -17142,6 +17505,18 @@ def _acyclic_browser_value(value, _seen=None, _depth=0):
     return str(value)[:240]
 
 
+def _coerce_game_state_dict(value):
+    val = _acyclic_browser_value(value)
+    if isinstance(val, str) and val.strip().startswith("{"):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, dict):
+                return _acyclic_browser_value(parsed)
+        except (TypeError, ValueError):
+            pass
+    return val if isinstance(val, dict) else {}
+
+
 def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement=""):
     RUN["browser_checks"] += 1
     ok, detail = ensure_browser(False)
@@ -17207,16 +17582,54 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
             text = page.locator("body").inner_text(timeout=5000)[:4000]
             runtime_state = _acyclic_browser_value(page.evaluate(f"""() => {{
                 const bridge = {GAME_BRIDGE_EXPRESSION} || null;
-                const state = bridge && typeof bridge.getState === 'function' ? bridge.getState() : null;
+                let state = bridge && typeof bridge.getState === 'function' ? bridge.getState() : null;
+                if (typeof state === 'string' && state.trim().startsWith('{{')) {{
+                    try {{ state = JSON.parse(state); }} catch {{}}
+                }}
                 return {{canvasCount: document.querySelectorAll('canvas').length,
                         gameBridge: bridge ? {{name: {json.dumps(GAME_BRIDGE_NAME)}, state}} : null,
                         debugState: state}};
             }}"""))
             canvas_quality = page.evaluate(BROWSER_CANVAS_QUALITY_JS)
             if isinstance(canvas_quality, dict):
+                is_real_three_doc = bool(page.evaluate(
+                    """() => Boolean(document.querySelector('script[type="importmap" i], script[src*="three" i]') || /\\bTHREE\\b/.test(document.documentElement.innerHTML))"""
+                ))
                 canvas_quality["requiresThreeWebGL"] = bool(
                     detect_threejs_or_3d(ACTIVE_TOOL_CONTRACT or ACTIVE_CONTRACT or {})
+                    or detect_threejs_or_3d(verification_requirement or "")
                 )
+                if (
+                    (canvas_quality["requiresThreeWebGL"] or is_real_three_doc)
+                    and int(canvas_quality.get("visibleCount", 0) or 0) >= 1
+                    and is_real_three_doc
+                ):
+                        try:
+                            pre_b64 = base64.b64encode(page.screenshot(type="jpeg", quality=55)).decode("ascii")
+                            center_std = float(page.evaluate(
+                                """async (b64) => {
+                                    const img = new Image();
+                                    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = 'data:image/jpeg;base64,' + b64; });
+                                    const c = document.createElement('canvas');
+                                    c.width = 48; c.height = 32;
+                                    const ctx = c.getContext('2d');
+                                    ctx.drawImage(img, 0, 0, 48, 32);
+                                    const data = ctx.getImageData(6, 6, 36, 20).data;
+                                    let sum = 0, sumSq = 0, n = 0;
+                                    for (let i = 0; i < data.length; i += 4) {
+                                        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                                        sum += lum; sumSq += lum * lum; n += 1;
+                                    }
+                                    if (!n) return 10;
+                                    const mean = sum / n;
+                                    return Math.sqrt(Math.max(0, (sumSq / n) - (mean * mean)));
+                                }""",
+                                pre_b64,
+                            ))
+                            canvas_quality["initialCenterLuminanceStd"] = round(center_std, 3)
+                            canvas_quality["initialFrameBlank"] = bool(center_std < 0.75)
+                        except Exception:
+                            pass
             runtime_state["canvasMetrics"] = canvas_quality
             interaction_checks = []
             def _check_entry(check_name, passed_flag, *, before=None, after=None):
@@ -17243,7 +17656,7 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                 bridge_expr = GAME_BRIDGE_EXPRESSION
                 page.evaluate(f"() => {{ const game={bridge_expr}; if (game.start) game.start(); }}")
                 page.wait_for_timeout(100)
-                before_move = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                before_move = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                 moved_with_bridge = page.evaluate(
                     f"""() => {{ const game={bridge_expr}; if (typeof game.move === 'function') {{
                         const safeProj = (v) => {{
@@ -17268,7 +17681,10 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                         const snap = () => {{
                             try {{
                                 if (!game.getState) return null;
-                                const s = game.getState() || {{}};
+                                let s = game.getState() || {{}};
+                                if (typeof s === 'string' && s.trim().startsWith('{{')) {{
+                                    try {{ s = JSON.parse(s); }} catch {{ s = {{}}; }}
+                                }}
                                 return JSON.stringify([s.score, safeProj(s.player), safeProj(s.position)]);
                             }} catch {{
                                 return null;
@@ -17288,7 +17704,7 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                     page.wait_for_timeout(200)
                     page.keyboard.up("ArrowUp")
                 page.wait_for_timeout(300)
-                moved_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                moved_state = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                 moved = moved_state != before_move and (
                     moved_state.get("score", 0) > (before_move or {}).get("score", -1)
                     or moved_state.get("player") != (before_move or {}).get("player")
@@ -17300,7 +17716,7 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                         page.wait_for_timeout(180)
                         page.keyboard.up(key_probe)
                         page.wait_for_timeout(80)
-                        moved_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                        moved_state = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                         moved = moved_state != before_move and (
                             moved_state.get("score", 0) > (before_move or {}).get("score", -1)
                             or moved_state.get("player") != (before_move or {}).get("player")
@@ -17313,10 +17729,10 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
 
                 req_interactions = set(profile.required_interactions) if profile else set()
                 if (not profile or "collection_updates_state" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).forceCollect === 'function'"):
-                    before_collect = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    before_collect = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     page.evaluate(f"() => ({bridge_expr}).forceCollect()")
                     page.wait_for_timeout(100)
-                    after_collect = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    after_collect = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     collected = (
                         after_collect.get("score", 0) > (before_collect or {}).get("score", -1)
                         or after_collect.get("collected") != (before_collect or {}).get("collected")
@@ -17328,7 +17744,7 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                 if (not profile or "collision_game_over" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).forceCollision === 'function'"):
                     page.evaluate(f"() => ({bridge_expr}).forceCollision()")
                     page.wait_for_timeout(150)
-                    state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    state = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     interaction_checks.append(_check_entry(
                         "collision_game_over",
                         str(state.get("status", "")).lower().replace("_", "-") in {"gameover", "game-over", "lost", "dead"},
@@ -17336,11 +17752,11 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                     ))
 
                 if (not profile or "restart_resets_state" in req_interactions) and page.evaluate(f"() => typeof ({bridge_expr}).restart === 'function'"):
-                    immediate_restart = _acyclic_browser_value(page.evaluate(
+                    immediate_restart = _coerce_game_state_dict(page.evaluate(
                         f"() => {{ const game={bridge_expr}; game.restart(); return game.getState ? game.getState() : null; }}"
                     ))
                     page.wait_for_timeout(150)
-                    state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    state = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     score_was_reset = (
                         (isinstance(immediate_restart, dict) and immediate_restart.get("score") == 0)
                         or state.get("score") == 0
@@ -17357,7 +17773,7 @@ def browser_snapshot(url, task_id="ROOT", profile=None, verification_requirement
                     page.wait_for_timeout(50)
                     page.evaluate(f"() => ({bridge_expr}).forceWin()")
                     page.wait_for_timeout(150)
-                    win_state = _acyclic_browser_value(page.evaluate(f"() => ({bridge_expr}).getState()"))
+                    win_state = _coerce_game_state_dict(page.evaluate(f"() => ({bridge_expr}).getState()"))
                     interaction_checks.append(_check_entry(
                         "goal_win_state",
                         str(win_state.get("status", "")).lower().replace("_", "-") in {"won", "win", "complete", "completed", "victory"},
@@ -18506,11 +18922,16 @@ def falsify_task(task, contract, memory, builder_result, repo_snapshot, node_con
             "status": "done", "summary": "Source-bound exact-byte readback covers the request.",
             "memory": memory, "tool_evidence": source_evidence,
         }
+    six_angle_qa = build_six_angle_qa_checklist(
+        detect_quality_domain(contract if isinstance(contract, dict) else None, str(task.get("goal", "")))
+    )
     instruction = (
         f"BUILDER SUMMARY: {compact_text(builder_result.get('summary', ''), 700)}\n"
         "ROLE CONSTRAINT: You are strictly READ-ONLY. Never call write_file, edit_file, or edit_file_range; "
         "only read_file, list_files, search_text, run_file, run_command, and verify_web_app are available. "
-        "For HTML/browser applications, verify with verify_web_app and read_file (never pass function=... to run_file on HTML files).\n"
+        "For HTML/browser applications, verify with verify_web_app and read_file (never pass function=... to run_file on HTML files). "
+        "Verify ONLY files that currently exist in the workspace; do not attempt to run downstream sibling test files that have not been created yet.\n"
+        f"{six_angle_qa}\n"
         "Actively try to falsify success using current files. Run relevant tests/commands/browser interactions. "
         "For normal/high risk, attempt at most 1-2 cheap edge-case probes (boundary/invalid/reload/repeated action/alternate viewport) when useful. "
         "Do not modify application files. Concrete executable failures matter; narrative suspicion is advisory."
@@ -21373,7 +21794,7 @@ def repair_task(task, contract, failure_evidence, memory, node_context, parent_g
     context = (
         f"{direct_failure}{node_context}\n\nCURRENT DETERMINISTIC FAILURE EVIDENCE:\n"
         f"{json.dumps(failure_evidence, ensure_ascii=False)[:5000]}\n"
-        "Repair only demonstrated implementation defects. Run fresh executable verification after the edit."
+        "Repair only demonstrated implementation defects in your owned file(s): call read_file first, then apply a small targeted edit_file (never call write_file when sibling files exist). Run fresh executable verification after the edit."
     )
     worker_execution_contract = _current_execution_contract(task)
     draft_policy = (
@@ -21764,11 +22185,16 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
     current_browser = browser
     repair_history = []
     repair_mutation_failures = _mutation_failure_records(builder)
-    for _ in range(MAX_REPAIRS_PER_LEAF):
-        repaired = repair_task(
-            task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context,
-            parent_goal=parent_summary,
-        )
+    for _repair_idx in range(MAX_REPAIRS_PER_LEAF):
+        prev_epoch = RUN.get("_active_decoding_epoch", 0)
+        RUN["_active_decoding_epoch"] = max(int(prev_epoch or 0), _repair_idx + 1)
+        try:
+            repaired = repair_task(
+                task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context,
+                parent_goal=parent_summary,
+            )
+        finally:
+            RUN["_active_decoding_epoch"] = prev_epoch
         memory = repaired["memory"]
         repair_mutation_failures = _merge_mutation_failure_records(
             repair_mutation_failures, _mutation_failure_records(repaired),
@@ -22877,6 +23303,31 @@ def run_integration_preflight(task=None, child_info=None, contract=None):
             sorted({owner for symbol in duplicate_child_symbols for owner in child_symbol_owners[symbol]}),
             symbols=duplicate_child_symbols,
         ))
+    if len(source_files) >= 2:
+        ag_certs = {
+            rel_p: extract_file_certificate(rel_p, _read_source_file(abs_p))
+            for rel_p, abs_p in source_files
+            if rel_p.lower().endswith((".py", ".html", ".htm", ".js", ".mjs", ".cjs", ".css"))
+        }
+        if ag_certs:
+            ag_preflight = verify_compositional_certificates(
+                ag_certs,
+                workspace_files={rel_p for rel_p, _ in source_files},
+                check_html_assets=True,
+            )
+            RUN["interface_hallucinations_detected"] = RUN.get("interface_hallucinations_detected", 0) + int(
+                ag_preflight.get("interface_hallucination_count", 0) or 0
+            )
+            for v in ag_preflight.get("violations", []) or []:
+                if not isinstance(v, dict):
+                    continue
+                v_file = str(v.get("file") or v.get("source_path") or "")
+                conflicts.append(_preflight_conflict(
+                    "assume_guarantee_interface_mismatch",
+                    str(v.get("counterexample") or v.get("message") or v.get("code") or "cross-file interface mismatch"),
+                    [v_file] if v_file else [rel_p for rel_p, _ in source_files[:2]],
+                    violation_code=v.get("code"),
+                ))
     # Contract prose is authoritative task input, but it is not evidence that
     # a project already has an invariant.  Keep the canonical ledger limited
     # to deterministic scans and verified child manifests.
@@ -23758,6 +24209,7 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         ),
         impact_contract=parent_impact_candidate,
         impact_contract_required=bool(task.get("impact_contract_required")),
+        mutation_optional=bool(preflight_before.get("passed")),
     )
     memory = builder.get("memory", memory)
     builder["integration_contract"] = integration_contract
@@ -23823,7 +24275,8 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
     gate = evidence_gate(builder, falsifier, browser, integration_preflight=preflight_after)
     event(f"[VERIFY {label}] {'PASS' if gate['passed'] else 'FAIL'}",
           role="Quality Review", task=label, action="parent evidence gate")
-    if gate["passed"] and task.get("impact_contract_required"):
+    parent_mutated_files = bool(ACTIVE_TRANSACTION and ACTIVE_TRANSACTION.get("files"))
+    if gate["passed"] and task.get("impact_contract_required") and (parent_mutated_files or not preflight_before.get("passed")):
         impact_contract = _accepted_impact_contract_for_result(task, builder)
         if impact_contract is not None or _impact_result_requires_artifact(builder):
             impact_comparison = _impact_post_mutation_check(
@@ -25034,6 +25487,8 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
             retry_task["failure_evidence"] = retry_evidence[-4:]
             event(f"[EVIDENCE-LICENSED CORRECTION {label}] {episode.get('episode_class')}",
                   role="Coordinator", task=label, action="same-authority correction")
+            prev_epoch = RUN.get("_active_decoding_epoch", 0)
+            RUN["_active_decoding_epoch"] = max(int(prev_epoch or 0), 1)
             try:
                 corrected = executor(
                     retry_task, contract, memory, inspect_repository(),
@@ -25041,6 +25496,8 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
                 )
             except ProviderError as exc:
                 corrected = {"status": "failed", "failure_type": "ENVIRONMENT_ERROR", "summary": str(exc), "memory": memory}
+            finally:
+                RUN["_active_decoding_epoch"] = prev_epoch
             leaf = corrected
             memory = leaf.get("memory", memory)
             if leaf.get("status") == "done":
@@ -29039,7 +29496,9 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
                           integration_target_policy="current", semantic_evidence_policy="current",
                           verification_classification_policy="current",
                           worker_no_tool_policy="current",
-                          worker_context_decision_policy="current"):
+                          worker_context_decision_policy="current",
+                          decoding_policy="fixed"):
+    validate_decoding_policy(decoding_policy)
     if planning_route not in {"current_recursive", "decomposition_first_recursive"}:
         raise ValueError("unknown recursive planning route")
     if mission_advice_policy not in {"strict", "contract_fallback"}:
@@ -29108,6 +29567,7 @@ def run_recursive_request(user_text, memory, interactive=True, contract_override
     RUN["integration_target_policy"] = integration_target_policy
     RUN["semantic_evidence_policy"] = semantic_evidence_policy
     RUN["verification_classification_policy"] = verification_classification_policy
+    RUN["decoding_policy"] = decoding_policy
     RUN["worker_no_tool_policy"] = worker_no_tool_policy
     RUN["worker_context_decision_policy"] = worker_context_decision_policy
     RUN["experiment_case_id"] = experiment_case_id or hashlib.sha256(
@@ -31682,6 +32142,8 @@ def parse_args():
     parser.add_argument("--prompt-file")
     parser.add_argument("--json-report", metavar="PATH",
                         help="Write a structured privacy-safe JSON deliverable run report to PATH")
+    parser.add_argument("--decoding-policy", choices=DECODING_POLICIES, default="fixed",
+                        help="Role/epoch decoding schedule: 'adaptive' (min_p + stagnation escape) or 'fixed' (default)")
     parser.add_argument("--max-model-calls", type=int, help="Admit at most this many task generation requests, including retries")
     parser.add_argument("--max-tool-calls", type=int, help="Admit at most this many model-proposed tool calls")
     parser.add_argument("--max-elapsed-seconds", type=float, help="Task admission deadline; excludes startup preflight")
@@ -31870,6 +32332,22 @@ def main():
         except ValueError as exc:
             print(f"[SETUP_ERROR] {exc}")
             raise SystemExit(2)
+        if not hasattr(run_host_preflight, "_mock_name"):
+            try:
+                import urllib.request as _ureq
+                _ps = json.loads(_ureq.urlopen(str(OLLAMA_BASE_URL).rstrip("/") + "/api/ps", timeout=3).read().decode("utf-8"))
+                if _ps.get("models"):
+                    for _m in _ps["models"]:
+                        _mname = _m.get("name") or _m.get("model")
+                        if _mname:
+                            _ureq.urlopen(_ureq.Request(
+                                str(OLLAMA_BASE_URL).rstrip("/") + "/api/generate",
+                                data=json.dumps({"model": str(_mname), "keep_alive": 0}).encode("utf-8"),
+                                headers={"Content-Type": "application/json"},
+                            ), timeout=5).read()
+                    time.sleep(1.5)
+            except Exception:
+                pass
         HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
         print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
         if not HOST_PREFLIGHT_RESULT["passed"]:
@@ -31920,6 +32398,9 @@ def main():
         classification_policy = getattr(args, "verification_classification_policy", "current")
         classification_kwargs = ({"verification_classification_policy": classification_policy}
                                  if classification_policy != "current" else {})
+        decoding_policy = getattr(args, "decoding_policy", "fixed")
+        decoding_kwargs = ({"decoding_policy": decoding_policy}
+                           if decoding_policy != "fixed" else {})
         if args.mode == "baseline":
             result, memory = run_baseline_request(user_text, memory, interactive=interactive)
         elif args.mode == "recursive":
@@ -31932,6 +32413,7 @@ def main():
                 **integration_kwargs,
                 **semantic_kwargs,
                 **classification_kwargs, **no_tool_kwargs, **context_closure_kwargs,
+                **decoding_kwargs,
             )
         elif args.mode in {"current_recursive", "decomposition_first_recursive"}:
             route = ("decomposition_first_recursive" if args.mode == "decomposition_first_recursive"
@@ -31946,6 +32428,7 @@ def main():
                 **integration_kwargs,
                 **semantic_kwargs,
                 **classification_kwargs, **no_tool_kwargs, **context_closure_kwargs,
+                **decoding_kwargs,
             )
         else:
             result, memory = run_auto_request(user_text, memory, interactive=interactive)

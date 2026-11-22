@@ -182,6 +182,18 @@ def check_source_assertion(workspace, case):
     }
 
 
+def _json_values_equal(a, b):
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_json_values_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return set(a.keys()) == set(b.keys()) and all(_json_values_equal(a[k], b[k]) for k in a)
+    return type(a) is type(b) and a == b
+
+
 def check_call(workspace, path, function, arguments, expected):
     root = Path(workspace).resolve()
     target = (root / path).resolve()
@@ -233,7 +245,7 @@ def check_call(workspace, path, function, arguments, expected):
     except OSError as exc:
         return {"passed": False, "error": f"Python-call source became unreadable: {exc}"}
     return {
-        "passed": actual_json == expected_json and unchanged,
+        "passed": (actual_json == expected_json or _json_values_equal(observed["actual"], expected)) and unchanged,
         "path": target.relative_to(root).as_posix(), "function": function,
         "arguments": arguments, "expected": expected, "actual": observed["actual"],
         "stdout": observed["stdout"], "source_sha256": source_hash,

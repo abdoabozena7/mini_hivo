@@ -1,0 +1,173 @@
+# Sanitized derivative excerpt: lines 1..165 of retained local run log run-py-multifile-gemma-agiss-live-v9.log
+# Run ID: 20261122T140910-1b993032 | Model: gemma4:e4b | Mode: recursive | Exit code: 0
+# Topology: [FIT ROOT] SPLIT ([SPLIT ROOT] -> Child 1 metrics.py [DONE 1] -> Child 2 cli.py [DONE 2] -> Child 3 test_metrics.py [DONE 3] -> [AGGREGATE ROOT] -> [ROOT VERIFIED] PASS)
+# Original full log: 96,041 bytes | original_sha256: d74eb80be5d9558e827402351f9d01092c3ef26728a747a5833706a1f805840a
+# Original UTF-8 lines 1..165 slice: 22,256 bytes | original_slice_sha256: 14dcea32bf8f164297cd3ccd39f0564dfbe350e32b00e6261510c0f3a028eb1f
+# Sanitization: stripped UTF-8 BOM, normalized CRLF to LF, replaced local workspace path with
+# <workspace>/workspace-py-multifile-gemma-agiss-live-v9, and redacted host RAM/GPU inventory lines per AGENTS.md.
+
+workspace set to: <workspace>\workspace-py-multifile-gemma-agiss-live-v9
+
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: gemma4:e4b
+Completed canary calls: 3/3
+System RAM: <redacted-host-ram>
+GPU: <redacted-local-gpu>
+Warnings: none
+Starting HIVO...
+[MODEL] gemma4:e4b
+[PROVIDER] local Ollama only
+[CAPACITY] 1/4 (PARAMETER-SIZE HEURISTIC; NOT A BENCHMARK)
+[ROOT] Create `metrics.py`, `cli.py`, and `test_metrics.py` for a Swarm Telemetry Analyzer in Python 3 (stdlib only, ask no clarification questions):
+[FIT ROOT] SPLIT
+[TASK 1] Implement the core logic for latency summarization in `metrics.py`.
+[FIT 1] EXECUTE
+[BUILDER] 1 executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 649}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 1242}
+[TOOL] write_file metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 548}
+[TOOL] run_file metrics.py::ea29750a2d3b852a
+[FALSIFY 1]
+[FALSIFIER] 1 executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 1104, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 1558}
+[TOOL] list_files -
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 316}
+[VERIFY 1] PASS
+[DONE 1]
+[TASK 2] Implement the command-line interface in `cli.py` to consume comma-separated values and use the metrics function.
+[FIT 2] EXECUTE
+[BUILDER] 2 executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 725}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 2630}
+[TOOL] write_file cli.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 470}
+[TOOL] run_command python cli.py --values 10.5,20.1,30.0
+[FALSIFY 2]
+[FALSIFIER] 2 executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 1132, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 3620}
+[TOOL] write_file cli.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 2452}
+[TOOL] write_file cli.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 326, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 5001}
+[TOOL] write_file test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 317}
+[VERIFY 2] PASS
+[DONE 2]
+[TASK 3] Create the unit test suite in `test_metrics.py` to verify `metrics.py` and `cli.py` functionality.
+[FIT 3] EXECUTE
+[BUILDER] 3 executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 806}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "length", "has_error": false, "body_chars": 1796}
+[TOOL] write_file -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 2162}
+[TOOL] write_file test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 469}
+[TOOL] run_command python -m unittest test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 771, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 1233}
+[TOOL] read_file test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 320}
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 932}
+[TOOL] edit_file test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 480}
+[TOOL] read_file_range test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 844}
+[TOOL] edit_file test_metrics.py
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 468}
+[TOOL] run_command python -m unittest test_metrics.py
+[FALSIFY 3]
+[FALSIFIER] 3 executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 438}
+[TOOL] read_file metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 441}
+[TOOL] read_file test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 442}
+[TOOL] run_file test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 1891, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 2459}
+[TOOL] read_file_range test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 480}
+[TOOL] read_file_range test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 480}
+[TOOL] read_file_range test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 480}
+[TOOL] read_file_range test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 480}
+[TOOL] read_file_range test_metrics.py
+[VERIFY 3] PASS
+[DONE 3]
+[AGGREGATE ROOT]
+[INTEGRATION PREFLIGHT ROOT] PASS (0 conflict(s))
+[BUILDER] ROOT executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 810}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 468}
+[TOOL] run_command python -m unittest test_metrics.py
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 324}
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 327}
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 795, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 1250}
+[TOOL] run_file test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 440}
+[TOOL] run_file test_metrics.py
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 266, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 738}
+[TOOL] run_command python cli.py::880465f3b3300195
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 483}
+[TOOL] run_command python cli.py --values ""::880465f3b3300195
+[VERIFY ROOT] PASS
+[ROOT VERIFIED] PASS
+[DONE ROOT]
+[FINAL] done
+
+[TASK TREE]
+ROOT Create `metrics.py`, `cli.py`, and `test_metrics.py` for a Swarm Telemetry Analyzer in Py... PASS
+├── 1 Implement the core logic for latency summarization in `metrics.py`. PASS
+├── 2 Implement the command-line interface in `cli.py` to consume comma-separated values and us... PASS
+└── 3 Create the unit test suite in `test_metrics.py` to verify `metrics.py` and `cli.py` funct... PASS
+
+[RESPLIT METRICS]
+failed_nodes_resplit: 0
+resplit_nodes_with_any_verified_child: 0
+resplit_nodes_fully_recovered: 0
+granularity_rescue_rate: 0%
+
+[DECOMPOSITION / STRATEGY SEARCH METRICS]
+terminal_too_broad_nodes: 0
+decomposition_backtracks: 0
+alternative_decompositions: 0
+alternative_decomposition_rescues: 0
+strategy_searches: 0
+strategy_generation_failures: 0
+alternate_strategies_attempted: 0
+strategy_rescues: 0
+strategy_search_failures: 0
+capability_floor_nodes: 0
+capability_floor_guard_blocks: 0
+capability_floor_routed_to_strategy: 0
+execution_budget_exhaustions: 0
+budget_exhaustion_routed_to_scope: 0
+budget_exhaustion_routed_to_strategy: 0
+budget_exhaustion_routed_to_dependency: 0
+budget_exhaustion_routed_to_other: 0
+mutation_failures_recorded: 5
+mutation_recovery_packets_emitted: 1
+decomposition_backtrack_rescue_rate: N/A
+strategy_rescue_rate: N/A
+
+[INTEGRATION METRICS]
+parent_integrations_attempted: 1
+parent_integrations_passed: 1
+parent_integrations_failed: 0
+parent_integrations_recovered: 0
+integration_preflight_conflicts: 0
+integration_conflicts_resolved: 0
+invariant_violations_detected: 0
+integration_milestone_runs: 0
+integration_tasks_created: 0
+integration_splits: 0
+integration_resplits: 0
+integration_verified_nodes: 0

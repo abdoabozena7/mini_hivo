@@ -1,0 +1,4 @@
+Create `metrics.py`, `cli.py`, and `test_metrics.py` for a Swarm Telemetry Analyzer in Python 3 (stdlib only, ask no clarification questions):
+1. `metrics.py`: implement `summarize_latencies(values: list[float]) -> dict` returning `{"count": len(values), "min": min_val, "max": max_val, "mean": round(mean_val, 2)}` for non-empty numeric lists and raising `ValueError("values must not be empty")` when `values` is empty.
+2. `cli.py`: accept comma-separated numbers via `--values` (for example `python cli.py --values 10,20,30`), call `summarize_latencies`, print canonical JSON (`json.dumps(result, sort_keys=True)`) to stdout with exit code `0`, and on invalid/empty input print an error message to stderr and exit with code `2`.
+3. `test_metrics.py`: `unittest` suite testing `summarize_latencies([10, 20, 30]) == {"count": 3, "min": 10.0, "max": 30.0, "mean": 20.0}`, empty-list `ValueError`, and `cli.py --values 10,20,30` subprocess exit `0` + `--values ""` nonzero exit.

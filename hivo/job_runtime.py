@@ -562,14 +562,22 @@ def _chat_payload(payload):
     ):
         return None
     options = payload.get("options", {})
-    if not isinstance(options, dict) or set(options) - {"num_ctx", "num_predict", "temperature", "seed", "num_gpu"}:
+    if not isinstance(options, dict) or set(options) - {
+        "num_ctx", "num_predict", "temperature", "seed", "num_gpu",
+        "min_p", "top_p", "top_k", "repeat_penalty", "repeat_last_n",
+    }:
         return None
     options = {"num_ctx": 4096, "num_predict": 4096, **options}
-    for key, lower, upper in (("num_ctx", 512, 12288), ("num_predict", 1, 4096),
-                              ("seed", -1, 2147483647), ("num_gpu", 0, 0)):
+    for key, lower, upper in (
+        ("num_ctx", 512, 12288), ("num_predict", 1, 4096), ("seed", -1, 2147483647),
+        ("num_gpu", 0, 0), ("top_k", 1, 200), ("repeat_last_n", 0, 512),
+    ):
         if key in options and (type(options[key]) is not int or not lower <= options[key] <= upper):
             return None
-    if "temperature" in options and not _number(options["temperature"], 0, 2):
+    for key, lower, upper in (("temperature", 0, 2), ("min_p", 0.0, 0.5), ("repeat_penalty", 1.0, 1.3)):
+        if key in options and not _number(options[key], lower, upper):
+            return None
+    if "top_p" in options and not (_number(options["top_p"], 0.0, 1.0) and options["top_p"] > 0.0):
         return None
     return payload | {"stream": False, "keep_alive": "10m", "options": options}
 

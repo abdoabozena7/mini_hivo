@@ -1,10 +1,11 @@
 # Mini Hivo
 
-**North Star & Architecture:** [project goal and graduation thesis](docs/PROJECT_GOAL.md) · [swarm and recursive agent charter](docs/AGENT_ARCHITECTURE.md)
+**North Star & Architecture:** [project goal and graduation thesis](docs/PROJECT_GOAL.md) · [swarm and recursive agent charter](docs/AGENT_ARCHITECTURE.md) · [AGISS research paper](docs/RESEARCH_PAPER.md)
 
-**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md) · [Karim PR integration](updates/R_UPDATE_003.md).
+**Project checkpoint:** [feature status and remaining architecture milestones](docs/PROJECT_STATUS.md) · [experiment commit history](docs/EXPERIMENT_HISTORY.md) · [measured results index](reports/INDEX.md) · [branch consolidation](docs/BRANCH_CONSOLIDATION.md) · [live request-to-output acceptance](docs/LIVE_E2E_VALIDATION.md) · [Three.js weak-model swarm baseline](updates/R_UPDATE_008.md) · [Karim PR integration](updates/R_UPDATE_003.md).
 
-Latest: [quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md),
+Latest: [AGISS formal synthesis & hardware-aware decoding paper](docs/RESEARCH_PAPER.md),
+[quiet terminal and real interactive acceptance](updates/R_UPDATE_004.md),
 [manual Three.js run diagnosis](docs/MANUAL_RUN_ANALYSIS.md), and
 [one selected research contribution](docs/RESEARCH_DIRECTION.md).
 The [publication addendum](reports/integration/karim-pr1/publication.json)
@@ -55,10 +56,11 @@ directly under `list/` still migrate once into `list/project-1`.
 
 For a noninteractive run, supply an existing workspace directory and a UTF-8
 prompt file (optionally emitting a structured privacy-safe JSON deliverable
-report via `--json-report`):
+report via `--json-report` and selecting `--decoding-policy {adaptive,fixed}`,
+default `adaptive` role/epoch `min_p` + hardware-aware `num_ctx` schedule):
 
 ```powershell
-.\.venv\Scripts\python.exe mini.py --mode recursive --workspace D:\cases\new-project --prompt-file D:\cases\prompt.txt --json-report D:\cases\run-report.json --no-bootstrap
+.\.venv\Scripts\python.exe mini.py --mode recursive --workspace D:\cases\new-project --prompt-file D:\cases\prompt.txt --decoding-policy adaptive --json-report D:\cases\run-report.json --no-bootstrap
 ```
 
 Batch execution exits with `0` only for `done`, `1` for an unsuccessful or
@@ -196,8 +198,12 @@ environment and do not establish live isolation.
 - `hivo/project_understanding.py`: deterministic project-mode classification, bounded read-only repository evidence, repository conflicts, and temporary Task Brain validation/projection.
 - `hivo/impact_planning.py`: bounded Impact Map and challenge schemas, evidence/coverage gates, minimal-effective plan reconciliation, immutable plan IDs, and approved-scope projection.
 - `hivo/execution_contracts.py`: immutable approved-plan snapshots, deterministic zero-model-call execution contracts, DAG validation, bounded projections, mission checks, and contract-local scope rules.
+- `hivo/assume_guarantee.py`: zero-model disjoint child ownership partitioning, 3-tier producer-to-consumer topological scheduling, and static Assume-Guarantee interface certificates across Python, HTML, JavaScript, and CSS.
+- `hivo/hyperparams.py`: role-conditioned and stagnation-adaptive `min_p` decoding schedules with prime-stride seed rotation (`--decoding-policy {adaptive,fixed}`).
+- `hivo/evidence_licensed_gate.py`: deterministic *Before You Split* failure episode attribution and bounded same-authority recovery.
+- `hivo/quality_rubric.py`: compact domain finishing rubrics, DOM HUD bounding-box anti-overlap probes, and 6-angle adversarial QA checklists.
 - `hivo/evidence.py`: latest-evidence semantics; resolved failures do not poison a run.
-- `hivo/verification.py`: contract-aware browser pass/fail rules.
+- `hivo/verification.py`: contract-aware browser pass/fail rules, including pre-start `<canvas>` luminance (`blank_initial_canvas`) and `hud_layout_overlap` checks.
 - `hivo/browser_checks.py`: deterministic profile-specific interactions for timers and other web apps.
 - `tests/`: deterministic regression tests that do not require a live model.
 

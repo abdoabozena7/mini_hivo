@@ -1,0 +1,70 @@
+# Sanitized derivative excerpt: lines 1..63 of retained local run log run-threejs-starfighter-agiss-live-v8.log
+# Run ID: 20261122T153409-45b4cd0f | Model: gemma4:e4b | Mode: recursive | Exit code: 0
+# Original full log: 108,715 bytes | original_sha256: 1f3644d8ecc684138e5e5b02e394227bbca253fa863174be586ad4acd22a5b77
+# Original UTF-8 lines 1..63 slice: 4,328 bytes | original_slice_sha256: 63226c7abde277a15892c3c1ff442f88cd95e3a5e9c5fc10bed1d91162b12559
+# Sanitization: stripped UTF-8 BOM, normalized CRLF to LF, replaced local workspace path with
+# <workspace>/workspace-threejs-starfighter-agiss-live-v8, and redacted host RAM/GPU inventory lines per AGENTS.md.
+
+workspace set to: <workspace>\workspace-threejs-starfighter-agiss-live-v8
+
+HIVO HOST PREFLIGHT: PASS
+
+Selected model: gemma4:e4b
+Completed canary calls: 3/3
+System RAM: <redacted-host-ram>
+GPU: <redacted-local-gpu>
+Warnings: none
+Starting HIVO...
+[MODEL] gemma4:e4b
+[PROVIDER] local Ollama only
+[CAPACITY] 1/4 (PARAMETER-SIZE HEURISTIC; NOT A BENCHMARK)
+[ROOT] Create a complete standalone 3D browser game in `index.html` titled "Neon Starfighter 3D" using Three.js loaded directly inside `<script type="module">` via `import * as THREE f...
+[FIT ROOT] EXECUTE
+[BUILDER] ROOT executing
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 638}
+[TOOL] context_sufficiency_check -
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 19920}
+[TOOL] write_file index.html
+[OLLAMA SHAPE] Builder {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 444}
+[TOOL] verify_web_app index.html
+[FALSIFY ROOT]
+[FALSIFIER] ROOT executing
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role", "tool_calls"], "content_chars": 1692, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 1, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 2182}
+[TOOL] verify_web_app index.html
+[OLLAMA SHAPE] Falsifier {"http_status": 200, "top_keys": ["created_at", "done", "done_reason", "eval_count", "eval_duration", "load_duration", "message", "model", "prompt_eval_cached_count", "prompt_eval_count", "prompt_eval_duration", "total_duration"], "message_keys": ["content", "role"], "content_chars": 0, "thinking_chars": 0, "reasoning_chars": 0, "tool_calls_count": 0, "done": true, "done_reason": "stop", "has_error": false, "body_chars": 319}
+[VERIFY ROOT] PASS
+[ROOT VERIFIED] PASS
+[DONE ROOT]
+[FINAL] done
+
+[TASK TREE]
+ROOT Create a complete standalone 3D browser game in `index.html` titled "Neon Starfighter 3D"... PASS
+
+[RESPLIT METRICS]
+failed_nodes_resplit: 0
+resplit_nodes_with_any_verified_child: 0
+resplit_nodes_fully_recovered: 0
+granularity_rescue_rate: 0%
+
+[DECOMPOSITION / STRATEGY SEARCH METRICS]
+terminal_too_broad_nodes: 0
+decomposition_backtracks: 0
+alternative_decompositions: 0
+alternative_decomposition_rescues: 0
+strategy_searches: 0
+strategy_generation_failures: 0
+alternate_strategies_attempted: 0
+strategy_rescues: 0
+strategy_search_failures: 0
+capability_floor_nodes: 0
+capability_floor_guard_blocks: 0
+capability_floor_routed_to_strategy: 0
+execution_budget_exhaustions: 0
+budget_exhaustion_routed_to_scope: 0
+budget_exhaustion_routed_to_strategy: 0
+budget_exhaustion_routed_to_dependency: 0
+budget_exhaustion_routed_to_other: 0
+mutation_failures_recorded: 0
+mutation_recovery_packets_emitted: 0
+decomposition_backtrack_rescue_rate: N/A
+strategy_rescue_rate: N/A

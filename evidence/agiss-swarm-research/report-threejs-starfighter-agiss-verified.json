@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20261122T153409-45b4cd0f",
+  "model": "gemma4:e4b",
+  "mode": "recursive",
+  "status": "done",
+  "exit_code": 0,
+  "verified": true,
+  "summary": "Deterministic browser verification passed; stop-on-proof completed this focused execution.",
+  "telemetry": {
+    "model_calls": 8,
+    "tool_calls": 4,
+    "splits": 0,
+    "max_depth": 0,
+    "leaf_tasks": 1,
+    "repairer_calls": 0,
+    "browser_checks": 3,
+    "evidence_licensed_corrections": 0,
+    "input_tokens": 32138,
+    "output_tokens": 7574,
+    "elapsed_seconds": 184.04
+  },
+  "deliverables": [
+    {
+      "path": "index.html",
+      "size_bytes": 18751,
+      "sha256": "f6673118af7169b0400430f824d8d8e6e41a1d840e0e2a0b23f0a8dde58f1665"
+    }
+  ],
+  "screenshots": [
+    ".agent_evidence/task_ROOT.png"
+  ],
+  "task_summary": {
+    "total_nodes": 1,
+    "done_nodes": 1,
+    "failed_nodes": 0
+  }
+}

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Starfighter 3D</title>
+    <style>
+        body { margin: 0; height: 100%; overflow: hidden; background-color: #050816; }
+        #game-container { width: 100vw; height: 100vh; }
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 15px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none; /* Allows clicks to pass through to canvas unless targeting HUD elements */
+            color: #00ffff;
+            font-family: 'Courier New', Courier, monospace;
+            text-shadow: 0 0 5px #00ffff, 0 0 10px #00ffff;
+        }
+        .hud-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: auto; /* Re-enable pointer events for HUD elements */
+        }
+        .hud-title {
+            font-size: 2em;
+            margin: 0;
+        }
+        .hud-stat {
+            font-size: 1.2em;
+            margin: 5px 0;
+        }
+        #status-badge {
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: background-color 0.3s;
+        }
+        .status-playing { background-color: #00ff00; color: #050816; }
+        .status-paused { background-color: #ffaa00; color: #050816; }
+        .status-gameover { background-color: #ff0000; color: white; }
+        .status-won { background-color: #00aa00; color: white; }
+
+        #controls {
+            position: absolute;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 30px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            border: 1px solid #00ffff;
+            pointer-events: auto;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .control-group p {
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1.1em;
+            cursor: pointer;
+            background: rgba(0, 150, 255, 0.3);
+            border: 2px solid #00ffff;
+            color: #00ffff;
+            text-transform: uppercase;
+            transition: background 0.2s, box-shadow 0.2s;
+            pointer-events: auto;
+        }
+        button:hover {
+            background: rgba(0, 150, 255, 0.6);
+            box-shadow: 0 0 15px #00ffff;
+        }
+    </style>
+    <script type="importmap">
+{"imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+    <div id="game-container"></div>
+    <div id="hud">
+        <div class="hud-section">
+            <h1 class="hud-title">Neon Starfighter 3D</h1>
+            <div id="status-badge" class="status-paused">PAUSED</div>
+        </div>
+        <div class="hud-section" style="text-align: right;">
+            <div class="hud-stat">Score: <span id="score-display">0</span></div>
+            <div class="hud-stat">Crystals: <span id="collected-display">0</span></div>
+        </div>
+    </div>
+    <div id="controls">
+        <div class="control-group">
+            <p>Movement:</p>
+            <p>WASD / Arrows</p>
+        </div>
+        <div class="control-group">
+            <button id="start-button">Start Game</button>
+        </div>
+        <div class="control-group">
+            <button id="reset-button">Reset</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+        // --- GAME STATE MANAGEMENT ---
+        const GAME_STATE = {
+            status: "paused", // "paused", "playing", "gameover", "won"
+            score: 0,
+            collected: 0,
+            player: { x: 0, z: 0 }, // Player's XZ position
+            position: { x: 0, y: 0.5, z: 0 }, // Player's full position (Y is fixed for simplicity)
+            tick: 0
+        };
+
+        const AGENT_GAME = {
+            getState: () => {
+                return JSON.parse(JSON.stringify({
+                    status: GAME_STATE.status,
+                    score: GAME_STATE.score,
+                    collected: GAME_STATE.collected,
+                    player: { x: GAME_STATE.player.x, z: GAME_STATE.player.z },
+                    position: { x: GAME_STATE.position.x, y: GAME_STATE.position.y, z: GAME_STATE.position.z },
+                    tick: GAME_STATE.tick
+                }));
+            },
+            start: () => {
+                if (GAME_STATE.status !== "playing") {
+                    GAME_STATE.status = "playing";
+                    updateHUD();
+                    // In a real scenario, this would trigger game object activation
+                }
+            },
+            restart: () => {
+                GAME_STATE.score = 0;
+                GAME_STATE.collected = 0;
+                GAME_STATE.player = { x: 0, z: 0 };
+                GAME_STATE.position = { x: 0, y: 0.5, z: 0 };
+                GAME_STATE.status = "playing";
+                updateHUD();
+                // Reset player visual position in the scene
+                playerShip.position.set(0, 0.5, 0);
+                // Reset crystal positions
+                crystals.forEach(c => c.visible = false);
+                // Re-initialize crystals
+                initializeCrystals();
+            },
+            move: (direction) => {
+                if (GAME_STATE.status !== "playing") return;
+                const speed = 0.15;
+                let newX = GAME_STATE.player.x;
+                let newZ = GAME_STATE.player.z;
+
+                switch (direction) {
+                    case 'forward':
+                        newZ -= speed;
+                        break;
+                    case 'backward':
+                        newZ += speed;
+                        break;
+                    case 'left':
+                        newX -= speed;
+                        break;
+                    case 'right':
+                        newX += speed;
+                        break;
+                }
+
+                // Clamp movement to a reasonable area (e.g., -20 to 20)
+                GAME_STATE.player.x = Math.max(-20, Math.min(20, newX));
+                GAME_STATE.player.z = Math.max(-20, Math.min(20, newZ));
+                GAME_STATE.position.x = GAME_STATE.player.x;
+                GAME_STATE.position.z = GAME_STATE.player.z;
+            },
+            forceCollect: () => {
+                if (GAME_STATE.status !== "playing") return;
+                GAME_STATE.score += 10;
+                GAME_STATE.collected += 1;
+                updateHUD();
+                // Logic to respawn crystals would go here
+            },
+            forceCollision: () => {
+                if (GAME_STATE.status === "playing") {
+                    GAME_STATE.status = "gameover";
+                    updateHUD();
+                    // Stop animation loop or trigger game over visuals
+                }
+            },
+            forceWin: () => {
+                if (GAME_STATE.status === "playing") {
+                    GAME_STATE.status = "won";
+                    updateHUD();
+                    // Stop animation loop or trigger win visuals
+                }
+            }
+        };
+
+        window.AGENT_GAME = AGENT_GAME;
+
+        // --- SCENE SETUP ---
+        let scene, camera, renderer;
+        let playerShip, crystals = [];
+        let starfield, gridHelper;
+        let ambientLight, directionalLight;
+        let keys = {};
+        let animationFrameId = null;
+
+        const CONTAINER = document.getElementById('game-container');
+        const STARFIELD_COUNT = 10000;
+        const CRYSTAL_COUNT = 8;
+
+        function init() {
+            // 1. Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x050816, 1);
+            CONTAINER.appendChild(renderer.domElement);
+
+            // 2. Scene Setup
+            scene = new THREE.Scene();
+
+            // 3. Camera Setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 9, 14);
+            camera.lookAt(0, 0, 0);
+
+            // 4. Lighting
+            ambientLight = new THREE.AmbientLight(0x404040, 2); // Soft ambient light
+            scene.add(ambientLight);
+
+            directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            // 5. Grid Helper
+            gridHelper = new THREE.GridHelper(24, 24, 0x00f5ff, 0x1e293b);
+            scene.add(gridHelper);
+
+            // 6. Starfield (THREE.Points)
+            const starGeometry = new THREE.BufferGeometry();
+            const starVertices = [];
+            for (let i = 0; i < STARFIELD_COUNT; i++) {
+                const x = (Math.random() - 0.5) * 100;
+                const y = (Math.random() - 0.5) * 100;
+                const z = (Math.random() - 0.5) * 100;
+                starVertices.push(x, y, z);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 });
+            starfield = new THREE.Points(starGeometry, starMaterial);
+            scene.add(starfield);
+
+            // 7. Player Ship (Glowing Cyan)
+            const coneGeometry = new THREE.ConeGeometry(1, 2, 32);
+            const coneMaterial = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.5 });
+            playerShip = new THREE.Mesh(coneGeometry, coneMaterial);
+            playerShip.rotation.x = Math.PI / 2; // Pointing forward along Z axis initially
+            playerShip.position.set(0, 0.5, 0);
+            scene.add(playerShip);
+
+            // Wings (BoxGeometry)
+            const wingGeometry = new THREE.BoxGeometry(3, 0.5, 0.5);
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.0 });
+            const wingL = new THREE.Mesh(wingGeometry, wingMaterial);
+            wingL.position.set(-2, 0, 0);
+            const wingR = new THREE.Mesh(wingGeometry, wingMaterial);
+            wingR.position.set(2, 0, 0);
+
+            playerShip.add(wingL);
+            playerShip.add(wingR);
+
+            // 8. Energy Crystals (OctahedronGeometry)
+            initializeCrystals();
+
+            // 9. Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.getElementById('start-button').addEventListener('click', () => AGENT_GAME.start());
+            document.getElementById('reset-button').addEventListener('click', () => AGENT_GAME.restart());
+
+            // Initial state setup
+            updateHUD();
+
+            // Start the loop
+            animate();
+        }
+
+        function initializeCrystals() {
+            // Remove old crystals if any
+            crystals.forEach(c => scene.remove(c));
+            crystals = [];
+
+            for (let i = 0; i < CRYSTAL_COUNT; i++) {
+                const geometry = new THREE.OctahedronGeometry(1.5);
+                const material = new THREE.MeshPhongMaterial({
+                    color: 0xffd700,
+                    emissive: 0xffd700,
+                    emissiveIntensity: 1.5,
+                    shininess: 100
+                });
+                const crystal = new THREE.Mesh(geometry, material);
+
+                // Place at radius >= 4
+                let radius = 4 + Math.random() * 5;
+                let theta = Math.random() * Math.PI * 2;
+                let phi = Math.acos(Math.random() * 2 - 1);
+
+                crystal.position.x = radius * Math.sin(phi) * Math.cos(theta);
+                crystal.position.y = radius * Math.sin(phi) * Math.sin(theta) * 0.5; // Keep them slightly lower
+                crystal.position.z = radius * Math.cos(phi);
+
+                crystal.userData = { collected: false };
+                scene.add(crystal);
+                crystals.push(crystal);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onKeyDown(event) {
+            keys[event.code] = true;
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+                event.preventDefault();
+            }
+        }
+
+        function onKeyUp(event) {
+            keys[event.code] = false;
+        }
+
+        function updateHUD() {
+            document.getElementById('score-display').textContent = GAME_STATE.score;
+            document.getElementById('collected-display').textContent = GAME_STATE.collected;
+            const statusBadge = document.getElementById('status-badge');
+
+            statusBadge.textContent = GAME_STATE.status.toUpperCase();
+            statusBadge.className = 'status-badge'; // Reset classes
+
+            if (GAME_STATE.status === "playing") {
+                statusBadge.classList.add('status-playing');
+            } else if (GAME_STATE.status === "paused") {
+                statusBadge.classList.add('status-paused');
+            } else if (GAME_STATE.status === "gameover") {
+                statusBadge.classList.add('status-gameover');
+            } else if (GAME_STATE.status === "won") {
+                statusBadge.classList.add('status-won');
+            }
+        }
+
+        function updatePlayerMovement() {
+            if (GAME_STATE.status !== "playing") return;
+
+            let moved = false;
+            const speed = 0.15;
+            let newX = GAME_STATE.player.x;
+            let newZ = GAME_STATE.player.z;
+
+            if (keys['KeyW'] || keys['ArrowUp']) {
+                newZ -= speed;
+                moved = true;
+            }
+            if (keys['KeyS'] || keys['ArrowDown']) {
+                newZ += speed;
+                moved = true;
+            }
+            if (keys['KeyA'] || keys['ArrowLeft']) {
+                newX -= speed;
+                moved = true;
+            }
+            if (keys['KeyD'] || keys['ArrowRight']) {
+                newX += speed;
+                moved = true;
+            }
+
+            if (moved) {
+                // Clamp movement
+                GAME_STATE.player.x = Math.max(-20, Math.min(20, newX));
+                GAME_STATE.player.z = Math.max(-20, Math.min(20, newZ));
+                GAME_STATE.position.x = GAME_STATE.player.x;
+                GAME_STATE.position.z = GAME_STATE.player.z;
+
+                playerShip.position.x = GAME_STATE.player.x;
+                playerShip.position.z = GAME_STATE.player.z;
+            }
+        }
+
+        function updateCrystals(delta) {
+            const playerPos = new THREE.Vector3(GAME_STATE.player.x, 0, GAME_STATE.player.z);
+
+            crystals.forEach(crystal => {
+                if (crystal.userData.collected) {
+                    crystal.visible = false;
+                    return;
+                }
+
+                // 1. Rotation (Continuous Animation)
+                crystal.rotation.x += 0.01 * delta;
+                crystal.rotation.y += 0.01 * delta * 0.5;
+
+                // 2. Check for Collection (Simplified: check distance to player)
+                const distance = crystal.position.distanceTo(playerPos);
+                if (distance < 3.5) {
+                    // Collision detected
+                    crystal.userData.collected = true;
+                    crystal.visible = false;
+                    AGENT_GAME.forceCollect();
+
+                    // Respawn logic: Immediately respawn the crystal
+                    const newRadius = 4 + Math.random() * 5;
+                    const newTheta = Math.random() * Math.PI * 2;
+                    const newPhi = Math.acos(Math.random() * 2 - 1);
+
+                    crystal.position.x = newRadius * Math.sin(newPhi) * Math.cos(newTheta);
+                    crystal.position.y = newRadius * Math.sin(newPhi) * Math.sin(newTheta) * 0.5;
+                    crystal.position.z = newRadius * Math.cos(newPhi);
+                    crystal.visible = true;
+                }
+            });
+        }
+
+        function animate(time) {
+            animationFrameId = requestAnimationFrame(animate);
+
+            const delta = 0.016; // Approximation for fixed delta time step for physics/movement updates
+
+            if (GAME_STATE.status === "playing") {
+                // 1. Update Player Position based on input
+                updatePlayerMovement();
+
+                // 2. Update Crystal Positions/Checks
+                updateCrystals(delta);
+            }
+
+            // 3. Animation Updates (Always run for visual continuity)
+            // Starfield movement (subtle parallax/drift)
+            starfield.rotation.y += 0.0005;
+
+            // Player ship rotation (slight bobbing/yawing)
+            playerShip.rotation.y = Math.sin(GAME_STATE.tick * 0.05) * 0.2;
+            playerShip.position.y = 0.5 + Math.sin(GAME_STATE.tick * 0.05) * 0.1;
+
+            // 4. Render
+            renderer.render(scene, camera);
+
+            // 5. Update State Tick
+            GAME_STATE.tick++;
+        }
+
+        // --- INITIALIZATION CALL ---
+        init();
+    </script>
+</body>
+</html>

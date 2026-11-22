@@ -40,18 +40,19 @@ _THREEJS_OR_3D_PATTERNS = (
 _QUALITY_RUBRICS: dict[str, str] = {
     "threejs_3d": (
         "FINISHING & QUALITY CONTRACT [threejs_3d]:\n"
-        "1. Importmap & Budget: Keep HTML concise (~145 lines, minimal comments) so tool JSON fits <3,200 tokens. "
-        'Never write bare `\'three\'` without `<script type="importmap">` before `<script type="module">`: '
-        '{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", '
-        '"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}\n'
-        "2. Modern r160 & Polish: Use `THREE.BoxGeometry`, `THREE.SphereGeometry`, `THREE.CylinderGeometry`, "
-        "`THREE.TorusGeometry`, `THREE.GridHelper` (all from `'three'`, NOT addons; NOT `Geometry`/`*BufferGeometry`), "
-        "camera `(0, 9, 14)`, starfield, `AmbientLight` + `DirectionalLight`, `emissive` glow, and `resize` "
-        "(`camera.aspect`, `camera.updateProjectionMatrix()`, `renderer.setSize(window.innerWidth, window.innerHeight)`).\n"
-        "3. Layout & HUD: `html, body { margin: 0; height: 100%; overflow: hidden; }` (never 0x0 canvas; never call `console.error`) + HUD.\n"
-        "4. Bridge: Expose `window.AGENT_GAME` at init with `getState()` (`{status, score, best, player, position, tick}`; "
-        "no `Object3D`), `start()`, `restart()` (score=0), `move(direction)` mutating `position`/`player`, "
-        "`forceCollect()`, `forceCollision()` (`'gameover'`), `forceWin()` (`'won'`; freeze when won/gameover)."
+        '1. Importmap (~135 lines, no comments): `<script type="importmap">` before `<script type="module">`: '
+        '{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",'
+        '"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}\n'
+        "2. r160 & Init: `BoxGeometry`, `SphereGeometry`, `CylinderGeometry`, `TorusGeometry`, `GridHelper` "
+        "(no `Geometry`/`*BufferGeometry`), cam `(0,9,14)`, starfield, `AmbientLight`+`DirectionalLight`, "
+        "`emissive`, `renderer.setSize(window.innerWidth, window.innerHeight)` + `updateProjectionMatrix()`. "
+        "Start `requestAnimationFrame(animate)` in `init()`, ALWAYS calling `renderer.render(scene, camera)` "
+        "even when `paused` (no early `return`); respawn at radius `>= 4` via `Math.hypot`.\n"
+        "3. HUD: `html, body { margin: 0; height: 100%; overflow: hidden; }` (no `console.error`); "
+        "1 top flex bar (`display:flex;justify-content:space-between`) or corners (`top-left`,`top-right`,`bottom-center`,`bottom-right`).\n"
+        "4. Bridge: `window.AGENT_GAME` in `init()`: `getState()` (`{status,score,best,player,position,tick}`, "
+        "no `Object3D`), `start()`, `restart()` (score=0), `move(direction)` (`position`/`player`), "
+        "`forceCollect()`, `forceCollision()` (`'gameover'`), `forceWin()` (`'won'`; freeze won/gameover)."
     ),
     "web_game": (
         "FINISHING & QUALITY CONTRACT [web_game]:\n"
@@ -101,9 +102,13 @@ _QUALITY_RUBRICS: dict[str, str] = {
 BROWSER_CANVAS_QUALITY_JS = r"""() => {
     const isVisible = (el) => {
         if (!el) return false;
-        const style = window.getComputedStyle(el);
-        if (!style || style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') <= 0) {
-            return false;
+        let cur = el;
+        while (cur && cur.nodeType === 1) {
+            const style = window.getComputedStyle(cur);
+            if (!style || style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') <= 0) {
+                return false;
+            }
+            cur = cur.parentElement;
         }
         const rect = el.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
@@ -113,8 +118,7 @@ BROWSER_CANVAS_QUALITY_JS = r"""() => {
     let maxHeight = 0;
     let visibleCount = 0;
     for (const canvas of canvases) {
-        const style = window.getComputedStyle(canvas);
-        const hidden = !style || style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') <= 0;
+        const hidden = !isVisible(canvas);
         const rect = canvas.getBoundingClientRect();
         const bufferOk = (typeof canvas.width !== 'number' || canvas.width > 0)
             && (typeof canvas.height !== 'number' || canvas.height > 0);
@@ -145,6 +149,60 @@ BROWSER_CANVAS_QUALITY_JS = r"""() => {
         );
         return hasDirectText || el.matches(hudRoleSelector);
     });
+    const overlapControls = Array.from(
+        document.querySelectorAll('button, input:not([type="hidden"]), select, [role="button"]')
+    ).filter(isVisible);
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+    const positionedHudBlocks = Array.from(document.querySelectorAll('body *')).filter((el) => {
+        if (ignoredHudTags.has(el.tagName) || !isVisible(el)) return false;
+        const style = window.getComputedStyle(el);
+        if (!style || (style.position !== 'fixed' && style.position !== 'absolute')) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width >= 20 && rect.height >= 14 && rect.width < vw * 0.92 && rect.height < vh * 0.85;
+    });
+    const hudCandidates = Array.from(new Set([...positionedHudBlocks, ...overlapControls]));
+    const labelFor = (el) => {
+        if (el.id) return `#${el.id}`;
+        if (el.getAttribute('data-direction')) return `[data-direction="${el.getAttribute('data-direction')}"]`;
+        if (el.classList && el.classList.length > 0) return `.${el.classList[0]}`;
+        const txt = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 14);
+        const tag = el.tagName.toLowerCase();
+        return txt ? `${tag}("${txt}")` : tag;
+    };
+    const isSharedBarParent = (parent) => {
+        if (!parent) return false;
+        const ps = window.getComputedStyle(parent);
+        const disp = (ps && ps.display) || '';
+        const cls = parent.getAttribute ? (parent.getAttribute('class') || '') : '';
+        return disp.includes('flex') || disp.includes('grid')
+            || /bar|controls|buttons|actions|group/i.test(`${parent.id || ''} ${cls}`);
+    };
+    let hudOverlapCount = 0;
+    const hudOverlaps = [];
+    for (let i = 0; i < hudCandidates.length; i += 1) {
+        const a = hudCandidates[i];
+        const ra = a.getBoundingClientRect();
+        for (let j = i + 1; j < hudCandidates.length; j += 1) {
+            const b = hudCandidates[j];
+            if (a === b || a.contains(b) || b.contains(a)) continue;
+            const rb = b.getBoundingClientRect();
+            if (a.parentElement && a.parentElement === b.parentElement && isSharedBarParent(a.parentElement)) {
+                if (Math.min(ra.right, rb.right) <= Math.max(ra.left, rb.left)
+                    || Math.min(ra.bottom, rb.bottom) <= Math.max(ra.top, rb.top)) {
+                    continue;
+                }
+            }
+            const ix = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+            const iy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+            if (ix > 6 && iy > 6 && (ix * iy) >= 48) {
+                hudOverlapCount += 1;
+                if (hudOverlaps.length < 4) {
+                    hudOverlaps.push(`${labelFor(a)} vs ${labelFor(b)}`);
+                }
+            }
+        }
+    }
     const hasWebGL = canvases.some((c) => {
         try { return Boolean(c.getContext('webgl2') || c.getContext('webgl')); }
         catch { return false; }
@@ -158,6 +216,8 @@ BROWSER_CANVAS_QUALITY_JS = r"""() => {
         hasWebGL,
         hudElementCount: hudElements.length,
         interactiveControlCount,
+        hudOverlapCount,
+        hudOverlaps,
     };
 }"""
 
@@ -282,6 +342,31 @@ def quality_rubric_context(contract: dict[str, Any] | None, task_goal: str = "")
     """Return a compact (<1,300 chars) domain-tailored FINISHING & QUALITY CONTRACT."""
     domain = detect_quality_domain(contract, task_goal)
     return _QUALITY_RUBRICS[domain][:1299]
+
+
+def build_six_angle_qa_checklist(domain: str = "general") -> str:
+    """Return a compact (<=600 chars) HarrTest-inspired 6-angle adversarial QA checklist."""
+    key = (str(domain or "general").strip().lower() or "general")[:20]
+    visual_focus = (
+        "separate HUD corners (0 overlap); `init()` renders scene while `paused`"
+        if key in {"threejs_3d", "web_game"}
+        else "clean layout with 0 control overlap or horizontal overflow"
+    )
+    hygiene_focus = (
+        "`restart()` resets state with a single `requestAnimationFrame` loop"
+        if key in {"threejs_3d", "web_game"}
+        else "idempotent reset without duplicate timers or listeners"
+    )
+    checklist = (
+        f"SIX-ANGLE QA CHECKLIST [{key}]:\n"
+        "1. Functionality: Required actions/transitions observably update state.\n"
+        "2. Preservation: Existing contracts, controls, and invariants remain intact.\n"
+        "3. Interface/DOM Binding: Referenced IDs, imports, and `AGENT_GAME` hooks match.\n"
+        "4. Error/Input Resilience: 0 console/page/404 errors; guard storage & inputs.\n"
+        f"5. Visual/HUD Non-Overlap & Initial Render: Ensure {visual_focus}.\n"
+        f"6. State Reset & Single-RAF Hygiene: Ensure {hygiene_focus}."
+    )
+    return checklist[:600]
 
 
 def _string_errors(items: Any) -> list[str]:
@@ -417,6 +502,36 @@ def diagnose_browser_failures(snapshot: dict[str, Any]) -> list[str]:
         add_hint(
             "Mount at least one rendered `<canvas>` element into `document.body` synchronously on load "
             "(e.g. `document.body.appendChild(renderer.domElement)`)."
+        )
+
+    if "blank_initial_canvas" in failure_codes or (
+        canvas_metrics is not None and canvas_metrics.get("initialFrameBlank") is True
+    ):
+        add_hint(
+            "Fix `blank_initial_canvas`: call `renderer.render(scene, camera)` and start "
+            "`requestAnimationFrame(animate)` unconditionally inside `init()` so the 3D scene "
+            "renders visibly on initial load even while `paused` (before Start is clicked)."
+        )
+
+    if "hud_layout_overlap" in failure_codes or (
+        canvas_metrics is not None and int(canvas_metrics.get("hudOverlapCount", 0) or 0) > 0
+    ):
+        overlap_pairs: list[str] = []
+        if canvas_metrics is not None and isinstance(canvas_metrics.get("hudOverlaps"), list):
+            overlap_pairs = [str(item).strip() for item in canvas_metrics["hudOverlaps"] if str(item).strip()]
+        if not overlap_pairs:
+            for item in raw_failures:
+                if isinstance(item, dict) and item.get("code") == "hud_layout_overlap":
+                    ev = str(item.get("evidence") or "").strip()
+                    if ":" in ev:
+                        ev = ev.split(":", 1)[1].strip()
+                    if ev:
+                        overlap_pairs.append(ev)
+        overlap_detail = ", ".join(overlap_pairs[:4]) if overlap_pairs else "overlapping HUD elements"
+        add_hint(
+            f"Fix `hud_layout_overlap` ({overlap_detail}): pin each positioned HUD panel to a separate viewport "
+            "corner (`top-left`, `top-right`, `bottom-center`, `bottom-right`) or group sibling buttons in one "
+            "`display: flex; gap: 8px` bar so HUD/control bounding boxes never intersect."
         )
 
     if "missing_game_bridge" in failure_codes:

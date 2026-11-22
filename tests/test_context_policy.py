@@ -62,6 +62,27 @@ class ContextPolicyTests(unittest.TestCase):
         content = projected[2]["tool_calls"][0]["function"]["arguments"]["content"]
         self.assertEqual(content, source)
 
+    def test_primary_user_task_specification_survives_oversized_failed_tool_call(self):
+        from hivo.context import compact_messages, projected_size
+
+        spec = "Create Neon Starfighter 3D in index.html with requirement details: " + ("R" * 4_500)
+        truncated_json = '{"content": "' + ("x" * 19_500)
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": spec},
+            {"role": "assistant", "content": "", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": truncated_json},
+            }]},
+            {"role": "tool", "tool_name": "write_file", "content": "error: incomplete or truncated write_file tool call"},
+        ]
+
+        projected = compact_messages(messages, max_chars=15_360, keep_recent=4)
+
+        self.assertLessEqual(projected_size(projected), 15_360)
+        self.assertEqual(projected[1]["content"], spec)
+        self.assertNotIn("HIVO HISTORY OMITTED", projected[1]["content"])
+        self.assertEqual(projected[2]["tool_calls"][0]["function"]["arguments"], {})
+
 
 if __name__ == "__main__":
     unittest.main()

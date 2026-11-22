@@ -96,11 +96,11 @@ def infer_web_profile(task_text: str, contract: dict | None = None,
             required.append("collection_updates_state")
         if any(word in combined for word in ("restart", "game-over", "game over", "start state")):
             required.append("restart_resets_state")
-        if any(word in combined for word in ("win", "won", "goal", "finish")):
+        if re.search(r"\b(?:win|won|goal|finish)\b", combined):
             required.append("goal_win_state")
         if any(word in combined for word in ("best score", "high score", "persist", "localstorage")):
             required.append("score_persistence")
-        if any(word in combined for word in ("touch", "mobile", "responsive controls")):
+        if re.search(r"\b(?:touch|mobile|responsive controls)\b", combined):
             required.append("touch_control")
     elif timer:
         required.extend((
@@ -189,6 +189,22 @@ def evaluate_web_snapshot(snapshot: dict, profile: WebVerificationProfile) -> di
             fail(
                 "missing_webgl_context",
                 "a Three.js/3D WebGL contract cannot be satisfied by a 2D canvas without Three.js/WebGL",
+            )
+    if isinstance(canvas_metrics, dict):
+        if int(canvas_metrics.get("hudOverlapCount", 0) or 0) > 0:
+            overlaps = [
+                str(item).strip()
+                for item in (canvas_metrics.get("hudOverlaps") or [])
+                if str(item).strip()
+            ]
+            fail(
+                "hud_layout_overlap",
+                "overlapping HUD/control elements: " + ", ".join(overlaps or ["overlap detected"]),
+            )
+        if profile.require_canvas and canvas_metrics.get("initialFrameBlank") is True:
+            fail(
+                "blank_initial_canvas",
+                "canvas was completely blank on initial load before interaction; render the scene immediately during init()",
             )
     bridge = runtime.get("gameBridge") or runtime.get("debugState")
     if profile.require_game_bridge and not bridge:

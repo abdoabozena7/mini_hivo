@@ -67,10 +67,15 @@ def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8)
     def size() -> int:
         return projected_size(projected)
 
+    protected_anchor = (
+        1 if len(projected) > 1 and projected[1].get("role") == "user" else None
+    )
+
     # Do not rewrite a healthy prompt merely because it contains a recent file
     # mutation. Gemma needs its own immediately preceding payload to avoid
     # inventing or copying compaction placeholders. Only compact on real overflow,
-    # starting outside the protected recent window.
+    # starting outside the protected recent window and preserving the root user
+    # task specification (projected[1]) ahead of transient tool payloads.
     cutoff = max(1, len(projected) - keep_recent)
     if size() > max_chars:
         for index in range(1, cutoff):
@@ -81,26 +86,29 @@ def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8)
     for index in range(1, cutoff):
         if size() <= max_chars:
             break
+        if index == protected_anchor:
+            continue
         content = projected[index].get("content")
         if isinstance(content, str) and len(content) > 300:
             projected[index]["content"] = _compact_marker(content)
 
-    if size() > max_chars:
-        for index in range(1, max(1, len(projected) - 1)):
-            if size() <= max_chars:
-                break
-            content = projected[index].get("content")
-            if isinstance(content, str) and len(content) > 120:
-                projected[index]["content"] = _compact_marker(content)
-
-    # If old history was not enough, remove large argument bodies from oldest
-    # to newest. Empty string fields are valid historical arguments and cannot
-    # masquerade as source code. Paths and tool outcomes remain available.
+    # Compact oversized tool-call argument bodies (such as truncated 19KB
+    # write_file payloads) BEFORE ever replacing the primary user task prompt!
     if size() > max_chars:
         for item in projected[1:]:
             _compact_tool_arguments(item)
             if size() <= max_chars:
                 break
+
+    if size() > max_chars:
+        for index in range(1, max(1, len(projected) - 1)):
+            if size() <= max_chars:
+                break
+            if index == protected_anchor:
+                continue
+            content = projected[index].get("content")
+            if isinstance(content, str) and len(content) > 120:
+                projected[index]["content"] = _compact_marker(content)
 
     # A very large latest tool result is still bounded so output tokens remain
     # available to the model. Keep both ends because code declarations and
@@ -117,11 +125,14 @@ def compact_messages(messages: list[dict], max_chars: int, keep_recent: int = 8)
 
     # Tool schemas and message metadata add provider overhead, so never return a
     # projection whose measured payload is above the explicit message budget.
+    # Compact transient tool/assistant history before ever touching projected[1].
     if size() > max_chars:
-        for item in projected[1:]:
-            content = item.get("content")
+        for index, item in enumerate(projected[1:], start=1):
             if size() <= max_chars:
                 break
+            if index == protected_anchor:
+                continue
+            content = item.get("content")
             if isinstance(content, str) and len(content) > 120:
                 item["content"] = _compact_marker(content)
     return projected
