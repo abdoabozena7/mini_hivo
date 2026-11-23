@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<title>Orbital Prism Harvester 3D</title>
+<style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #060918; color: #f8fafc; font-family: system-ui; }
+</style>
+<div id='canvas-mount' style='width:100vw;height:100vh;'></div>
+<div id='hud-bar' style='position:fixed;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;align-items:center;pointer-events:none;z-index:10;'>
+    <span id='title-badge'>ORBITAL PRISM HARVESTER 3D</span>
+    <span id='score-val'>SCORE: 0</span>
+    <span id='prisms-val'>PRISMS: 0 / 8</span>
+    <span id='status-badge'>PLAYING</span>
+</div>
+<div id='controls-bar' style='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:14px;z-index:10;'>
+    <button id='btn-pause'>Pause</button>
+    <button id='btn-restart'>Restart</button>
+</div>
+<script type='module' src='./app.js'></script>

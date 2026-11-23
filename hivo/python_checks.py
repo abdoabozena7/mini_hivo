@@ -244,8 +244,18 @@ def check_call(workspace, path, function, arguments, expected):
         unchanged = hashlib.sha256(target.read_bytes()).hexdigest() == source_hash
     except OSError as exc:
         return {"passed": False, "error": f"Python-call source became unreadable: {exc}"}
+    expected_cmp = expected
+    if (
+        isinstance(expected, str)
+        and not isinstance(observed["actual"], str)
+        and expected.strip().startswith(("{", "["))
+    ):
+        try:
+            expected_cmp = ast.literal_eval(expected)
+        except Exception:
+            expected_cmp = expected
     return {
-        "passed": (actual_json == expected_json or _json_values_equal(observed["actual"], expected)) and unchanged,
+        "passed": (actual_json == expected_json or _json_values_equal(observed["actual"], expected_cmp)) and unchanged,
         "path": target.relative_to(root).as_posix(), "function": function,
         "arguments": arguments, "expected": expected, "actual": observed["actual"],
         "stdout": observed["stdout"], "source_sha256": source_hash,
@@ -264,7 +274,8 @@ def _probe():
     sys.path.insert(0, str(path.parent))
     with contextlib.redirect_stdout(stdout):
         spec.loader.exec_module(module)
-        actual = getattr(module, sys.argv[2])(*arguments)
+        fn = getattr(module, sys.argv[2])
+        actual = fn(*arguments)
     print(_RESULT_PREFIX + json.dumps(
         {"actual": actual, "stdout": stdout.getvalue()}, allow_nan=False,
     ))

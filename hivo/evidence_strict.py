@@ -26,6 +26,8 @@ def _path(value, workspace):
 
 def target(value, tool, workspace=None):
     """Parse a file invocation, never search stdout or arbitrary command args."""
+    if isinstance(value, str) and "::" in value:
+        value = value.split("::", 1)[0]
     if tool != "run_command":
         return _path(value, workspace)
     if not isinstance(value, str):
@@ -34,10 +36,17 @@ def target(value, tool, workspace=None):
         tokens = [t.strip('"\'') for t in shlex.split(value, posix=False)]
     except ValueError:
         return None
-    if len(tokens) != 2:
+    if not tokens:
         return None
     executable = Path(tokens[0]).name.casefold()
-    if executable not in {"node", "node.exe", "python", "python.exe", "python3", "pytest", "pytest.exe"}:
+    py_execs = {"python", "python.exe", "python3", "python3.exe", "py", "py.exe"}
+    if len(tokens) == 4 and executable in py_execs and tokens[1] == "-m" and tokens[2] in {"unittest", "pytest"}:
+        if tokens[3].startswith("-"):
+            return None
+        return _path(tokens[3], workspace)
+    if len(tokens) != 2:
+        return None
+    if executable not in (py_execs | {"node", "node.exe", "pytest", "pytest.exe"}):
         return None
     if tokens[1].startswith("-"):
         return None

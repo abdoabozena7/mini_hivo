@@ -16,8 +16,16 @@ evidence/agiss-swarm-research/**/*.json text eol=lf
 evidence/agiss-swarm-research/**/*.html text eol=lf
 evidence/agiss-swarm-research/**/*.py text eol=lf
 evidence/agiss-swarm-research/**/*.png binary
+evidence/asymmetric-decomposition-scaling/**/*.md text eol=lf
+evidence/asymmetric-decomposition-scaling/**/*.json text eol=lf
+evidence/asymmetric-decomposition-scaling/**/*.html text eol=lf
+evidence/asymmetric-decomposition-scaling/**/*.js text eol=lf
+evidence/asymmetric-decomposition-scaling/**/*.py text eol=lf
+evidence/asymmetric-decomposition-scaling/**/*.png binary
+docs/DECOMPOSITION_CAPABILITY_PAPER.md text eol=lf
 AGENTS.md text eol=lf
 updates/UPDATE_TEMPLATE.md text eol=lf
 updates/R_UPDATE_002.md text eol=lf
 updates/R_UPDATE_008.md text eol=lf
 updates/R_UPDATE_009.md text eol=lf
+updates/R_UPDATE_010.md text eol=lf

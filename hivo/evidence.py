@@ -225,6 +225,12 @@ def latest_verification_evidence(evidence: list[dict]) -> list[dict]:
             continue
         if _is_comparable_executed_pass(result, payload):
             outstanding.pop(key, None)
+            if tool == "run_command" and "::" in str(item.get("target", "")):
+                base_cmd = str(item.get("target", "")).split("::", 1)[0]
+                for old_key in list(outstanding.keys()):
+                    if old_key[0] == "run_command" and old_key[1] == base_cmd and old_key[4] == key[4]:
+                        outstanding.pop(old_key, None)
+                        latest.pop(old_key, None)
             if tool in {"verify_web_app", "run_file"} and isinstance(payload.get("verification_profile"), dict):
                 role_str = str(item.get("role") or "")
                 identity = key[4]

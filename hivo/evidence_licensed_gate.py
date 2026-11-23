@@ -1610,6 +1610,48 @@ def _normalize_single_tool_call_dict(
     }
 
 
+def _sanitize_triple_quoted_json(raw: str) -> str:
+    """Convert Python-style triple-quoted string values (\"\"\"...\"\"\") into RFC-8259 JSON strings."""
+    if '"""' not in raw:
+        return raw
+    out: list[str] = []
+    i = 0
+    n = len(raw)
+    in_normal_str = False
+    escaped = False
+    while i < n:
+        if in_normal_str:
+            ch = raw[i]
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_normal_str = False
+            i += 1
+            continue
+        if raw.startswith('"""', i):
+            close_m = re.search(r'"""(?=\s*[,}\]])', raw[i + 3 :])
+            if close_m is None:
+                return raw
+            end = i + 3 + close_m.start()
+            inner = raw[i + 3 : end]
+            if inner.startswith("\n"):
+                inner = inner[1:]
+            elif inner.startswith("\r\n"):
+                inner = inner[2:]
+            out.append(json.dumps(inner, ensure_ascii=False))
+            i = end + 3
+            continue
+        ch = raw[i]
+        if ch == '"':
+            in_normal_str = True
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _extract_candidate_json_text(content: str) -> str | None:
     stripped = content.strip()
     if not stripped:
@@ -1645,7 +1687,7 @@ def _extract_candidate_json_text(content: str) -> str | None:
     if suffix:
         return None
     if prefix:
-        if "\n" in prefix or len(prefix) > 64 or _PROSE_EXCLUSION_PATTERNS.search(prefix):
+        if prefix.count("\n") > 2 or len(prefix) > 220 or _PROSE_EXCLUSION_PATTERNS.search(prefix):
             return None
 
     body = match.group(2).strip()
@@ -1672,11 +1714,35 @@ def extract_text_tool_call_fallback(
     candidate_json = _extract_candidate_json_text(content)
     if not candidate_json:
         return []
+    candidate_json = _sanitize_triple_quoted_json(candidate_json)
+    if "\\'" in candidate_json:
+        candidate_json = re.sub(r"(?<!\\)\\'", r"\\\\'", candidate_json)
 
     try:
-        parsed = json.loads(candidate_json)
+        parsed = json.loads(candidate_json, strict=False)
     except (TypeError, ValueError, RecursionError):
-        return []
+        decoder = json.JSONDecoder(strict=False)
+        idx = 0
+        n_chars = len(candidate_json)
+        seq_objs: list[Any] = []
+        while idx < n_chars:
+            while idx < n_chars and candidate_json[idx].isspace():
+                idx += 1
+            if idx >= n_chars:
+                break
+            try:
+                obj, next_idx = decoder.raw_decode(candidate_json, idx)
+            except (TypeError, ValueError, RecursionError):
+                return []
+            if not isinstance(obj, dict):
+                return []
+            seq_objs.append(obj)
+            if len(seq_objs) > MAX_EXTRACTED_TOOL_CALLS:
+                return []
+            idx = next_idx
+        if not seq_objs:
+            return []
+        parsed = seq_objs
 
     raw_items: list[Any]
     if isinstance(parsed, dict):

@@ -350,7 +350,7 @@ def build_deliverable_run_report(
     deliverables = inventory_workspace_deliverables(workspace_path)
     screenshots = find_workspace_evidence_screenshots(workspace_path)
 
-    return {
+    report: dict[str, Any] = {
         "schema_version": DELIVERABLE_REPORT_SCHEMA_VERSION,
         "run_id": str(run_id),
         "model": str(model),
@@ -364,6 +364,53 @@ def build_deliverable_run_report(
         "screenshots": screenshots,
         "task_summary": _summarize_task_ledger(task_ledger),
     }
+
+    regime = str(metrics.get("decomposition_regime") or "auto").strip()
+    is_asym = bool(metrics.get("is_asymmetric"))
+    plan_comp = metrics.get("plan_completeness")
+    if is_asym or regime != "auto" or isinstance(plan_comp, dict):
+        usage = metrics.get("provider_usage") if isinstance(metrics.get("provider_usage"), dict) else {}
+        by_role = usage.get("by_role") if isinstance(usage.get("by_role"), dict) else {}
+        worker_calls = 0
+        orch_calls = 0
+        worker_in = 0
+        worker_out = 0
+        orch_in = 0
+        orch_out = 0
+        for r_name, r_row in by_role.items():
+            if not isinstance(r_row, dict):
+                continue
+            att = _non_negative_int(r_row.get("attempts"), 0)
+            p_tok = _non_negative_int(r_row.get("prompt_eval_count"), 0)
+            e_tok = _non_negative_int(r_row.get("eval_count"), 0)
+            if str(r_name).strip().lower() in {"builder", "repairer"}:
+                worker_calls += att
+                worker_in += p_tok
+                worker_out += e_tok
+            else:
+                orch_calls += att
+                orch_in += p_tok
+                orch_out += e_tok
+        total_tok = orch_in + orch_out + worker_in + worker_out
+        report["asymmetric_swarm"] = {
+            "is_asymmetric": is_asym,
+            "orchestrator_model": str(metrics.get("orchestrator_model") or model),
+            "worker_model": str(metrics.get("worker_model") or model),
+            "decomposition_regime": regime,
+            "orchestrator_id": metrics.get("external_orchestrator_id"),
+            "orchestrator_calls": orch_calls,
+            "worker_calls": worker_calls,
+            "orchestrator_input_tokens": orch_in,
+            "orchestrator_output_tokens": orch_out,
+            "worker_input_tokens": worker_in,
+            "worker_output_tokens": worker_out,
+            "worker_token_share": round((worker_in + worker_out) / total_tok, 4) if total_tok > 0 else 0.0,
+            "schema_echo_unwrapped": _non_negative_int(metrics.get("schema_echo_arguments_unwrapped"), 0),
+            "deterministic_oracle_runs": _non_negative_int(metrics.get("deterministic_oracle_runs"), 0),
+            "plan_completeness": plan_comp if isinstance(plan_comp, dict) else None,
+        }
+
+    return report
 
 
 def write_deliverable_run_report(report: dict, output_path: Path) -> Path:

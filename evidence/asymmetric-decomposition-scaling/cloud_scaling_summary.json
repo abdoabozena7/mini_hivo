@@ -1,0 +1,1208 @@
+{
+  "total_cloud_systems": 37,
+  "total_worker_invocations": 113,
+  "models_evaluated": [
+    "mai-code-1.1-flash (default)",
+    "gpt-5.6-luna (reasoning_effort=low)",
+    "gemini-3.8-flash (default)",
+    "claude-haiku-5.5 (reasoning_effort=low)"
+  ],
+  "benchmarks": [
+    "B6_query_engine",
+    "B7_bytecode_vm",
+    "B8_event_ledger"
+  ],
+  "runs": [
+    {
+      "cell_key": "B6_query_engine__mai11_flash__D0_mono",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "DESC\")\n  File \"<workspace-path>\", line 153, in execute_query\n    parsed = parse_query(sql)\n  File \"<workspace-path>\", line 199, in parse_query\n    raise ValueError(f\"Unexpected query text: {remainder}\")\nValueError: Unexpected query text: amount DESC\n"
+    },
+    {
+      "cell_key": "B6_query_engine__mai11_flash__D2_naive_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "y_engine__mai11_flash__D2_naive_parallel\\engine.py\", line 556, in execute_query\n    table_name, alias = _parse_table_reference(source_text)\n                        ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^\n  File \"<workspace-path>\", line 337, in _parse_table_reference\n    text = ref.strip()\n           ^^^^^^^^^\nAttributeError: 'JoinClause' object has no attribute 'strip'\n"
+    },
+    {
+      "cell_key": "B6_query_engine__mai11_flash__D4_atomic_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          true
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__mai11_flash__D0_mono",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "lf.arg)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^\n  File \"<workspace-path>\", line 30, in validate_operand\n    if not isinstance(arg, str) or not LABEL_RE.match(arg): raise ValueError(f\"Opcode {op} requires a label operand\")\n                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: Opcode JZ requires a label operand\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__mai11_flash__D2_naive_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 37, in <module>\n    r2 = run_program(assemble(loop_src))\n                     ~~~~~~~~^^^^^^^^^^\n  File \"<workspace-path>\", line 26, in assemble\n    else: raise ValueError(f\"Undefined label {op}\")\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: Undefined label acc\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__mai11_flash__D4_atomic_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__luna56_low__D0_mono",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "vo\\output\\asymmetric-decomposition-paper-20261122\\cloud_weak_workers\\B6_query_engine__luna56_low__D0_mono\\expr_eval.py\", line 122, in evaluate_where\n    return _Parser(predicate, row).parse()\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"<workspace-path>\", line 53, in parse\n    raise ValueError(\"unexpected token in predicate\")\nValueError: unexpected token in predicate\n"
+    },
+    {
+      "cell_key": "B6_query_engine__luna56_low__D2_naive_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "r-20261122\\cloud_weak_workers\\B6_query_engine__luna56_low__D2_naive_parallel\\engine.py\", line 10, in execute_query\n    expr_eval, query_parser = _load_modules()\n                              ~~~~~~~~~~~~~^^\n  File \"<workspace-path>\", line 6, in _load_modules\n    from . import expr_eval, query_parser\nImportError: attempted relative import with no known parent package\n"
+    },
+    {
+      "cell_key": "B6_query_engine__luna56_low__D4_atomic_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "dept = 'eng' AND age >= 25\")\n  File \"<workspace-path>\", line 6, in execute_query\n    ast = parse_sql(sql)\n  File \"<workspace-path>\", line 159, in parse_sql\n    raise ValueError(\"invalid SQL syntax\")\nValueError: invalid SQL syntax\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__luna56_low__D0_mono",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__luna56_low__D2_naive_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "jects\\Ai\\mini_hivo\\output\\asymmetric-decomposition-paper-20261122\\cloud_weak_workers\\B7_bytecode_vm__luna56_low__D2_naive_parallel\\assembler.py\", line 11, in assemble\n    _opcode_table()\n    ~~~~~~~~~~~~~^^\n  File \"<workspace-path>\", line 9, in _opcode_table\n    raise ValueError('isa does not define an opcode table')\nValueError: isa does not define an opcode table\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__luna56_low__D4_atomic_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__gem38_flash__D0_mono",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 5,
+      "checks_total": 6,
+      "check_fraction": 0.8333,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          false
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__gem38_flash__D2_naive_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 17, in <module>\n    r1 = execute_query(tables, \"SELECT name, age FROM users WHERE dept = 'eng' AND age >= 25\")\n  File \"<workspace-path>\", line 4, in execute_query\n    return query.get('from')\n           ^^^^^^^^^\nAttributeError: 'ParsedQuery' object has no attribute 'get'\n"
+    },
+    {
+      "cell_key": "B6_query_engine__gem38_flash__D4_atomic_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          true
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__gem38_flash__D0_mono",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__gem38_flash__D2_naive_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 37, in <module>\n    r2 = run_program(assemble(loop_src))\n  File \"<workspace-path>\", line 28, in run_program\n    else: raise VMError(f\"Unknown opcode {op_name}\")\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nvm.VMError: Unknown opcode CMP_LT\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__gem38_flash__D4_atomic_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__haiku55_low__D0_mono",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          true
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__haiku55_low__D2_naive_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 17, in <module>\n    r1 = execute_query(tables, \"SELECT name, age FROM users WHERE dept = 'eng' AND age >= 25\")\n  File \"<workspace-path>\", line 4, in execute_query\n    return tables[parsed['from'][0]]\n                  ~~~~~~~~~~~~~~^^^\nKeyError: 0\n"
+    },
+    {
+      "cell_key": "B6_query_engine__haiku55_low__D4_atomic_parallel",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          true
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__haiku55_low__D0_mono",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B7_bytecode_vm__haiku55_low__D2_naive_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "xception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 37, in <module>\n    r2 = run_program(assemble(loop_src))\n                     ~~~~~~~~^^^^^^^^^^\n  File \"<workspace-path>\", line 26, in assemble\n    else: raise ValueError(f\"undefined label {op!r}\")\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: undefined label 'acc'\n"
+    },
+    {
+      "cell_key": "B7_bytecode_vm__haiku55_low__D4_atomic_parallel",
+      "benchmark_id": "B7_bytecode_vm",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "arith_order",
+          true
+        ],
+        [
+          "loop_sum_1_to_5",
+          true
+        ],
+        [
+          "call_ret_subroutine",
+          true
+        ],
+        [
+          "undef_label_raises",
+          true
+        ],
+        [
+          "infinite_loop_guard",
+          true
+        ],
+        [
+          "cli_valid_and_divzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B6_query_engine__luna56_low__D4_atomic_1repair",
+      "benchmark_id": "B6_query_engine",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_1Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 1,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "where_and_project",
+          true
+        ],
+        [
+          "inner_join_order",
+          true
+        ],
+        [
+          "group_by_agg",
+          true
+        ],
+        [
+          "order_limit",
+          true
+        ],
+        [
+          "cli_valid_sql",
+          true
+        ],
+        [
+          "cli_invalid_sql_nonzero",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__mai11_flash__D0_mono",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__mai11_flash__D2_naive_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "  e1 = j.post_entry(\"tx-1\", [\n        {\"account\": \"cash\", \"delta_cents\": 10000},\n        {\"account\": \"equity\", \"delta_cents\": -10000},\n    ])\n  File \"<workspace-path>\", line 4, in post_entry\n    if 'amount' not in l: raise ValueError('leg must contain amount')\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: leg must contain amount\n"
+    },
+    {
+      "cell_key": "B8_event_ledger__mai11_flash__D4_atomic_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "mai11_flash",
+      "worker_model": "mai-code-1.1-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__luna56_low__D0_mono",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__luna56_low__D2_naive_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": ", in <module>\n    e1 = j.post_entry(\"tx-1\", [\n        {\"account\": \"cash\", \"delta_cents\": 10000},\n        {\"account\": \"equity\", \"delta_cents\": -10000},\n    ])\n  File \"<workspace-path>\", line 4, in post_entry\n    if l.get('amount') is None: raise ValueError('invalid amount')\n                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: invalid amount\n"
+    },
+    {
+      "cell_key": "B8_event_ledger__luna56_low__D4_atomic_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "luna56_low",
+      "worker_model": "gpt-5.6-luna (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__gem38_flash__D0_mono",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__gem38_flash__D2_naive_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 11, in <module>\n    j = journal.LedgerJournal()\n  File \"<workspace-path>\", line 3, in __init__\n    def __init__(self): self.chain = hash_chain.HashChain()\n                                     ^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'hash_chain' has no attribute 'HashChain'\n"
+    },
+    {
+      "cell_key": "B8_event_ledger__gem38_flash__D4_atomic_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "gem38_flash",
+      "worker_model": "gemini-3.8-flash (default)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__haiku55_low__D0_mono",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D0_Monolithic",
+      "mean_kappa": null,
+      "parallel_workers": 1,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    },
+    {
+      "cell_key": "B8_event_ledger__haiku55_low__D2_naive_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D2_Naive_Vague_Split",
+      "mean_kappa": 0.35,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": false,
+      "checks_passed": 0,
+      "checks_total": 6,
+      "check_fraction": 0.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [],
+      "error": "odule>\n    e1 = j.post_entry(\"tx-1\", [\n        {\"account\": \"cash\", \"delta_cents\": 10000},\n        {\"account\": \"equity\", \"delta_cents\": -10000},\n    ])\n  File \"<workspace-path>\", line 4, in post_entry\n    if 'amount' not in l: raise ValueError('leg must have amount')\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: leg must have amount\n"
+    },
+    {
+      "cell_key": "B8_event_ledger__haiku55_low__D4_atomic_parallel",
+      "benchmark_id": "B8_event_ledger",
+      "worker_slug": "haiku55_low",
+      "worker_model": "claude-haiku-5.5 (reasoning_effort=low)",
+      "regime": "D4_Frontier_Contract_Atomic_0Repair",
+      "mean_kappa": 1.0,
+      "parallel_workers": 4,
+      "repair_rounds": 0,
+      "external_passed": true,
+      "checks_passed": 6,
+      "checks_total": 6,
+      "check_fraction": 1.0,
+      "files_present": 4,
+      "files_expected": 4,
+      "details": [
+        [
+          "balanced_post_and_balances",
+          true
+        ],
+        [
+          "unbalanced_rejected_atomically",
+          true
+        ],
+        [
+          "idempotency_and_conflict_guard",
+          true
+        ],
+        [
+          "hash_chain_tamper_detection",
+          true
+        ],
+        [
+          "snapshot_compaction_and_replay",
+          true
+        ],
+        [
+          "cli_valid_and_unbalanced_rejection",
+          true
+        ]
+      ],
+      "error": null
+    }
+  ]
+}

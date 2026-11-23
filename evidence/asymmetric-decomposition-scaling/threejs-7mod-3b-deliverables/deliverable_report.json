@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20261123T062836-65b98eef",
+  "model": "qwen2.5-coder:3b",
+  "mode": "recursive",
+  "status": "done",
+  "exit_code": 0,
+  "verified": true,
+  "summary": "Completed bounded integration verification audit.",
+  "telemetry": {
+    "model_calls": 38,
+    "tool_calls": 34,
+    "splits": 1,
+    "max_depth": 1,
+    "leaf_tasks": 7,
+    "repairer_calls": 1,
+    "browser_checks": 5,
+    "evidence_licensed_corrections": 0,
+    "input_tokens": 196220,
+    "output_tokens": 12035,
+    "elapsed_seconds": 144.86
+  },
+  "deliverables": [
+    {
+      "path": "app.js",
+      "size_bytes": 905,
+      "sha256": "3ca529dffcde47a42598cd3d8b70c88c424a994e3812ebbc31f22dee00c7145c"
+    },
+    {
+      "path": "arena_env.js",
+      "size_bytes": 1394,
+      "sha256": "421f8453501c869c183a460fe4de7fc786f9800e15f13f9d133ddd4da36a21f7"
+    },
+    {
+      "path": "bridge.js",
+      "size_bytes": 1484,
+      "sha256": "1ab186bc3214cd6dfd83832fbfe79c855d3f8813676658110bfdf18b5cf91abc"
+    },
+    {
+      "path": "entities3d.js",
+      "size_bytes": 1260,
+      "sha256": "cc5f87516a4925c39202abcccaff5c4228f1ee442f2fa896563fae6f4f3f79cc"
+    },
+    {
+      "path": "game_state.js",
+      "size_bytes": 2173,
+      "sha256": "e38470a39eb5932b760450cdbd051d64582879a1cc2ceaf3e3eee51b4d0ec117"
+    },
+    {
+      "path": "hud_ui.js",
+      "size_bytes": 1505,
+      "sha256": "ca542b52f6066354c621a170b44b7e549f734ae437227af2c285e79e5d4fcb09"
+    },
+    {
+      "path": "index.html",
+      "size_bytes": 913,
+      "sha256": "dd92939cc4174f2e2c20b36306b716c6b520ae4e33d00086f73c30ca3ddb713d"
+    }
+  ],
+  "screenshots": [
+    ".agent_evidence/task_7.png",
+    ".agent_evidence/task_ROOT.png"
+  ],
+  "task_summary": {
+    "total_nodes": 8,
+    "done_nodes": 8,
+    "failed_nodes": 0
+  },
+  "asymmetric_swarm": {
+    "is_asymmetric": true,
+    "orchestrator_model": "gemma4:e4b",
+    "worker_model": "qwen2.5-coder:3b",
+    "decomposition_regime": "contract_atomic",
+    "orchestrator_id": "frontier-architect-v7-flat-prose-zero-code",
+    "orchestrator_calls": 3,
+    "worker_calls": 35,
+    "orchestrator_input_tokens": 11691,
+    "orchestrator_output_tokens": 66,
+    "worker_input_tokens": 184529,
+    "worker_output_tokens": 11969,
+    "worker_token_share": 0.9435,
+    "schema_echo_unwrapped": 0,
+    "deterministic_oracle_runs": 15,
+    "plan_completeness": {
+      "num_children": 7,
+      "boundary_count": 6,
+      "mean_kappa": 1.0,
+      "min_kappa": 1.0,
+      "child_kappas": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  }
+}

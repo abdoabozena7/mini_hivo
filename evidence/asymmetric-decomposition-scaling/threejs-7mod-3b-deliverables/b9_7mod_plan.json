@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.0",
+  "regime": "contract_atomic",
+  "orchestrator_id": "frontier-architect-v7-flat-prose-zero-code",
+  "goal": "Create game_state.js, arena_env.js, entities3d.js, bridge.js, hud_ui.js, app.js, and index.html for Orbital Prism Harvester 3D.",
+  "constraints": [
+    "Separate Three.js environment (arena_env.js), 3D meshes (entities3d.js), bridge (bridge.js), and DOM HUD (hud_ui.js).",
+    "Pure browser ES modules without bundler and zero HUD overlap."
+  ],
+  "success_criteria": [
+    "All 6 ES modules pass node --check and export their declared symbols.",
+    "index.html renders WebGL scene in Chromium with 0 console/page errors and zero HUD overlap."
+  ],
+  "children": [
+    {
+      "id": "1",
+      "goal": "Create game_state.js exporting createGameState, collectNearbyPrisms, stepShip, forceCollectOne, forceWinAll, setPaused, and resetGameState.",
+      "owned_mutation_paths": [
+        "game_state.js"
+      ],
+      "scope_hint": [
+        "game_state.js"
+      ],
+      "interface_contract": "File game_state.js (ES module). Export ALL 7 named functions and ensure every function explicitly ends with 'return state' (never return the result of .forEach(), which is undefined). (1) createGameState() returns {ship: {x: 0, z: 0}, prisms: array of 8 items {id: i, x: Number((6*Math.cos(i*Math.PI/4)).toFixed(2)), z: Number((6*Math.sin(i*Math.PI/4)).toFixed(2)), active: true}, score: 0, collected: 0, totalPrisms: 8, paused: false, won: false}. (2) collectNearbyPrisms(state) loops over state.prisms and for each active prism with Math.hypot(state.ship.x - p.x, state.ship.z - p.z) <= 1.6 sets p.active to false, increments state.collected by 1 and state.score by 25, sets state.won to true when state.collected >= state.totalPrisms, and finally returns state. (3) stepShip(state, dx, dz) returns state unchanged if state.paused or state.won, otherwise clamps state.ship.x + dx and state.ship.z + dz to [-10, 10], calls collectNearbyPrisms(state), and returns state. (4) forceCollectOne(state) finds the first active prism p, moves state.ship.x to p.x and state.ship.z to p.z, marks p.active false, adds 1 to collected and 25 to score, updates state.won if all collected, and returns state. (5) forceWinAll(state) marks all 8 prisms active false, sets collected to totalPrisms, score to totalPrisms * 25, won to true, and returns state. (6) setPaused(state, flag) sets state.paused to Boolean(flag) and returns state. (7) resetGameState(state) resets ship to (0,0), all 8 prisms to active true, score to 0, collected to 0, paused to false, won to false, and returns state.",
+      "done_when": [
+        "node --check game_state.js exits 0 and exports all 7 functions."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "game_state.js",
+          "command": "node --check game_state.js",
+          "expected_exports": [
+            "createGameState",
+            "collectNearbyPrisms",
+            "stepShip",
+            "forceCollectOne",
+            "forceWinAll",
+            "setPaused",
+            "resetGameState"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "goal": "Create arena_env.js exporting createArenaEnv(mountEl) for the Three.js scene, camera, lights, grid, and starfield.",
+      "owned_mutation_paths": [
+        "arena_env.js"
+      ],
+      "scope_hint": [
+        "arena_env.js"
+      ],
+      "interface_contract": "File arena_env.js (ES module importing * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', never call console.error). Export named function createArenaEnv(mountEl). Inside createArenaEnv: create scene = new THREE.Scene() with background new THREE.Color(0x060918), create camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500) placed at (0, 12, 16) looking at (0, 0, 0), create renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true}) sized to window.innerWidth by window.innerHeight and appended via mountEl.appendChild(renderer.domElement). Add THREE.AmbientLight(0x94a3b8, 1.8), THREE.DirectionalLight(0xffffff, 2.2) at (8, 18, 10), and THREE.GridHelper(24, 24, 0x38bdf8, 0x1e293b) to scene. Allocate typed array const coords = new Float32Array(900) and fill each scalar slot coords[k] = (Math.random() - 0.5) * 70 for k from 0 to 899 (NEVER return nested [x, y, z] sub-arrays, which produce NaN in Float32BufferAttribute). Create starGeo = new THREE.BufferGeometry(), call starGeo.setAttribute('position', new THREE.BufferAttribute(coords, 3)), pass starGeo into new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xe2e8f0, size: 0.22})), add points to scene, and return {scene, camera, renderer}.",
+      "done_when": [
+        "node --check arena_env.js exits 0 and exports createArenaEnv."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "arena_env.js",
+          "command": "node --check arena_env.js",
+          "expected_exports": [
+            "createArenaEnv"
+          ],
+          "expected_source_substrings": [
+            "THREE.AmbientLight",
+            "THREE.DirectionalLight",
+            "THREE.GridHelper",
+            "Float32Array",
+            "THREE.BufferGeometry",
+            "setAttribute"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "goal": "Create entities3d.js exporting createEntities(scene) and syncEntities(entities, state, elapsedSec) for the 3D starcraft and 8 prisms.",
+      "owned_mutation_paths": [
+        "entities3d.js"
+      ],
+      "read_only_sibling_paths": [
+        "game_state.js",
+        "arena_env.js"
+      ],
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "scope_hint": [
+        "entities3d.js"
+      ],
+      "interface_contract": "File entities3d.js (ES module importing * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', never return null for shipGroup, and use distinct local const variable names in createEntities vs syncEntities such as createdPrismMesh vs targetPrismMesh so no const identifier is declared twice in entities3d.js). IMPORTANT: Always wrap every geometry inside new THREE.Mesh(geometry, material) before setting .position or .rotation. Export (1) createEntities(scene): construct shipGroup = new THREE.Group(), add new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.8, 16), new THREE.MeshStandardMaterial({color: 0x00f5ff, emissive: 0x0284c7, emissiveIntensity: 0.9})) with mesh.rotation.x set to Math.PI/2, add new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.14, 0.6), new THREE.MeshStandardMaterial({color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.7})), and add new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.08, 12, 24), new THREE.MeshStandardMaterial({color: 0xf43f5e, emissive: 0xe11d48})), position shipGroup at (0, 0.6, 0) and call scene.add(shipGroup). Build prismMeshes array of 8 new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), new THREE.MeshStandardMaterial({color: i % 2 === 0 ? 0xfbbf24 : 0xe879f9, emissive: i % 2 === 0 ? 0xd97706 : 0xc026d3, emissiveIntensity: 0.8})) instances named createdPrismMesh, call scene.add(createdPrismMesh) and push to prismMeshes, then return {shipGroup, prismMeshes}. Export (2) syncEntities(entities, state, elapsedSec): update entities.shipGroup.position.set(state.ship.x, 0.6, state.ship.z), and for each index k from 0 to 7 update entities.prismMeshes[k].visible to Boolean(state.prisms[k].active), set entities.prismMeshes[k].position.set(state.prisms[k].x, 0.9 + 0.2 * Math.sin(elapsedSec * 3 + k), state.prisms[k].z), and set entities.prismMeshes[k].rotation.y to elapsedSec * 1.8 + k without redeclaring any const name from createEntities.",
+      "done_when": [
+        "node --check entities3d.js exits 0 and exports createEntities and syncEntities."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "entities3d.js",
+          "command": "node --check entities3d.js",
+          "expected_exports": [
+            "createEntities",
+            "syncEntities"
+          ],
+          "expected_source_substrings": [
+            "THREE.Group",
+            "new THREE.Mesh",
+            "THREE.ConeGeometry",
+            "THREE.OctahedronGeometry",
+            "scene.add("
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "goal": "Create bridge.js exporting createGameBridge(state, onUpdate) returning one object with getState, move, forceCollect, forceWin, togglePause, and restart.",
+      "owned_mutation_paths": [
+        "bridge.js"
+      ],
+      "read_only_sibling_paths": [
+        "game_state.js"
+      ],
+      "depends_on": [
+        "1"
+      ],
+      "scope_hint": [
+        "bridge.js"
+      ],
+      "interface_contract": "File bridge.js (pure JS ES module importing {stepShip, forceCollectOne, forceWinAll, setPaused, resetGameState} from './game_state.js', zero Three.js imports). Export named function createGameBridge(state, onUpdate). Define helper snap() returning {player: {x: state.ship.x, y: 0.6, z: state.ship.z}, position: {x: state.ship.x, z: state.ship.z}, score: state.score, collected: state.collected, totalPrisms: state.totalPrisms, paused: Boolean(state.paused), won: Boolean(state.won), status: state.won ? 'won' : (state.paused ? 'paused' : 'playing')}. Return ONE plain object literal containing all 6 methods on that single object: getState() returning snap(), move(dir) mapping up to (0,-0.8), down to (0,0.8), left to (-0.8,0), right to (0.8,0) then calling stepShip(state, dx, dz) and onUpdate() and returning snap(), forceCollect() calling forceCollectOne(state) and onUpdate() and returning snap(), forceWin() calling forceWinAll(state) and onUpdate() and returning snap(), togglePause() calling setPaused(state, !state.paused) and onUpdate() and returning snap(), and restart() calling resetGameState(state) and onUpdate() and returning snap().",
+      "done_when": [
+        "node --check bridge.js exits 0 and exports createGameBridge."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "bridge.js",
+          "command": "node --check bridge.js",
+          "expected_exports": [
+            "createGameBridge"
+          ],
+          "expected_source_substrings": [
+            "import ",
+            "./game_state.js",
+            "getState",
+            "move",
+            "forceCollect",
+            "forceWin",
+            "togglePause",
+            "restart",
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "goal": "Create hud_ui.js exporting updateHud(state) and bindControls(state, bridge, onUpdate) for DOM HUD updates and input listeners.",
+      "owned_mutation_paths": [
+        "hud_ui.js"
+      ],
+      "read_only_sibling_paths": [
+        "game_state.js",
+        "bridge.js"
+      ],
+      "depends_on": [
+        "1",
+        "4"
+      ],
+      "scope_hint": [
+        "hud_ui.js"
+      ],
+      "interface_contract": "File hud_ui.js (browser ES module importing {stepShip} from './game_state.js', zero Three.js imports, never use require, and use distinct const variable names in updateHud vs bindControls such as hudPauseBtn vs ctrlPauseBtn so no const identifier appears twice in hud_ui.js). IMPORTANT: Null-guard every document.getElementById(...) lookup with 'if (el)' before reading or writing .textContent or calling .addEventListener. Export named function updateHud(state) using local const names scoreEl, prismsEl, statusEl, and hudPauseBtn to update #score-val textContent to 'SCORE: ' + state.score, #prisms-val textContent to 'PRISMS: ' + state.collected + ' / ' + state.totalPrisms, #status-badge textContent to 'VICTORY' when state.won else ('PAUSED' when state.paused else 'PLAYING'), and #btn-pause textContent to 'Resume' when state.paused else 'Pause'. Export named function bindControls(state, bridge, onUpdate) using local const names ctrlPauseBtn and ctrlRestartBtn to bind click on #btn-pause to bridge.togglePause(), click on #btn-restart to bridge.restart(), and window keydown for ArrowLeft/a (-0.8,0), ArrowRight/d (0.8,0), ArrowUp/w (0,-0.8), ArrowDown/s (0,0.8) calling stepShip(state, dx, dz) then onUpdate().",
+      "done_when": [
+        "node --check hud_ui.js exits 0 and exports updateHud and bindControls."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "hud_ui.js",
+          "command": "node --check hud_ui.js",
+          "expected_exports": [
+            "updateHud",
+            "bindControls"
+          ],
+          "expected_source_substrings": [
+            "import ",
+            "./game_state.js",
+            "score-val",
+            "prisms-val",
+            "status-badge",
+            "btn-pause",
+            "btn-restart"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "goal": "Create app.js connecting game_state.js, arena_env.js, entities3d.js, bridge.js, and hud_ui.js with window.AGENT_GAME and requestAnimationFrame.",
+      "owned_mutation_paths": [
+        "app.js"
+      ],
+      "read_only_sibling_paths": [
+        "game_state.js",
+        "arena_env.js",
+        "entities3d.js",
+        "bridge.js",
+        "hud_ui.js"
+      ],
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scope_hint": [
+        "app.js"
+      ],
+      "interface_contract": "File app.js (24-line browser ES module bootstrap using ES import statements only, never use require and never import 'three'). Import {createGameState} from './game_state.js', {createArenaEnv} from './arena_env.js', {createEntities, syncEntities} from './entities3d.js', {createGameBridge} from './bridge.js', and {updateHud, bindControls} from './hud_ui.js'. At module top level initialize state = createGameState(), env = createArenaEnv(document.getElementById('canvas-mount') || document.body), and entities = createEntities(env.scene). Define function onUpdate() that calls updateHud(state), syncEntities(entities, state, performance.now() / 1000), and env.renderer.render(env.scene, env.camera). Define function animate(ts) that calls syncEntities(entities, state, ts / 1000), calls env.renderer.render(env.scene, env.camera), and schedules requestAnimationFrame(animate). Assign window.AGENT_GAME = createGameBridge(state, onUpdate), call bindControls(state, window.AGENT_GAME, onUpdate), call onUpdate() once immediately, and call requestAnimationFrame(animate).",
+      "done_when": [
+        "node --check app.js exits 0 and connects all modules to window.AGENT_GAME."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "run_command",
+          "target": "app.js",
+          "command": "node --check app.js",
+          "expected_source_substrings": [
+            "import ",
+            "createGameState",
+            "createArenaEnv",
+            "createEntities",
+            "createGameBridge",
+            "updateHud",
+            "bindControls",
+            "window.AGENT_GAME",
+            ".render(",
+            "requestAnimationFrame"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "goal": "Create index.html with #canvas-mount, #score-val, #prisms-val, #status-badge, #btn-pause, #btn-restart, and <script type='module' src='./app.js'></script>.",
+      "owned_mutation_paths": [
+        "index.html"
+      ],
+      "read_only_sibling_paths": [
+        "game_state.js",
+        "arena_env.js",
+        "entities3d.js",
+        "bridge.js",
+        "hud_ui.js",
+        "app.js"
+      ],
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "scope_hint": [
+        "index.html"
+      ],
+      "interface_contract": "File index.html (~30 lines, zero inline JS, no importmap, use single quotes for all HTML attributes so JSON string escaping stays clean). Include <!DOCTYPE html>, <title>Orbital Prism Harvester 3D</title>, minimal <style> setting html,body margin 0 overflow hidden background #060918 color #f8fafc font-family system-ui, <div id='canvas-mount' style='width:100vw;height:100vh;'></div>, fixed top bar <div id='hud-bar' style='position:fixed;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;align-items:center;pointer-events:none;z-index:10;'> containing <span id='title-badge'>ORBITAL PRISM HARVESTER 3D</span>, <span id='score-val'>SCORE: 0</span>, <span id='prisms-val'>PRISMS: 0 / 8</span>, and <span id='status-badge'>PLAYING</span>, fixed bottom bar <div id='controls-bar' style='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:14px;z-index:10;'> containing <button id='btn-pause'>Pause</button> and <button id='btn-restart'>Restart</button>, and <script type='module' src='./app.js'></script> before </body>.",
+      "done_when": [
+        "verify_web_app('index.html') passes with 0 console errors, 0 page errors, and non-blank WebGL canvas."
+      ],
+      "verification_oracles": [
+        {
+          "kind": "verify_web_app",
+          "target": "index.html"
+        }
+      ]
+    }
+  ]
+}

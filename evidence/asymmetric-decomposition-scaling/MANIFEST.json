@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0",
+  "update_id": "R_UPDATE_010",
+  "branch": "research/asymmetric-decomposition-weak-workers",
+  "artifact_count": 16,
+  "artifacts": [
+    {
+      "path": "cloud_scaling_summary.json",
+      "bytes": 35183,
+      "sha256": "3f08a48c1c98babca25251bbee17523e49e83d4970a736952b876a90e5d3a622"
+    },
+    {
+      "path": "local_scaling_summary.json",
+      "bytes": 100360,
+      "sha256": "89f940ec16427ecb04074e6dcb05141c6506adacccf5795f02566e2105fbe508"
+    },
+    {
+      "path": "README.md",
+      "bytes": 5595,
+      "sha256": "0b50bb9cb479d7cadd428445df6fa43c9c4ae0938455ca8012c0430c7f368578"
+    },
+    {
+      "path": "screenshots/01-3b-threejs-initial-8prisms.png",
+      "bytes": 49790,
+      "sha256": "66a0214eed5f1af3b530411f0cd0c58b6ffd53ca7e60c867fb42a4a3177a9ef8"
+    },
+    {
+      "path": "screenshots/02-3b-threejs-harvesting-75pts.png",
+      "bytes": 51632,
+      "sha256": "1e64cd89c6466911e6e0af6142fde6bbe271255d17bbafd2b570a891bcca3107"
+    },
+    {
+      "path": "screenshots/03-3b-threejs-paused-hud.png",
+      "bytes": 52124,
+      "sha256": "a2dc4f7ec8923124d51d87729bfd54b757e587533a378efafc0432e012988180"
+    },
+    {
+      "path": "screenshots/04-3b-threejs-victory-200pts.png",
+      "bytes": 51880,
+      "sha256": "b9c1fa51bdd7eae118070a9f7ed802b8450d102512c0dca34b169b5414a1946d"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/app.js",
+      "bytes": 878,
+      "sha256": "dcbf69fc39f4aba3af18865cdaa426adbf5896c873f5d85484dc53c7ecf41827"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/arena_env.js",
+      "bytes": 1355,
+      "sha256": "1fd2d47ba4a76c81c859523d7157d779d504141c4ec5e9fdb44bfbb67cd12bca"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/b9_7mod_plan.json",
+      "bytes": 17173,
+      "sha256": "46caf9e97775998225674a339676d612c621981bbd0c1899a8f81f869048dfce"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/bridge.js",
+      "bytes": 1437,
+      "sha256": "ac4db3d0c31cd2b78045b885b3858d1451a3198196c0a1f35c56f696e07e3b36"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/deliverable_report.json",
+      "bytes": 2619,
+      "sha256": "c5857c32fce04937d4fa3e8692a25d10e58b98d991cdaddcfb28e39df4e643e8"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/entities3d.js",
+      "bytes": 1231,
+      "sha256": "c5c1ce84472f049b33b49b67d6f480d21b5848c7b49eb7008bac90e21e072607"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/game_state.js",
+      "bytes": 2095,
+      "sha256": "fa1046c751f7dceb146121e7ccca8cd10549d2991db191d53b4c198ffbf537cc"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/hud_ui.js",
+      "bytes": 1471,
+      "sha256": "ab7ae400df3be41373874be52d75a0ddfcecc9804b52b57e935fb409f1a0d697"
+    },
+    {
+      "path": "threejs-7mod-3b-deliverables/index.html",
+      "bytes": 897,
+      "sha256": "d114628c99d1d7cb10623d9ecb7e8c28f8473e0721f5968634c61d67acd12b26"
+    }
+  ]
+}
