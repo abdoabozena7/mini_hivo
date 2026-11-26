@@ -1,24 +1,16 @@
-# Mini Hivo — Hybrid Model Strategy & Optimization Notes
+# Mini Hivo — Hybrid Model & Provider Deployment Reference
 
-> - **Status:** Reference & Integration Plan (v0.1 — distilled from small-model optimization playbook + live provider verification on 2026-11-26)
-> - **Immediate Scope:** Plug in a swappable **Cloud Thinking Orchestrator** (free tier during dev → paid model later with zero architecture changes) paired with a fast **Local Worker** (`qwen3.5:2b` on 4 GB VRAM)
-> - **Related Specs:** [Tool Architecture & Design Rules (`../tool_rules.md`)](../tool_rules.md), [Agent Architecture Charter](AGENT_ARCHITECTURE.md), [Project Goal](PROJECT_GOAL.md)
+> - **Status:** Living deployment & hardware reference (`v0.2` — provider landscape & 4 GB VRAM tuning, last verified 2026-11-26)
+> - **Scope:** Hardware-specific local-worker sizing (4 GB VRAM / GTX 1650 baseline), live free-dev vs. paid-target cloud provider comparisons (pricing/quotas), and deferred long-term research tracks.
+> - **Related Docs & Rules:** [Orchestration Implementation Architecture (`ORCHESTRATION_ARCHITECTURE.md`)](ORCHESTRATION_ARCHITECTURE.md) *(implemented modules & runtime flow)*, [Orchestration Guardrails (`../dev_rules/orchestration_rules.md`)](../dev_rules/orchestration_rules.md) *(timeless rules & capability floors)*, [Tool Rules (`../dev_rules/tool_rules.md`)](../dev_rules/tool_rules.md)
 
 ---
 
-## 1. Core Architectural Principle
+## 1. Deployment Topology Overview
 
-Split execution into two asymmetric tiers separated by a strict, schema-enforced boundary:
+This guide documents Mini Hivo's concrete **Cloud Thinking Orchestrator + 4 GB VRAM Local Worker** deployment profile (free dev cloud endpoints during iteration → paid drop-in endpoints via `EndpointConfig` swap). For the implemented module map (`hivo/providers/`, `hivo/hybrid/`) and runtime loop details, see [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md); for timeless architectural invariants, see [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md).
 
-1. **Cloud Thinking Orchestrator (Heavy Lifting):**
-   - Owns planning, requirement extraction, repository navigation, task decomposition, worker briefing, and verification review.
-   - Uses explicit **thinking/reasoning mode** (`enable_thinking=True` / reasoning tokens enabled) with generous output token headroom (`4,096–8,192` tokens) so thinking chains do not truncate final JSON or tool calls.
-   - Never directly edits source lines (enforced via role profiles in [`../hivo/tools/registry.py`](../hivo/tools/registry.py)).
-2. **Local Resident Worker (Fast Scoped Execution — 4 GB VRAM Baseline):**
-   - Runs a single resident lightweight model (starting with **`qwen3.5:2b`** via local Ollama) dedicated to tightly scoped file edits and bounded execution tasks.
-   - Operates with **thinking disabled**, **tight local context**, and **3–4 flat-schema tools** (`read_file`, Hashline `edit_file`, `write_file`).
-
-> **Attribution Boundary:** Mini Hivo's existing [`SingleModelPolicy`](../hivo/model_policy.py) remains intact as the default single-local-model research baseline. Hybrid cloud+local orchestration is introduced strictly as an **explicit opt-in mode** with full model/provider provenance recorded per run.
+> **Attribution Boundary:** Legacy [`SingleModelPolicy`](../hivo/model_policy.py) remains intact in `mini.py` as the v1 single-local-model baseline. Hybrid cloud+local orchestration runs opt-in with explicit per-run model/provider provenance.
 
 ---
 
@@ -66,50 +58,30 @@ All candidate cloud providers (free and paid) expose an **OpenAI-compatible `/v1
 | **Chutes (Direct)** | `Qwen/Qwen3.8-27B-TEE` | \$0.039 in / \$1.25 out (**\$0.0039/M cached input**) | 10× prompt-caching discount for repeated orchestrator system prompts |
 | **DeepInfra (Direct)** | `Qwen/Qwen3.8-27B` | ~\$0.15–\$0.20 in / \$1.875–\$2.50 out | Straightforward direct FP8 OpenAI-compatible endpoint |
 
-### 3.3 Provider-Agnostic Adapter Invariants (Keep Free → Paid Seamless)
+### 3.3 Provider Adapter Checklist (Implemented in `hivo/providers/`)
+Concrete provider-agnostic adapter mechanics (unified message/tool-arg normalization, `<think>`/`reasoning_content` extraction, `max_tokens` headroom, `structured_mode` fallback, and `429`/`Retry-After`/`x-ratelimit-reset-*` deadline-clamped backoff) are implemented in [`../hivo/providers/clients.py`](../hivo/providers/clients.py) — see [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) and [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md) for the authoritative specs.
 
-Every cloud provider quirk must stay isolated inside one thin adapter layer:
-
-1. **Unified Normalized Output:** Translate OpenAI `choices[0].message` (content, `tool_calls`, `usage`) into one canonical message shape. Normalize OpenAI JSON-string `function.arguments` into dicts and map `usage` (`prompt_tokens`, `completion_tokens`) cleanly into provider accounting.
-2. **Thinking Extraction & Isolation:** Strip `reasoning_content`, `reasoning`, and `<think>...</think>` blocks from persisted conversation history and worker packets; record thinking token/char telemetry separately without leaking private chain-of-thought into the 2B worker.
-3. **Thinking-Aware Output Ceilings:** Cloud thinking roles require `max_tokens` of `4,096–8,192` (not the legacy `1,024–1,536` non-thinking local caps) so reasoning never starves the final answer or tool call.
-4. **Configurable Structured-Output Mode:** Support `json_schema` → `json_object` → prompt-enforced JSON fallback per endpoint (some fast endpoints like Cerebras FP16 advertise `tools=True` without strict `structured_outputs`).
-5. **Transport-Only Rate-Limit Backoff:** Handle HTTP `429` / `503` + `Retry-After` strictly inside the HTTP client while respecting global wall-clock run budgets. Never fabricate fallback responses on provider failure.
-6. **Intelligence-Parity Discipline:** Developing on a massive free model (e.g., `nemotron-3-ultra-550b-a55b` or `kimi-k3.1-pro`) can hide prompt fragility on smaller paid models. Spot-check prompts against `qwen/qwen3.8-27b` (via Groq free or paid) before locking in prompt assumptions.
+- **Intelligence-Parity Discipline:** Developing on a massive free model (e.g., `nemotron-3-ultra-550b-a55b` or `kimi-k3.1-pro`) can hide prompt fragility on smaller paid models. Spot-check prompts against `qwen/qwen3.8-27b` (via Groq free or paid) before locking in prompt assumptions.
 
 ---
 
-## 4. Quick Wins Included in Immediate Scope
+## 4. Explicitly Deferred / Out of Scope for Now
 
-These low-effort, high-ROI items will be wired directly during provider integration:
-
-- [x] **Explicit `think=False` enforcement on local worker calls** (and explicit thinking/reasoning headroom on cloud orchestrator calls).
-- [x] **Explicit local worker `num_ctx` ceiling (`4096–8192`)** + `keep_alive` to keep one resident worker warm in VRAM without eviction thrashing.
-- [x] **Verified local VRAM & Ollama config check** (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `nvidia-smi` memory delta check at 4K vs 8K context).
-- [x] **Native reuse of `hivo/tools/`** (`ToolBinding`, 3–4 worker tools, Hashline `edit_file`, `code_intel`, `checkpoint`, `ToolProtocolAdapter` with `native` / `grammar_json` / `xml_tags`).
-- [x] **Gitignored secrets hygiene:** Ensure `.env` is listed in `.gitignore` before storing any local API key (or use Windows user environment variables exclusively).
-
----
-
-## 5. Explicitly Deferred / Out of Scope for Now
-
-Valid long-term research ideas intentionally **excluded** from the current milestone so we ship the working hybrid cloud+local loop first:
+Valid long-term research ideas intentionally **excluded** from the current deployment milestone:
 
 - **Harness Trajectory Distillation (SFT + LoRA) & Verifiable RL (GRPO / HarnessAdapt-RL):** Requires cloud GPU budget and a locked 50-task automated benchmark first. *(Optional passive prep: log clean execution-verified runs cleanly so traces exist later if needed.)*
 - **Multi-LoRA Serving (`vLLM --enable-lora`):** Not suited to a local Windows 4 GB GTX 1650 runtime; revisit only on Linux/workstation/cloud GPU infrastructure.
-- **Model Compression Research (QAT, Structured Pruning, Custom PTQ Math):** Low ROI compared to using commodity `imatrix` / dynamic quants and stronger deterministic harness verification.
-- **Switching Local Runtime From Ollama to Raw `llama-server`:** Defer asymmetric KV cache (`-ctk q8_0 -ctv q4_0`) and raw `.gbnf` sampler enforcement via `llama-server` unless real tests show Ollama's `qwen3.5:2b` tool calling or VRAM footprint hits a hard wall.
+- **Model Compression Research (QAT, Structured Pruning, Custom PTQ Math):** Low ROI compared to using commodity `imatrix` / dynamic quants (`qwen3.5:2b-q4_K_M`, 100% GPU resident at `1.60 GB` on 4 GB VRAM) and stronger deterministic harness verification.
+- **Switching Local Runtime From Ollama to Raw `llama-server`:** Defer asymmetric KV cache (`-ctk q8_0 -ctv q4_0`) and raw `.gbnf` sampler enforcement via `llama-server` unless real tests show Ollama's `qwen3.5:2b-q4_K_M` tool calling or VRAM footprint hits a hard wall.
 - **Full LSP Server Integration:** Defer until `hivo/tools/code_intel.py` (AST/outline/references) + inline syntax checks show concrete cross-file type-error gaps on real tasks.
 
 ---
 
-## 6. High-Level Integration Roadmap
+## 5. Deployment Milestone Status
 
-1. **Phase 1 — Live API & Local Worker Smoke Test (Standalone):**
-   - Verify `.env` gitignore safety; test chosen free cloud provider(s) (latency, thinking extraction, native tool calling, structured JSON, rate-limit headers) and local Ollama `qwen3.5:2b` (`think=False`, `num_ctx` 4096/8192, `nvidia-smi` VRAM check, tool-calling sanity).
-2. **Phase 2 — Provider-Agnostic Client & Role Split Layer (`hivo/providers/`):**
-   - Implement a stdlib-only OpenAI-compatible cloud client + local Ollama worker client built on [`../hivo/http_client.py`](../hivo/http_client.py), normalizing responses, tool arguments, thinking separation, `429` backoff, and token usage — driven strictly by config so free → paid is a 3-field swap.
-3. **Phase 3 — Wire Cloud Orchestrator + Local `Qwen3.5-2B` Worker Loop:**
-   - Connect the cloud orchestrator (thinking ON, `orchestrator` profile) and local worker (thinking OFF, `coder_worker` profile, capped `num_ctx`) through [`ToolBinding`](../hivo/tools/registry.py) / [`ToolProtocolAdapter`](../hivo/tools/protocol.py) with explicit opt-in config (preserving `SingleModelPolicy` default).
-4. **Phase 4 — End-to-End Verification & Drop-In Paid Swap Benchmark:**
-   - Run real coding tasks (single-file edit → multi-file bugfix/feature) verifying real disk diffs, syntax/unit tests, VRAM ceiling, and clean provider swap from free dev endpoint to paid `Qwen3.8-27B` with zero code changes.
+| Phase | Scope | Status | Reference |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | Live free cloud + local 4 GB VRAM smoke probe & residency verification (`Q8_0` vs `Q4_K_M`) | **Done** | [`../scripts/probe_hybrid_models.py`](../scripts/probe_hybrid_models.py), [`../reports/experiment23/experiment23-report.md`](../reports/experiment23/experiment23-report.md) |
+| **Phase 2** | Stdlib-only provider-agnostic client layer (`hivo/providers/`) | **Done** | [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) |
+| **Phase 3** | Asymmetric Cloud Orchestrator + Local Worker runner (`hivo/hybrid/`) over `hivo/tools/ToolBinding` | **Done** | [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) |
+| **Phase 4** | Initial live `SWE-bench Verified` Docker evaluation (`N=3` free tier) → Next: `unified_diff` handoff & larger paid-endpoint slice (`N=10–50`) | **In Progress** | [`../reports/experiment23/experiment23-report.md`](../reports/experiment23/experiment23-report.md) |
