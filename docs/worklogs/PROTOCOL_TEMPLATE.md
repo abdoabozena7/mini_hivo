@@ -1,6 +1,6 @@
 # Experiment Protocol — <Short Descriptive Title>
 
-> **Template instructions:** Required for `Type: experiment` dossiers. Copy into `docs/worklogs/<person>/YYYY-MM-DD_<short-slug>/PROTOCOL.md` and lock fixed inputs and acceptance criteria before interpreting results.
+> **Template instructions:** Required for `Type: experiment` dossiers. Copy into `docs/worklogs/<person>/YYYY-MM-DD_<short-slug>/PROTOCOL.md` and lock fixed inputs, decontamination rules, cost estimates, and acceptance criteria before running (see `dev_rules/benchmarking_rules.md`).
 
 - **Date:** `<YYYY-MM-DD>`
 - **Author:** `<name>`
@@ -12,11 +12,12 @@
 
 ## 2. Fixed Inputs & Controlled Variables
 
-- **Dataset / Task Set:** <Exact dataset, version, split, and deterministic sampling seed (`seed=...`) or fixed case list.>
-- **Model(s) & Endpoint Config:** <Exact Orchestrator & Worker model tags, quantization, `think`/reasoning flags, `max_tokens`, `num_ctx`, provider.>
-- **Hardware & Runtime:** <GPU/VRAM, OS, Python/Docker/Ollama versions.>
-- **Run Budgets & Limits:** <Max turns, worker turns/dispatches, history char ceiling, timeouts, wall-clock caps.>
-- **Zero-Leakage & Isolation Rules:** <What is strictly withheld from the agent during solve time, and how evaluation runs independently.>
+- **Benchmark Stage, Suite & Exact Version:** `<e.g., Stage 1 | Terminal-Bench 4.1 | Slice: Dev (N=15, seed=42)>`
+- **Dataset / Task Set:** <Exact dataset, version, split, and deterministic sampling seed (`seed=...`) or fixed case list (state Dev vs. Held-Out).>
+- **Model(s) & Endpoint Config:** <Exact Orchestrator & Worker model tags, quantization, `think`/reasoning effort flags, `max_tokens`, `num_ctx`, `ToolProfile` hash, provider.>
+- **Hardware & Runtime:** <GPU/VRAM + verified local residency `%`, OS, Python/Docker/Ollama versions.>
+- **Run Budgets & Pre-Run Cost Estimate:** <Max turns, worker turns/dispatches, history char ceiling, timeouts, estimated total LLM calls & worst-case USD spend + human sign-off status.>
+- **Decontamination, Isolation & Zero-Leakage Controls:** <`.git` stripped to 1 orphan commit, network mode (`--network none`/allowlist), `/tmp` & secrets isolated, hidden `test_patch`/hints withheld, privilege-separated grading container.>
 
 ## 3. Hypothesis
 

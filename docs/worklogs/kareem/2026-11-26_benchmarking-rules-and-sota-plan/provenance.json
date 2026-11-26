@@ -1,0 +1,35 @@
+{
+  "date": "2026-11-26",
+  "author": "kareem",
+  "type": "change",
+  "subsystem": "dev_rules / docs / benchmarking",
+  "branch": "docs/benchmarking-rules",
+  "base_commit": "27bb0a138174224ec3ceaa605980a31966a401d7",
+  "tested_revision": "27bb0a138174224ec3ceaa605980a31966a401d7+uncommitted",
+  "source_sha256": {
+    "dev_rules/benchmarking_rules.md": "6b7aaefc46cacf193b0a58e575f9be2a7b91a21610b70d6dad0ac316957e0945",
+    "docs/BENCHMARKING_ARCHITECTURE.md": "facfa47b5c1b4e96622a1aec2eb89e4aff1103fd90e1ac9a142f381eb3dcead2",
+    "docs/BENCHMARK_SCORECARD.md": "6a8f27b30dbef3e2700624fc747a60c07aa0dfe1bb5e1f197edb1b090f3f1512",
+    "AGENTS.md": "5643612fd49f19d099090b4a35f1b9a6c3b93bb0f66f33b99f3c544855556e3b",
+    "dev_rules/how_to_make_rules.md": "e3361956fc222ab0f70c22fdf1a4307de39747a742c0e23d027c11bf471137d0",
+    "dev_rules/orchestration_rules.md": "e11cb214a16c2c02f8f7736aa4c2549ebc34bcbae0cc6d24ca70a8305de96c66",
+    "dev_rules/documentation_rules.md": "2ac4a525d8a9fb639d3d19003140ab8ae625a88ba575b586445896405d44f728",
+    "docs/worklogs/PROTOCOL_TEMPLATE.md": "ed615e4973f56d701741b03d6c5d7f2641d690605a3e4c2719221c8deb7e354c",
+    "docs/worklogs/REPORT_TEMPLATE.md": "3016da648007a6e303cbe7ac7c27f3f9a313c39ee32331b1699f0a3064e3e9a2"
+  },
+  "environment": {
+    "os": "Windows 11 (10.0.26300)",
+    "python": "3.14.6",
+    "gpu": "N/A (offline governance/documentation pass)",
+    "runtime_tools": "git, scripts/check.py, scripts/update_worklog_index.py"
+  },
+  "models": {
+    "orchestrator": "offline (zero LLM calls)",
+    "worker": "offline (zero LLM calls)"
+  },
+  "reproduction_commands": [
+    "python scripts/update_worklog_index.py --check",
+    "python scripts/check.py -v",
+    "git diff --check"
+  ]
+}

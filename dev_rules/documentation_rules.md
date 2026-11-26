@@ -1,8 +1,8 @@
 # Team Documentation & Worklog Rules (`dev_rules/documentation_rules.md`)
 
-> - **Status:** Living team policy (`v0.4`)
+> - **Status:** Living team policy (`v0.5`)
 > - **Scope:** Governs how all contributors and coding agents document current system architecture (`docs/`), trace individual engineering/research work (`docs/worklogs/`), find the latest open problem, and **propose** (never auto-apply) rule updates for `dev_rules/`.
-> - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Worklogs Master Index (`../docs/worklogs/INDEX.md`)](../docs/worklogs/INDEX.md)
+> - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Benchmarking & Evaluation Rules (`benchmarking_rules.md`)](benchmarking_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Worklogs Master Index (`../docs/worklogs/INDEX.md`)](../docs/worklogs/INDEX.md)
 > - **Tag Legend:** `[ENFORCED]` = enforced via templates, `.gitattributes`, or `scripts/update_worklog_index.py --check`; `[PROCESS]` = contributor & PR review gate.
 
 ---
@@ -17,7 +17,7 @@ Keep prescriptive rules, current-state system documentation, and per-person fore
 | **2. Living System Docs** *(Descriptive — Current State)* | `docs/` *(top-level, by subsystem)* | Shared team | **Where we are / how each subsystem works today** — implementation maps (`TOOLS_ARCHITECTURE.md`, `ORCHESTRATION_ARCHITECTURE.md`), provider/hardware guides (`HYBRID_MODEL_STRATEGY.md`), papers. **Never stored inside a person's folder.** | Living (updated when code/stack changes) |
 | **3. Evidence Locker / Worklogs** *(Descriptive — Forensic History)* | `docs/worklogs/<person>/YYYY-MM-DD_<slug>/` | Individual author | **What this contributor ran, changed, measured, and found** — small-scoped, experiment-grade traceable dossiers. | Append-only (immutable once verified) |
 
-> **Legacy Archive Boundary `[PROCESS]`:** Legacy `reports/experiment*/` and `updates/R_UPDATE_*.md` records remain frozen as historical archives. Do not overwrite historical records or assign new colliding global `experimentNN` / `R_UPDATE_NNN` numbers for parallel team work.
+> **Historical Reference Archives `[PROCESS]`:** `reports/`, `updates/`, and `mini.py` are read-only historical archives preserved for chronological record and earlier baseline findings — cite them as reference artifacts and keep them immutable.
 
 ---
 
@@ -58,7 +58,7 @@ If a session spans multiple activities (e.g., code fixes + a formal benchmark), 
 | **`analysis`** | Forensic debugging, root-cause trace, log/code audit, paper/option comparison *(no code changed)* | Block A (`Question & Inputs Inspected`, `Detailed Findings & Root Cause` separating **proven causes** vs. **hypotheses**, `Recommended Next Actions`) | Optional curated excerpts/logs in `artifacts/` |
 | **`test`** | Hardware/VRAM profiling, reproducing a bug, running verification passes on a branch | Block B (`Setup & Environment`) + Block D (`Verification & Checks`) | `provenance.json`, `results.json` |
 | **`change`** | Implementing a feature, fix, or refactor + verifying it | Block C (`Problem & Root Cause`, `Exact Changes Made` before → after table) + Block D (`Verification & Checks`) | `provenance.json` *(+ `results.json` if metrics measured)* |
-| **`experiment`** | Hypothesis-driven benchmark or A/B evaluation | Block B (`Setup & Environment`) + Block D (`Verification & Checks`) + Block E (`Experiment Results & Intermediate Defects Caught`) *(+ Block C if code changed)* | **`PROTOCOL.md`** *(enforced)* + `results.json` + `provenance.json` + `patches/` or `artifacts/` |
+| **`experiment`** | Hypothesis-driven benchmark or A/B evaluation *(follow [`benchmarking_rules.md`](benchmarking_rules.md) for KPIs, 8-point Truth Check & failure triage)* | Block B (`Setup & Environment`) + Block D (`Verification & Checks`) + Block E (`Experiment Results & Intermediate Defects Caught`) *(+ Block C if code changed)* | **`PROTOCOL.md`** *(enforced)* + `results.json` + `provenance.json` + `patches/` or `artifacts/` |
 
 ### 3.3 Machine-Readable JSON Conventions `[PROCESS]`
 - **`provenance.json`:** Copy [`../docs/worklogs/PROVENANCE_TEMPLATE.json`](../docs/worklogs/PROVENANCE_TEMPLATE.json) (`date`, `author`, `type`, `subsystem`, `branch`, `base_commit`, `tested_revision`, `source_sha256`, `environment`, `models`, `reproduction_commands`).
@@ -103,3 +103,4 @@ If a session spans multiple activities (e.g., code fixes + a formal benchmark), 
 | `v0.2` | 2026-11-26 | Added `scripts/update_worklog_index.py` auto-index & `--check` validation, chronological lookup & sequential continuation (`Builds On` + `Next / Open Issue`), `PROVENANCE_TEMPLATE.json` & `results.json` envelope, primary `Type` precedence + Block E, explicit Rule-Amendment Proposal workflow, and clean per-item status tags. |
 | `v0.3` | 2026-11-26 | Enforced strict Propose-Only Rule Lock (zero auto-edits to `dev_rules/` during normal work) and added `Rule Proposal:` metadata field feeding `docs/worklogs/INDEX.md`'s Pending Rule Proposals review queue. |
 | `v0.4` | 2026-11-26 | Added per-contributor Tier 1 quick logs (`docs/worklogs/<person>/LOG.md`) auto-indexed into `INDEX.md`'s Recent Tier 1 Fixes view, and aligned section 2.3 to parallel assigned-track coordination. |
+| `v0.5` | 2026-11-26 | Linked `benchmarking_rules.md` for `Type: experiment` KPI/Truth-Check standards and simplified historical-archive wording to positive framing. |
