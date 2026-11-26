@@ -1,0 +1,9 @@
+# Maintainer ownership for locked rules, multi-agent entrypoints, and CI gates.
+# Enable "Require review from Code Owners" in GitHub branch protection on main.
+/AGENTS.md                       @abdoabozena7 @kareem232003
+/CLAUDE.md                       @abdoabozena7 @kareem232003
+/**/AGENTS.md                    @abdoabozena7 @kareem232003
+/dev_rules/                      @abdoabozena7 @kareem232003
+/.github/                        @abdoabozena7 @kareem232003
+/scripts/check.py                @abdoabozena7 @kareem232003
+/scripts/update_worklog_index.py @abdoabozena7 @kareem232003

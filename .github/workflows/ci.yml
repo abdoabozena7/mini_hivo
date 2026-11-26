@@ -1,0 +1,51 @@
+name: Offline Checks & PR Gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-checks:
+    name: Offline v2 Tests, Worklog Hygiene & Rule Lock
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run unified offline checks (v2 suites + worklog index)
+        run: python scripts/check.py -v
+
+      - name: Enforce Hard Rule Lock & Code-Requires-Tests gates
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          ALLOW_RULE_EDITS: ${{ contains(github.event.pull_request.labels.*.name, 'rule-approved') }}
+          ALLOW_NO_TESTS: ${{ contains(github.event.pull_request.labels.*.name, 'no-tests-needed') }}
+        run: |
+          args=(--ci-diff "origin/${BASE_REF}")
+          if [ "${ALLOW_RULE_EDITS}" = "true" ]; then
+            args+=(--allow-rule-edits)
+          fi
+          if [ "${ALLOW_NO_TESTS}" = "true" ]; then
+            args+=(--allow-no-tests)
+          fi
+          python scripts/check.py "${args[@]}"
+
+      - name: Check git diff whitespace hygiene
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git diff --check "origin/${BASE_REF}...HEAD"
