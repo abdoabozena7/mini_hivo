@@ -1,6 +1,6 @@
 # Team Documentation & Worklog Rules (`dev_rules/documentation_rules.md`)
 
-> - **Status:** Living team policy (`v0.3`)
+> - **Status:** Living team policy (`v0.4`)
 > - **Scope:** Governs how all contributors and coding agents document current system architecture (`docs/`), trace individual engineering/research work (`docs/worklogs/`), find the latest open problem, and **propose** (never auto-apply) rule updates for `dev_rules/`.
 > - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Worklogs Master Index (`../docs/worklogs/INDEX.md`)](../docs/worklogs/INDEX.md)
 > - **Tag Legend:** `[ENFORCED]` = enforced via templates, `.gitattributes`, or `scripts/update_worklog_index.py --check`; `[PROCESS]` = contributor & PR review gate.
@@ -21,20 +21,20 @@ Keep prescriptive rules, current-state system documentation, and per-person fore
 
 ---
 
-## 2. Two-Tier Traceability & Finding the Latest Work `[PROCESS]`
+## 2. Two-Tier Traceability & Parallel Track Visibility `[PROCESS]`
 
 Every contribution must be traceable without creating busywork on trivial edits:
 
 1. **Tier 1 — Small Code Fix / Typo / Minor Refactor (No New Investigation or Metrics):**
-   - **No worklog folder required.**
-   - Trace via descriptive commits (`type(scope): concise summary`), `git log --author="<name>" --oneline --stat`, and GitHub PRs using [`.github/pull_request_template.md`](../.github/pull_request_template.md).
+   - **No separate dossier subfolder or `REPORT.md` required.**
+   - Append **1 row** to your personal quick log (**`docs/worklogs/<person>/LOG.md`**) and run **`python scripts/update_worklog_index.py`** so accumulated small fixes stay visible in [`../docs/worklogs/INDEX.md`](../docs/worklogs/INDEX.md) with zero cross-contributor merge conflicts.
+   - Pair with descriptive commits (`type(scope): concise summary`) and [`.github/pull_request_template.md`](../.github/pull_request_template.md).
 2. **Tier 2 — Meaningful Feature, Architectural Change, Forensic Analysis, Profiling/Test Run, or Experiment:**
    - Create a dedicated dossier folder under **`docs/worklogs/<person>/YYYY-MM-DD_<short-slug>/`** using lowercase POSIX folder names (date prefix guarantees chronological sorting and zero collisions across parallel branches).
    - Run **`python scripts/update_worklog_index.py`** to regenerate [`../docs/worklogs/INDEX.md`](../docs/worklogs/INDEX.md) deterministically (avoiding manual merge conflicts) and link the dossier in the PR description.
-3. **How to Find the Latest Update or Pick the Next Problem:**
-   - **Research, features, investigations, open problems:** Open [`../docs/worklogs/INDEX.md`](../docs/worklogs/INDEX.md) — **Row 1 of *Latest Activity (Newest First)*** is always the most recent worklog across all contributors, including each entry's **`Status`** and **`Next / Open Issue`**.
+3. **Parallel Track Coordination & Seeing What Recently Landed:**
+   - **Cross-track radar:** Before starting your assigned track, open [`../docs/worklogs/INDEX.md`](../docs/worklogs/INDEX.md) — **Row 1 of *Latest Activity (Newest First)*** shows the latest Tier 2 work across all contributors, and ***Recent Tier 1 Fixes (Quick Log)*** shows accumulated small fixes from every contributor's `LOG.md`.
    - **Sequential Continuation (`Builds On`):** When continuing work traced in another contributor's dossier, create a **new dossier in your own folder** and link their report in the **`Builds On:`** metadata field so handoffs form an unbroken chain without duplicating folders.
-   - **Recent small code commits (Tier 1):** Check `git log -n 15 --oneline` or recent merged GitHub PRs.
 
 ---
 
@@ -102,3 +102,4 @@ If a session spans multiple activities (e.g., code fixes + a formal benchmark), 
 | `v0.1` | 2026-11-26 | Initial team documentation & worklog policy establishing the 3-part boundary, 2-tier cutoff, Unified Core + Modular Blocks, rule-promotion loop, and privacy hygiene. |
 | `v0.2` | 2026-11-26 | Added `scripts/update_worklog_index.py` auto-index & `--check` validation, chronological lookup & sequential continuation (`Builds On` + `Next / Open Issue`), `PROVENANCE_TEMPLATE.json` & `results.json` envelope, primary `Type` precedence + Block E, explicit Rule-Amendment Proposal workflow, and clean per-item status tags. |
 | `v0.3` | 2026-11-26 | Enforced strict Propose-Only Rule Lock (zero auto-edits to `dev_rules/` during normal work) and added `Rule Proposal:` metadata field feeding `docs/worklogs/INDEX.md`'s Pending Rule Proposals review queue. |
+| `v0.4` | 2026-11-26 | Added per-contributor Tier 1 quick logs (`docs/worklogs/<person>/LOG.md`) auto-indexed into `INDEX.md`'s Recent Tier 1 Fixes view, and aligned section 2.3 to parallel assigned-track coordination. |

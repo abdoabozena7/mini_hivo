@@ -34,6 +34,17 @@ def is_pending_proposal(value: str) -> bool:
 
 
 @dataclass(frozen=True)
+class Tier1Entry:
+    contributor: str
+    date: str
+    area: str
+    summary: str
+    verification: str
+    ref: str
+    log_rel: str
+
+
+@dataclass(frozen=True)
 class WorklogEntry:
     contributor: str
     folder: str
@@ -226,8 +237,92 @@ def scan_worklogs(worklogs_root: Path) -> tuple[list[str], list[WorklogEntry], l
     return contributors, entries, errors
 
 
-def render_index(contributors: list[str], entries: list[WorklogEntry]) -> str:
+def scan_tier1_logs(worklogs_root: Path) -> tuple[list[Tier1Entry], list[str]]:
+    """Parse and validate optional per-contributor ``LOG.md`` Tier 1 quick logs."""
+    tier1_entries: list[Tier1Entry] = []
+    errors: list[str] = []
+
+    if not worklogs_root.is_dir():
+        return tier1_entries, errors
+
+    for person_dir in sorted(p for p in worklogs_root.iterdir() if p.is_dir()):
+        contributor = person_dir.name
+        log_path = person_dir / "LOG.md"
+        if not log_path.is_file():
+            continue
+
+        rel_log = f"{contributor}/LOG.md"
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+        if BAD_PATH_RE.search(content):
+            errors.append(f"{rel_log}: contains host-private absolute path")
+        if BAD_SECRET_RE.search(content):
+            errors.append(f"{rel_log}: matches real vendor API-key prefix")
+        for link in LINK_RE.findall(content):
+            if link.startswith(("http://", "https://", "mailto:", "<")):
+                continue
+            if not (log_path.parent / link).resolve().exists():
+                errors.append(f"{rel_log}: broken relative link {link!r}")
+
+        in_table = False
+        for line_no, raw_line in enumerate(content.splitlines(), 1):
+            stripped = raw_line.strip()
+            if not stripped.startswith("|"):
+                if in_table:
+                    in_table = False
+                continue
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if not cells:
+                continue
+            first = cells[0].strip("`").strip()
+            if first.lower() == "date" or set(first.replace(":", "").replace("-", "").replace(" ", "")) == set():
+                in_table = True
+                continue
+            if first.startswith("<!--") or first.startswith("<") or first.startswith("*("):
+                continue
+            if len(cells) < 5:
+                errors.append(
+                    f"{rel_log}:{line_no}: expected 5 table columns (Date | Area | Change | Verification | PR / Commit)"
+                )
+                continue
+            date_val = cells[0].strip("`").strip()
+            area_val = cells[1].strip("`").strip()
+            summary_val = cells[2].strip()
+            verify_val = cells[3].strip()
+            ref_val = cells[4].strip()
+
+            if not DATE_RE.match(date_val):
+                errors.append(f"{rel_log}:{line_no}: invalid Date (YYYY-MM-DD): {date_val!r}")
+                continue
+            if not area_val or not summary_val:
+                errors.append(f"{rel_log}:{line_no}: Area and Tier 1 Change columns must be non-empty")
+                continue
+
+            tier1_entries.append(
+                Tier1Entry(
+                    contributor=contributor,
+                    date=date_val,
+                    area=area_val,
+                    summary=summary_val,
+                    verification=verify_val or "—",
+                    ref=ref_val or "—",
+                    log_rel=rel_log,
+                )
+            )
+
+    tier1_entries.sort(key=lambda e: (e.date, e.contributor, e.summary), reverse=True)
+    return tier1_entries, errors
+
+
+def render_index(
+    contributors: list[str],
+    entries: list[WorklogEntry],
+    tier1_entries: list[Tier1Entry] | None = None,
+) -> str:
+    tier1_list = list(tier1_entries or [])
     by_person: dict[str, list[WorklogEntry]] = {c: [] for c in contributors}
+    tier1_by_person: dict[str, list[Tier1Entry]] = {c: [] for c in contributors}
+    for t in tier1_list:
+        tier1_by_person.setdefault(t.contributor, []).append(t)
     for entry in entries:
         by_person.setdefault(entry.contributor, []).append(entry)
 
@@ -235,7 +330,7 @@ def render_index(contributors: list[str], entries: list[WorklogEntry]) -> str:
         "# Team Worklogs & Evidence Locker (`docs/worklogs/INDEX.md`)",
         "",
         "This is the team's chronological evidence locker for detailed, small-scoped engineering and research work dossiers.",
-        "**Row 1 of the Latest Activity table below is always the most recent worklog across all contributors** — use it to see what was solved last and which open issue to pick up next.",
+        "**Row 1 of the Latest Activity table below is always the most recent worklog across all contributors** — check it before starting your assigned track to see what recently landed on adjacent tracks and any open follow-up issues.",
         "",
         "- **Policy:** Read [`../../dev_rules/documentation_rules.md`](../../dev_rules/documentation_rules.md) before creating or updating a dossier.",
         "- **Templates:** Copy [`REPORT_TEMPLATE.md`](REPORT_TEMPLATE.md) (every dossier), [`PROTOCOL_TEMPLATE.md`](PROTOCOL_TEMPLATE.md) (`Type: experiment`), and [`PROVENANCE_TEMPLATE.json`](PROVENANCE_TEMPLATE.json) (`test`/`change`/`experiment`).",
@@ -283,6 +378,27 @@ def render_index(contributors: list[str], entries: list[WorklogEntry]) -> str:
         "",
         "---",
         "",
+        "## Recent Tier 1 Fixes (Quick Log)",
+        "",
+        "Accumulated small code fixes, minor refactors, and typo fixes logged as 1-line rows in each contributor's `docs/worklogs/<person>/LOG.md` (newest 25 shown):",
+        "",
+        "| Date | Author | Area | Tier 1 Change | Verification | PR / Commit | Log |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    ])
+    if not tier1_list:
+        lines.append("| *(no Tier 1 entries yet)* | — | — | Append 1 row to `docs/worklogs/<person>/LOG.md` and run `update_worklog_index.py` | — | — | — |")
+    else:
+        for t in tier1_list[:25]:
+            lines.append(
+                f"| `{_clean_cell(t.date)}` | {_clean_cell(t.contributor.capitalize())} | `{_clean_cell(t.area)}` "
+                f"| {_clean_cell(t.summary)} | {_clean_cell(t.verification)} | {_clean_cell(t.ref)} "
+                f"| [LOG.md]({t.log_rel}) |"
+            )
+
+    lines.extend([
+        "",
+        "---",
+        "",
         "## Pending Rule Proposals (Maintainer Review Queue)",
         "",
         "Coding agents and feature PRs must **never** auto-edit `dev_rules/*.md`, `AGENTS.md`, or `CLAUDE.md`. Any worklog carrying an unresolved `Rule Proposal:` metadata entry appears below for explicit maintainer review (prefix `[APPLIED]`, `[REJECTED]`, or `[DEFERRED]` once resolved to clear this queue while preserving history):",
@@ -305,18 +421,22 @@ def render_index(contributors: list[str], entries: list[WorklogEntry]) -> str:
         "",
         "## Contributor Folders",
         "",
-        "| Contributor | Folder | Dossiers | Latest Entry |",
-        "| :--- | :--- | :---: | :--- |",
+        "| Contributor | Folder | Tier 2 Dossiers | Tier 1 Quick Log | Latest Tier 2 Entry |",
+        "| :--- | :--- | :---: | :---: | :--- |",
     ])
     for contributor in sorted(contributors):
         person_entries = by_person.get(contributor, [])
+        person_t1 = tier1_by_person.get(contributor, [])
         display = contributor.capitalize()
         if person_entries:
             latest = person_entries[0]
             latest_cell = f"`{latest.date}` — [{_clean_cell(latest.title)}]({latest.report_rel})"
         else:
             latest_cell = "—"
-        lines.append(f"| {display} | [`{contributor}/`]({contributor}/) | `{len(person_entries)}` | {latest_cell} |")
+        t1_cell = f"[`{len(person_t1)}`]({contributor}/LOG.md)"
+        lines.append(
+            f"| {display} | [`{contributor}/`]({contributor}/) | `{len(person_entries)}` | {t1_cell} | {latest_cell} |"
+        )
 
     lines.append("")
     return "\n".join(lines)
@@ -339,7 +459,9 @@ def main(argv: list[str] | None = None) -> int:
 
     worklogs_root: Path = args.worklogs_dir.resolve()
     contributors, entries, errors = scan_worklogs(worklogs_root)
-    rendered = render_index(contributors, entries)
+    tier1_entries, tier1_errors = scan_tier1_logs(worklogs_root)
+    errors.extend(tier1_errors)
+    rendered = render_index(contributors, entries, tier1_entries)
     index_path = worklogs_root / "INDEX.md"
 
     if errors:

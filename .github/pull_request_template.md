@@ -12,6 +12,6 @@
 ## Rule Lock & Traceability Check
 - [ ] **Confirmed: zero unauthorized edits to `AGENTS.md`, `CLAUDE.md`, `**/AGENTS.md`, or `dev_rules/*.md`** *(CI blocks rule edits unless a maintainer applies the `rule-approved` label on a dedicated rule PR)*
 - [ ] **Confirmed: any code change under `hivo/` or `scripts/` includes offline tests under `tests/`** *(or `no-tests-needed` label approved)*
-- **Worklog dossier (`docs/worklogs/<person>/YYYY-MM-DD_<slug>/`):** <Relative link, or "N/A — Tier 1 minor change">
+- **Worklog / Quick Log:** <Relative link to Tier 2 `docs/worklogs/<person>/YYYY-MM-DD_<slug>/REPORT.md`, or `"Tier 1 — logged in docs/worklogs/<person>/LOG.md"`>
 - **Living docs updated (`docs/`):** <Relative link, or "None">
 - **Proposed rule updates (NOT applied here):** <1-line summary + link to `REPORT.md` proposal block, or "None">
