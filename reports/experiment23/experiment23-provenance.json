@@ -1,0 +1,32 @@
+{
+  "experiment": 23,
+  "parent_revision": "886ea71a317af373bde7e4e0c3be9b8180288540",
+  "pr5_tools_base_revision": "047179f6a71a6e51c781a4b880a5381518af32e5",
+  "upstream_main_revision": "3c870a64728316c94b581ea98aacec12dc77706e",
+  "python": "3.14.6",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "docker": "Docker version 29.6.2, build dfc4efb",
+  "hardware": {
+    "gpu": "NVIDIA GeForce GTX 1650 (4096 MiB VRAM)",
+    "ollama_env": {
+      "OLLAMA_FLASH_ATTENTION": "1",
+      "OLLAMA_KV_CACHE_TYPE": "q8_0",
+      "OLLAMA_MAX_LOADED_MODELS": "1"
+    }
+  },
+  "source_sha256_lf_normalized": {
+    ".gitignore": "d6c44b61cb04786683a94a07f6f79c0baf3469493de31047f2f1ce1d50ddc245",
+    ".env.example": "62b9a7697e3020cd0575640531ecafeeea3f3473f5e8ab5e3a34bb907ec14a87",
+    "docs/HYBRID_MODEL_STRATEGY.md": "9a1d375c97c90200e9e22b504e8038830dd5c1df0b387cb31870ab9a7271e29e",
+    "hivo/providers/__init__.py": "ace88c3103ab74bb15212c54f3aa9f214f911759b3c6906e4c8a29b9a191f270",
+    "hivo/providers/env.py": "6a7ca2fd61ca37cfaf23c56d8d8c441f65ac119f5faa95fe1722cd0ea664b961",
+    "hivo/providers/types.py": "c390add71f6958494246022af252ee5d511bd403da7d97e11d5e183fb456915f",
+    "hivo/providers/clients.py": "16df76440a25ef9fc952b33bf3942103aeb394fdf69b23b1986fe8ec8356a9ac",
+    "hivo/hybrid/__init__.py": "a1d53c819516c1c821546ffb76035207b6dfa7983cc5912a3e0b9d1712fa5cab",
+    "hivo/hybrid/prompts.py": "4e06981ced85c17978a1b2977c69cdcffa6a70dec07a47e242bbabc445b2ae7b",
+    "hivo/hybrid/runner.py": "def1b774df107450ebf0b07ca273436c732eebae848320568952e04a4debcdd7",
+    "scripts/probe_hybrid_models.py": "5cc5814680bb86ff373461811e71d54cd4d8e12e955a71b984dc5f1fa1a84fd2",
+    "scripts/run_swebench_hybrid.py": "0a761af9d3ed62d8a62a743796b3dee8aafe304a38efd2c9f19d17faa402e2ba"
+  },
+  "boundary": "small-sample (N=3, seed=42) live SWE-bench Verified Docker evaluation plus offline unit/controlled-functional/regression gates; raw workspaces and logs retained locally under gitignored output/swebench_hybrid/"
+}

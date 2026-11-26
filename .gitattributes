@@ -21,3 +21,4 @@ updates/UPDATE_TEMPLATE.md text eol=lf
 updates/R_UPDATE_002.md text eol=lf
 updates/R_UPDATE_008.md text eol=lf
 updates/R_UPDATE_009.md text eol=lf
+reports/experiment23/patches/*.diff text eol=lf -whitespace

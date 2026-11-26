@@ -1,0 +1,224 @@
+{
+  "experiment": 23,
+  "date": "2026-11-26",
+  "title": "Hybrid Cloud Thinking Orchestrator + 4 GB Local Worker Evaluation (SWE-bench Verified)",
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "split": "test",
+  "seed": 42,
+  "sample_size": 3,
+  "orchestrator": {
+    "provider": "groq",
+    "base_url": "https://api.groq.com/openai/v1",
+    "model": "qwen/qwen3.8-27b",
+    "think": true,
+    "reasoning_effort": "medium",
+    "max_tokens": 1536,
+    "temperature": 0.0
+  },
+  "worker": {
+    "provider": "ollama",
+    "model": "qwen3.5:2b-q4_K_M",
+    "quantization": "Q4_K_M",
+    "size_gb": 1.6,
+    "vram_gb": 1.6,
+    "gpu": "NVIDIA GeForce GTX 1650 (4096 MiB)",
+    "think": false,
+    "num_ctx": 4096,
+    "temperature": 0.0
+  },
+  "summary": {
+    "n_tasks": 3,
+    "resolved_count": 1,
+    "resolved_rate_overall": 0.3333,
+    "non_quota_blocked_valid_baseline_tasks": 2,
+    "resolved_among_non_quota_blocked_valid_baseline": 1,
+    "resolved_rate_non_quota_blocked_valid_baseline": 0.5
+  },
+  "swebench_tasks": [
+    {
+      "instance_id": "django__django-16527",
+      "repo": "django/django",
+      "version": "5.0",
+      "difficulty": "15 min - 1 hour",
+      "base_commit": "bd366ca2aeffa869b7dbc0b0aa01caea75e6dc31",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-16527:latest",
+      "eval_command": "./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 admin_views.test_templatetags",
+      "agent_status": "provider_error",
+      "agent_note": "Fix written cleanly on Dispatch 1 (Turn 3); Turn 5 post-edit verification hit Groq 200K TPD cap (195846/200000).",
+      "orchestrator_turns": 5,
+      "orchestrator_tool_calls": 6,
+      "orchestrator_reasoning_chars": 835,
+      "orchestrator_usage": {
+        "prompt_tokens": 14990,
+        "completion_tokens": 732,
+        "total_tokens": 15722,
+        "reasoning_tokens": 229,
+        "cached_tokens": 2048
+      },
+      "worker_dispatches": 1,
+      "worker_rollbacks": 0,
+      "worker_usage": {
+        "prompt_tokens": 5539,
+        "completion_tokens": 219,
+        "total_tokens": 5758
+      },
+      "agent_elapsed_sec": 306.61,
+      "patch_bytes": 549,
+      "patch_file": "patches/django__django-16527.diff",
+      "baseline_f2p_passed": 0,
+      "baseline_f2p_total": 1,
+      "baseline_p2p_passed": 6,
+      "baseline_p2p_total": 6,
+      "baseline_oracle_valid": true,
+      "patch_applied": true,
+      "f2p_passed": 1,
+      "f2p_total": 1,
+      "p2p_passed": 6,
+      "p2p_total": 6,
+      "resolved": true
+    },
+    {
+      "instance_id": "pytest-dev__pytest-10051",
+      "repo": "pytest-dev/pytest",
+      "version": "7.2",
+      "difficulty": "15 min - 1 hour",
+      "base_commit": "aa55975c7d3f6c9f6d7f68accc41bb7cadf0eb9a",
+      "image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-10051:latest",
+      "eval_command": "pytest -rA --tb=short testing/logging/test_fixture.py",
+      "agent_status": "max_turns",
+      "agent_note": "Orchestrator localized exact line (src/_pytest/logging.py:345 self.records = []); local 2B replaced it with a blank line; hit max_turns=14 after observing test failures.",
+      "orchestrator_turns": 14,
+      "orchestrator_tool_calls": 17,
+      "orchestrator_reasoning_chars": 6672,
+      "orchestrator_usage": {
+        "prompt_tokens": 67883,
+        "completion_tokens": 2852,
+        "total_tokens": 70735,
+        "reasoning_tokens": 1712,
+        "cached_tokens": 23552
+      },
+      "worker_dispatches": 1,
+      "worker_rollbacks": 0,
+      "worker_usage": {
+        "prompt_tokens": 8939,
+        "completion_tokens": 337,
+        "total_tokens": 9276
+      },
+      "agent_elapsed_sec": 388.51,
+      "patch_bytes": 411,
+      "patch_file": "patches/pytest-dev__pytest-10051.diff",
+      "baseline_f2p_passed": 0,
+      "baseline_f2p_total": 1,
+      "baseline_p2p_passed": 15,
+      "baseline_p2p_total": 15,
+      "baseline_oracle_valid": true,
+      "patch_applied": true,
+      "f2p_passed": 0,
+      "f2p_total": 1,
+      "p2p_passed": 9,
+      "p2p_total": 15,
+      "resolved": false
+    },
+    {
+      "instance_id": "psf__requests-1724",
+      "repo": "psf/requests",
+      "version": "2.0",
+      "difficulty": "<15 min fix",
+      "base_commit": "1ba83c47ce7b177efe90d5f51f7760680f72eda0",
+      "image": "swebench/sweb.eval.x86_64.psf_1776_requests-1724:latest",
+      "eval_command": "pytest -rA --tb=short test_requests.py",
+      "agent_status": "provider_error",
+      "agent_note": "Blocked on Turn 2 by Groq free-tier daily TPD cap (198265/200000 used); zero patch bytes emitted. Baseline also showed F2P=6/6 pre-patch.",
+      "orchestrator_turns": 2,
+      "orchestrator_tool_calls": 2,
+      "orchestrator_reasoning_chars": 71,
+      "orchestrator_usage": {
+        "prompt_tokens": 2700,
+        "completion_tokens": 319,
+        "total_tokens": 3019
+      },
+      "worker_dispatches": 0,
+      "worker_rollbacks": 0,
+      "worker_usage": {
+        "prompt_tokens": null,
+        "completion_tokens": null,
+        "total_tokens": null
+      },
+      "agent_elapsed_sec": 242.43,
+      "patch_bytes": 0,
+      "patch_file": null,
+      "baseline_f2p_passed": 6,
+      "baseline_f2p_total": 6,
+      "baseline_p2p_passed": 77,
+      "baseline_p2p_total": 79,
+      "baseline_oracle_valid": false,
+      "patch_applied": true,
+      "f2p_passed": 6,
+      "f2p_total": 6,
+      "p2p_passed": 77,
+      "p2p_total": 79,
+      "resolved": false
+    }
+  ],
+  "local_vram_and_toy_e2e_progression": [
+    {
+      "stage": "initial_q8_0_no_effort",
+      "worker_model": "qwen3.5:2b",
+      "size_gb": 2.94,
+      "vram_gb": 1.91,
+      "e2e_elapsed_sec": 86.43,
+      "unittest_exit_code": 0
+    },
+    {
+      "stage": "post_fixes_q8_0_effort_medium",
+      "worker_model": "qwen3.5:2b",
+      "size_gb": 2.94,
+      "vram_gb": 1.91,
+      "e2e_elapsed_sec": 65.18,
+      "orchestrator_reasoning_chars": 392,
+      "unittest_exit_code": 0
+    },
+    {
+      "stage": "q4_k_m_100pct_vram_effort_medium",
+      "worker_model": "qwen3.5:2b-q4_K_M",
+      "size_gb": 1.6,
+      "vram_gb": 1.6,
+      "e2e_elapsed_sec": 37.35,
+      "worker_dispatch2_sec": 4.65,
+      "unittest_exit_code": 0
+    }
+  ],
+  "offline_regression_gate": {
+    "passed": true,
+    "suites": [
+      {
+        "suite": "tests/test_providers.py + tests/test_hybrid_runner.py",
+        "observed_methods": 16,
+        "passed_methods": 16,
+        "skipped": 0,
+        "exit_code": 0
+      },
+      {
+        "suite": "tests/test_tools_*.py",
+        "observed_methods": 37,
+        "passed_methods": 35,
+        "skipped": 2,
+        "exit_code": 0
+      },
+      {
+        "suite": "tests/test_verification_outcome_integrity.py",
+        "observed_methods": 31,
+        "passed_methods": 31,
+        "skipped": 0,
+        "exit_code": 0
+      },
+      {
+        "suite": "tests/test_execution_contracts.py",
+        "observed_methods": 36,
+        "passed_methods": 36,
+        "skipped": 0,
+        "exit_code": 0
+      }
+    ]
+  }
+}
