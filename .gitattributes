@@ -17,8 +17,17 @@ evidence/agiss-swarm-research/**/*.html text eol=lf
 evidence/agiss-swarm-research/**/*.py text eol=lf
 evidence/agiss-swarm-research/**/*.png binary
 AGENTS.md text eol=lf
+CLAUDE.md text eol=lf
+hivo/*/AGENTS.md text eol=lf
 updates/UPDATE_TEMPLATE.md text eol=lf
 updates/R_UPDATE_002.md text eol=lf
 updates/R_UPDATE_008.md text eol=lf
 updates/R_UPDATE_009.md text eol=lf
 reports/experiment23/patches/*.diff text eol=lf -whitespace
+dev_rules/*.md text eol=lf
+docs/worklogs/**/*.md text eol=lf
+docs/worklogs/**/*.json text eol=lf
+docs/worklogs/**/patches/*.diff text eol=lf -whitespace
+.github/workflows/*.yml text eol=lf
+.github/CODEOWNERS text eol=lf
+.github/pull_request_template.md text eol=lf
