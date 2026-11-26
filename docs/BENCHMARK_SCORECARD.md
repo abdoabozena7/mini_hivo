@@ -34,7 +34,7 @@ All external frontier numbers below reflect the **`2026-11-26`** landscape with 
 
 | Date | Harness SHA | Command | Offline Suites | Self-Test Checks (7/7) | Status | Dossier |
 | :--- | :--- | :--- | :--- | :---: | :---: | :--- |
-| *(pending Stage 0 PR)* | — | `python scripts/check.py --benchmarks` | `tests/test_benchmark_*.py` | `0/7` *(not yet built)* | `TARGET` | — |
+| `2026-11-27` | `5005210`+Stage 0 | `python scripts/check.py --benchmarks` | `tests/test_benchmark_stage0.py` | **`7/7` PASS** | **`PASS`** | [Stage 0 Harness & Preflight](worklogs/kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md) |
 
 ### 2.2 Stage 1 & Stage 2 — Execution & Frontier Repo Runs
 

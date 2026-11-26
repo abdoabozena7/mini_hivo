@@ -147,16 +147,16 @@ Every `Type: experiment` benchmark worklog uses [`../dev_rules/documentation_rul
 
 ## 5. Current Harness Inventory & Stage 0 Implementation Backlog
 
-### 5.1 Current Runner Status (`scripts/run_swebench_hybrid.py`)
-Inspected on `2026-11-26`:
-- **Already `[ENFORCED]`:** Artifact-only `git diff` extraction, zero solve-time leakage of `test_patch`/`F2P`/`P2P`/`hints_text`, `protected_paths` write-time lock, privilege-separated fresh Docker grading containers (`_docker_eval_once`), strict test-ID parsing (`MISSING != PASSED`), and 1-image-at-a-time cleanup.
-- **Stage 0 `[TARGET]` Gaps to Implement Next (dedicated feature PR `feat/benchmark-harness-stage0`):**
-  1. **Workspace decontamination:** Strip `.git` and re-init a single fresh orphan commit inside `_extract_testbed_to_host`; run containers with `--network none`; isolate `/tmp` and host env.
-  2. **Move Baseline Oracle pre-solve:** Run `[ORACLE 1/2]` *before* `HybridAgentRunner.run()`, skip live solving when `F2P == total` or `P2P < total`, quarantine as `INVALID_BASELINE`, and gate `resolved` on `baseline_oracle_valid`.
-  3. **Final-diff protected-path assertion:** Deterministically inspect `model_patch` headers (`+++ b/...`) before grading and reject (`TAMPER_DETECTED`) if any protected/test path appears.
-  4. **Deterministic Trace Cheat-Scanner:** Scan executed tool/shell arguments in `agent_res.trace` for `.git` history mining (`git log`, `cat-file`, `fsck`, `reflog`), `/tmp` or secret scans, and network exfiltration; compute `cheating_adjusted_rate`.
-  5. **Unified KPI Aggregator & 3-Key Emitter:** Emit §4's `{"meta", "summary", "cases"}` JSON with `pass^k`, `cache_hit_rate`, `estimated_usd` / `usd_per_resolved`, `latency_p50`/`p95`, and 6-stage funnel metrics.
-  6. **Host & Sandbox Preflight Checker (`hivo/benchmarks/preflight.py`):** Zero-LLM CLI preflight checking Docker daemon + `--network none` capability, free disk space on container/workspace drives, `.env` provider key presence (zero secret output), Ollama + `100%` local GPU residency (when local worker enabled), and optional suite CLI availability (e.g., Harbor).
+### 5.1 Current Runner Status (`hivo/benchmarks/` + `scripts/run_swebench_hybrid.py`)
+Updated on `2026-11-27` (Stage 0 harness hardening implemented):
+- **Implemented & Verified Offline (`7/7` self-tests in `tests/test_benchmark_stage0.py` via `python scripts/check.py --benchmarks`):**
+  1. **Workspace decontamination (`hivo/benchmarks/decontamination.py`):** `strip_git_and_reinit()` removes `.git` history/remotes/tags/reflogs and creates 1 fresh orphan commit; `docker_network_args("none")` seals both solve and grading containers with `--network none`.
+  2. **Pre-solve Baseline Oracle & quarantine (`hivo/benchmarks/audit.py` + `scripts/run_swebench_hybrid.py`):** `[ORACLE 1/2]` runs *before* `HybridAgentRunner.run()`, quarantining broken baselines (`F2P == total` or `P2P < total` or missing tests) as `INVALID_BASELINE` at `0` LLM tokens spent.
+  3. **Final-diff protected-path anti-tamper gate (`hivo/benchmarks/decontamination.py` + `audit.py`):** `check_protected_paths_in_patch()` inspects every touched diff path and fails closed (`TAMPER_DETECTED`) if any protected/test path appears.
+  4. **Deterministic Trace Cheat-Scanner (`hivo/benchmarks/audit.py`):** `scan_trace_for_cheats()` audits executed tool/shell calls across Tier 1–3 exploits (`git log`, `cat-file`, `/tmp`, `.env`, mirrors, `ORACLE_LOCKED`) while ignoring assistant prose, driving `cheating_adjusted_rate`.
+  5. **Unified KPI Aggregator & 3-Key Emitter (`hivo/benchmarks/metrics.py`):** `build_benchmark_results()` computes `pass^k`, `cache_hit_rate`, `usd_per_resolved`, `latency_p50`/`p95`, 6-bucket triage, harness funnel, sanity-bound assertions, and the programmatic 8-Point Truth Check (`PASS` vs. `INVALID_HARNESS`).
+  6. **Host & Sandbox Preflight CLI (`python -m hivo.benchmarks.preflight`):** Zero-LLM check verifying Docker + `--network none`, disk headroom, secret-safe `.env` credentials, Ollama + local GPU residency `%`, and optional Harbor CLI.
+- **Remaining Next Milestone Adapter (Stage 1):**
   7. **Harbor Adapter (`Terminal-Bench 4.1`):** Wrap Mini Hivo's `HybridAgentRunner` as a standardized Harbor agent runner for Stage 1 CLI benchmarking.
 
 ### 5.2 Stage 0 Benchmark Self-Test Suite Specification (`tests/test_benchmark_*.py`)

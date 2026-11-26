@@ -1,6 +1,6 @@
 # Benchmarking & Evaluation Rules (`dev_rules/benchmarking_rules.md`)
 
-> - **Status:** Living evaluation guardrails (`v0.1`)
+> - **Status:** Living evaluation guardrails (`v0.2`)
 > - **Scope:** Benchmark harnesses and runners (`scripts/*swebench*`, `scripts/*bench*`, `scripts/*eval*`, `hivo/benchmarks/`), Stage 0 benchmark self-tests (`tests/test_benchmark_*.py`), `Type: experiment` worklogs, and promotion decisions for Mini Hivo's active v2 asymmetric architecture.
 > - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Orchestration Guardrails (`orchestration_rules.md`)](orchestration_rules.md), [Tool Rules (`tool_rules.md`)](tool_rules.md), [Documentation & Worklog Rules (`documentation_rules.md`)](documentation_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Benchmarking Architecture & 2026 Plan (`../docs/BENCHMARKING_ARCHITECTURE.md`)](../docs/BENCHMARKING_ARCHITECTURE.md), [Benchmark Scorecard (`../docs/BENCHMARK_SCORECARD.md`)](../docs/BENCHMARK_SCORECARD.md)
 > - **Rule Standard:** All invariants below are model-, vendor-, and hardware-agnostic. Concrete suite names in §6 are explicitly dated **reference targets** subject to periodic re-audit; live dataset splits, sample budgets, and SOTA comparison tables live in `docs/BENCHMARKING_ARCHITECTURE.md` and `docs/BENCHMARK_SCORECARD.md`.
@@ -27,16 +27,16 @@ Never verify a coding agent by reading its chat response. Grade strictly via ind
 
 1. **Artifact-Only Extraction `[ENFORCED]`:** Discard the agent's final prose. Extract only concrete workspace mutations (`git diff` patch) or post-run container state.
 2. **Zero Solve-Time Leakage `[ENFORCED]`:** Strictly withhold hidden `test_patch`, ground-truth patches, `FAIL_TO_PASS`/`PASS_TO_PASS` lists, and hints during solve time; lock test paths via `protected_paths` (`ORACLE_LOCKED`).
-3. **Strict Workspace Decontamination `[TARGET]`:** Before agent launch, delete `.git` history and re-initialize the workspace as a single fresh orphan commit (eliminating commit logs, reflogs, remotes, and dangling blobs), wipe `/tmp`, mount zero host secrets, and run execution containers with outbound internet disabled (`--network none` or an allowlisted package-registry proxy).
-4. **Privilege-Separated Grading Container `[ENFORCED]`:** Apply extracted artifacts and hidden tests inside a **brand-new container** the agent never accessed. Require clean `git apply`, **zero** edits to protected/test files `[TARGET]`, and exact parsed test IDs (`100%` `F2P` + `100%` `P2P` passed; `0` `MISSING`/`SKIPPED` targets counted as pass `[ENFORCED]`).
-5. **Pre-Solve Baseline Oracle Gate `[TARGET]`:** Run the unpatched baseline oracle *before* spending agent tokens. Confirm `F2P < total` and `P2P == total`; quarantine broken tasks as `INVALID_BASELINE` (retained in denominators, never scored as passes).
+3. **Strict Workspace Decontamination `[ENFORCED]`:** Before agent launch, delete `.git` history and re-initialize the workspace as a single fresh orphan commit (eliminating commit logs, reflogs, remotes, and dangling blobs), wipe `/tmp`, mount zero host secrets, and run execution containers with outbound internet disabled (`--network none` or an allowlisted package-registry proxy).
+4. **Privilege-Separated Grading Container `[ENFORCED]`:** Apply extracted artifacts and hidden tests inside a **brand-new container** the agent never accessed. Require clean `git apply`, **zero** edits to protected/test files `[ENFORCED]`, and exact parsed test IDs (`100%` `F2P` + `100%` `P2P` passed; `0` `MISSING`/`SKIPPED` targets counted as pass `[ENFORCED]`).
+5. **Pre-Solve Baseline Oracle Gate `[ENFORCED]`:** Run the unpatched baseline oracle *before* spending agent tokens. Confirm `F2P < total` and `P2P == total`; quarantine broken tasks as `INVALID_BASELINE` (retained in denominators, never scored as passes).
 6. **Task-Matched Oracles & Cross-Family Judges `[TARGET / PROCESS]`:**
    - *Repo Fixes:* Containerized `F2P` + `P2P` unit/integration suites.
    - *Headless CLI / Ops:* Hidden post-run container `pytest` assertions on files, exit codes, and runtime state.
    - *Test Authoring:* **No-op stub mutation check** — agent-written tests must **pass** on intact code and **fail** when target functions are replaced with no-op stubs.
    - *Performance & Mergeability:* Deterministic workload recovery under functional pass gates + automated lint/style/minimal-diff zero-edit mergeability gates.
    - *Qualitative Rubrics `[PROCESS]`:* Any LLM judge grading maintainability or refactoring must come from a **different model family** than both Orchestrator and Worker (preventing self-grading bias).
-7. **Deterministic Trace Cheat-Audit `[TARGET]`:** Inspect every executed tool/shell call in the saved trace (never trusting reasoning summaries) for `.git` mining (`git log`, `cat-file`, `fsck`), `/tmp` or secret scans, external mirrors, or test tampering. Report **Cheating-Adjusted Accuracy**.
+7. **Deterministic Trace Cheat-Audit `[ENFORCED]`:** Inspect every executed tool/shell call in the saved trace (never trusting reasoning summaries) for `.git` mining (`git log`, `cat-file`, `fsck`), `/tmp` or secret scans, external mirrors, or test tampering. Report **Cheating-Adjusted Accuracy**.
 
 ---
 
@@ -45,12 +45,12 @@ Never verify a coding agent by reading its chat response. Grade strictly via ind
 ### 3.1 Required Non-Prompt KPIs (`results.json`)
 Store every benchmark run inside the standard 3-key worklog envelope (`{"meta", "summary", "cases"}`, per [`documentation_rules.md`](documentation_rules.md)) capturing four deterministic layers (exact field schema in [`../docs/BENCHMARKING_ARCHITECTURE.md`](../docs/BENCHMARKING_ARCHITECTURE.md)):
 
-1. **Outcome & Integrity:** Raw `resolved / total_n`, `resolved / valid_non_blocked_n`, **Cheating-Adjusted Accuracy** `[TARGET]`, mutation kill rate (test-writing) `[TARGET]`, and patch hygiene / zero-edit mergeability `%` `[TARGET]`.
-2. **Repeatability & Reliability Envelope `[TARGET]`:** **`pass^k`** ($\mathbb{E}_{\text{task}}[\binom{c}{k}/\binom{n}{k}]$, requiring $k \ge 3$ at Stage 3 and Milestone Release gates) across $n$ independent trials, plus worst-case pass rate across **Repeat** (identical runs), **Rephrase** (varied prompt phrasing), **Break** (injected tool/timeout/rate-limit faults), and **Bound** (strict token/turn/time caps).
-3. **Economics & Host Health `[TARGET]`:** Cost per task, **cost per resolved task**, **Prompt Cache Hit `%`** (`cached_input / total_input`), per-tier token splits (orchestrator input/cached/output/reasoning vs. worker), latency `p50`/`p95`, and empirically verified local **GPU residency `%`** (flagging VRAM CPU-spill anomalies).
-4. **Internal Harness Funnel `[TARGET]`:** Trace-derived diagnostic rates separating where tasks fail: *Tool-Schema Validity `%` → Localization Recall `%` → Worker Edit Fidelity & Rollback `%` → Verification Closure `%`*.
+1. **Outcome & Integrity:** Raw `resolved / total_n`, `resolved / valid_non_blocked_n`, **Cheating-Adjusted Accuracy** `[ENFORCED]`, mutation kill rate (test-writing) `[TARGET]`, and patch hygiene / zero-edit mergeability `%` `[TARGET]`.
+2. **Repeatability & Reliability Envelope:** **`pass^k`** math ($\mathbb{E}_{\text{task}}[\binom{c}{k}/\binom{n}{k}]$, requiring $k \ge 3$ at Stage 3 and Milestone Release gates) `[ENFORCED]`, plus multi-trial orchestration across **Repeat** (identical runs), **Rephrase** (varied prompt phrasing), **Break** (injected tool/timeout/rate-limit faults), and **Bound** (strict token/turn/time caps) `[TARGET]`.
+3. **Economics & Host Health `[ENFORCED]`:** Cost per task, **cost per resolved task**, **Prompt Cache Hit `%`** (`cached_input / total_input`), per-tier token splits (orchestrator input/cached/output/reasoning vs. worker), latency `p50`/`p95`, and empirically verified local **GPU residency `%`** (flagging VRAM CPU-spill anomalies).
+4. **Internal Harness Funnel `[ENFORCED]`:** Trace-derived diagnostic rates separating where tasks fail: *Tool-Schema Validity `%` → Localization Recall `%` → Worker Edit Fidelity & Rollback `%` → Verification Closure `%`*.
 
-### 3.2 Stage 0 Benchmark Self-Test Suite (`tests/test_benchmark_*.py`) `[TARGET]`
+### 3.2 Stage 0 Benchmark Self-Test Suite (`tests/test_benchmark_*.py`) `[ENFORCED]`
 Every benchmark runner must pass an offline pure-Python self-test suite (zero LLM calls, wired into `python scripts/check.py --benchmarks`) verifying the harness itself cannot emit false positives:
 1. **Decontamination check:** Stripped workspace has exactly 1 fresh orphan commit and zero prior history/remotes.
 2. **Invalid-baseline quarantine:** Mock pre-passing `F2P` baseline is flagged `INVALID_BASELINE` and never scored `resolved=True`.
@@ -59,8 +59,8 @@ Every benchmark runner must pass an offline pure-Python self-test suite (zero LL
 5. **Planted-cheat scanner:** Mock traces containing `git log`, `git cat-file`, `/tmp` sweeps, or secret reads are detected `100%` and downgrade `cheating_adjusted_rate`.
 6. **KPI sanity bounds:** `pass^k`, cost, cache hit, and funnel aggregators assert realistic bounds (`0..1`, zero NaNs, conserved denominators).
 
-### 3.3 Host, Sandbox & New-Runner Preflight Gate `[TARGET / PROCESS]`
-1. **Zero-LLM Host & Sandbox Preflight (Mandatory Before Every Live Run) `[TARGET]`:** Run an automated preflight check verifying: (a) container/sandbox runtime is reachable and supports `--network none`, (b) host disk has sufficient headroom for images and disposable workspaces, (c) configured provider credentials resolve cleanly via process env or gitignored `.env` without printing secrets, (d) when a local worker participates, the model is loaded at `100%` GPU residency with zero silent CPU spill, and (e) any suite-specific external CLI (e.g., Harbor) is installed and callable. Abort before spending tokens if any check fails.
+### 3.3 Host, Sandbox & New-Runner Preflight Gate `[ENFORCED / PROCESS]`
+1. **Zero-LLM Host & Sandbox Preflight (Mandatory Before Every Live Run) `[ENFORCED]`:** Run an automated preflight check verifying: (a) container/sandbox runtime is reachable and supports `--network none`, (b) host disk has sufficient headroom for images and disposable workspaces, (c) configured provider credentials resolve cleanly via process env or gitignored `.env` without printing secrets, (d) when a local worker participates, the model is loaded at `100%` GPU residency with zero silent CPU spill, and (e) any suite-specific external CLI (e.g., Harbor) is installed and callable. Abort before spending tokens if any check fails.
 2. **Benchmark-Author Onboarding Contract `[PROCESS]`:** Anyone adding a new benchmark runner or suite adapter must wire all six invariants before executing live runs: workspace decontamination (§2.3), pre-solve baseline validity gate (§2.5), privilege-separated grading (§2.4), trace cheat-scanning (§2.7), canonical 3-key `results.json` emission (§3.1), and Stage 0 offline self-tests (§3.2).
 
 ---
@@ -70,7 +70,7 @@ Every benchmark runner must pass an offline pure-Python self-test suite (zero LL
 Contributors typically delegate benchmark runs to a coding agent (`Antigravity`, `Codex`, `Claude Code`) in a single prompt. Execute these **7 steps automatically**:
 
 1. **Lock `PROTOCOL.md` & Budget First:** Inspect Git SHA, models, local GPU residency, and task slice; create `docs/worklogs/<person>/YYYY-MM-DD_<slug>/PROTOCOL.md` with pre-run call and cost estimates. **Pause for explicit human approval** before any paid or large multi-task batch.
-2. **Run Stage 0 Offline Gate & Host Preflight:** Execute `python scripts/check.py` (including `--benchmarks` self-tests once implemented) AND the zero-LLM Host/Sandbox Preflight (§3.3). Stop immediately if any check fails.
+2. **Run Stage 0 Offline Gate & Host Preflight:** Execute `python scripts/check.py` (including `--benchmarks` self-tests) AND the zero-LLM Host/Sandbox Preflight (§3.3). Stop immediately if any check fails.
 3. **Run Pre-Solve Baseline Preflight:** Confirm baseline oracle validity per task; quarantine `INVALID_BASELINE` cases before spending live tokens.
 4. **Execute Decontaminated Run & Save Evidence:** Run inside the sealed sandbox; keep raw traces/logs in gitignored `output/` and save sanitized `results.json`, `provenance.json`, and `patches/` in the worklog dossier.
 5. **Execute the Mandatory 8-Point Truth Check (Anti-False-Result Audit):** Record explicit `PASS`/`FAIL` for every item before citing any score:
@@ -139,3 +139,4 @@ Human audits are **optional** and never block automated coding-agent runs, but p
 | Version | Date | Summary |
 | :--- | :--- | :--- |
 | `v0.1` | 2026-11-26 | Initial SOTA benchmarking & evaluation guardrails: full-system UUT attribution, strict decontamination & privilege-separated output verification, deterministic KPI contract, Stage 0 self-test suite & host/sandbox preflight gate, 7-step coding-agent autopilot runbook with 8-point Truth Check, 6-bucket Evidence-vs-Hypothesis triage, progressive 5-stage ladder with dated (`2026-11-26`) reference suite roster, and optional human-in-the-loop audit checks. |
+| `v0.2` | 2026-11-27 | Promoted verified Stage 0 safeguards (§2.3, §2.4, §2.5, §2.7, §3.1–§3.3) from `[TARGET]` to `[ENFORCED]` after `hivo/benchmarks/`, `tests/test_benchmark_stage0.py` (`7/7` pass), and live zero-LLM host preflight landed (`docs/worklogs/kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md`). |

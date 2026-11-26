@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-27",
+  "author": "kareem",
+  "type": "change",
+  "subsystem": "hivo/benchmarks / scripts / tests",
+  "branch": "feat/benchmark-harness-stage0",
+  "base_commit": "50052107a5161bbc27af071a3839ff2075ccf8e0",
+  "tested_revision": "50052107a5161bbc27af071a3839ff2075ccf8e0+uncommitted",
+  "source_sha256": {
+    "hivo/benchmarks/__init__.py": "3036c89334d44adf9579265c97be96feae94a0f49241a833a2ca7f49f94b7d07",
+    "hivo/benchmarks/decontamination.py": "87c78c2f56944f77620dbeedf1c76f9560513d5862c179bc164f2c2e600e9eb3",
+    "hivo/benchmarks/audit.py": "8baac5c850c0ece74b864cd49f479f46c0bb3b6728f44f5f4b5c00292e06b239",
+    "hivo/benchmarks/metrics.py": "e42a95fb9750b13cf3392fcf6b6210d6db8ac62b80464e190cd8023ee2cac1c5",
+    "hivo/benchmarks/preflight.py": "fe28bb4f5d3a8299c7085cb3e49c585fb232d64d3dc9e80dfddfb4cf73104528",
+    "scripts/run_swebench_hybrid.py": "8ac8a06527297434ba04e4963152ba8c0ef5eb9d3d3eaf6cb7d9975306005700",
+    "scripts/check.py": "1bfcfd38334b9d1fcbf2e38b6205133f631335014522bea94f8d22017974cb17",
+    "tests/test_benchmark_stage0.py": "d20f7f2a5c451935a06176804816d43cf2103543866d867051044c9fd5f038d3",
+    "tests/test_check_runner.py": "1e51b7ed7e9acf2ec0dd43ac034c6b167beff190627f623062da0ea8dab51df0",
+    "dev_rules/benchmarking_rules.md": "709965ddf8df8d27dd0169f21634a4d751918846065c9f07a7fc55a0cce33865",
+    "docs/BENCHMARKING_ARCHITECTURE.md": "cfc7bb1d015466041436831095ed26ee0b94affc33e333cc074dd95c30368e0c",
+    "docs/BENCHMARK_SCORECARD.md": "da942e1713df67f110b43f201bda43207d9f1f2556f83eff0bc40861003e62c2"
+  },
+  "environment": {
+    "os": "Windows 11 (10.0.26300)",
+    "python": "3.14.6",
+    "gpu": "NVIDIA GeForce GTX 1650 (4 GB VRAM, 3685 MiB free during preflight)",
+    "runtime_tools": "Docker 29.6.2, Ollama (qwen3.5:2b-q4_K_M pulled), git, scripts/check.py"
+  },
+  "models": {
+    "orchestrator": "offline (zero LLM calls)",
+    "worker": "offline (zero LLM calls; local pull verified via Ollama /api/tags)"
+  },
+  "reproduction_commands": [
+    "python scripts/check.py --benchmarks -v",
+    "python scripts/check.py -v",
+    "python -m hivo.benchmarks.preflight --provider groq",
+    "git diff --check"
+  ]
+}

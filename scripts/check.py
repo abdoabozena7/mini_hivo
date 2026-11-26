@@ -8,6 +8,7 @@ Usage:
     python scripts/check.py                  # All active v2 offline tests + worklog check
     python scripts/check.py --tools          # hivo/tools offline tests only
     python scripts/check.py --orchestration  # hivo/providers + hivo/hybrid tests only
+    python scripts/check.py --benchmarks     # Stage 0 benchmark self-tests only
     python scripts/check.py --worklogs       # worklog/check tests + INDEX.md --check
     python scripts/check.py --ci-diff BASE   # Enforce PR Hard Rule Lock + tests-touched gates
 """
@@ -103,16 +104,19 @@ def discover_v2_test_modules(
     *,
     tools: bool = False,
     orchestration: bool = False,
+    benchmarks: bool = False,
     worklogs: bool = False,
 ) -> list[str]:
     """Return sorted unittest dotted module names for the requested offline scopes."""
-    run_all = not (tools or orchestration or worklogs)
+    run_all = not (tools or orchestration or benchmarks or worklogs)
     tests_dir = repo_root / "tests"
     patterns: list[str] = []
     if run_all or tools:
         patterns.append("test_tools_*.py")
     if run_all or orchestration:
         patterns.extend(["test_providers*.py", "test_hybrid_*.py"])
+    if run_all or benchmarks:
+        patterns.append("test_benchmark_*.py")
     if run_all or worklogs:
         patterns.extend(["test_worklog_index.py", "test_check_runner.py"])
 
@@ -151,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Mini Hivo offline verification suites and PR gates.")
     parser.add_argument("--tools", action="store_true", help="Run hivo/tools offline tests.")
     parser.add_argument("--orchestration", action="store_true", help="Run hivo/providers & hivo/hybrid offline tests.")
+    parser.add_argument("--benchmarks", action="store_true", help="Run Stage 0 benchmark self-tests.")
     parser.add_argument("--worklogs", action="store_true", help="Run worklog/check tests and INDEX.md --check.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose unittest output.")
     parser.add_argument(
@@ -195,11 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[OK] PR diff gates passed across {len(changed)} changed file(s) vs. {args.ci_diff}.")
         return 0
 
-    run_all = not (args.tools or args.orchestration or args.worklogs)
+    run_all = not (args.tools or args.orchestration or args.benchmarks or args.worklogs)
     modules = discover_v2_test_modules(
         repo_root,
         tools=args.tools,
         orchestration=args.orchestration,
+        benchmarks=args.benchmarks,
         worklogs=args.worklogs,
     )
     if not modules:
