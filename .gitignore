@@ -2,6 +2,13 @@ __pycache__/
 *.py[cod]
 *.backup_*
 
+# Local environment secrets (never commit real API keys).
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
 # Runtime provenance and browser/visual verification artifacts.
 .agent_runs/
 .agent_evidence/
