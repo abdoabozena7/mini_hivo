@@ -106,7 +106,7 @@ Run 1 exposed three immediate architectural defects preventing Mini Hivo v2 from
 
 ## Artifacts, Reproduction & Rule Proposals
 
-- **Sibling Artifacts:** [`PROTOCOL.md`](PROTOCOL.md), [`results.json`](results.json), [`provenance.json`](provenance.json), [`patches/run1_baseline.diff`](patches/run1_baseline.diff), [`patches/run2_unified_diff_14k.diff`](patches/run2_unified_diff_14k.diff), [`patches/run3_unified_diff_8k.diff`](patches/run3_unified_diff_8k.diff), [`patches/run4_poc_2b.diff`](patches/run4_poc_2b.diff)
+- **Sibling Artifacts:** [`PROTOCOL.md`](PROTOCOL.md), [`results.json`](results.json), [`provenance.json`](provenance.json), [`patches/run1_baseline.diff`](patches/run1_baseline.diff), [`patches/run2_unified_diff_14k.diff`](patches/run2_unified_diff_14k.diff), [`patches/run3_unified_diff_8k.diff`](patches/run3_unified_diff_8k.diff), [`patches/run4_poc_2b.diff`](patches/run4_poc_2b.diff), and reproducible controlled benchmark fixture under [`artifacts/breakout_fixture/`](artifacts/breakout_fixture/) (`before/`, `oracle/verify_breakout.js`, `prompt.txt`)
 - **Living Docs Updated (`docs/`):** [`docs/ORCHESTRATION_ARCHITECTURE.md`](../../../ORCHESTRATION_ARCHITECTURE.md)
 - **Proposed Rule Updates (NOT APPLIED — Pending Maintainer Review):**
 

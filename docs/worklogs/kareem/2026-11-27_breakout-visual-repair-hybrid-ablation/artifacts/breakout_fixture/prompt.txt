@@ -1,0 +1,23 @@
+Fix all visual layout and gameplay bugs in this Neon Breakout web app (`index.html`, `style.css`, `game.js`):
+
+1. **Visual HUD & Overlay Layout (`style.css`):**
+   - The top HUD bar (`.hud`) currently floats on top of the canvas and covers the top row of bricks. Fix the layout so `.hud` sits cleanly above `.stage` in normal document flow without overlapping the playfield.
+   - When `.overlay` has the `.hidden` class, it still intercepts mouse events over the canvas. Fix `.overlay.hidden` so it does not block canvas interaction (e.g., `display: none` or `pointer-events: none` + hidden visibility).
+
+2. **Right-Wall Physics (`game.js`):**
+   - When the ball hits the right edge of the canvas (`ball.x + ball.r > state.width`), it currently flies off-screen to the right instead of bouncing back left. Clamp `ball.x` to `state.width - ball.r` and reverse horizontal velocity leftward (`-Math.abs(ball.dx)`).
+
+3. **Brick Scoring, High Score Persistence & Victory (`game.js`):**
+   - Destroying a brick must increment `state.score` by `BRICK_POINTS` (`10`), update `state.highScore` when `state.score > state.highScore`, and persist the new high score to `storage` under `HIGHSCORE_KEY` (`"neon_breakout_highscore"`).
+   - `loadHighScore(storage)` must safely read and parse a non-negative integer from `storage.getItem(HIGHSCORE_KEY)` (falling back to `0` if storage is missing/invalid), and `saveHighScore(storage, value)` must safely write it via `storage.setItem(HIGHSCORE_KEY, String(value))`.
+   - When all bricks have `alive === false`, transition `state.status` to `"won"`.
+
+4. **Lives & Game Over (`game.js`):**
+   - When the ball falls past the bottom edge (`ball.y - ball.r > state.height`), decrement `state.lives` by `1`.
+   - If `state.lives <= 0`, clamp `state.lives = 0` and set `state.status = "gameover"`. Otherwise reset ball and paddle via `resetBallAndPaddle(state)`.
+
+5. **Pause Toggle & Full Restart Reset (`game.js`):**
+   - `togglePause(state)` must toggle `"playing"` <-> `"paused"` and leave `"gameover"` and `"won"` unchanged.
+   - `resetGame(state)` must reset `score = 0`, `lives = 3`, `status = "playing"`, rebuild `bricks = createBricks()`, reset ball and paddle, and **preserve `state.highScore`**.
+
+Keep all exported function names and constants in `game.js` intact. Delegate code edits to the local worker and verify `game.js` syntax and behavior using `run_command` with `node`.
