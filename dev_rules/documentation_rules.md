@@ -1,6 +1,6 @@
 # Team Documentation & Worklog Rules (`dev_rules/documentation_rules.md`)
 
-> - **Status:** Living team policy (`v0.5`)
+> - **Status:** Living team policy (`v0.6`)
 > - **Scope:** Governs how all contributors and coding agents document current system architecture (`docs/`), trace individual engineering/research work (`docs/worklogs/`), find the latest open problem, and **propose** (never auto-apply) rule updates for `dev_rules/`.
 > - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Benchmarking & Evaluation Rules (`benchmarking_rules.md`)](benchmarking_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Worklogs Master Index (`../docs/worklogs/INDEX.md`)](../docs/worklogs/INDEX.md)
 > - **Tag Legend:** `[ENFORCED]` = enforced via templates, `.gitattributes`, or `scripts/update_worklog_index.py --check`; `[PROCESS]` = contributor & PR review gate.
@@ -17,7 +17,7 @@ Keep prescriptive rules, current-state system documentation, and per-person fore
 | **2. Living System Docs** *(Descriptive — Current State)* | `docs/` *(top-level, by subsystem)* | Shared team | **Where we are / how each subsystem works today** — implementation maps (`TOOLS_ARCHITECTURE.md`, `ORCHESTRATION_ARCHITECTURE.md`), provider/hardware guides (`HYBRID_MODEL_STRATEGY.md`), papers. **Never stored inside a person's folder.** | Living (updated when code/stack changes) |
 | **3. Evidence Locker / Worklogs** *(Descriptive — Forensic History)* | `docs/worklogs/<person>/YYYY-MM-DD_<slug>/` | Individual author | **What this contributor ran, changed, measured, and found** — small-scoped, experiment-grade traceable dossiers. | Append-only (immutable once verified) |
 
-> **Historical Reference Archives `[PROCESS]`:** `reports/`, `updates/`, and `mini.py` are read-only historical archives preserved for chronological record and earlier baseline findings — cite them as reference artifacts and keep them immutable.
+> **Retired v1 Historical Archives `[PROCESS]`:** **Mini Hivo is v2-only.** Legacy v1 (`mini.py`, single-model baseline, Experiments 1–22), `reports/`, and `updates/` are **retired read-only historical archives** — never used for active development, prompts, or new experiments. Preserve them immutable as reference provenance only; document all active v2 work in `docs/` and `docs/worklogs/`.
 
 ---
 
@@ -104,3 +104,4 @@ If a session spans multiple activities (e.g., code fixes + a formal benchmark), 
 | `v0.3` | 2026-11-26 | Enforced strict Propose-Only Rule Lock (zero auto-edits to `dev_rules/` during normal work) and added `Rule Proposal:` metadata field feeding `docs/worklogs/INDEX.md`'s Pending Rule Proposals review queue. |
 | `v0.4` | 2026-11-26 | Added per-contributor Tier 1 quick logs (`docs/worklogs/<person>/LOG.md`) auto-indexed into `INDEX.md`'s Recent Tier 1 Fixes view, and aligned section 2.3 to parallel assigned-track coordination. |
 | `v0.5` | 2026-11-26 | Linked `benchmarking_rules.md` for `Type: experiment` KPI/Truth-Check standards and simplified historical-archive wording to positive framing. |
+| `v0.6` | 2026-11-27 | Formalized v2-only active scope and retired v1 archive boundary in §1 (explicit maintainer approval; see `docs/worklogs/kareem/2026-11-27_v2-only-docs-and-live-model-readiness/REPORT.md`). |

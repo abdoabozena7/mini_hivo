@@ -1,5 +1,8 @@
 # One selected paper: evidence-licensed decomposition
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This research note documents the retired v1 single-local-model baseline (`mini.py`) and is preserved strictly for history. For active v2 architecture and strategy, see [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) and [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md).
+
 **Decision date:** 2026-11-17.
 **Status:** one research direction selected; proposed mechanism and evaluation,
 not an implemented research result or submission-ready paper.

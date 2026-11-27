@@ -1,5 +1,8 @@
 # من merge شغال إلى prompt بيطلع برنامج حقيقي
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This document preserves historical v1 (`mini.py` / `gemma4:e4b`) validation records only and is no longer used. For active v2 verification and benchmarks, see [`../README.md`](../README.md), [`BENCHMARKING_ARCHITECTURE.md`](BENCHMARKING_ARCHITECTURE.md), and [`worklogs/INDEX.md`](worklogs/INDEX.md).
+
 تاريخ المتابعة: 2026-11-17. الطلب الجديد كان إننا نكمّل إصلاح المسارات اللي
 لسه فاشلة لحد live end-to-end بنتيجة حقيقية. نقطة البداية هي `3b02b3e`،
 بعد توحيد الفروع وحفظ كل الـ original commits. تفاصيل الدمج القديمة ونتايج

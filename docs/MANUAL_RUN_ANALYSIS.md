@@ -1,5 +1,8 @@
 # Why the latest manual Three.js run stopped
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This document preserves a historical v1 (`mini.py`) manual run diagnosis only and is no longer used. See [`../README.md`](../README.md) and [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for the active v2 system.
+
 ## Evidence boundary
 
 This is a causal analysis of the user's actual manual run,

@@ -10,7 +10,7 @@
 
 This guide documents Mini Hivo's concrete **Cloud Thinking Orchestrator + 4 GB VRAM Local Worker** deployment profile (free dev cloud endpoints during iteration → paid drop-in endpoints via `EndpointConfig` swap). For the implemented module map (`hivo/providers/`, `hivo/hybrid/`) and runtime loop details, see [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md); for timeless architectural invariants, see [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md).
 
-> **Attribution Boundary:** Legacy [`SingleModelPolicy`](../hivo/model_policy.py) remains intact in `mini.py` as the v1 single-local-model baseline. Hybrid cloud+local orchestration runs opt-in with explicit per-run model/provider provenance.
+> **Active v2 Scope:** Asymmetric hybrid orchestration (`hivo/providers/`, `hivo/hybrid/`, `hivo/tools/`) **is** Mini Hivo, logging explicit per-run model/endpoint provenance. The legacy v1 single-local-model baseline (`mini.py`, `SingleModelPolicy`, `gemma4:e4b`, `updates/`, `reports/`) is **retired historical archive only** and is no longer used.
 
 ---
 

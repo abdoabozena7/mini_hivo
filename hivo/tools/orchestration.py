@@ -177,6 +177,7 @@ def _handle_dispatch_worker(args: dict[str, Any], ctx: ToolContext) -> dict[str,
         "status": str(raw_result.get("status", "unknown")),
         "modified_files": [str(p) for p in modified],
         "diff_summary": str(raw_result.get("diff_summary", "")),
+        "unified_diff": str(raw_result.get("unified_diff", "")),
         "error": raw_result.get("error"),
     }
     return ok_result(normalized_result)

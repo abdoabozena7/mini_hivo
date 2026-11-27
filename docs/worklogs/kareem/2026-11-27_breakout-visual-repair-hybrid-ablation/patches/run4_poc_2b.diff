@@ -1,0 +1,104 @@
+--- before/game.js
++++ after/game.js
+@@ -33,11 +33,22 @@
+ }
+ 
+ function loadHighScore(storage) {
+-  return 0;
++  try {
++    const score = storage.getItem(HIGHSCORE_KEY);
++    if (!score || isNaN(score)) return 0;
++    return parseInt(score, 10);
++  } catch (e) {
++    return 0;
++  }
+ }
+ 
+ function saveHighScore(storage, value) {
+-  return false;
++  try {
++    storage.setItem(HIGHSCORE_KEY, String(value));
++    return true;
++  } catch (e) {
++    return false;
++  }
+ }
+ 
+ function createInitialState(storage) {
+@@ -78,9 +89,21 @@
+   resetBallAndPaddle(state);
+   return state;
+ }
++function resetGame(state) {
++  state.score = 0;
++  state.lives = 3;
++  state.status = "playing";
++  state.bricks = createBricks();
++  resetBallAndPaddle(state);
++  return state;
++}
+ 
+ function togglePause(state) {
+-  state.status = "paused";
++  if (state.status === "playing") {
++    state.status = "paused";
++  } else if (state.status === "paused") {
++    state.status = "playing";
++  }
+   return state.status;
+ }
+ 
+@@ -104,8 +127,10 @@
+   if (ball.x - ball.r < 0) {
+     ball.x = ball.r;
+     ball.dx = Math.abs(ball.dx);
++    ball.x = state.width - ball.r;
++    ball.dx = -Math.abs(ball.dx);
+   } else if (ball.x + ball.r > state.width) {
+-    ball.dx = Math.abs(ball.dx);
++    ball.dy = Math.abs(ball.dy);
+   }
+ 
+   if (ball.y - ball.r < 0) {
+
+--- before/style.css
++++ after/style.css
+@@ -33,20 +33,14 @@
+   padding: 16px;
+ }
+ 
+-.hud {
+-  position: absolute;
+-  top: 28px;
+-  left: 24px;
+-  right: 24px;
+-  z-index: 5;
+-  display: flex;
+-  align-items: center;
+-  justify-content: space-between;
+-  gap: 10px;
+-  padding: 10px 14px;
+-  background: rgba(17, 24, 51, 0.92);
+-  border: 1px solid var(--border);
+-  border-radius: 10px;
++   display: flex;
++   align-items: center;
++   justify-content: space-between;
++   gap: 10px;
++   padding: 10px 14px;
++   background: rgba(17, 24, 51, 0.92);
++   border: 1px solid var(--border);
++   border-radius: 10px;
+ }
+ 
+ .hud-stats {
+@@ -115,8 +109,7 @@
+ }
+ 
+ .overlay.hidden {
+-  opacity: 0;
+-}
++display: none;
+ 
+ .overlay-card {
+   text-align: center;

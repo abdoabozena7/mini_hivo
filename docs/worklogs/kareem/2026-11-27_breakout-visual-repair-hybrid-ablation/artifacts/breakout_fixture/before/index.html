@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon Breakout — Mini Hivo Live Test</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header id="hud" class="hud">
+      <div class="hud-stats">
+        <span class="stat">Score: <strong id="score-val">0</strong></span>
+        <span class="stat">Best: <strong id="highscore-val">0</strong></span>
+        <span class="stat">Lives: <strong id="lives-val">3</strong></span>
+        <span class="badge" id="status-badge">PLAYING</span>
+      </div>
+      <div class="hud-actions">
+        <button id="pause-btn" type="button">Pause (Space)</button>
+        <button id="restart-btn" type="button">Restart (R)</button>
+      </div>
+    </header>
+
+    <section class="stage" id="stage">
+      <canvas id="gameCanvas" width="640" height="420" aria-label="Neon Breakout Playfield"></canvas>
+      <div id="overlay" class="overlay hidden" role="dialog" aria-live="polite">
+        <div class="overlay-card">
+          <h2 id="overlay-title">Paused</h2>
+          <p id="overlay-message">Press Space to resume or R to restart.</p>
+          <button id="overlay-restart-btn" type="button">Play Again</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="controls-hint">
+      Move: <strong>Arrow Left / Right</strong> or <strong>Mouse</strong> ·
+      Pause: <strong>Space</strong> · Restart: <strong>R</strong>
+    </footer>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>

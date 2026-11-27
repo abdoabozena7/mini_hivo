@@ -4,7 +4,7 @@
 > - **Governing Rules:** [`../dev_rules/benchmarking_rules.md`](../dev_rules/benchmarking_rules.md) *(prescriptive invariants, autopilot runbook, 8-point Truth Check, promotion gates)*
 > - **Companion Scoreboard:** [`BENCHMARK_SCORECARD.md`](BENCHMARK_SCORECARD.md) *(version-locked `2026-11-26` SOTA reference snapshot & Mini Hivo v2 tracking tables)*
 > - **Related Living Docs:** [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md), [`TOOLS_ARCHITECTURE.md`](TOOLS_ARCHITECTURE.md), [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md), [`worklogs/INDEX.md`](worklogs/INDEX.md)
-> - **Historical Reference:** `mini.py`, `reports/`, and `updates/` remain read-only historical archives preserving Mini Hivo's chronological evolution and earlier v1/v2 baseline findings (including Experiment 23).
+> - **Retired v1 Archive:** Mini Hivo is **v2 only**. Legacy v1 (`mini.py`, `SingleModelPolicy`), the old experiment route (`Experiments 1–22`), `reports/`, and `updates/` are retired read-only historical archives preserved solely for provenance and are no longer used. All active benchmarking targets v2 exclusively.
 
 ---
 
