@@ -1,11 +1,11 @@
 # Benchmarking & Evaluation Rules (`dev_rules/benchmarking_rules.md`)
 
-> - **Status:** Living evaluation guardrails (`v0.2`)
+> - **Status:** Living evaluation guardrails (`v0.3`)
 > - **Scope:** Benchmark harnesses and runners (`scripts/*swebench*`, `scripts/*bench*`, `scripts/*eval*`, `hivo/benchmarks/`), Stage 0 benchmark self-tests (`tests/test_benchmark_*.py`), `Type: experiment` worklogs, and promotion decisions for Mini Hivo's active v2 asymmetric architecture.
 > - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Orchestration Guardrails (`orchestration_rules.md`)](orchestration_rules.md), [Tool Rules (`tool_rules.md`)](tool_rules.md), [Documentation & Worklog Rules (`documentation_rules.md`)](documentation_rules.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Benchmarking Architecture & 2026 Plan (`../docs/BENCHMARKING_ARCHITECTURE.md`)](../docs/BENCHMARKING_ARCHITECTURE.md), [Benchmark Scorecard (`../docs/BENCHMARK_SCORECARD.md`)](../docs/BENCHMARK_SCORECARD.md)
 > - **Rule Standard:** All invariants below are model-, vendor-, and hardware-agnostic. Concrete suite names in §6 are explicitly dated **reference targets** subject to periodic re-audit; live dataset splits, sample budgets, and SOTA comparison tables live in `docs/BENCHMARKING_ARCHITECTURE.md` and `docs/BENCHMARK_SCORECARD.md`.
 > - **Tag Legend:** `[ENFORCED]` = verified in current harness/code; `[TARGET]` = validated SOTA requirement to implement in upcoming harness code; `[PROCESS]` = mandatory operational or review gate (`[PROCESS — OPTIONAL]` = recommended human audit).
-> - **Historical Reference:** `mini.py`, `reports/`, and `updates/` are preserved historical archives kept for chronological record and earlier baseline findings.
+> - **Retired v1 Archive:** **Mini Hivo is v2-only.** Legacy v1 (`mini.py`, single-model baseline), the old experiment route (`Experiments 1–22`), `reports/`, and `updates/` are retired read-only historical archives and are never used for new benchmarks.
 
 ---
 
@@ -140,3 +140,4 @@ Human audits are **optional** and never block automated coding-agent runs, but p
 | :--- | :--- | :--- |
 | `v0.1` | 2026-11-26 | Initial SOTA benchmarking & evaluation guardrails: full-system UUT attribution, strict decontamination & privilege-separated output verification, deterministic KPI contract, Stage 0 self-test suite & host/sandbox preflight gate, 7-step coding-agent autopilot runbook with 8-point Truth Check, 6-bucket Evidence-vs-Hypothesis triage, progressive 5-stage ladder with dated (`2026-11-26`) reference suite roster, and optional human-in-the-loop audit checks. |
 | `v0.2` | 2026-11-27 | Promoted verified Stage 0 safeguards (§2.3, §2.4, §2.5, §2.7, §3.1–§3.3) from `[TARGET]` to `[ENFORCED]` after `hivo/benchmarks/`, `tests/test_benchmark_stage0.py` (`7/7` pass), and live zero-LLM host preflight landed (`docs/worklogs/kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md`). |
+| `v0.3` | 2026-11-27 | Formalized v2-only active scope and retired v1 / Experiments 1–22 archive boundary (explicit maintainer approval; see `docs/worklogs/kareem/2026-11-27_v2-only-docs-and-live-model-readiness/REPORT.md`). |

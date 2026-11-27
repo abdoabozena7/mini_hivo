@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-27",
+  "author": "kareem",
+  "type": "change",
+  "subsystem": "docs / dev_rules / providers / hybrid",
+  "branch": "feat/benchmark-harness-stage0",
+  "base_commit": "dac866bfe35c3a94969c7ad84ed4ae7ee0af8538",
+  "tested_revision": "dac866bfe35c3a94969c7ad84ed4ae7ee0af8538+uncommitted",
+  "source_sha256": {
+    "AGENTS.md": "5a4df34d071c8a186388be875f2a6edbb92a291557e0ece2c057eab2856a19d5",
+    "dev_rules/orchestration_rules.md": "f2dd86f3cc5b8524010e4706c213bb709cec23d976f34acaf9dd7f2e873ed03c",
+    "dev_rules/documentation_rules.md": "4a12f8702b590d7c6b9689cf2ecda2cc523033fc656f516de11783da3eece6ed",
+    "dev_rules/benchmarking_rules.md": "9df3ee065392f57c06627be343f7b8f07c1e6a84159babd9e166ec5be6d77ca2",
+    "README.md": "933774be7febb0ff13555716908e6fe21ea0b1a532eb7550aead99050d8439d7",
+    "docs/PROJECT_STATUS.md": "2455feb543e069ae5fb2a52ab25664f59f27bcb6daa7488a99a520b07b006d3d",
+    "docs/HYBRID_MODEL_STRATEGY.md": "4cd6b274fc3129312b1c2ccc118cee7b2daffd63e4dea5e05a3b2bcb7c5b5fe6",
+    "docs/ORCHESTRATION_ARCHITECTURE.md": "5e92e83139a6b6c4d51461d82a40c8b7adb8bdafc4912eb61164ed35e9779f1b",
+    "docs/TOOLS_ARCHITECTURE.md": "4c3f8f6d856d12c0e25a78e74f84d76692cbf69f187a934b06662673e4a3fa15",
+    "docs/BENCHMARKING_ARCHITECTURE.md": "860bdcb8ca69814d85aa62c2f525b95fcf297703912888a3327bd957c81cb9a7"
+  },
+  "environment": {
+    "os": "Windows 11 (10.0.26300)",
+    "python": "3.14.6",
+    "gpu": "NVIDIA GeForce GTX 1650 (4096 MiB VRAM)",
+    "runtime_tools": "Ollama 0.40.18, Docker 29.6.2"
+  },
+  "models": {
+    "orchestrator": "Groq qwen/qwen3.8-27b & openai/gpt-oss-120b (reasoning_effort=medium)",
+    "worker": "Ollama qwen3.5:2b-q4_K_M (Q4_K_M, num_ctx=4096, think=False, 100% GPU resident 1.60 GB)"
+  },
+  "reproduction_commands": [
+    "python scripts/update_worklog_index.py --check",
+    "python scripts/check.py -v",
+    "python scripts/check.py --ci-diff dac866b",
+    "python -m hivo.benchmarks.preflight --provider groq --skip-docker",
+    "python -u scripts/probe_hybrid_models.py --local-only --worker-model qwen3.5:2b-q4_K_M"
+  ]
+}

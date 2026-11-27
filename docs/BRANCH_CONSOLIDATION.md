@@ -1,5 +1,8 @@
 # دمج تاريخ Mini Hivo من غير فقدان الـ commits
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This document preserves historical v1 (`mini.py`) branch consolidation records only and is no longer used for active development. See [`../README.md`](../README.md) and [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
+
 تاريخ المهمة: 2026-11-16. الـ validation workflow المستخدم هو HarrTest 4.1.0
 المثبت محليًا؛ مفيش تحديث للـ skill أو تغيير للموديل أثناء المهمة.
 آخر live runs اكتملت بعد منتصف الليل يوم 2026-11-17 بالتوقيت المحلي.

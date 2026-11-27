@@ -1,5 +1,8 @@
 # Certify Before You Compose: Assume-Guarantee Interface Certificates, Dual-Boundary Hardware-Aware Decoding, and Visual-Execution Oracles for Local Weak-Model Software Swarms
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This paper documents the retired **v1 single-local-model system** (`mini.py` / `gemma4:e4b`), preserved strictly as historical record. Active Mini Hivo development is exclusively **v2** — see [`../README.md`](../README.md), [`PROJECT_STATUS.md`](PROJECT_STATUS.md), [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md), and [`BENCHMARKING_ARCHITECTURE.md`](BENCHMARKING_ARCHITECTURE.md).
+
 **System Under Study:** Mini Hivo — Architecture-First Local Weak-Model Swarm & Recursive Coding Engine (`mini.py` final regression-verified `source_sha256: 03ebfa8af7cd1ff01e0ab70ef9b476c7a1f5ff83eac380d30a6e423d8cd62b61`; live `threejs v8` trial `source_sha256: 3bf32fbdab883b9f17ab1baaf73abe28d02383e335ae15a8b18acc89e0a97492`)
 **Primary Pinned Subject Model:** `gemma4:e4b` (Q4_K_M quantized 4B local open-weight model via Ollama under `SingleModelPolicy`, zero frontier/cloud fallback; comparative protocol probe on `qwen2.5-coder:3b`)
 **Companion Architectural Records:** [Graduation North Star](PROJECT_GOAL.md) · [14-Role Swarm Charter](AGENT_ARCHITECTURE.md) · [Before You Split Formulation](RESEARCH_DIRECTION.md) · [Baseline Checkpoint (`R_UPDATE_008`)](../updates/R_UPDATE_008.md)

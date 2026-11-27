@@ -1,5 +1,8 @@
 # Calm terminal and saved sessions
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This guide describes the retired v1 `mini.py` terminal UI, which is no longer used or maintained. See [`../README.md`](../README.md) and [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for the active v2 runtime.
+
 The normal interactive interface separates **operating the agent** from
 **investigating the agent**. A coding request needs a readable activity
 indicator and an honest result, not hundreds of metric and contract lines.

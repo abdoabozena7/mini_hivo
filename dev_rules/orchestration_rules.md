@@ -1,6 +1,6 @@
 # Orchestration Architecture & Guardrails (`dev_rules/orchestration_rules.md`)
 
-> - **Status:** Living architectural guardrails (`v0.4` — aligned with asymmetric orchestration design, Decomposition-Capability Scaling & `benchmarking_rules.md`)
+> - **Status:** Living architectural guardrails (`v0.5` — v2-only active scope, asymmetric orchestration, Decomposition-Capability Scaling & `benchmarking_rules.md`)
 > - **Scope:** Orchestration layer — how Mini Hivo coordinates an **Orchestrator tier** and **Worker tier(s)** across capability floors, contract-complete decomposition, delegation, context budgets, rollback safety, verification handoffs, and provider-agnostic endpoints.
 > - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Tool Architecture & Design Rules (`tool_rules.md`)](tool_rules.md), [Benchmarking & Evaluation Rules (`benchmarking_rules.md`)](benchmarking_rules.md), [Orchestration Implementation Architecture (`../docs/ORCHESTRATION_ARCHITECTURE.md`)](../docs/ORCHESTRATION_ARCHITECTURE.md), [Hybrid Model & Provider Reference (`../docs/HYBRID_MODEL_STRATEGY.md`)](../docs/HYBRID_MODEL_STRATEGY.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md)
 > - **Rule Standard:** Guardrails below are **model-, vendor-, and hardware-agnostic invariants**. Any named models or providers are **illustrative examples / reference targets**, never mandatory locks. Live provider pricing, quotas, and hardware tuning live in `docs/`; dated empirical runs live in `docs/worklogs/` (with historical baseline records preserved in `reports/` and `updates/`).
@@ -19,7 +19,7 @@ Mini Hivo separates **architectural reasoning & control** from **scoped code exe
    - Owns concrete, narrowly scoped file creation or edits strictly inside its assigned `target_files`.
    - Runs as a bounded sub-loop invoked by the Orchestrator (agent-as-a-tool) with a minimal fixed tool surface, flat schemas, non-thinking execution, and fast deterministic feedback.
 
-> **Migration Boundary `[ENFORCED]`:** New orchestration modules (`hivo/providers/`, `hivo/hybrid/`) stay isolated from legacy single-model `mini.py` global state (zero imports from `mini.py`) and log explicit per-run model/endpoint provenance until a full cutover is authorized.
+> **Active v2 Boundary `[ENFORCED]`:** **Mini Hivo is v2-only.** Active orchestration modules (`hivo/providers/`, `hivo/hybrid/`, `hivo/tools/`, `hivo/benchmarks/`) maintain zero imports from the retired v1 historical archive (`mini.py`, legacy single-model modules, `updates/`, `reports/`) and log explicit per-run model/endpoint provenance. Never build new features, prompts, or runs on v1.
 
 ---
 
@@ -130,3 +130,4 @@ Empirical scaling studies show that **more splitting without complete interface 
 | `v0.2` | 2026-11-26 | Added Orchestrator/Worker behavioral capability floors (informed by the Decomposition-Capability Scaling Law & live hybrid runs), non-binding dev-free → paid-target model/provider examples, 5-dimension contract-completeness & single-syntax guardrails, scope-matched greenfield vs. brownfield repair rules, and moved into `dev_rules/`. |
 | `v0.3` | 2026-11-26 | Updated `tool_rules.md` link after `dev_rules/` move and split mixed `[ENFORCED]` / `[TARGET]` / `[PROCESS]` status tags per sub-bullet for strict 1:1 accuracy against current code. |
 | `v0.4` | 2026-11-26 | Linked `benchmarking_rules.md`, deduplicated §6.4 benchmark guardrails into a single pointer, and updated empirical-run path to `docs/worklogs/`. |
+| `v0.5` | 2026-11-27 | Formalized v2-only active scope and retired v1 historical archive boundary in §1 (explicit maintainer approval; see `docs/worklogs/kareem/2026-11-27_v2-only-docs-and-live-model-readiness/REPORT.md`). |

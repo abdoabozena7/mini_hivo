@@ -14,7 +14,7 @@ Before planning, diagnosing deeply, or editing files in any area below, you **MU
 | `docs/`, `docs/worklogs/`, PRs, findings | [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) | [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) *(newest-first team radar)* |
 | `dev_rules/`, `AGENTS.md`, `CLAUDE.md`, `**/AGENTS.md` | **LOCKED (READ-ONLY)** — see Hard Rule Lock below + [dev_rules/how_to_make_rules.md](dev_rules/how_to_make_rules.md) | — |
 
-> **Historical archives:** `mini.py` (v1 single-model baseline, documented in [docs/PROJECT_GOAL.md](docs/PROJECT_GOAL.md) and [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md)), `reports/`, and `updates/` are preserved read-only archives kept for chronological context and historical baseline findings.
+> **Active v2 Scope & Retired Historical Archives:** **Mini Hivo is v2-only** (`hivo/tools/`, `hivo/providers/`, `hivo/hybrid/`, `hivo/benchmarks/`). The retired **v1 single-model prototype** (`mini.py`, `SingleModelPolicy`, legacy `scripts/experiment1–22`, [docs/PROJECT_GOAL.md](docs/PROJECT_GOAL.md), [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md)), `reports/`, and `updates/` are **read-only historical archives only — never used for active development, execution, or new experiments.**
 
 ## Hard Rule Lock — PROPOSE ONLY, NEVER AUTO-EDIT RULES
 
@@ -68,7 +68,7 @@ Follow **Observe → Investigate → Fix → Verify → Document → Review → 
 ## Worklog documentation & historical archives
 
 - Record all active team work in per-contributor chronological dossiers under `docs/worklogs/<person>/YYYY-MM-DD_<slug>/` (Tier 2) or `docs/worklogs/<person>/LOG.md` (Tier 1), governed by [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) and indexed newest-first in [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) via `python scripts/update_worklog_index.py`.
-- `mini.py`, `reports/`, and `updates/` are read-only historical archives preserved for chronological context and earlier baseline data — read and cite them as reference artifacts and keep them immutable (`R_UPDATE_001` remains permanently private/gitignored).
+- **Mini Hivo is v2-only:** `mini.py`, legacy v1 single-model modules and experiments (`Experiments 1–22`), `reports/`, and `updates/` are **retired read-only historical archives** — never used for active runs or new development. Preserve them immutable as reference provenance only (`R_UPDATE_001` remains permanently private/gitignored).
 - Use commit hashes only when available. A document cannot know its own future commit hash; identify the tested source revision and mark a containing commit pending when necessary. Never fabricate commands, before-code excerpts, results, counts or provenance.
 
 ## Evidence preservation and publication

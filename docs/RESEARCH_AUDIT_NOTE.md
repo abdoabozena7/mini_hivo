@@ -1,5 +1,8 @@
 # Research note — When splitting helps a small coding model
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This audit note documents historical v1 (`mini.py` / Experiments 1–19) observations only and is no longer used. Active v2 work is tracked in [`PROJECT_STATUS.md`](PROJECT_STATUS.md) and [`worklogs/INDEX.md`](worklogs/INDEX.md).
+
 **2026-11-18. Proposal, not a measured model-quality gain.** This note follows the project's existing [evidence-licensed decomposition direction](RESEARCH_DIRECTION.md). The fresh results in [R_UPDATE_005](../updates/R_UPDATE_005.md) show that the controller can misread both success and failure. They do not show that an adaptive swarm finishes more real tasks.
 
 ## أقوى فكرة للـpaper

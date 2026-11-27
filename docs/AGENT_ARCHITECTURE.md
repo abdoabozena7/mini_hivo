@@ -1,6 +1,7 @@
 # Mini Hivo — Swarm & Recursive Agent Architecture Charter
 
-> **Architecture Scope Note:** This charter documents Mini Hivo's **v1 single-local-model baseline** (`mini.py` / `SingleModelPolicy`). Active **v2 asymmetric orchestration** work is governed by [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md) and [`../dev_rules/tool_rules.md`](../dev_rules/tool_rules.md), and documented in [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md), [`TOOLS_ARCHITECTURE.md`](TOOLS_ARCHITECTURE.md), and [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md).
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 (DO NOT USE):** Mini Hivo is **v2 only**. This charter is preserved strictly as historical record of the retired **v1 single-local-model baseline** (`mini.py` / `SingleModelPolicy`), which is no longer used or maintained. For the active v2 architecture, see [`../README.md`](../README.md), [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md), [`TOOLS_ARCHITECTURE.md`](TOOLS_ARCHITECTURE.md), [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md), and [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md).
 
 **Role of this document:** Authoritative technical charter specifying how every model-backed agent role and deterministic controller gate inside Mini Hivo collaborates from user prompt ingestion to verified promotion and deliverable reporting. For the high-level problem statement and graduation-project thesis, see [PROJECT_GOAL.md](PROJECT_GOAL.md); for empirical checkpoints and research boundaries, see [PROJECT_STATUS.md](PROJECT_STATUS.md), [RESEARCH_DIRECTION.md](RESEARCH_DIRECTION.md), and [RESEARCH_AUDIT_NOTE.md](RESEARCH_AUDIT_NOTE.md).
 

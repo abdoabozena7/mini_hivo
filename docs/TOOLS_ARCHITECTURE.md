@@ -2,7 +2,7 @@
 
 > - **Status:** Living current-state documentation (`hivo/tools/`)
 > - **Governing Rules:** [`../dev_rules/tool_rules.md`](../dev_rules/tool_rules.md) *(prescriptive contracts & guardrails)*
-> - **Historical Origin:** Introduced in PR #5 (`updates/R_UPDATE_010.md`) as a standalone, framework-free Python package with zero imports from `mini.py`.
+> - **Active v2 Tool Layer:** `hivo/tools/` is Mini Hivo's sole active tool subsystem (v2-only), completely independent of the retired v1 historical archive (`mini.py`, `updates/`). Historical creation provenance is preserved read-only in `updates/R_UPDATE_010.md`.
 
 ---
 

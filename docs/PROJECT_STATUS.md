@@ -1,62 +1,48 @@
-# Mini Hivo — architecture and feature status
+# Mini Hivo — Project Status & Active v2 Roadmap (`docs/PROJECT_STATUS.md`)
 
-Checkpoint: 2026-11-21. This page tracks capabilities, not individual defects. The core thesis and North Star are in [PROJECT_GOAL.md](PROJECT_GOAL.md); the complete Swarm & Recursive role charter is in [AGENT_ARCHITECTURE.md](AGENT_ARCHITECTURE.md). The experiment timeline is in [EXPERIMENT_HISTORY.md](EXPERIMENT_HISTORY.md); implementation details are in the [README](../README.md). The [consolidation report](BRANCH_CONSOLIDATION.md) records original branch ancestry, and the [live end-to-end checkpoint](LIVE_E2E_VALIDATION.md) records the subsequent source-to-output repairs and acceptance.
+> - **Status:** Living v2 project status (`2026-11-27`)
+> - **Scope:** Mini Hivo is **v2 only** (asymmetric Cloud Thinking Orchestrator + Local Quantized Worker under `hivo/tools/`, `hivo/providers/`, `hivo/hybrid/`, and `hivo/benchmarks/`).
+> - **Retired v1 Notice:** The legacy v1 single-local-model system (`mini.py`, `SingleModelPolicy`, `gemma4:e4b`, Experiments 1–22, `reports/`, `updates/`) is **retired historical archive only** and is no longer used or maintained.
+> - **Live Activity Radar:** [`worklogs/INDEX.md`](worklogs/INDEX.md) *(newest-first team activity)* · [`BENCHMARK_SCORECARD.md`](BENCHMARK_SCORECARD.md)
 
-## What exists in the code
+---
 
-| Capability | Status | Main implementation |
-|---|---|---|
-| Local CLI, numbered project workspaces, single-model-per-run generative Ollama policy (`gemma4:e4b` default), bounded context, persistent SQLite run/task memory, and structured JSON deliverable reports | Implemented | `mini.py`, `hivo/projects.py`, `hivo/model_policy.py`, `hivo/deliverable_report.py`, `hivo/http_client.py`, `hivo/context.py`, `hivo/memory.py` |
-| Calm animated terminal, persistent named sessions, native scoped decisions and complete private diagnostics | Implemented; actual ConPTY/local-model acceptance | `hivo/sessions.py`, `hivo/terminal_ui.py`, `mini.py`; [guide](TERMINAL_SESSIONS.md), [measured update](../updates/R_UPDATE_004.md) |
-| Source requirement ledger, clarification, repository reconnaissance, Project Brain, and temporary Task Brain | Implemented | `hivo/requirements.py`, `hivo/project_understanding.py`, `hivo/reentry.py` |
-| Impact Map, challenge, minimal change plan, explicit approval, and immutable execution contracts | Implemented | `hivo/impact_planning.py`, `hivo/execution_contracts.py`, `hivo/approval_bound_execution.py` |
-| Recursive task decomposition, scoped Worker missions, Evidence-Licensed Granularity & Tool-Contract Recovery Gate (*Before You Split*), mutation guards, and bounded recovery | Implemented | `mini.py`, `hivo/evidence_licensed_gate.py`, `hivo/context_sufficiency.py`, `hivo/pre_mutation_impact.py`, `hivo/mutation_grounding.py`, `hivo/recovery.py` |
-| Domain quality rubrics, Three.js/ES-module/WebGL canvas quality checks, verified child receipts, fresh parent integration, verified-state promotion and re-entry | Implemented | `hivo/quality_rubric.py`, `hivo/playbooks.py`, `hivo/verification.py`, `hivo/verification_routing.py`, `hivo/atomic_child_receipt.py`, `hivo/integration_gate.py`, `hivo/promotion.py`, `hivo/reentry.py` |
-| Experiment runners, deterministic regression tests, paired reports and saved result summaries | Reports archived through Experiment 22 across separately identified workstreams; original histories integrated without rewriting | `scripts/`, `tests/`, `reports/` |
+## 1. Active v2 Subsystems
 
-“Implemented” means a code path and focused tests exist. It does **not** claim reliable end-to-end completion for every project or that an experimental policy is the default.
+| Subsystem | Status | Implementation | Living Spec & Guardrails |
+| :--- | :--- | :--- | :--- |
+| **Standalone Tool Layer** | Implemented & offline-verified | `hivo/tools/` (15 flat-schema tools, Hashline `edit_file`, AST/brace `code_intel`, `@scratch/` checkpoints, `ToolProtocolAdapter`, static `ToolBinding` + `spawn_worker_binding()`) | [`TOOLS_ARCHITECTURE.md`](TOOLS_ARCHITECTURE.md) · [`../dev_rules/tool_rules.md`](../dev_rules/tool_rules.md) |
+| **Provider-Agnostic Clients** | Implemented; offline-verified + live-verified on Groq & Ollama | `hivo/providers/` (`OpenAICompatClient`, `OllamaClient`, `.env` secret isolation, `<think>`/`reasoning_content` stripping, deadline-clamped `429`/`5xx` backoff, config-only presets) | [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) · [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md) |
+| **Asymmetric Hybrid Runtime** | Implemented; offline-verified + live-verified on single-file & SWE-bench anchor | `hivo/hybrid/` (`HybridAgentRunner`, cloud orchestrator + fenced 3-tool local worker, `think=False`, `O(target_files)` atomic rollback, 2-pass anchor-pinned history compaction, repeated-error abort) | [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md) · [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md) |
+| **Stage 0 Sealed Benchmark Harness & Preflight** | Implemented & offline-verified (`7/7` Stage 0 self-tests) | `hivo/benchmarks/` (`decontamination.py`, `audit.py`, `metrics.py`, `preflight.py`) + hardened `scripts/run_swebench_hybrid.py` + `tests/test_benchmark_stage0.py` | [`BENCHMARKING_ARCHITECTURE.md`](BENCHMARKING_ARCHITECTURE.md) · [`../dev_rules/benchmarking_rules.md`](../dev_rules/benchmarking_rules.md) |
+| **Governance, CI & Evidence Locker** | Active & enforced | `AGENTS.md`, `CLAUDE.md`, `dev_rules/`, `scripts/check.py`, `scripts/update_worklog_index.py`, `docs/worklogs/` | [`../dev_rules/documentation_rules.md`](../dev_rules/documentation_rules.md) · [`worklogs/INDEX.md`](worklogs/INDEX.md) |
 
-## Current working point
+> *"Implemented"* means the code path and deterministic offline tests exist. It does **not** claim universal live reliability across every repository or benchmark suite.
 
-The actual Karim PR head `34a972a` is preserved by two-parent merge `14fffa5`
-after the previous consolidation, with both independently numbered report
-workstreams retained. The [merge record](../updates/R_UPDATE_003.md) distinguishes
-that source integration from final remote publication.
+---
 
-The subsequent [quiet-terminal checkpoint](../updates/R_UPDATE_004.md) ran
-**1950 tests, OK with four existing skips**, and the public self-test. A fresh
-actual interactive local Gemma request produced the exact 11 required bytes,
-used 10 semantic result lines against a limit of 20, retained complete local
-diagnostics and resumed its completed session in a new process. Native decision
-scope and controls were exercised at 100x30 and 60x20. This does not establish
-universal task reliability or successful completion of the original full
-Three.js game; its [actual failure](MANUAL_RUN_ANALYSIS.md) is diagnosed separately.
+## 2. Current Working Point (`2026-11-27`)
 
-The [selected research direction](RESEARCH_DIRECTION.md) is evidence-licensed
-decomposition, explicitly proposed rather than a completed experimental result.
-The paragraphs below retain the earlier experiment/live checkpoints as history.
-The [publication addendum](../reports/integration/karim-pr1/publication.json)
-subsequently verifies GitHub PR #1 as merged, all 104 original inventoried
-tips and 36 Karim commits as reachable, a sole local `main` branch, and fresh
-full regression/self-test/live TUI output on the original final-main checkout.
+- **Offline Gate (`python scripts/check.py`):** All active v2 offline test suites (`hivo/tools/`, `hivo/providers/`, `hivo/hybrid/`, `hivo/benchmarks/`, and worklog/check gates) run deterministically with zero LLM calls and mirror `.github/workflows/ci.yml`.
+- **Stage 0 Benchmarking Gate:** Completed and verified (`7/7` adversarial offline self-tests in `tests/test_benchmark_stage0.py`, live zero-LLM host preflight CLI `python -m hivo.benchmarks.preflight`, and sealed `.git` stripping / `--network none` / pre-solve `INVALID_BASELINE` quarantine / anti-tamper / trace cheat-scanning wired into `scripts/run_swebench_hybrid.py`). See [`worklogs/kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md`](worklogs/kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md).
+- **Live Cloud + Local Baseline Anchor:**
+  - Verified live on `GTX 1650` (`4 GB` VRAM) with local Ollama `qwen3.5:2b-q4_K_M` (`100%` GPU resident at `1.60 GB`, `num_ctx=4096`, `think=False`) paired with Groq cloud orchestrators (`qwen/qwen3.8-27b`, `openai/gpt-oss-120b`).
+  - Historical pre-Stage-0 Day-0 SWE-bench anchor (Experiment 23, `N=3`, `seed=42`): `1/3` (`33%` raw) / `1/2` (`50%` valid non-blocked; `django__django-16527` resolved on 1st worker dispatch). Small-sample anchor only; sealed Stage 1 benchmarks are queued next. See [`BENCHMARK_SCORECARD.md`](BENCHMARK_SCORECARD.md).
 
-Experiment 17's [completed report](../reports/experiment17/experiment17-report.md) retains the **opt-in** `field_scoped` browser classifier. It classified all measured Timer/game contracts correctly, and the two game tasks each reached Root verified in 3/3 fresh approved-contract runs. Timer reached Root verified in 0/3: correct classification and browser behavior did not close its later receipt/grounding failures.
+---
 
-Experiment 18's [no-tool report](../reports/experiment18/no-tool-exit-report.md) shows that the opt-in no-tool re-anchor moved Python into source inspection, but not into a context decision or legal mutation. Experiment 19's [context-closure report](../reports/experiment19/context-decision-closure-report.md) found 0/3 Python context decisions in both comparison arms; its closure guard remains experimental and is not promoted to a default. Contributor diagnostics and verification-integrity experiments independently reused those numbers; their separate evidence is indexed without overwriting either workstream.
+## 3. Active v2 Engineering & Benchmark Backlog
 
-The consolidation adds focused repairs for false source conflicts, provider/runtime context-schema drift, context-only false completion, negated browser requirements, nonzero replacement-count recovery, requirement-grounded creation impact targets, native tool-call protocol mismatches, and honest batch exit status. Source-authorized new outputs are distinguished from missing dependencies without claiming existing implementation evidence. The deterministic self-test uses independent-task fixtures.
+| Priority | Milestone | Acceptance Evidence Needed |
+| :--- | :--- | :--- |
+| **Next** | **Computed `unified_diff` in `dispatch_worker`** (`hivo/hybrid/runner.py`) | Return compact pre/post `unified_diff` directly inside worker results (`dev_rules/orchestration_rules.md §6.2 [TARGET]`) with offline regression tests catching silent worker edit defects immediately. |
+| **Next** | **User-facing v2 prompt CLI** | Provide a clean v2 CLI entrypoint (`HybridAgentRunner`) for running arbitrary local prompts/workspaces without writing boilerplate Python or touching retired `mini.py`. |
+| **Stage 1** | **Higher-quota provider + Sealed Stage 1 Benchmarks** | Configure higher-quota cloud endpoint (`NVIDIA_API_KEY` or OpenRouter), install `harbor`, build Stage 1 `Terminal-Bench 4.1` adapter, and run sealed `SWE-bench` calibration + 3-arm Scaffold-Lift control (`Minimal` vs. `Orch-Only` vs. `Hybrid`). |
+| **Upcoming** | **Contract-Complete Multi-File Decomposition ($\kappa \ge 0.90$) & DCVG** | Wire 5-dimension leaf contracts, `< ~60`-line greenfield atomic rewrite, and declarative per-leaf verification oracles into `hivo/hybrid/` (`dev_rules/orchestration_rules.md §3, §6`). |
+| **Stage 3–4** | **Repeatability (`pass^k`), Anti-Cheat (`CHEATBENCH`) & Private Gold Gate** | Multi-trial runner (`n=5`), Stage 4A integrity battery, Stage 4B `SWE Atlas` mutation checks, and Stage 4D internal Private Gold regression suite. |
 
-The consolidation checkpoint ran 1729 tests and independently verified two live clamp repairs, while retaining its greenfield/auto failures. The follow-up now runs **1751 tests successfully with four pre-existing legacy skips**, plus the public self-test. On `df77206`, three fresh empty-workspace requests through default `auto` reached Root verified and passed independent acceptance: a greeting CLI/public function with real tests, integer multiplication with valid/invalid input boundaries, and exact `MERGE_OK` console output. All 71 implementation files match the source fingerprint used by those final live/offline checks.
+---
 
-The [live checkpoint](LIVE_E2E_VALIDATION.md) retains all 27 follow-up attempts, including a false success rejected independently, failed/interrupted tasks, and a real host-memory block. It fixes evidence transport, runtime/source contract resolution, structured context closure, safe draft revision, current verification, source-derived acceptance and post-repair freshness. This demonstrates measured Python CLI request-to-persisted-output behavior, **not** reliable completion for every task family; historical experiment percentages remain unchanged.
+## 4. Retired Historical Archive (v1 — Do Not Use)
 
-## Capabilities still needed for the intended complete architecture
-
-| Milestone | Acceptance evidence needed |
-|---|---|
-| A chosen, integrated execution policy | Compare the opt-in experiment policies on fixed, representative tasks; record which combination becomes the normal CLI behavior and why. Today many improvements are flags and `current` remains the default. |
-| End-to-end behavior across the declared task families | Fresh runs from approved contracts must reach legal mutation, child behavior verification, valid receipt, and fresh parent verification for browser games, Timer, Python unit behavior, and Node unit behavior. The five-task Experiment 12 did not reach executable verification for Timer or Python; Experiment 16 confirms their distinct stopping boundaries. |
-| Full request-to-result validation across project modes | New-project Python CLI source-to-output paths now have fresh default-CLI evidence. Still exercise existing-project clarification, repository evidence, impact plan, explicit approval, execution, verification, and durable promotion together. Experiments 12–16 start from frozen approved contracts, so they do not measure the planning/approval portion. |
-| Reproducible release checkpoint | Keep the selected policy, supported task families, acceptance fixtures, runbook, and measured limits together in the repo; rerun the meaningful regression and live acceptance set before calling the architecture complete. |
-
-These are feature-level acceptance milestones. Individual failures found while meeting them should be tracked separately. The existing modules form the intended pipeline, but current evidence does not support calling the whole architecture complete and reliable yet.
+The earlier **v1 single-local-model baseline** (`mini.py`, `SingleModelPolicy`, `gemma4:e4b`, legacy `scripts/experiment1–22`, `reports/`, `updates/`, and historical v1 charters/notes in `docs/`) is **retired history**. Those artifacts remain preserved read-only for provenance only; all active engineering, testing, prompts, and benchmarks belong strictly to **v2**.

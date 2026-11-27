@@ -1,5 +1,8 @@
 # Experiment history on `main`
 
+> [!WARNING]
+> **HISTORICAL ARCHIVE — RETIRED v1 EXPERIMENT ROUTE (DO NOT USE):** Mini Hivo is **v2 only**. The legacy v1 single-model experiment route (Experiments 1–22, `reports/`, `updates/`, `mini.py`) is retired historical record and is no longer used. Active v2 work and benchmarks are tracked in [`worklogs/INDEX.md`](worklogs/INDEX.md), [`BENCHMARKING_ARCHITECTURE.md`](BENCHMARKING_ARCHITECTURE.md), and [`BENCHMARK_SCORECARD.md`](BENCHMARK_SCORECARD.md).
+
 Checkpoint: 2026-11-16. The original core feature work was previously transplanted into a linear series on `main`. The [history-preserving consolidation](BRANCH_CONSOLIDATION.md) now also makes the original feature commits ancestors of `main`, without replaying their older implementation over newer fixes. Experiments 17–19 are integrated through a separate content merge. Original branch names and complete commit IDs are retained in the consolidation inventory, so retiring a branch name does not remove its history.
 
 ## Contributor fork history, preserved during PR #1 integration
