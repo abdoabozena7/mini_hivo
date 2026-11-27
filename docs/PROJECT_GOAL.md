@@ -1,5 +1,7 @@
 # Mini Hivo — Graduation Project Goal & Architectural North Star
 
+> **Architecture Scope Note:** This charter documents Mini Hivo's **v1 single-local-model baseline** (`mini.py` / `SingleModelPolicy`). Active **v2 asymmetric orchestration** work is governed by [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md) and [`../dev_rules/tool_rules.md`](../dev_rules/tool_rules.md), and documented in [`ORCHESTRATION_ARCHITECTURE.md`](ORCHESTRATION_ARCHITECTURE.md), [`TOOLS_ARCHITECTURE.md`](TOOLS_ARCHITECTURE.md), and [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md).
+
 **Role of this document:** Authoritative graduation-project charter defining Mini Hivo's core problem statement, engineering thesis, architectural pillars, deliverable backend surfaces, and scientific measurement boundaries. For role-by-role execution mechanics, see [AGENT_ARCHITECTURE.md](AGENT_ARCHITECTURE.md); for the formal AGISS synthesis, WDDM VRAM-cliff laws, and live weak-model evaluation, see [RESEARCH_PAPER.md](RESEARCH_PAPER.md); for current capability checkpoints and empirical status, see [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ---

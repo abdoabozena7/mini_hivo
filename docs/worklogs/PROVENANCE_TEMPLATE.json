@@ -1,0 +1,25 @@
+{
+  "date": "YYYY-MM-DD",
+  "author": "<contributor-name>",
+  "type": "<test | change | experiment>",
+  "subsystem": "<e.g. hivo/tools | hivo/providers | hivo/hybrid>",
+  "branch": "<branch-name>",
+  "base_commit": "<full-40-char-sha>",
+  "tested_revision": "<full-commit-sha-or-base-plus-uncommitted>",
+  "source_sha256": {
+    "relative/path/to/key_file.py": "<sha256-hex>"
+  },
+  "environment": {
+    "os": "<e.g. Windows 11 / Ubuntu 24.04>",
+    "python": "<e.g. 3.14.6>",
+    "gpu": "<e.g. None / 4GB GPU>",
+    "runtime_tools": "<e.g. Ollama x.y, Docker x.y, or N/A>"
+  },
+  "models": {
+    "orchestrator": "<provider + model tag, or offline>",
+    "worker": "<runtime + model tag + quant, or offline>"
+  },
+  "reproduction_commands": [
+    "python -m unittest discover -s tests -p \"test_*.py\" -v"
+  ]
+}

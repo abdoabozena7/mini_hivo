@@ -1,0 +1,58 @@
+"""Provider-agnostic cloud (OpenAI-compatible) and local (Ollama) model clients."""
+
+from .clients import (
+    ModelClient,
+    OllamaClient,
+    OpenAICompatClient,
+    RawHttpResponse,
+    create_client,
+    extract_rate_limit_headers,
+    normalize_tool_calls,
+    strip_think_blocks,
+)
+from .env import load_dotenv, resolve_api_key
+from .types import (
+    DEFAULT_OLLAMA_BASE_URL,
+    MAX_LOCAL_WORKER_CTX,
+    EndpointConfig,
+    ModelResponse,
+    ProviderConfigError,
+    ProviderError,
+    ProviderType,
+    StructuredMode,
+    TokenUsage,
+    cerebras_orchestrator,
+    gemini_orchestrator,
+    groq_orchestrator,
+    nvidia_nim_orchestrator,
+    ollama_worker,
+    openrouter_orchestrator,
+)
+
+__all__ = [
+    "DEFAULT_OLLAMA_BASE_URL",
+    "EndpointConfig",
+    "MAX_LOCAL_WORKER_CTX",
+    "ModelClient",
+    "ModelResponse",
+    "OllamaClient",
+    "OpenAICompatClient",
+    "ProviderConfigError",
+    "ProviderError",
+    "ProviderType",
+    "RawHttpResponse",
+    "StructuredMode",
+    "TokenUsage",
+    "cerebras_orchestrator",
+    "create_client",
+    "extract_rate_limit_headers",
+    "gemini_orchestrator",
+    "groq_orchestrator",
+    "load_dotenv",
+    "normalize_tool_calls",
+    "nvidia_nim_orchestrator",
+    "ollama_worker",
+    "openrouter_orchestrator",
+    "resolve_api_key",
+    "strip_think_blocks",
+]

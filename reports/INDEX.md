@@ -28,6 +28,7 @@ This index identifies the final report and machine-readable measurements for eve
 | 20 | [Tasneem integration report](experiment20/experiment20-report.md) | [JSON](experiment20/experiment20-results.json); **deterministic comparison, not live E2E** | [Protocol](experiment20/PROTOCOL.md); contributor fork checkpoint |
 | 21 | [Rodina integration and parser correction](experiment21/experiment21-report.md) | [JSON](experiment21/experiment21-results.json); **controlled functional comparison** | [Protocol](experiment21/PROTOCOL.md); source-bound exact-byte scripted replays |
 | 22 | [Verification status integration](experiment22/experiment22-report.md) | [JSON](experiment22/experiment22-results.json); **181 selected offline methods** | [Protocol](experiment22/PROTOCOL.md), [provenance](experiment22/experiment22-provenance.json), [runner](../scripts/experiment22_validate.py) |
+| 23 | [Hybrid cloud orchestrator + 4 GB local worker (`SWE-bench Verified`)](experiment23/experiment23-report.md) | [JSON](experiment23/experiment23-results.json); **`1/3` resolved ($N=3$, `seed=42`; `django__django-16527` PASS)** | [Protocol](experiment23/PROTOCOL.md), [provenance](experiment23/experiment23-provenance.json), [runner](../scripts/run_swebench_hybrid.py), [patches](experiment23/patches/) |
 
 Experiment numbers 18/19 were independently reused by upstream and the contributor workstream. Both original reports and numeric results are retained; their cases, policies and denominators must not be combined.
 

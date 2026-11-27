@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-26",
+  "author": "kareem",
+  "type": "change",
+  "subsystem": "dev_rules / docs / worklogs",
+  "branch": "docs/rules-and-worklog-policy",
+  "base_commit": "2e396fa94b3b35df735260a74735f255dbf83e1e",
+  "tested_revision": "2e396fa94b3b35df735260a74735f255dbf83e1e + uncommitted working tree",
+  "source_sha256": {
+    "AGENTS.md": "7344be7b86e2065f85532b5dcb114784cd3bf217a24a01c0600b24ab28ef1896",
+    "CLAUDE.md": "14b4a9f32366bfea8f2d213c28ccd7c86ef04401740ce9442fcbd20cabd7ba2b",
+    "hivo/tools/AGENTS.md": "5b74ec951711f4008fb78895b69363f41287e0411a3e2b213b7d1e6b1f7627da",
+    "hivo/providers/AGENTS.md": "5a6d05ffbefd729b5761487bbfe431278cab9e5c9d1c3a16d4837d9bc45008a5",
+    "hivo/hybrid/AGENTS.md": "a07e2c33422e522c8075bc7566ff9d511902efcb3be5150c2b06e662c276bb42",
+    "dev_rules/how_to_make_rules.md": "68b6839b3dd887eadcb5530b4e300eed683f68cb53918ede474ccb0b739dc89b",
+    "dev_rules/documentation_rules.md": "7f7c03ae525059f958c9800826a0b2b926d7cded4d69fd6dc44f1ccfb1154af7",
+    "dev_rules/tool_rules.md": "76999c19240621306bdf2e9d2f5abedf67057852291e2941bf37aa362ec81a70",
+    "dev_rules/orchestration_rules.md": "0ed74e6d4cddd345ded8e8daa74f3caebf7ed4fd67af5d38d9970839ca2e7b11",
+    "docs/TOOLS_ARCHITECTURE.md": "3912d4af3810b68ab03ef34565392e392bfc5373d82a2117fd5c238f129d2e2b",
+    "docs/ORCHESTRATION_ARCHITECTURE.md": "35cae34802dee449576ad2700a86be92de100f0d9e9b1d8b7ef566692034a9c5",
+    "docs/HYBRID_MODEL_STRATEGY.md": "849cffee08206d47d3a16c1b3ae4ed984d4c6d40f06c136300760d2e186f643a",
+    "scripts/update_worklog_index.py": "3d63be9777dac8cc7069d2d48d2ac6407052a16aacd702f68a3fed5f5d69ebdc",
+    "tests/test_worklog_index.py": "fdae87a6e7e19cbaab7b4f63bfdffa6d5a678b89cd70c35955ac2f9ff1a1846d",
+    "scripts/check.py": "05ff21ab1cde325832b4b2900c313495e5708fc9b0a79d43da84ae80a2f6f5ac",
+    "tests/test_check_runner.py": "b62a1e1054dfe299948e307541efca5cf1207b1e5ffec78ea1d711a35f9391e8",
+    ".github/workflows/ci.yml": "9952ab0a2186aa68ff53974fc7e89583122064e975199ab41b0bd4bc7cd898df",
+    ".github/CODEOWNERS": "dacf0259d7eecb844c35fa9413e17df2163029ff526d64c39dc2f75625ef4e0f",
+    ".github/pull_request_template.md": "2837f4b6364b1499c43a2b527d06a17b1fbb0bfa48f57296ab13d7eadbb04559"
+  },
+  "environment": {
+    "os": "Windows 11",
+    "python": "3.14.6",
+    "gpu": "N/A (offline docs/rules/script tests)",
+    "runtime_tools": "stdlib-only"
+  },
+  "models": {
+    "orchestrator": "offline (not applicable)",
+    "worker": "offline (not applicable)"
+  },
+  "reproduction_commands": [
+    "python scripts/check.py -v",
+    "git diff --check"
+  ]
+}
