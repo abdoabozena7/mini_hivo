@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -16,6 +16,7 @@ class HttpTransportError(OSError):
 class JsonResponse:
     status_code: int
     text: str
+    headers: dict = field(default_factory=dict)
 
     def json(self):
         return json.loads(self.text)
@@ -30,10 +31,10 @@ def request_json(url: str, *, method: str, timeout: float, payload=None, headers
     try:
         with urlopen(request, timeout=timeout) as response:
             text = response.read().decode("utf-8", errors="replace")
-            return JsonResponse(int(response.status), text)
+            return JsonResponse(int(response.status), text, dict(response.headers))
     except HTTPError as exc:
         text = exc.read().decode("utf-8", errors="replace")
-        return JsonResponse(int(exc.code), text)
+        return JsonResponse(int(exc.code), text, dict(exc.headers or {}))
     except (URLError, OSError, TimeoutError) as exc:
         raise HttpTransportError(str(exc)) from exc
 

@@ -1,0 +1,182 @@
+{
+  "date": "2026-11-25 Africa/Cairo",
+  "base": "ef08b09708a295d5765d4c207141aa8a11d85f72",
+  "publication": "local uncommitted; no remote modifications",
+  "scope": "Offline and controlled provider/controller verification plus one bounded genuine local Qwen coding/tool diagnostic; no real cloud calls or live application E2E",
+  "runs": {
+    "cli-baseline-001": {
+      "tests": 2,
+      "failure_records": 0,
+      "error_records": 2,
+      "skipped": 0,
+      "successful": false,
+      "raw_sha256": "1922c0356006b453ad02102e691968c0d8728547bd9a9fb3820889c493ac6317"
+    },
+    "routing-001": {
+      "tests": 52,
+      "failure_records": 1,
+      "error_records": 0,
+      "skipped": 0,
+      "successful": false,
+      "raw_sha256": "94af7b71bc927e3bf7dc3c594b0dfbc383b294a2f0b794fccb0300369569d49d"
+    },
+    "routing-002": {
+      "tests": 75,
+      "failure_records": 0,
+      "error_records": 2,
+      "skipped": 0,
+      "successful": false,
+      "raw_sha256": "88c087e6112f28c96870f04554ec436af24c1692409db5e5b3bd3ef5c9458eb8"
+    },
+    "routing-004": {
+      "tests": 184,
+      "failure_records": 0,
+      "error_records": 0,
+      "skipped": 0,
+      "successful": true,
+      "raw_sha256": "d8efa9f09b7b62c9072806363f0a4be70f681bbbb40ec20491df7424a9d6f498"
+    },
+    "routing-final-001": {
+      "tests": 188,
+      "failure_records": 0,
+      "error_records": 0,
+      "skipped": 0,
+      "successful": true,
+      "raw_sha256": "c4ac4a064b7045f5d7c7e65747629aaff63f4ebbb2c9aca6cd8992198c489c01"
+    },
+    "diagnostic-safety-001": {
+      "tests": 2,
+      "failure_records": 0,
+      "error_records": 0,
+      "skipped": 0,
+      "successful": true,
+      "raw_sha256": "d12e21a293ecbad7f251a9da7a7c29b72d9e75985057ac8a018aac129a7cbce1"
+    },
+    "controller-001": {
+      "checks": {
+        "root_outcome_expected": true,
+        "independent_outcome_expected": true,
+        "all_requests_exact_roles": true,
+        "no_implicit_model_substitution": true
+      },
+      "root_status": "done",
+      "independent": {
+        "increment": true,
+        "persistence": true
+      },
+      "scripted_http_calls": 28,
+      "raw_sha256": "5de0c562757fbd499f4de6c8739070a3b7aeb33a0e68e8b750dcacf49181093a",
+      "budget_failures": []
+    },
+    "controller-negative-001": {
+      "checks": {
+        "root_outcome_expected": true,
+        "independent_outcome_expected": true,
+        "all_requests_exact_roles": true,
+        "no_implicit_model_substitution": true,
+        "foundation_retained_after_failed_child": true
+      },
+      "root_status": "failed",
+      "independent": {
+        "increment": false,
+        "persistence": false
+      },
+      "scripted_http_calls": 44,
+      "raw_sha256": "41fe3bf6ef74ab82165f383f49c7bc3f1593ac93d4cac80931fba0578edfe611",
+      "budget_failures": []
+    },
+    "controller-budget-001": {
+      "checks": {
+        "root_outcome_expected": true,
+        "independent_outcome_expected": true,
+        "all_requests_exact_roles": true,
+        "no_implicit_model_substitution": true,
+        "undersized_context_blocks_before_project_mutation": true
+      },
+      "root_status": "failed",
+      "independent": {
+        "increment": false,
+        "persistence": false
+      },
+      "scripted_http_calls": 8,
+      "raw_sha256": "d5546387b92e2fc8ef98ca1aa4630770e4cc8a37ebcfc26e37f621f1b4cfc0d4",
+      "budget_failures": [
+        {
+          "role": "builder",
+          "provider": "ollama",
+          "model": "fixture-worker:small",
+          "context": 4096,
+          "status": "failed",
+          "code": "CONTEXT_BUDGET_EXCEEDED",
+          "diagnostics": {
+            "estimated_input_tokens": 3769,
+            "context": 4096,
+            "reserved_output_tokens": 1024,
+            "message_chars": 7824,
+            "tool_schema_chars": 3440
+          }
+        }
+      ]
+    },
+    "local-worker-001": {
+      "status": "PASS",
+      "inference_requests": 6,
+      "oracle": {
+        "inputs": [
+          0,
+          2,
+          -1
+        ],
+        "outputs": [
+          1,
+          3,
+          0
+        ]
+      },
+      "code_sha256": "c1970d9e77515d7c25fd19b2932bedf1c1b4dd2a13e317a163c4345a752c66b2",
+      "available_ram_before_bytes": 3755425792,
+      "available_ram_after_probe_bytes": 1172860928,
+      "canaries_completed": 3,
+      "raw_sha256": "7f9e5fe96be8188d21756fa6507ab0b62b44f550a00a92579717a7b3cd1722d1",
+      "residency_after": {
+        "models": [],
+        "openrouter_key_present": false
+      }
+    },
+    "routing-final-002": {
+      "tests": 189,
+      "failure_records": 0,
+      "error_records": 0,
+      "skipped": 0,
+      "successful": true,
+      "raw_sha256": "f2406b79dec7e597b3fd6f85ccd00ccee8a28221b45ccadd3eedaa7bbd69b7f2"
+    }
+  },
+  "source_sha256": {
+    "mini.py": "19b650a5adc4214533e7350aa2371f84c4eab404a88ef44e3f570eb4a613610f",
+    "hivo/http_client.py": "2175f2b1a73901ad1e7d2dd21b9bc5cc37740184d96261172ade4d09a7dcc8bc",
+    "hivo/agent_roles.py": "1e6ad606c299ed72df54e576ee231423fc8c1b687af4106bbd06497bedd4640d",
+    "hivo/providers.py": "8e4c267997dc715317dd8a2e1f373dc2813ca86d2d2d381f633f1c39f985f16d",
+    "hivo/model_configuration.py": "4dee1f205b580b29f3517018cf86d3aefb027334dd5eb36ce617c9a3401bdca6",
+    "hivo/model_routing.py": "1dcbf573b5090c5409469d4a8563023edd15a1baf023ec068aba49449968cba6",
+    "hivo/provider_preflight.py": "e45d5dd34205a43a346ce8ca886c0ad77072a29627c9b0c4c828d0104a2490d2",
+    "scripts/provider_controller_functional.py": "cde72be368720a6ecb3b4ed276b774be303d0daa6ea678ca54195bd53219c62d",
+    "scripts/local_worker_diagnostic.py": "2ae900e3441e44c4d44dc4c000f0c69c804c190037f8d2e05f1ec67df09ff124",
+    "tests/test_providers.py": "6b795e63f1922fc399fd6eb1506e1c316f758e2f766c0df6b05d04282a33e3d7",
+    "tests/test_model_routing.py": "d67619cc9854e70fa9c1d94e6e7fd899e3bf17024e6a22e9284dff1e243eeb32",
+    "tests/test_provider_cli_migration.py": "64b8d036a8a482c099df6cdef4717d1629517532415551ed38ed04d64649fce0",
+    "tests/test_local_worker_diagnostic.py": "f0a032d1993eb1f20517d6a8ad7a9fd1069ddeff15102b2f48f7b1dd56735458",
+    "tests/test_host_preflight.py": "e0788ad864c756543524b16f3fb55b5a9a74286c508cd5c2ba3fc29793410842",
+    "configs/hybrid-free.example.json": "8c0b8d9ec061c893d6e6b3bd837f4a449ffa4c34406e759f3c7df702f9791640"
+  },
+  "preservation": {
+    "baseline_files_checked": 86,
+    "changed_baseline_files": [
+      "mini.py",
+      "hivo/http_client.py"
+    ],
+    "prior_reports_and_source_modules_other_than_mini_and_http_unchanged": true
+  },
+  "hash_policy": "SHA-256 of exact working-tree bytes, not staged Git blobs. Original raw results remain private; this summary is a sanitized derivative.",
+  "final_review_note": "Final effective-Builder binding correction after controlled browser/local runs; final189 offline cohort covers it. Original controlled/live source hashes retained, not relabeled as final-source reruns."
+}

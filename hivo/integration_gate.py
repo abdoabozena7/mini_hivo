@@ -15,8 +15,10 @@ import hashlib
 import json
 import os
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 from hivo import verification_routing
 
@@ -237,6 +239,54 @@ def _path_like_values(value: Any, workspace: str | os.PathLike | None = None) ->
     return _unique_strings(found)
 
 
+class _HTMLResourceLinks(HTMLParser):
+    """Collect executable/style resources, not navigation or commented markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.base = None
+        self.resources = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "base" and self.base is None and "href" in attrs:
+            self.base = attrs["href"]
+        elif tag == "script" and attrs.get("src"):
+            self.resources.append(attrs["src"])
+        elif tag == "link" and set(str(attrs.get("rel", "")).lower().split()) & {
+            "stylesheet", "modulepreload",
+        } and attrs.get("href"):
+            self.resources.append(attrs["href"])
+
+
+def _html_resource_dependencies(text: str, relative: str, root: Path) -> list[str]:
+    parser = _HTMLResourceLinks()
+    parser.feed(text)
+    # Resolve browser URLs before treating them as filesystem paths. A synthetic
+    # origin separates local links from remote/data URLs without any networking.
+    origin = "http://hivo.invalid/"
+    document_url = urljoin(origin, quote(relative, safe="/"))
+    base = urljoin(document_url, parser.base) if parser.base is not None else document_url
+    result = []
+    for raw in parser.resources:
+        try:
+            url = urlsplit(urljoin(base, raw))
+        except ValueError:
+            continue
+        if url.scheme != "http" or url.netloc != "hivo.invalid":
+            continue
+        path = normalize_path(unquote(url.path).lstrip("/"), root)
+        if path:
+            try:
+                (root / path).resolve().relative_to(root)
+            except (OSError, ValueError):
+                continue  # A local URL cannot authorize inspection outside the workspace.
+            # Missing local resources are dependencies too: later creation must
+            # invalidate old evidence, not silently leave it current.
+            result.append(path)
+    return _unique_strings(result)
+
+
 def _read_local_imports(root: Path | None, relative: str) -> list[str]:
     if root is None:
         return []
@@ -245,6 +295,8 @@ def _read_local_imports(root: Path | None, relative: str) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
+    if path.suffix.casefold() in {".html", ".htm"}:
+        return _html_resource_dependencies(text, relative, root)
     result: list[str] = []
     for raw in _IMPORT_RE.findall(text):
         if not str(raw).startswith((".", "/")):
@@ -273,6 +325,7 @@ def derive_evidence_dependency_paths(
     workspace: str | os.PathLike | None = None,
     mutation_paths: Iterable[Any] | None = None,
     dependency_paths: Iterable[Any] | None = None,
+    derivation_status: dict | None = None,
 ) -> list[str]:
     """Derive a conservative but evidence-scoped dependency set.
 
@@ -322,20 +375,26 @@ def derive_evidence_dependency_paths(
         normalize_path(item, workspace) for item in values if normalize_path(item, workspace)
     )
     root = _root_path(workspace)
-    expanded = list(initial)
-    seen = set(initial)
+    complete = len(initial) <= 120
+    expanded = list(initial[:120])
+    seen = set(expanded)
     # Follow imports from evidence/route files only.  This is bounded and does
     # not turn the entire repository into a dependency fingerprint.
-    queue = list(initial)
-    while queue and len(expanded) < 120:
+    queue = list(expanded)
+    while queue and complete:
         current = queue.pop(0)
         for imported in _read_local_imports(root, current):
             imported = normalize_path(imported, workspace)
             if imported and imported not in seen:
+                if len(expanded) >= 120:
+                    complete = False
+                    break
                 seen.add(imported)
                 expanded.append(imported)
                 queue.append(imported)
-    return sorted(set(expanded), key=str.casefold)[:120]
+    if derivation_status is not None:
+        derivation_status.update(complete=complete, path_limit=120)
+    return sorted(set(expanded), key=str.casefold)
 
 
 def _safe_projection(value: Any, depth: int = 0) -> Any:
@@ -539,10 +598,12 @@ def create_verified_child_receipt(
     contract = task.get("execution_contract") if isinstance(task.get("execution_contract"), dict) else task
     contract = contract if isinstance(contract, dict) else {}
     parent_contract = parent_contract if isinstance(parent_contract, dict) else {}
+    dependency_status = {}
     dependency_list = derive_evidence_dependency_paths(
         task, result, aggregation, evidence, workspace=workspace,
         mutation_paths=mutation_paths or contract.get("allowed_mutation_paths", []),
         dependency_paths=dependency_paths,
+        derivation_status=dependency_status,
     )
     fingerprint = fingerprint_dependency_paths(workspace, dependency_list)
     detected_violations = _provenance_violation_counts(task, result)
@@ -578,6 +639,9 @@ def create_verified_child_receipt(
         scope_violations=int(scope_violations or 0),
         dnt_violations=int(dnt_violations or 0),
     )
+    if not dependency_status.get("complete"):
+        verified = False
+        reasons.append("EVIDENCE_DEPENDENCY_LIMIT_EXCEEDED")
     coverage = {
         "plan_node_ids": _unique_strings(
             list(task.get("plan_node_ids", []) or []) + list(contract.get("plan_node_ids", []) or [])

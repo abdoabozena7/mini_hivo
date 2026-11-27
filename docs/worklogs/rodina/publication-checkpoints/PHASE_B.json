@@ -1,0 +1,29 @@
+{
+  "phase": "B",
+  "status": "PASS",
+  "source_path": "output/acceptance-phase/20261121-ownership-treatment-002/results.json",
+  "source_sha256": "9dede295224d0dede7fa66d6e05686ad3626dd2647318a40a7bb3fd80d5889e0",
+  "source_bytes": 9031,
+  "recovered_path": "evidence/acceptance-phase-20261121/ownership.json",
+  "recovered_sha256": "9dede295224d0dede7fa66d6e05686ad3626dd2647318a40a7bb3fd80d5889e0",
+  "recovered_bytes": 9031,
+  "strict_json": true,
+  "schema_keys": [
+    "tests",
+    "failures",
+    "errors",
+    "skipped",
+    "successful",
+    "modules",
+    "argv",
+    "python",
+    "source_sha256"
+  ],
+  "tests": 86,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "source_id_count": 79,
+  "ownership_module_present": true,
+  "limitations": "Offline ownership/accountability cohort; does not establish behavioral or root acceptance. Exact authoritative results JSON copied."
+}

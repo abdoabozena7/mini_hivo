@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "orchestrator": {
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "auth_env": "OPENROUTER_API_KEY",
+    "context": 16384,
+    "max_output": 4096,
+    "timeout": 60,
+    "retries": 0,
+    "min_interval": 1,
+    "free_only": true
+  },
+  "worker": {
+    "provider": "ollama",
+    "model": "qwen3.5:2b",
+    "endpoint": "http://127.0.0.1:11434",
+    "context": 4096,
+    "max_output": 1024,
+    "reasoning": "off",
+    "timeout": 30,
+    "retries": 0,
+    "keep_alive": "5m"
+  },
+  "roles": {},
+  "request_budget": 40
+}

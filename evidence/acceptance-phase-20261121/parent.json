@@ -1,0 +1,54 @@
+{
+  "artifact": "sanitized controlled parent-acceptance summary",
+  "schema_version": 1,
+  "source_run": "output/acceptance-phase/20261125-parent-functional-001/results.json",
+  "source_sha256": "602511644a7f06eee6de5ec2bd6bbee3464b1fabbd2bbcc84e59c328602dc3ed",
+  "source_bytes": 417087,
+  "source_identity": {
+    "mini.py": "ca8d7b0bfbc55bec2014feb46c32c3eed6437e138b3855b6fe894472313d12d0",
+    "hivo/requirement_ownership.py": "4bedcda744a9a19d4205e73b1f172c47f87a4c80308141a1029389deb6c5b048",
+    "scripts/acceptance_phase_functional.py": "65cc4d8e541a598e3f336b9415db5bd3fb62fa0b7e445d03e273b68eb0b19e45"
+  },
+  "scope": "Scripted role decisions; real scheduler, tools, guards, transactions and Chromium.",
+  "checks": {
+    "allocation_valid": true,
+    "foundation_accepted": true,
+    "child_status_expected": true,
+    "root_status_expected": true,
+    "behavior_expected": true
+  },
+  "children": [
+    {
+      "id": null,
+      "status": "done",
+      "changed_files": [
+        "<workspace>/app.js",
+        "<workspace>/index.html",
+        "<workspace>/style.css"
+      ]
+    },
+    {
+      "id": null,
+      "status": "done",
+      "changed_files": [
+        "<workspace>/app.js"
+      ]
+    }
+  ],
+  "parent": {
+    "status": "done",
+    "summary": "Complete declared source obligations verified read-only",
+    "changed_files": []
+  },
+  "root": {
+    "status": "done",
+    "summary": "Complete declared source obligations verified read-only"
+  },
+  "parent_provider_calls": [],
+  "independent_browser_acceptance": {
+    "increment": true,
+    "persistence": true
+  },
+  "limitations": "Role decisions were scripted. Scheduler, tools, authorization guards, transactions and Chromium were real. The fixture was a three-requirement browser counter. This is not live-model or arbitrary-project proof.",
+  "raw_evidence_retained_locally": true
+}

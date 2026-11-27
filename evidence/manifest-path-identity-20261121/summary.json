@@ -1,0 +1,50 @@
+{
+  "issue": "MP-001",
+  "scope": "Windows manifest transaction snapshot lookup; no permission changes.",
+  "baseline": {
+    "focused_methods": 3,
+    "passed": 1,
+    "failed": 2,
+    "errors": 0,
+    "skipped": 0
+  },
+  "default_sandbox_temp_treatment": {
+    "tests": 8,
+    "passed": 8,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "workspace_temp_treatment": {
+    "tests": 205,
+    "passed": 205,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": {
+      "mini.py": "7bbe1db035ef9f4553d17d7b7350a934babfee5e661301e30992b93ff57530a3",
+      "hivo/integration_gate.py": "f6cc8b9f43e4417d01dd56cd67eb97cf486d957923050661e500048410bb12e6",
+      "tests/test_browser_dependency_freshness.py": "889a524cbc1b609a5a167b34611435d5160862091965093d8d00f9fc484dd440",
+      "scripts/resume_engineering_checks.py": "274daf98aab6d715d3e5bf428416a95b4285ecb58ace76eae0cd340057374f94"
+    }
+  },
+  "controlled_chain_checks": {
+    "children_accepted": true,
+    "independent_behavior": true,
+    "foundation_attribution_unchanged": true,
+    "no_false_duplicate_owner": true,
+    "parent_scope_remains_blocking": true,
+    "retained_successor_bytes": true
+  },
+  "root_status": "failed",
+  "root_failure": "IMPACT_CONTRACT_INCOMPLETE: pre-mutation impact contract was not accepted; named greenfield artifact has no safe authorized path",
+  "explanation": "Windows case-insensitive file identity contrasted with case-sensitive string keys in previous_files; exact key lookup missed the existing snapshot. Workspace-local paths masked the discrepancy.",
+  "raw_sha256": {
+    "output/resume-engineering/20261121-path-baseline-001/results.json": "069c99f9909ad1f5dbcc518da0cccc8ba02b8ae02ba8bb844b68437ba3c8c20b",
+    "output/resume-engineering/20261121-path-baseline-002/results.json": "6f7cc04b372d08ae0aec8575db26b7a683f9a4f245f291edcf455de12a25d2bf",
+    "output/resume-engineering/20261121-001/path-key-baseline.json": "fbced8ee5222a43563ed3addbfb03966fc2657a121e45f439725917d578988c4",
+    "output/resume-engineering/20261121-001/default-temp-path-treatment.json": "655557b356d7dcd1a9c08ca803e9d2841a48c5ec31db8a836cbcb7b75b97947c",
+    "output/resume-engineering/20261121-checks-005/results.json": "04abd4730c62ed86bd777a55752cda243faaee81d5f7141650f3ab121398b3c8",
+    "output/resume-engineering/20261121-chain-002/results.json": "3cd19365920c6bab6a80620c358093e4469bc3c1e31837ad792c9d81ab4d1def"
+  }
+}

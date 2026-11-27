@@ -1,0 +1,111 @@
+{
+  "scope": "Review-authored expected accountability; not a runtime-issued contract or authorization receipt.",
+  "actual_scopes": {
+    "1": [
+      "index.html",
+      "style.css",
+      "app.js"
+    ],
+    "2": [
+      "app.js"
+    ]
+  },
+  "dependencies": [
+    {
+      "consumer": "2",
+      "prerequisite": "1",
+      "inspection": "accepted predecessor files",
+      "mutation": "assigned app.js only"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "Build a complete, working To-Do List web application using plain HTML, CSS, and JavaScript.",
+      "expected_owner": "ROOT",
+      "artifact": "all files and final integrated behavior",
+      "oracle": "full current independent requirement coverage",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-002",
+      "text": "Create `index.html`, `style.css`, and `app.js`.",
+      "expected_owner": "1 creates; 2 edits JS; ROOT checks",
+      "artifact": "index.html/style.css/app.js",
+      "oracle": "existence, linked resources and retained bytes",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-003",
+      "text": "Display a task list with a text input and Add button.",
+      "expected_owner": "1; ROOT",
+      "artifact": "index.html/style.css",
+      "oracle": "visible input/list/Add controls",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-004",
+      "text": "Allow users to add non-empty tasks.",
+      "expected_owner": "2; ROOT",
+      "artifact": "app.js consuming HTML",
+      "oracle": "nonempty submit adds one visible item; empty adds none",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-005",
+      "text": "Allow users to mark tasks as complete or incomplete.",
+      "expected_owner": "2; ROOT",
+      "artifact": "app.js and rendered state",
+      "oracle": "completion toggles both ways",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-006",
+      "text": "Allow users to delete tasks.",
+      "expected_owner": "2; ROOT",
+      "artifact": "app.js and task list",
+      "oracle": "delete selected item while preserving other items",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-007",
+      "text": "Save tasks in `localStorage` so they survive page refresh.",
+      "expected_owner": "2; ROOT",
+      "artifact": "app.js/localStorage",
+      "oracle": "text and completion survive reload",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-008",
+      "text": "Show a helpful empty-state message when no tasks exist.",
+      "expected_owner": "1 initial; 2 transitions; ROOT",
+      "artifact": "HTML/JS",
+      "oracle": "empty-state transitions; final return transition incompletely covered",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-009",
+      "text": "Use a clean, responsive interface that works on desktop and mobile.",
+      "expected_owner": "1; ROOT",
+      "artifact": "HTML/CSS",
+      "oracle": "desktop/mobile usability; executed oracle covers narrow overflow only",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-010",
+      "text": "Do not use external libraries, frameworks, or a backend.",
+      "expected_owner": "all children; ROOT",
+      "artifact": "entire dependency graph",
+      "oracle": "source/resource audit; exhaustive enforcement unverified",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    },
+    {
+      "id": "REQ-011",
+      "text": "Deliver a working application that can be opened through `index.html`.",
+      "expected_owner": "ROOT",
+      "artifact": "HTML entry and linked files",
+      "oracle": "current executable entry plus behavior and retained accepted deliverable",
+      "runtime_binding": "Ordinary decomposition has no mandatory ID-to-owner/oracle coverage map."
+    }
+  ]
+}

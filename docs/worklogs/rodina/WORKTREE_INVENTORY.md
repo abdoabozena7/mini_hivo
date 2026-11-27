@@ -1,0 +1,93 @@
+# Complete local working-tree path inventory
+
+2026-11-27. Preserved prior work plus new authorized phases. Uncommitted; index empty. This is not an approved staging list. Ignored private output is excluded by Git status and remains on disk. Snapshot includes all paths below plus this inventory file itself.
+
+```text
+ M hivo/http_client.py
+ M hivo/integration_gate.py
+ M mini.py
+ M tests/test_host_preflight.py
+?? configs/hybrid-free.example.json
+?? docs/CONTROLLED_BROWSER_HARNESS.md
+?? docs/MODEL_CONFIGURATION_CONTRACT.md
+?? docs/MODEL_PROVIDER_CONFIGURATION_2026-11-25.md
+?? docs/PROVIDER_ARCHITECTURE_REVIEW_2026-11-25.md
+?? docs/REQUIREMENT_AND_PARENT_ACCEPTANCE_DESIGN_2026-11-21.md
+?? docs/TEAMMATE_HANDOFF_2026-11-20.md
+?? docs/V2_GENERALIZATION_COMPATIBILITY_AUDIT_2026-11-27.md
+?? docs/worklogs/rodina/2026-11-27_browser-harness-portability/REPORT.md
+?? docs/worklogs/rodina/2026-11-27_browser-harness-portability/results.json
+?? docs/worklogs/rodina/2026-11-27_model-configuration-fixes/REPORT.md
+?? docs/worklogs/rodina/2026-11-27_model-configuration-fixes/results.json
+?? docs/worklogs/rodina/2026-11-27_packet-compaction-verification/REPORT.md
+?? docs/worklogs/rodina/2026-11-27_packet-compaction-verification/results.json
+?? docs/worklogs/rodina/FINAL_CHECKS.json
+?? docs/worklogs/rodina/HANDOFF.md
+?? docs/worklogs/rodina/HISTORICAL_MAP.md
+?? docs/worklogs/rodina/LOG.md
+?? evidence/acceptance-phase-20261121/behavior.json
+?? evidence/acceptance-phase-20261121/ownership.json
+?? evidence/acceptance-phase-20261121/parent.json
+?? evidence/host-preflight-memory-20261121/measurements.json
+?? evidence/m0-characterization-20261121/manifest.json
+?? evidence/m0-characterization-20261121/ownership-map.json
+?? evidence/m0-characterization-20261121/summary.json
+?? evidence/manifest-path-identity-20261121/summary.json
+?? evidence/provider-generalization-20261125/summary-final.json
+?? evidence/provider-generalization-20261125/summary.json
+?? evidence/receipt-freshness-20261121/summary.json
+?? first_test_prompt.txt
+?? hivo/agent_roles.py
+?? hivo/behavioral_obligations.py
+?? hivo/model_configuration.py
+?? hivo/model_routing.py
+?? hivo/provider_preflight.py
+?? hivo/providers.py
+?? hivo/readonly_acceptance.py
+?? hivo/requirement_ownership.py
+?? hivo/worker_packets.py
+?? list/project-1/.agent_host_preflight.json
+?? scripts/acceptance_phase_checks.py
+?? scripts/acceptance_phase_functional.py
+?? scripts/audit_worker_packets.py
+?? scripts/behavioral_oracle_matrix.py
+?? scripts/browser_freshness_functional.py
+?? scripts/browser_selection.py
+?? scripts/local_worker_diagnostic.py
+?? scripts/m0_characterize.py
+?? scripts/m0_controls.py
+?? scripts/m0_followup.py
+?? scripts/m0_manifest_checks.py
+?? scripts/m0_manifest_functional.py
+?? scripts/provider_controller_functional.py
+?? scripts/resume_engineering_checks.py
+?? tests/fixtures/worker-packet/oversized.json
+?? tests/test_behavioral_obligations.py
+?? tests/test_browser_dependency_freshness.py
+?? tests/test_browser_selection.py
+?? tests/test_greenfield_requirement_ownership.py
+?? tests/test_local_worker_diagnostic.py
+?? tests/test_manifest_path_identity.py
+?? tests/test_model_configuration_fixes.py
+?? tests/test_model_routing.py
+?? tests/test_provider_cli_migration.py
+?? tests/test_providers.py
+?? tests/test_readonly_parent_acceptance.py
+?? tests/test_verified_manifest_provenance.py
+?? tests/test_worker_packets.py
+?? updates/ENGINEERING_RESUME_2026-11-21.md
+?? updates/HOST_PREFLIGHT_MEMORY_DIAGNOSIS_2026-11-21.md
+?? updates/M0_INVESTIGATION_2026-11-21.md
+?? updates/PROVIDER_WORKTREE_INVENTORY_2026-11-25.md
+?? updates/R_UPDATE_004.md
+?? updates/R_UPDATE_005.md
+?? updates/R_UPDATE_006.md
+?? updates/R_UPDATE_007.md
+?? updates/R_UPDATE_008.md
+?? updates/R_UPDATE_009.md
+?? updates/R_UPDATE_010.md
+?? updates/R_UPDATE_011.md
+?? updates/R_UPDATE_012.md
+?? updates/R_UPDATE_013.md
+?? docs/worklogs/rodina/WORKTREE_INVENTORY.md
+```

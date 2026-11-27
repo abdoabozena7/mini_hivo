@@ -1,0 +1,31 @@
+{
+  "phase": "E1-E2",
+  "status": "PASS",
+  "parent_raw_source": "output/acceptance-phase/20261125-parent-functional-001/results.json",
+  "parent_raw_sha256": "602511644a7f06eee6de5ec2bd6bbee3464b1fabbd2bbcc84e59c328602dc3ed",
+  "parent_raw_bytes": 417087,
+  "sanitized_derivative": "evidence/acceptance-phase-20261121/parent.json",
+  "sanitized_sha256": "787a3387be1f8445aab9f7cc38fdeb61e40930ce982cd45bc704d9b66d0922a2",
+  "sanitized_bytes": 1862,
+  "raw_preserved_unchanged": true,
+  "claims_cross_checked": [
+    "source hash identities",
+    "scope",
+    "all five acceptance checks",
+    "both children done",
+    "parent/root done",
+    "parent changed_files empty",
+    "parent provider calls empty",
+    "independent increment true",
+    "independent persistence true"
+  ],
+  "fixture": "tests/fixtures/worker-packet/oversized.json",
+  "fixture_result": "Already portable; cited absolute path absent, no fixture/test assertion changes needed. Synthetic assigned relative artifact paths retained.",
+  "worker_packet_test_command": ".venv/Scripts/python.exe -B -X utf8 scripts/acceptance_phase_checks.py --output-dir output/prioritized-handoff/20261127-publication-phase-e2-001 test_worker_packets",
+  "test_exit_code": 0,
+  "tests": 39,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "integrity_check": "PASS: strict JSON, parent schema/claims/provenance, source SHA, privacy scan, raw hash unchanged."
+}

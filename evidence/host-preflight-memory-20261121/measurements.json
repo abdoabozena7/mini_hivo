@@ -1,0 +1,107 @@
+{
+  "scope": "Sanitized derivative of existing startup records and fresh read-only host observations; zero new live inference calls.",
+  "date": "2026-11-21",
+  "timezone": "Africa/Cairo",
+  "threshold_bytes": 536870912,
+  "historical_runs": [
+    {
+      "preflight_id": "d0d149c666f849f7a2262abe79cf77c3",
+      "started_at": "2026-11-21T01:09:33.010+00:00",
+      "finished_at": "2026-11-21T01:09:33.308+00:00",
+      "failure_reason": "CRITICAL_MEMORY_HEADROOM",
+      "failure_stage": "static_resources",
+      "canary_calls_completed": 0,
+      "resource_snapshots": [
+        {
+          "available_system_ram_bytes": 444014592,
+          "phase": "before_canary",
+          "total_system_ram_bytes": 16849293312
+        }
+      ]
+    },
+    {
+      "preflight_id": "a0d453fbbb8d423f9dd9ae7118b6d970",
+      "started_at": "2026-11-21T01:10:33.876+00:00",
+      "finished_at": "2026-11-21T01:10:49.599+00:00",
+      "failure_reason": "CRITICAL_MEMORY_HEADROOM",
+      "failure_stage": "resource_monitoring",
+      "canary_calls_completed": 1,
+      "resource_snapshots": [
+        {
+          "available_system_ram_bytes": 7626084352,
+          "phase": "before_canary",
+          "total_system_ram_bytes": 16849293312
+        },
+        {
+          "available_system_ram_bytes": 435351552,
+          "phase": "after_call_1",
+          "total_system_ram_bytes": 16849293312
+        }
+      ]
+    }
+  ],
+  "loaded_observation": {
+    "sampled_at": "2026-11-21T03:14:03.0316464+02:00",
+    "available_MiB": 444,
+    "commit_percent": 97,
+    "runner_working_set_bytes": 7268192256,
+    "runner_private_bytes": 8261312512,
+    "loaded_model_count": 1,
+    "runner_count": 1,
+    "size_vram_bytes": 0,
+    "runner_context_tokens": 2048,
+    "parallel_slots": 1
+  },
+  "idle_followup": {
+    "sampled_at": "2026-11-21T03:14:57.8718927+02:00",
+    "available_MiB": 399,
+    "commit_percent": 97
+  },
+  "natural_unload_observation": {
+    "sampled_at": "2026-11-21T03:16:23.9525002+02:00",
+    "available_MiB": 7096,
+    "commit_percent": 66,
+    "loaded_model_count": 0,
+    "runner_count": 0
+  },
+  "offline_checks": {
+    "scope": "Five selected offline unit/integration controls plus one historical-sample replay. No real model calls.",
+    "tests_run": 5,
+    "failures": [],
+    "errors": [],
+    "skipped": [],
+    "successful": true,
+    "test_names": [
+      "test_host_preflight.HostPreflightTests.test_three_successful_canaries_pass_sequentially_and_marker_completes",
+      "test_host_preflight.HostPreflightTests.test_exact_selected_model_and_tiny_zero_temperature_payload",
+      "test_host_preflight.HostPreflightTests.test_critical_memory_blocks_before_canary",
+      "test_host_preflight.HostPreflightTests.test_missing_gpu_telemetry_is_a_warning_not_a_failure",
+      "test_host_preflight.HostPreflightTests.test_main_preflight_failure_stops_before_task_creation"
+    ],
+    "replay_checks": {
+      "same_reason": true,
+      "same_stage": true,
+      "one_completed": true,
+      "only_one_fake_canary": true
+    },
+    "argv": [
+      "output/host-preflight-memory/20261121-inspection-001/offline_checks.py"
+    ],
+    "source_sha256": {
+      "hivo/host_preflight.py": "d581dd69536ed96db1f7915e49f150c046bee24c838d961f1ec8a8f9a165c354",
+      "tests/test_host_preflight.py": "1f6d1e81c48477975114cfef2db784315f8db3a2e123eaf2fd33381930f21ff9",
+      "mini.py": "8a1c493039a7778f90b7619d884041c0ce3be7d80123bb6fe9fd9209d6a6d3b3"
+    }
+  },
+  "raw_source_sha256": {
+    "project-2-preflight.json": "5b7f5133f4fb4bff010c8c66876a45390b5baa93156af387d1aa4eca44831bdd",
+    "project-3-preflight.json": "12bcdcf0422fff3c2f6e2a0bce7916661c4d6afd35deaa0a34fb66ed1e7eae9b",
+    "host-state.json": "8fedd1ef70e0d46b31983e43e2d3ae7dd5dec7b876c8326af025654830f41f1b",
+    "memory-api.json": "25bc7d4f6d8381b4b3bc79240c59a84a6b029e904191dfa944a9f23e60004537",
+    "idle-followup.json": "00488d4ff7fcf308eeda34d41f4c4cbcc962a2c4ca54d86a2ebcb0048e66b526",
+    "expiry-observation.json": "e88325c574ddf6b8c1fa7c42b6a7cbd04d1a33cc1d51513c912fa9702d992ebe",
+    "offline-results.json": "23a2ab0adb9c776f4b291227dc41e937a1248a8d28dd05b3d5d59e3e6ec108a4",
+    "offline-tests.log": "dbe7348831b486fcfb9610304b9e3124b134c8dc6ea8a9201cf47820141ef85b",
+    "offline_checks.py": "91d849420846d935dc7d93bf9533a8e42cb5a4cd5b6d307db77c3a3b9f4c3a81"
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "base_commit": "ef08b09708a295d5765d4c207141aa8a11d85f72",
+  "branch": "rodina/dev-turn-2026-11-20",
+  "scope": "Controlled diagnostics and one manifest-provenance correction. No live model, no accepted complete root.",
+  "fresh_resume_date": "2026-11-21",
+  "earlier_evidence_date": "2026-11-20",
+  "model_boundary": "Role/decomposition replies scripted; source tools, authorization, scheduler, transactions and browsers real where stated.",
+  "baseline_browser_cases": {
+    "matrix_full": {
+      "native_passed": true,
+      "independent_passed": true,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": true,
+        "empty_state_hidden": true,
+        "completion_on": true,
+        "reload_text": true,
+        "reload_completion": true,
+        "completion_off": true,
+        "delete_selected_only": true,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_inert": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": false,
+        "empty_state_hidden": false,
+        "completion_on": false,
+        "completion_off": false,
+        "reload_text": false,
+        "reload_completion": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_missing_js": {
+      "native_passed": false,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": false,
+        "empty_state_hidden": false,
+        "completion_on": false,
+        "completion_off": false,
+        "reload_text": false,
+        "reload_completion": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_runtime_error": {
+      "native_passed": false,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": false,
+        "empty_state_hidden": false,
+        "completion_on": false,
+        "completion_off": false,
+        "reload_text": false,
+        "reload_completion": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": false
+      }
+    },
+    "matrix_no_add": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": false,
+        "empty_state_hidden": false,
+        "completion_on": false,
+        "completion_off": false,
+        "reload_text": false,
+        "reload_completion": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_no_delete": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": true,
+        "empty_state_hidden": true,
+        "completion_on": true,
+        "reload_text": true,
+        "reload_completion": true,
+        "completion_off": true,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_no_toggle": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": true,
+        "empty_state_hidden": true,
+        "completion_on": false,
+        "reload_text": true,
+        "reload_completion": false,
+        "completion_off": true,
+        "delete_selected_only": true,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_no_persistence": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": true,
+        "empty_state_hidden": true,
+        "completion_on": true,
+        "reload_text": false,
+        "reload_completion": false,
+        "completion_off": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    },
+    "matrix_disconnected_script": {
+      "native_passed": true,
+      "independent_passed": false,
+      "independent_checks": {
+        "initial_empty_state": true,
+        "empty_input_rejected": true,
+        "add_visible_task": false,
+        "empty_state_hidden": false,
+        "completion_on": false,
+        "completion_off": false,
+        "reload_text": false,
+        "reload_completion": false,
+        "delete_selected_only": false,
+        "mobile_no_overflow": true,
+        "no_runtime_errors": true
+      }
+    }
+  },
+  "baseline_chains": {
+    "chain_inert": {
+      "children": [
+        "done",
+        "done"
+      ],
+      "parent_status": "failed",
+      "parent_failure_type": "INTEGRATION_FAILURE",
+      "independent_passed": false
+    },
+    "chain_full": {
+      "children": [
+        "done",
+        "done"
+      ],
+      "parent_status": "failed",
+      "parent_failure_type": "ORCHESTRATION_FAILURE",
+      "independent_passed": true
+    }
+  },
+  "later_edit_regression": {
+    "native_child_status": "done",
+    "before_behavior": true,
+    "after_behavior": false,
+    "after_checks": {
+      "initial_empty_state": true,
+      "empty_input_rejected": true,
+      "add_visible_task": true,
+      "empty_state_hidden": true,
+      "completion_on": true,
+      "reload_text": true,
+      "reload_completion": true,
+      "completion_off": true,
+      "delete_selected_only": false,
+      "mobile_no_overflow": true,
+      "no_runtime_errors": true
+    }
+  },
+  "missing_file_controls": {
+    "execution_date": "2026-11-21",
+    "output_name_retained_from_existing_script": "20261120-files-001",
+    "native_passed": {
+      "index.html": false,
+      "style.css": false
+    },
+    "process_exit": 0
+  },
+  "inherited_previous_session_controls": {
+    "tests": 13,
+    "passed": 13,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "manifest_before": {
+    "tests": 5,
+    "failed": 2,
+    "errors": 0,
+    "process_exit": 1
+  },
+  "manifest_after": {
+    "tests": 165,
+    "passed": 165,
+    "failed": 0,
+    "errors": 0,
+    "skipped": [],
+    "process_exit": 0,
+    "source_sha256": {
+      "mini.py": "8a1c493039a7778f90b7619d884041c0ce3be7d80123bb6fe9fd9209d6a6d3b3",
+      "tests/test_verified_manifest_provenance.py": "f036b846b8f765f51af2de3bbd23df1aed7d3150d36a1a275f253a4db8f9faa5",
+      "scripts/m0_manifest_checks.py": "a09cdb72f17fa4887f3f3fa4abd49f45dea22c4ffb58d3a7259161b94a40e077"
+    }
+  },
+  "fresh_controlled_chain": {
+    "checks": {
+      "children_accepted": true,
+      "independent_behavior": true,
+      "foundation_attribution_unchanged": true,
+      "no_false_duplicate_owner": true,
+      "parent_scope_remains_blocking": true,
+      "retained_successor_bytes": true
+    },
+    "process_exit": 0,
+    "parent_result": {
+      "status": "failed",
+      "failure_type": "INTEGRATION_FAILURE",
+      "summary": "IMPACT_CONTRACT_INCOMPLETE: pre-mutation impact contract was not accepted; named greenfield artifact has no safe authorized path"
+    }
+  },
+  "limits": [
+    "No fresh provider reliability proof",
+    "No false root success established",
+    "M1 behavioral obligation binding deferred",
+    "Root mutation/verification scope remains incomplete",
+    "Earlier preliminary harness errors retained, not counted as runtime successes",
+    "Direct stale-receipt gate probe is not an end-to-end accepted stale transaction"
+  ],
+  "blocked_command_history": "November 20 missing-file command was not executed: automatic approval review hit a usage limit. Normal approved retry completed November 21."
+}

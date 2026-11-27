@@ -324,14 +324,17 @@ class HostPreflightTests(unittest.TestCase):
         old_result = mini.HOST_PREFLIGHT_RESULT
         try:
             with patch.object(mini, "parse_args", return_value=args), \
+                    patch.object(mini.model_configuration, "choose_workflow"), \
+                    patch.object(mini, "prepare_model_routing", return_value=SimpleNamespace(config=SimpleNamespace(worker=SimpleNamespace(model="gemma4:e4b")))), \
                     patch.object(mini, "ensure_dependencies", return_value=True), \
                     patch.object(mini, "get_workspace", return_value=self.workspace), \
-                    patch.object(mini, "run_host_preflight", return_value=preflight_result), \
+                    patch.object(mini, "qualify_model_routing", return_value=preflight_result) as qualification, \
                     patch.object(mini, "select_local_ollama_model"), \
                     patch.object(mini, "load_memory", return_value={}), \
                     patch.object(mini, "run_recursive_request", return_value=({"status": "done", "summary": "ok"}, {})) as run:
                 mini.main()
             run.assert_called_once_with("deterministic test prompt", {}, interactive=False)
+            qualification.assert_called_once()
         finally:
             mini.HOST_PREFLIGHT_RESULT = old_result
 
@@ -350,14 +353,17 @@ class HostPreflightTests(unittest.TestCase):
         old_result = mini.HOST_PREFLIGHT_RESULT
         try:
             with patch.object(mini, "parse_args", return_value=args), \
+                    patch.object(mini.model_configuration, "choose_workflow"), \
+                    patch.object(mini, "prepare_model_routing", return_value=SimpleNamespace(config=SimpleNamespace(worker=SimpleNamespace(model="gemma4:e4b")))), \
                     patch.object(mini, "ensure_dependencies", return_value=True), \
                     patch.object(mini, "get_workspace", return_value=self.workspace), \
-                    patch.object(mini, "run_host_preflight", return_value=preflight_result), \
+                    patch.object(mini, "qualify_model_routing", return_value=preflight_result) as qualification, \
                     patch.object(mini, "load_memory") as load_memory, \
                     patch.object(mini, "run_recursive_request") as run:
                 with self.assertRaises(SystemExit) as exit_info:
                     mini.main()
             self.assertEqual(exit_info.exception.code, 2)
+            qualification.assert_called_once()
             load_memory.assert_not_called()
             run.assert_not_called()
         finally:

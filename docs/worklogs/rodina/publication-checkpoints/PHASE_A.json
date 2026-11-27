@@ -1,0 +1,28 @@
+{
+  "phase": "A",
+  "status": "PASS",
+  "source_path": "output/acceptance-phase/20261121-behavior-gate-treatment-005/results.json",
+  "source_sha256": "f1b270c2096ec7fc67f530970b624202fc90aff7796b3bc9371d5081971d2342",
+  "source_bytes": 9328,
+  "recovered_path": "evidence/acceptance-phase-20261121/behavior.json",
+  "recovered_sha256": "f1b270c2096ec7fc67f530970b624202fc90aff7796b3bc9371d5081971d2342",
+  "recovered_bytes": 9328,
+  "strict_json": true,
+  "schema_keys": [
+    "tests",
+    "failures",
+    "errors",
+    "skipped",
+    "successful",
+    "modules",
+    "argv",
+    "python",
+    "source_sha256"
+  ],
+  "tests": 100,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "source_id_count": 81,
+  "limitations": "Offline focused cohort; see R008 for controlled functional scope. Exact authoritative results JSON copied without reconstruction."
+}

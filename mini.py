@@ -17,6 +17,11 @@ import sys
 import tempfile
 import time
 import uuid
+from hivo import requirement_ownership
+from hivo import behavioral_obligations
+from hivo import readonly_acceptance
+from hivo import providers as model_providers, model_routing, model_configuration, provider_preflight
+from hivo import worker_packets
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -158,6 +163,7 @@ from hivo.promotion import run_verified_state_promotion_self_test
 # ---------------------------------------------------------------------------
 
 MODEL_POLICY = SingleModelPolicy()
+PROVIDER_ROUTER = None  # Legacy Python callers retain the original seam until explicitly configured.
 MODEL = GEMMA_MODEL
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_URL = OLLAMA_BASE_URL + "/api/chat"
@@ -2418,12 +2424,13 @@ def _greenfield_creation_context(task_id, candidate):
     return (
         "GREENFIELD CREATION CONTEXT (controller assignment and current filesystem observation):\n"
         + json.dumps(packet, ensure_ascii=False) + "\n"
+        + (worker_packets.CREATION_INSTRUCTION if PROVIDER_ROUTER is not None else (
         "Absent assigned files are outputs to CREATE from this local mission, not missing repository definitions. "
         "Do not request their pre-existing symbol definitions or source contents; those do not exist yet. "
         "Use the supplied mission and source requirements to implement the assigned artifacts. "
         "Present files, external APIs, dependencies and genuinely unspecified interfaces still require evidence. "
         "This packet is not a sufficiency decision or mutation authorization: evaluate context honestly, "
-        "submit the context check, and obey the Impact Contract. Do not implement another child's work."
+        "submit the context check, and obey the Impact Contract. Do not implement another child's work."))
     )
 
 
@@ -3222,6 +3229,9 @@ def _stage4_inspection_guard(name, args):
 
 
 def run_tool(name, args, role="System"):
+    readonly_issue = readonly_acceptance.tool_guard(WORKSPACE, ACTIVE_TOOL_CONTRACT or {}, name, args)
+    if readonly_issue:
+        return readonly_issue
     if role == "Falsifier" and name in {"write_file", "edit_file", "edit_file_range", "backup_file"}:
         return "error: Falsifier is read-only and may not modify files"
     if role == "Repairer" and name in {"write_file", "backup_file"}:
@@ -3613,7 +3623,7 @@ def new_metrics(mode):
         "worker_progress_source_sha256": _worker_progress_source_hash(),
         "mode": mode, "model": MODEL,
         "model_capabilities": sorted(MODEL_CAPABILITIES),
-        "role_models": {role: MODEL for role in MODEL_POLICY.role_models()},
+        "role_models": dict(MODEL_POLICY.role_models()),
         "host_preflight_status": host_preflight.get("status"),
         "host_preflight_id": host_preflight.get("preflight_id"),
         "host_preflight_duration_seconds": host_preflight_report.get("duration_seconds"),
@@ -4657,7 +4667,48 @@ def _emit_provider_capture(callback, event, **payload):
 
 def ask_ollama(messages, tools=TOOLS, response_format=None, temperature=None, think=False,
                provider_retries=None, model_override=None, role="Builder",
-               provider_capture=None, capture_context=None):
+               provider_capture=None, capture_context=None, packet_store=None, tool_window=None):
+    if PROVIDER_ROUTER is not None:
+        # Keep the historical API name for callers. Configured application runs
+        # use provider-neutral routing; no latest mandatory packet is sliced to
+        # make an undersized context appear compatible.
+        try:
+            selection = PROVIDER_ROUTER.config.selection(role)
+        except model_providers.ProviderFailure as exc:
+            raise ProviderError(str(exc)) from None
+        limit = stage3.planning_role_limit(role)
+        users = [m for m in messages if isinstance(m, dict) and m.get('role') == 'user']
+        if limit is not None and users and len(str(users[-1].get('content', ''))) > limit:
+            raise PlanningPacketBudgetError(f'{stage3.PLANNING_PACKET_PROVIDER_OVERFLOW}: role packet exceeds its audited budget')
+        started_requests = PROVIDER_ROUTER.client.requests
+        if model_routing.role_key(role) in model_routing.WORKER_ROLES:
+            try:
+                messages, tools = worker_packets.compact(messages, tools, packet_store)
+                if tool_window is not None:
+                    messages, tools = tool_window.project(messages, tools)
+            except model_providers.ProviderFailure as exc:
+                record_run_event('worker_packet_failed', role=role, code=exc.code)
+                raise ProviderError(str(exc)) from None
+        _emit_provider_capture(provider_capture, 'PROVIDER_REQUEST_INTENT',
+            capture_context=dict(capture_context or {}), provider_boundary='mini.provider_router',
+            role=role, provider=selection.provider, model=selection.model, context=selection.context)
+        try:
+            answer = PROVIDER_ROUTER.chat(role, copy.deepcopy(messages), tools=tools,
+                response_format=response_format,
+                temperature=MODEL_POLICY.temperature(role) if temperature is None else temperature,
+                model_override=model_override, provider_retries=provider_retries)
+        except model_providers.ProviderFailure as exc:
+            record_run_event('provider_request_failed', role=role, provider=selection.provider,
+                             model=selection.model, code=exc.code, http_status=exc.status)
+            raise ProviderError(str(exc)) from None
+        finally:
+            RUN['model_calls'] = RUN.get('model_calls', 0) + PROVIDER_ROUTER.client.requests - started_requests
+        record_run_event('provider_response_normalized', role=role, **PROVIDER_ROUTER.client.last_diagnostics)
+        _emit_provider_capture(provider_capture, 'NORMALIZED_RESPONSE_CAPTURED',
+            capture_context=dict(capture_context or {}), provider_boundary='mini.provider_router',
+            role=role, provider=selection.provider, model=selection.model,
+            diagnostics=copy.deepcopy(PROVIDER_ROUTER.client.last_diagnostics))
+        return answer
     global FORCE_CPU_FOR_RUN
     requested_model = model_override or MODEL
     try:
@@ -11934,7 +11985,7 @@ def _children_validator(data):
     return True
 
 
-def children_schema():
+def children_schema(ownership_required=False):
     child = {
         "type": "object", "properties": {
             "goal": {"type": "string"}, "done_when": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 6},
@@ -11943,9 +11994,93 @@ def children_schema():
         },
         "required": ["goal", "done_when", "scope_hint", "depends_on"], "additionalProperties": False,
     }
-    return {"type": "object", "properties": {
+    if ownership_required:
+        child["properties"]["requirement_ids"] = {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        child["required"].append("requirement_ids")
+        child["properties"]["verification_obligations"] = {"type": "array", "items": {"type": "object"}, "maxItems": 64}
+        child["required"].append("verification_obligations")
+    schema = {"type": "object", "properties": {
         "children": {"type": "array", "items": child, "minItems": 2, "maxItems": MAX_CHILDREN}},
         "required": ["children"], "additionalProperties": False}
+    if ownership_required:
+        schema["properties"]["parent_requirement_ids"] = {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        schema["required"].append("parent_requirement_ids")
+        schema["properties"]["parent_verification_obligations"] = {"type": "array", "items": {"type": "object"}, "maxItems": 64}
+        schema["required"].append("parent_verification_obligations")
+    return schema
+
+
+def _ownership_records(task, contract):
+    if RUN.get("project_mode") != NEW_PROJECT or _current_execution_contract(task):
+        return []
+    ledger = (contract or {}).get("source_requirement_ledger")
+    if not isinstance(ledger, dict):
+        return []
+    records = ledger_requirements(ledger)
+    if str(task.get("id")) != "ROOT":
+        assigned = task.get("requirement_ids", [])
+        records = [r for r in records if r["requirement_id"] in assigned]
+    return records
+
+
+def _bind_requirement_ownership(task, contract, children, parent_ids):
+    records = _ownership_records(task, contract)
+    if not records:
+        return True
+    allocation = requirement_ownership.validate(records, [{
+        "id": c["id"], "requirement_ids": c.get("requirement_ids"),
+        "implementation_paths": _greenfield_concrete_paths(c.get("scope_hint", [])),
+    } for c in children], parent_ids,
+        outer_paths=_greenfield_concrete_paths(contract["allowed_mutation_paths"])
+            if "allowed_mutation_paths" in contract else None)
+    task["requirement_ownership"] = allocation
+    if not allocation["valid"]:
+        task["ownership_failure"] = {"failure_type": requirement_ownership.INCOMPLETE,
+                                     "summary": "; ".join(allocation["errors"])}
+        record_run_event("requirement_ownership_rejected", task_id=task.get("id"), errors=list(allocation["errors"]))
+        return False
+    task.pop("ownership_failure", None)
+    task["parent_requirement_ids"] = list(parent_ids)
+    return True
+
+
+def _bind_verification_obligations(task, contract, children, parent_oracles):
+    records = _ownership_records(task, contract)
+    if not records:
+        return True
+    by_id = {str(c['id']): c for c in children}
+    errors = []
+    for child in children:
+        ids = child.get('requirement_ids', [])
+        oracles = child.get('verification_obligations', [])
+        errors.extend(behavioral_obligations.validate(records, ids, oracles, Path(WORKSPACE).resolve()))
+        accessible = set(_greenfield_concrete_paths(child.get('scope_hint', [])))
+        queue = list(child.get('depends_on', []))
+        seen = set()
+        while queue:
+            key = queue.pop()
+            if key in seen:
+                continue
+            seen.add(key)
+            dependency = by_id.get(key, {})
+            accessible.update(_greenfield_concrete_paths(dependency.get('scope_hint', [])))
+            queue.extend(dependency.get('depends_on', []))
+        for raw in task.get('dependency_inspection_paths', []):
+            path = _browser_workspace_path(WORKSPACE, raw)
+            if path is not None:
+                accessible.add(path.relative_to(Path(WORKSPACE).resolve()).as_posix())
+        for oracle in oracles if isinstance(oracles, list) else []:
+            if isinstance(oracle, dict) and oracle.get('target') not in accessible:
+                errors.append('oracle target lacks assigned/dependency inspection ownership')
+    if task.get('parent_requirement_ids'):
+        errors.extend(behavioral_obligations.validate(records, task['parent_requirement_ids'], parent_oracles,
+                                                     Path(WORKSPACE).resolve()))
+    if errors:
+        task['oracle_failure'] = {'failure_type': behavioral_obligations.UNCOVERED,
+                                  'summary': '; '.join(errors)}
+        return False
+    task.pop('oracle_failure', None)
+    return True
 
 
 def fallback_child_contracts(task):
@@ -12140,6 +12275,7 @@ PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}"""
         stage3.decomposition_plan_packet(approved_plan)
         if isinstance(approved_plan, dict) else "(not applicable / NEW_PROJECT)"
     )
+    ownership_records = _ownership_records(task, contract)
     prompt_text = f"""Split CURRENT NODE into 2-4 SMALL STRUCTURED SEQUENTIAL child contracts for the pinned weak local model.
 Each child supplies goal, done_when, scope_hint, and depends_on. Children together must preserve the parent goal.
 Also supply depends_on: earlier sibling ordinal strings (for example ["1"]), or [] only for independent work.
@@ -12154,9 +12290,27 @@ PROJECT BRAIN (expanded specification + verified state): {project_brain_task_pla
 PARENT NODE: {json.dumps({k: task.get(k) for k in ('goal','done_when','scope_hint')}, ensure_ascii=False)}
 PARENT VERIFIED SUMMARY: {compact_text(parent_summary or '(none)', 700)}
 DEPENDENCIES: {json.dumps((dependency_summaries or [])[-4:], ensure_ascii=False)[:2000]}
-REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
+REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}
+SOURCE OWNERSHIP REQUIREMENTS: {json.dumps(ownership_records, ensure_ascii=False)}
+When SOURCE OWNERSHIP REQUIREMENTS is nonempty, every child must supply requirement_ids naming only
+those exact source IDs. Also supply parent_requirement_ids for obligations retained at the parent.
+Allocate every ID. Required source files need a child implementation owner with a concrete assigned path;
+parent verification cannot create missing files. These bindings are accountability, not proof of behavior."""
+    data = None
     try:
-        data = structured_model_call(prompt_text, _children_validator, "decompose-task", children_schema())
+        prompt_text += """
+For each assigned requirement also supply verification_obligations. Each object contains requirement_id,
+source_text copied exactly from that source requirement, kind, and target (a workspace-relative file).
+For a source requirement that only creates named files, use kind=file_exists, one object per required file.
+For supported interactions use kind=browser_scenario with steps. Allowed steps: click(selector), fill(selector,value),
+check/uncheck(selector), reload(), assert_text/assert_value(selector,expected string), assert_count(selector,expected int),
+assert_checked/assert_visible(selector,expected bool). Each step has action plus exactly those named fields.
+Assert initial state, perform the source-required action, assert a changed observable state. Persistence requires
+reload followed by an assertion. A page-visible assertion or syntax check cannot certify behavior.
+Supply parent_verification_obligations for parent_requirement_ids. Unsupported meanings remain unresolved;
+do not invent an oracle or replace a source duty with a weaker load/existence check.
+""" if ownership_records else ""
+        data = structured_model_call(prompt_text, _children_validator, "decompose-task", children_schema(bool(ownership_records)))
         specs = data["children"]
     except (StructuredOutputError, KeyError, TypeError, ValueError) as exc:
         specs = fallback_child_contracts(task)
@@ -12170,11 +12324,26 @@ REPOSITORY HINTS: {repository_hints(repo_snapshot, task.get('scope_hint'))}"""
             )
     if len(specs) < 2:
         return []
+    if ownership_records:
+        proposed = [{"id": str(i), "scope_hint": s.get("scope_hint", []),
+                     "requirement_ids": s.get("requirement_ids"),
+                     "depends_on": s.get("depends_on", []),
+                     "verification_obligations": s.get("verification_obligations", [])}
+                    for i, s in enumerate(specs, 1)]
+        if not _bind_requirement_ownership(task, contract, proposed,
+                data.get("parent_requirement_ids") if isinstance(data, dict) else None):
+            return []
+        task["parent_verification_obligations"] = freeze(copy.deepcopy(data.get("parent_verification_obligations", [])))
+        if not _bind_verification_obligations(task, contract, proposed, task['parent_verification_obligations']):
+            return []
     children = []
     for index, spec in enumerate(specs, 1):
         child_id = str(index) if task["id"] == "ROOT" else f"{task['id']}.{index}"
         child = make_task(child_id, spec["goal"], task["depth"] + 1, task["id"],
                           spec.get("done_when", []), spec.get("scope_hint", []))
+        if ownership_records:
+            child["requirement_ids"] = list(spec["requirement_ids"])
+            child["verification_obligations"] = freeze(copy.deepcopy(spec.get("verification_obligations", [])))
         if "depends_on" in spec:
             child["depends_on"] = [
                 dep if task["id"] == "ROOT" else f"{task['id']}.{dep}"
@@ -14179,7 +14348,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                        context_sufficiency_enabled=False, context_sufficiency_gate=None,
                        context_evidence_provider=None, context_anchor=None,
                        initial_context_evidence=None, impact_contract=None,
-                       impact_contract_required=None):
+                       impact_contract_required=None, packet_repair_state=None):
     global ACTIVE_CONTEXT_SUFFICIENCY_GATE, ACTIVE_IMPACT_CONTRACT, ACTIVE_IMPACT_REQUIRED
     # A previous synchronous attempt must never lend its authorization to the
     # next Worker.  The caller's task/transaction retains the artifact for
@@ -14571,9 +14740,30 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                 {key: value for key, value in result.items() if key != "raw_worker_result_ref"}
             )[:24]
             return result
-    system_prompt = ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT)
+    routed_worker = PROVIDER_ROUTER is not None and role in ROLE_SYSTEM_PROMPTS
+    packet_store = worker_packets.PacketEvidence(WORKSPACE) if routed_worker else None
+    tool_window = worker_packets.ToolWindow() if routed_worker else None
+    if tool_window is not None:
+        tool_window.repair_state = copy.deepcopy(packet_repair_state)
+    if packet_store is not None and isinstance(TASKS.get(str(task_id)), dict):
+        assigned = TASKS[str(task_id)]
+        packet_store.task = copy.deepcopy(assigned)
+        packet_store.source_contract = copy.deepcopy(RUN.get('source_contract'))
+        packet_store.obligations = {
+            'task_id': str(task_id),
+            'requirement_ids': list(assigned.get('requirement_ids', [])),
+            'oracles': packet_store.put(assigned.get('verification_obligations', [])),
+        }
+    if packet_store is not None and isinstance(impact_candidate, dict):
+        packet_store.authority = {
+            'write_paths': ([] if role == 'Falsifier' else copy.deepcopy(impact_candidate.get('authorized_mutation_paths'))),
+            'read_paths': copy.deepcopy((ACTIVE_TOOL_CONTRACT or {}).get('allowed_inspection_paths')),
+            'scope_is_exhaustive': True, 'worker_claims_grant_no_authority': True,
+        }
+    system_prompt = (worker_packets.system_instructions(role, GAME_BRIDGE_EXPRESSION)
+                     if routed_worker else ROLE_SYSTEM_PROMPTS.get(role, SYSTEM_PROMPT))
     if context_gate is not None:
-        system_prompt += (
+        system_prompt += worker_packets.CONTEXT_INSTRUCTION if routed_worker else (
             " CONTEXT SUFFICIENCY GATE (runtime-enforced): before any write/edit mutation, "
             "call context_sufficiency_check with context_status='sufficient' only when the current "
             "bounded evidence establishes the contract, dependencies, invariants, caller/test expectations, "
@@ -14583,7 +14773,7 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             "by the runtime until the gate returns mutation_allowed=true."
         )
     if impact_required:
-        system_prompt += (
+        system_prompt += worker_packets.IMPACT_INSTRUCTION if routed_worker else (
             " PRE-MUTATION IMPACT CONTRACT (runtime-enforced): the controller has a bounded expected change surface, "
             "preservation set, and verification obligations. Do not broaden the mutation surface or treat a worker "
             "claim as authorization. The runtime will compare actual changed paths and verification evidence after "
@@ -14662,6 +14852,11 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
     # Preserve the role/recovery projection separately so a completed context
     # round can restore only the mutation tools already authorized by the
     # existing policy.
+    if packet_store is not None:
+        # Add metadata access after recovery/policy projection so discovery
+        # cannot restore a mutation mechanism suppressed by those policies.
+        offered_tools.append(copy.deepcopy(worker_packets.EVIDENCE_TOOL))
+        offered_tools.append(copy.deepcopy(worker_packets.SELECT_TOOL))
     unlocked_offered_tools = list(offered_tools)
     offered_tools = _context_tool_projection(unlocked_offered_tools, context_gate)
     offered_names = {item["function"]["name"] for item in offered_tools}
@@ -14712,6 +14907,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             policy=grounding_policy,
         )
     for _step in range(max(1, int(step_budget))):
+        if tool_window is not None:
+            tool_window.rounds_left = max(0, int(step_budget) - _step)
         context_reanchor_after_tool = False
         if structured_response_schema is not None:
             structured_context = dict(structured_response_context or {})
@@ -14752,7 +14949,8 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
             }
         else:
             try:
-                assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False)
+                assistant_message = ask_ollama(messages, tools=offered_tools, role=role, think=False,
+                    **({'packet_store': packet_store, 'tool_window': tool_window} if packet_store is not None else {}))
             except ProviderError as exc:
                 provider_error = str(exc)
                 status = "provider_failure"
@@ -15063,6 +15261,23 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                                 result = "error: TARGET_LOCATOR_STALE; candidate source changed before reading"
                             else:
                                 result = run_tool("read_file_range", resolved_read_args, role=role)
+                    elif name == 'select_worker_tools' and tool_window is not None:
+                        try:
+                            if set(args) != {'names'}:
+                                raise model_providers.ProviderFailure('PACKET_TOOL_SELECTION_DENIED')
+                            # Recheck current projection after context/repair
+                            # transitions; a previous catalogue grants no rights.
+                            tool_window.update(offered_tools)
+                            result = json.dumps(tool_window.select(args['names']))
+                        except model_providers.ProviderFailure as exc:
+                            result = 'error: ' + exc.code
+                    elif name == 'read_packet_evidence' and packet_store is not None:
+                        try:
+                            if set(args) - {'sha256', 'offset'} or 'sha256' not in args:
+                                raise model_providers.ProviderFailure('PACKET_EVIDENCE_INVALID_ARGUMENTS')
+                            result = json.dumps(packet_store.read(**args), ensure_ascii=False)
+                        except model_providers.ProviderFailure as exc:
+                            result = 'error: ' + exc.code
                     elif _browser_tool_request(name, args):
                         current_syntax_failures = _cycle_syntax_failures_for_target(
                             verification_cycle, args.get("path")
@@ -15119,6 +15334,10 @@ def execute_agent_task(task_text, memory, messages=None, role="Builder", task_id
                         if item.get("function", {}).get("name") != _CONTEXT_COMPLETION_TOOL
                     ]
                 offered_names = {item["function"]["name"] for item in offered_tools}
+                if tool_window is not None:
+                    # The gate transition changes available schemas, not role
+                    # authority. Request the next exact schema explicitly.
+                    tool_window.selected = []
             if (context_tool_call and context_gate.mutation_allowed
                     and context_tool_result.get("decision_valid") is not False
                     and context_tool_result.get("mutation_allowed")):
@@ -17079,7 +17298,12 @@ def discover_web_entrypoint(task, contract=None):
 def _task_web_verification_contract(task, contract):
     if RUN.get("project_mode") != NEW_PROJECT or isinstance(_current_execution_contract(task), dict):
         return dict(contract or {})
-    return verification_scope.scope_contract(task, contract, RUN.get("source_contract"))
+    result = verification_scope.scope_contract(task, contract, RUN.get("source_contract"))
+    if _ownership_records(task, RUN.get("source_contract") or {}):
+        result["source_obligations_required"] = True
+        result["requirement_ids"] = list(task.get("requirement_ids", []))
+        result["verification_obligations"] = copy.deepcopy(task.get("verification_obligations", []))
+    return result
 
 
 def _scoped_browser_profile(goal, contract, target=None):
@@ -18263,11 +18487,23 @@ def evidence_gate(builder_result, falsifier_result=None, browser_result=None, mo
         integration_preflight=integration_preflight,
         verification_aggregation=verification_aggregation,
     )
+    obligation_verification = None
+    active = ACTIVE_TOOL_CONTRACT or {}
+    records = ledger_requirements(RUN.get("source_requirement_ledger"))
+    if active.get("source_obligations_required") and not active.get("execution_contract_id"):
+        obligation_verification = behavioral_obligations.verify(
+            WORKSPACE, records, active.get("requirement_ids", []),
+            active.get("verification_obligations", []), browser_launch_kwargs(),
+            allowed_paths=active.get("allowed_inspection_paths", []))
+        if not obligation_verification.get("passed"):
+            deterministic.append({"name": "source_obligation_verification", "status": "FAIL", "source": "deterministic",
+                                  "evidence": json.dumps(obligation_verification, ensure_ascii=False)})
     advisory = list(model_checks or [])
     passed = builder_result.get("status") == "done" and not deterministic
     if not passed:
         RUN["verification_failures"] += 1
     return {"passed": passed, "checks": deterministic + advisory,
+            "obligation_verification": obligation_verification,
             "deterministic_failures": deterministic, "advisory_checks": advisory,
             "advisory_failures": [item for item in advisory
                                   if isinstance(item, dict) and str(item.get("status", "")).upper() == "FAIL"],
@@ -20011,17 +20247,22 @@ def print_node_diagnosis():
             print(f"  integration preflight: {labels or 'FAIL'}")
 
 
-def repair_task(task, contract, failure_evidence, memory, node_context, parent_goal=None):
+def repair_task(task, contract, failure_evidence, memory, node_context, parent_goal=None, packet_repair_state=None):
     RUN["repairer_calls"] += 1
     event(f"[REPAIR {task['id']}]", role="Repairer", task=task["id"], action="focused repair")
+    serialized_failures = json.dumps(failure_evidence, ensure_ascii=False)
+    # Routed packets use exact record references rather than broken JSON
+    # prefixes. Legacy callers keep their historical presentation boundary.
+    failure_packet = serialized_failures if PROVIDER_ROUTER is not None else serialized_failures[:5000]
     context = (
         f"{node_context}\n\nCURRENT DETERMINISTIC FAILURE EVIDENCE:\n"
-        f"{json.dumps(failure_evidence, ensure_ascii=False)[:5000]}\n"
+        f"{failure_packet}\n"
         "Repair only demonstrated implementation defects. Run fresh executable verification after the edit."
     )
     worker_execution_contract = _current_execution_contract(task)
     return execute_agent_task(
         task["goal"], memory, role="Repairer", task_id=task["id"], extra_context=context,
+        **({'packet_repair_state': packet_repair_state} if packet_repair_state is not None else {}),
         worker_context=context,
         execution_contract=worker_execution_contract,
         context_sufficiency_enabled=True,
@@ -20215,6 +20456,10 @@ def _commit_verified_leaf(task, contract, builder, falsifier, browser, gate, mem
 
 def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", dependency_summaries=None,
                  strategy_context=None):
+    if task.get("oracle_failure"):
+        return {"status": "failed", "memory": memory, **task["oracle_failure"]}
+    if task.get("ownership_failure"):
+        return {"status": "failed", "memory": memory, **task["ownership_failure"]}
     if task.get("kind") == "integration":
         return execute_integration_leaf(
             task, contract, memory, repo_snapshot, parent_summary, dependency_summaries,
@@ -20392,6 +20637,7 @@ def execute_leaf(task, contract, memory, repo_snapshot, parent_summary="", depen
         repaired = repair_task(
             task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"], memory, node_context,
             parent_goal=parent_summary,
+            **({'packet_repair_state': [len(repair_history) + 1, MAX_REPAIRS_PER_LEAF]} if PROVIDER_ROUTER is not None else {}),
         )
         memory = repaired["memory"]
         repair_mutation_failures = _merge_mutation_failure_records(
@@ -20769,6 +21015,7 @@ def execute_integration_leaf(task, contract, memory, repo_snapshot, parent_summa
         repaired = repair_task(
             task, contract, current_gate["deterministic_failures"], memory, node_context,
             parent_goal=parent_summary,
+            **({'packet_repair_state': [len(repair_history) + 1, MAX_REPAIRS_PER_LEAF]} if PROVIDER_ROUTER is not None else {}),
         )
         memory = repaired.get("memory", memory)
         repair_mutation_failures = _merge_mutation_failure_records(
@@ -21075,6 +21322,13 @@ def _manifest_from_result_source(task, result):
                 continue
             declarations = _source_declarations(text)
             old_snapshot = previous_files.get(str(path))
+            if old_snapshot is None:
+                # Transaction callers may use another spelling of the same
+                # Windows path. Preserve the first captured pre-edit state;
+                # filesystem identity must not depend on dictionary key case.
+                identity = os.path.normcase(os.path.realpath(path))
+                old_snapshot = next((snapshot for raw, snapshot in previous_files.items()
+                                     if os.path.normcase(os.path.realpath(raw)) == identity), None)
             old_text = ""
             has_old_snapshot = isinstance(old_snapshot, dict)
             if has_old_snapshot and old_snapshot.get("existed") and old_snapshot.get("content") is not None:
@@ -21119,7 +21373,16 @@ def _manifest_from_result_source(task, result):
 def attach_verified_manifest(task, result):
     if not isinstance(task, dict) or not isinstance(result, dict) or result.get("status") != "done":
         return None
-    manifest = _manifest_from_result_source(task, result)
+    # Attribution belongs to this result's transaction, not the most recent
+    # sibling transaction. Empty symbol sets are valid historical observations.
+    # Keep the controller snapshot separate from model-supplied manifests and
+    # copy it so later projections cannot mutate the original attribution.
+    snapshot = result.get("_controller_manifest_snapshot")
+    if isinstance(snapshot, dict) and snapshot.get("task_id") == str(task.get("id", "")):
+        manifest = copy.deepcopy(snapshot)
+    else:
+        manifest = _manifest_from_result_source(task, result)
+        result["_controller_manifest_snapshot"] = copy.deepcopy(manifest)
     task["integration_manifest"] = manifest
     result["integration_manifest"] = manifest
     merge_project_invariants(str(task.get("id", "")), manifest)
@@ -22210,6 +22473,87 @@ def compact_evidence_summary(result):
     return "(no deterministic evidence projection supplied)"
 
 
+def _readonly_parent_acceptance(task, contract, child_results, child_info, memory, preflight, *, root=False):
+    """Verify current complete source obligations without dispatching a mutator.
+
+    Integration edits, if needed, have already gone through the existing
+    separately scoped integration-task path. This operation grants no writes.
+    """
+    global ACTIVE_TOOL_CONTRACT
+    saved = ACTIVE_TOOL_CONTRACT
+    verification = None
+    before = None
+    failure_type = 'PARENT_VERIFICATION_FAILED'
+    try:
+        if ACTIVE_TRANSACTION is not None:
+            raise ValueError('read-only parent cannot overlap a mutable transaction')
+        children = [item['task'] for item in child_results]
+        if not _bind_requirement_ownership(task, contract, children, task.get('parent_requirement_ids')):
+            failure_type = requirement_ownership.INCOMPLETE
+            raise ValueError(task['ownership_failure']['summary'])
+        if not _bind_verification_obligations(task, contract, children, task.get('parent_verification_obligations', [])):
+            failure_type = behavioral_obligations.UNCOVERED
+            raise ValueError(task['oracle_failure']['summary'])
+        records = ledger_requirements(RUN.get('source_requirement_ledger'))
+        for item in child_results:
+            if not readonly_acceptance.child_proof_valid(item['task'], item['result'], records):
+                failure_type = 'CHILD_OBLIGATION_EVIDENCE_INVALID'
+                raise ValueError('missing, invalid or wrong-responsibility child evidence')
+        ids = [r['requirement_id'] for r in _ownership_records(task, contract)]
+        oracles = list(task.get('parent_verification_obligations', []))
+        inspection = []
+        for child in children:
+            oracles.extend(copy.deepcopy(child.get('verification_obligations', [])))
+            inspection.extend(_greenfield_concrete_paths(child.get('scope_hint', [])))
+        allowed = readonly_acceptance.inspection_paths(WORKSPACE, inspection)
+        if 'allowed_inspection_paths' in contract:
+            allowed &= readonly_acceptance.inspection_paths(WORKSPACE, contract['allowed_inspection_paths'])
+        targets = readonly_acceptance.inspection_paths(WORKSPACE, [o.get('target') for o in oracles])
+        if not targets or not targets <= allowed:
+            failure_type = 'PARENT_VERIFICATION_SCOPE_INCOMPLETE'
+            raise ValueError('required parent verification target lacks inspection authority')
+        ACTIVE_TOOL_CONTRACT = {
+            'task_id': task['id'], 'goal': task['goal'], 'parent_verification_read_only': True,
+            'allowed_mutation_paths': [], 'allowed_inspection_paths': sorted(allowed),
+            'source_obligations_required': True, 'requirement_ids': ids,
+            'verification_obligations': freeze(copy.deepcopy(oracles)),
+        }
+        before = readonly_acceptance.snapshot(WORKSPACE)
+        verification = behavioral_obligations.verify(
+            WORKSPACE, records, ids, oracles, browser_launch_kwargs(), allowed_paths=sorted(allowed))
+        after = readonly_acceptance.snapshot(WORKSPACE)
+        if before != after:
+            failure_type = readonly_acceptance.SOURCE_CHANGED
+            raise ValueError('project source changed during read-only parent verification')
+        current = run_integration_preflight(task, child_info, contract)
+        if not current.get('passed'):
+            failure_type = 'INTEGRATION_FAILURE'
+            raise ValueError('current parent integration preflight failed')
+        task['integration_preflight']['after'] = current
+        if not verification.get('passed'):
+            failure_type = verification.get('failure_type') or behavioral_obligations.FAILED
+            raise ValueError('complete parent obligations did not pass fresh verification')
+        task['verification_obligations'] = freeze(copy.deepcopy(oracles))
+        task['requirement_ids'] = ids
+        _finish_parent_integration(task, passed=True, preflight=current)
+        event(f"[{'ROOT VERIFIED' if root else 'PARENT VERIFIED ' + task['id']}] PASS (read-only)",
+              role='Quality Review', task=task['id'], action='current complete source obligations')
+        return {'status': 'done', 'summary': 'Complete declared source obligations verified read-only',
+                'memory': memory, 'changed_files': [], 'children': child_info,
+                'gate': {'passed': True, 'obligation_verification': verification, 'deterministic_failures': []},
+                'integration_preflight': task['integration_preflight'],
+                'integration_outcome': task.get('integration_outcome'),
+                'parent_verification': {'mode': 'read_only', 'source_before': before, 'source_after': after,
+                                        'obligation_verification': verification}}
+    except (ValueError, OSError, RuntimeError) as exc:
+        _finish_parent_integration(task, passed=False, preflight=preflight)
+        return {'status': 'failed', 'failure_type': failure_type, 'summary': str(exc),
+                'memory': memory, 'changed_files': [], 'children': child_info,
+                'obligation_verification': verification, 'integration_preflight': task.get('integration_preflight')}
+    finally:
+        ACTIVE_TOOL_CONTRACT = saved
+
+
 def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, root=False):
     label = "ROOT" if root else task["id"]
     event(f"[AGGREGATE {label}]", role="Builder", task=label, action="hierarchical integration")
@@ -22328,6 +22672,9 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         )
         integration_contract["integration_tasks"] = integration_info
 
+    if _ownership_records(task, contract):
+        return _readonly_parent_acceptance(task, contract, child_results, child_info,
+                                           memory, preflight_before, root=root)
     begin_transaction(f"aggregate-{label}")
     global ACTIVE_TOOL_CONTRACT
     ACTIVE_TOOL_CONTRACT = {
@@ -22491,7 +22838,8 @@ def aggregate_task(task, contract, child_results, memory, repo_snapshot=None, ro
         integration_repair_mutation_failures = []
         for _ in range(MAX_REPAIRS_PER_LEAF):
             repaired = repair_task(task, ACTIVE_TOOL_CONTRACT, current_gate["deterministic_failures"],
-                                   memory, integration_context)
+                                   memory, integration_context,
+                                   **({'packet_repair_state': [_ + 1, MAX_REPAIRS_PER_LEAF]} if PROVIDER_ROUTER is not None else {}))
             memory = repaired["memory"]
             integration_repair_mutation_failures = _merge_mutation_failure_records(
                 integration_repair_mutation_failures, _mutation_failure_records(repaired),
@@ -23029,6 +23377,10 @@ def _scheduler_dependency_blocked_result(child, blocking, memory):
 def _execute_children(task, children, depth, contract, memory, repo_snapshot, parent_summary,
                       dependency_summaries, fit_decider, leaf_executor, aggregator):
     """Run children sequentially while propagating only explicit dependencies."""
+    if not _bind_requirement_ownership(task, contract, children, task.get("parent_requirement_ids")):
+        return {"status": "failed", "memory": memory, **task["ownership_failure"]}
+    if not _bind_verification_obligations(task, contract, children, task.get("parent_verification_obligations", [])):
+        return {"status": "failed", "memory": memory, **task["oracle_failure"]}
     completed = []
     inherited_dependencies = copy.deepcopy(list(dependency_summaries or []))
     child_list = [child for child in (children or []) if isinstance(child, dict)]
@@ -23539,6 +23891,10 @@ def solve_task(task, depth, contract, memory, repo_snapshot=None, parent_summary
             result = _semantic_coupling_blocked_result(task, memory)
             _mark_task_result(task, result)
             event(f"[FAILED {label}] semantic coupling evidence is conflicting", task=label)
+            return result
+        if task.get("ownership_failure") or task.get("oracle_failure"):
+            result = {"status": "failed", "memory": memory, **(task.get("ownership_failure") or task['oracle_failure'])}
+            _mark_task_result(task, result)
             return result
         if len(children) >= 2:
             RUN["splits"] += 1
@@ -30108,14 +30464,30 @@ def read_user_prompt(prompt_label="You> "):
     return input(prompt_label).strip()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Mini Hivo adaptive task-granularity research prototype")
+def parse_args(argv=None):
+    parser = model_configuration.SafeArgumentParser(description="Mini Hivo adaptive task-granularity research prototype")
     parser.add_argument("--mode", choices=(
         "auto", "baseline", "recursive", "current_recursive",
         "decomposition_first_recursive",
     ), default="auto")
-    parser.add_argument("--model", choices=(GEMMA_MODEL, "gpt-oss:20b-cloud"),
-                        help=f"Pin every role to this model (default: {GEMMA_MODEL})")
+    parser.add_argument("--model", help="Legacy shorthand: use this exact installed Ollama ID for every role; no automatic fallback")
+    parser.add_argument('--model-config', help='JSON role configuration containing selections and environment-variable references only')
+    parser.add_argument('--orchestrator-model', help='Exact provider:model reference for reasoning/planning roles')
+    parser.add_argument('--worker-model', help='Exact provider:model reference for Builder, Falsifier and Repairer')
+    parser.add_argument('--role-model', action='append', help='Explicit role=provider:model override (repeatable)')
+    parser.set_defaults(model_options_provided=frozenset())
+    model_setting = model_configuration.ModelSettingAction
+    parser.add_argument('--worker-context', type=int, default=4096, action=model_setting)
+    parser.add_argument('--worker-output', type=int, default=1024, action=model_setting)
+    parser.add_argument('--orchestrator-context', type=int, default=16384, action=model_setting)
+    parser.add_argument('--orchestrator-output', type=int, default=4096, action=model_setting)
+    parser.add_argument('--worker-thinking', choices=['default', 'off', 'low', 'medium', 'high'], action=model_setting)
+    parser.add_argument('--ollama-url', default=OLLAMA_BASE_URL, action=model_setting)
+    parser.add_argument('--model-request-budget', type=int, default=40, action=model_setting)
+    parser.add_argument('--confirm-models', action='store_true', help='Confirm explicitly supplied selections without a menu')
+    parser.add_argument('--approve-free-cloud', action='store_true', help='Explicitly permit strict-free cloud catalogue/auth/canary/workflow calls for this invocation')
+    parser.add_argument('--allow-paid-inference', action='store_true', help='Explicit billable-operation permission for separately configured non-free selections')
+    parser.add_argument('--save-model-config', help='Write selected non-secret settings to a NEW JSON file after qualification')
     parser.add_argument("--prompt-file")
     parser.add_argument("--experiment-case-id")
     parser.add_argument("--mission-advice-policy", choices=("strict", "contract_fallback"),
@@ -30141,7 +30513,7 @@ def parse_args():
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-browser", action="store_true")
     parser.add_argument("--no-bootstrap", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def ollama_reachable():
@@ -30152,8 +30524,32 @@ def ollama_reachable():
         return False
 
 
+def prepare_model_routing(args):
+    client = model_providers.ProviderClient(request_budget=getattr(args, 'model_request_budget', 40))
+    return model_routing.RoleRouter(model_configuration.configure(args, client), client)
+
+
+def qualify_model_routing(router, workspace):
+    global PROVIDER_ROUTER, MODEL_POLICY, MODEL, MODEL_TASK_CAPACITY, MODEL_CAPABILITIES
+    global VISION_MODEL, ROUTER_MODEL, FALLBACK_MODEL, CONTEXT_LIMIT_TOKENS
+    PROVIDER_ROUTER = None
+    result = provider_preflight.qualify(router, workspace)
+    if result['passed']:
+        PROVIDER_ROUTER = router
+        MODEL_POLICY = model_routing.RoutingPolicy(router.config)
+        builder_selection = router.config.selection('builder')
+        MODEL = builder_selection.model
+        MODEL_TASK_CAPACITY = 2  # Unmeasured conservative prior, never inferred from parameter count.
+        MODEL_CAPABILITIES = set(router.infos[builder_selection].capabilities)
+        visual = router.config.selection('visual')
+        VISION_MODEL = visual.model if 'vision' in router.infos[visual].capabilities else ''
+        ROUTER_MODEL, FALLBACK_MODEL = router.config.orchestrator.model, ''
+        CONTEXT_LIMIT_TOKENS = MODEL_POLICY.context_window('Builder')
+    return result
+
+
 def main():
-    global WORKSPACE, HOST_PREFLIGHT_RESULT, MODEL_POLICY
+    global WORKSPACE, HOST_PREFLIGHT_RESULT
     configure_console_streams()
     args = parse_args()
     # The architecture self-test is deterministic and must remain runnable on
@@ -30164,12 +30560,16 @@ def main():
         raise SystemExit(0 if ok else 1)
     if not ensure_dependencies(auto_install=not args.no_bootstrap):
         raise SystemExit(2)
-    MODEL_POLICY = SingleModelPolicy(args.model or GEMMA_MODEL)
     try:
-        selected_model = MODEL_POLICY.validate(args.model)
-    except ValueError as exc:
+        model_configuration.choose_workflow(args)
+        router = prepare_model_routing(args)
+        selected_model = router.config.worker.model
+    except model_providers.ProviderFailure as exc:
         print(f"[SETUP_ERROR] {exc}")
         raise SystemExit(2)
+    except (EOFError, KeyboardInterrupt):
+        print('Model configuration cancelled.')
+        raise SystemExit(0)
     try:
         WORKSPACE = get_workspace(args.workspace)
     except RuntimeError as exc:
@@ -30182,18 +30582,19 @@ def main():
         else:
             print(f"[SETUP_ERROR] {exc}")
         raise SystemExit(2)
-    HOST_PREFLIGHT_RESULT = run_host_preflight(WORKSPACE, selected_model, OLLAMA_BASE_URL)
-    print(format_host_preflight_report(HOST_PREFLIGHT_RESULT))
+    HOST_PREFLIGHT_RESULT = qualify_model_routing(router, WORKSPACE)
+    print(provider_preflight.format_report(HOST_PREFLIGHT_RESULT))
     if not HOST_PREFLIGHT_RESULT["passed"]:
         print("terminal: HOST_PREFLIGHT_FAILED")
         raise SystemExit(2)
-    # Preserve the established model configuration path after qualification;
-    # the preflight itself never mutates HIVO task state or metrics.
-    try:
-        select_local_ollama_model(selected_model)
-    except (RuntimeError, ValueError) as exc:
-        print(f"[SETUP_ERROR] {exc}")
-        raise SystemExit(2)
+    if getattr(args, 'save_model_config', None):
+        try:
+            with Path(args.save_model_config).expanduser().open('x', encoding='utf-8') as config_file:
+                json.dump(router.config.to_dict(), config_file, indent=2)
+                config_file.write('\n')
+        except OSError:
+            print('[SETUP_ERROR] configuration destination must be a new writable file')
+            raise SystemExit(2)
     memory = load_memory()
 
     def handle(user_text, interactive=True):

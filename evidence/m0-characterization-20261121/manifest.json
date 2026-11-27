@@ -1,0 +1,90 @@
+{
+  "type": "Local original hashes and reviewed derivative hashes; not runtime authorization.",
+  "raw_records": [
+    {
+      "path": "output/m0-characterization/20261120-canonical-005/provenance.json",
+      "sha256": "7dcd5337852d24aae3ecf998f76b76bf0938475b997ae826833ffcc9b4c4a06c",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-canonical-005/results.json",
+      "sha256": "53d03dc35c1f9150fd04909da8a402b82c24deadd2120f97fcc1365690ef27cf",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-canonical-005/chain_full/manifests-before-parent.json",
+      "sha256": "d2f9f72ebeddd5f76793b8d5f7ae31d00e78c08623306b204a3b2059a32d6009",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-canonical-005/chain_full/parent-preflights.json",
+      "sha256": "dada680df4c8e7faddb025ccb7d9f5f06d4c97bd7b9d54581d49223faf703bd8",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-regression-001/result.json",
+      "sha256": "86a6ba1d2ba1ae1fdc9449a135b540772120b7a11593b4c1a62d6168363423b4",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-controls-002/results.json",
+      "sha256": "ff95659fdf1b71628c8c24a97c933a1290eeff41ad87b2a6d1aa05757dad9e58",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-controls-002/coverage-probe.json",
+      "sha256": "56be5d24a8dadc7e814ab47c730cbd0c3e21356a7da7eafbb39e056d5705486e",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261120-files-001/results.json",
+      "sha256": "23bda37bcc5cdda8ea5563a60defac693ac20360e3c1785db63e1e98815c7774",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261121-manifest-before-001/results.json",
+      "sha256": "5557e3dbbf76e6e33d3d29a30cda7cae520ac83c2d663828b1aed34d7a01777c",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261121-manifest-before-001/mini-before.py",
+      "sha256": "7a2da8da38b8b394da794ac4d84c4c103f118d62e9f53ec48617d3cc11e54768",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261121-manifest-after-001/results.json",
+      "sha256": "629c0de2ad22850b08c5459dcab9dad59f9d155c2a42d443079162b855605692",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261121-manifest-after-001/mini-after.py",
+      "sha256": "8a1c493039a7778f90b7619d884041c0ce3be7d80123bb6fe9fd9209d6a6d3b3",
+      "availability": "local-only"
+    },
+    {
+      "path": "output/m0-characterization/20261121-manifest-functional-001/results.json",
+      "sha256": "3c20d5fa3b53588b773b944bc3c3f87507b8a0df378ba2fba93d6d7deb9943f0",
+      "availability": "local-only"
+    }
+  ],
+  "derivatives": [
+    {
+      "path": "summary.json",
+      "sha256": "54a7d71835537bebbe66ec1f2acfeaf4230ea3162464310cc36d0eaac82b4782"
+    },
+    {
+      "path": "ownership-map.json",
+      "sha256": "99aaabbd76fde819fd9a77ae11fe7c34c8f8f2f62c4e8d4b95c5d900cc1593db"
+    }
+  ],
+  "production_changes": [
+    "mini.py::attach_verified_manifest"
+  ],
+  "diagnostic_sources": {
+    "scripts/m0_characterize.py": "02c286925e8bc79d5662365f318d808e7d3e0df51b61ec079e129a75e9d0e92b",
+    "scripts/m0_controls.py": "1f0b1742d7ce8bb3a1bc629145373f9a5bc8870c564828194cfd0642e8622788",
+    "scripts/m0_followup.py": "c2f04c6f4a4dc4f354bc9ef325e0a5c7a6172feff9e245937d760158a4b1135f",
+    "scripts/m0_manifest_checks.py": "a09cdb72f17fa4887f3f3fa4abd49f45dea22c4ffb58d3a7259161b94a40e077",
+    "scripts/m0_manifest_functional.py": "cb11af5e7e206bf773e8cc30159ef8ef1e05e4a0ec6be45add2ff45815cae1eb"
+  }
+}

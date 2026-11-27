@@ -1,0 +1,26 @@
+{
+  "phase": "D",
+  "status": "PASS",
+  "source": "scripts/local_worker_diagnostic.py",
+  "test": "tests/test_local_worker_diagnostic.py",
+  "scope": "Pure-source validator and bounded local diagnostic; diagnostic execution itself was not run.",
+  "dependencies": [
+    "hivo/http_client.py",
+    "hivo/model_routing.py",
+    "hivo/provider_preflight.py",
+    "hivo/providers.py"
+  ],
+  "offline_test_command": ".venv/Scripts/python.exe -B -X utf8 scripts/acceptance_phase_checks.py --output-dir output/prioritized-handoff/20261127-publication-phase-d-001 test_local_worker_diagnostic",
+  "exit_code": 0,
+  "tests": 2,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "provider_calls": 0,
+  "source_sha256": {
+    "scripts/local_worker_diagnostic.py": "2ae900e3441e44c4d44dc4c000f0c69c804c190037f8d2e05f1ec67df09ff124",
+    "tests/test_local_worker_diagnostic.py": "f0a032d1993eb1f20517d6a8ad7a9fd1069ddeff15102b2f48f7b1dd56735458"
+  },
+  "publication": "Both files are required and included in proposed allowlist; sensitive literals not found in these two files.",
+  "limitations": "No Ollama or live inference; only offline pure function safety tests."
+}

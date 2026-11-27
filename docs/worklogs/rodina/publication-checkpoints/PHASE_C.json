@@ -1,0 +1,29 @@
+{
+  "phase": "C",
+  "status": "PASS",
+  "source_path": "output/acceptance-phase/20261125-parent-functional-001/results.json",
+  "source_sha256": "602511644a7f06eee6de5ec2bd6bbee3464b1fabbd2bbcc84e59c328602dc3ed",
+  "source_bytes": 417087,
+  "recovered_path": "evidence/acceptance-phase-20261121/parent.json",
+  "recovered_sha256": "602511644a7f06eee6de5ec2bd6bbee3464b1fabbd2bbcc84e59c328602dc3ed",
+  "recovered_bytes": 417087,
+  "strict_json": true,
+  "checks": {
+    "allocation_valid": true,
+    "foundation_accepted": true,
+    "child_status_expected": true,
+    "root_status_expected": true,
+    "behavior_expected": true
+  },
+  "parent_status": "done",
+  "root_status": "done",
+  "parent_changed_files": [],
+  "parent_provider_calls": [],
+  "independent_behavior": {
+    "increment": true,
+    "persistence": true
+  },
+  "source_id_count": 3,
+  "scope": "Scripted role decisions; real scheduler, tools, guards, transactions and Chromium.",
+  "limitations": "Controlled scripted role decisions with real scheduler/tools/guards/transactions/Chromium; fixture is a browser counter, not live-model or arbitrary-project acceptance."
+}

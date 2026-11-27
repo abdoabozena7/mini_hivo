@@ -1,0 +1,21 @@
+{
+  "phase": "E",
+  "status": "PASS",
+  "allowlist": "docs/worklogs/rodina/PUBLICATION_ALLOWLIST.txt",
+  "staged_paths": 91,
+  "staged_manifest_sha256": "2b8cdff6b8fb164101d0656ca30fc9bf2d4036b6c9462b3b185140909b118cf1",
+  "all_allowlist_paths_staged_exactly": true,
+  "all_staged_json_strictly_parsed": true,
+  "staged_secret_and_absolute_path_scan": "PASS",
+  "staged_parent_derivative_sha256": "787a3387be1f8445aab9f7cc38fdeb61e40930ce982cd45bc704d9b66d0922a2",
+  "git_diff_cached_check_exit_code": 0,
+  "excluded": [
+    "first_test_prompt.txt",
+    "list/project-1/.agent_host_preflight.json",
+    "output/ (ignored raw runs)",
+    "virtual environments and caches"
+  ],
+  "gitignore_changed": false,
+  "no_unexpected_deletions": true,
+  "limitations": "The historical M0/team repository provenance is documented; independent snapshot history is intentional. Live model/full hybrid E2E not claimed."
+}

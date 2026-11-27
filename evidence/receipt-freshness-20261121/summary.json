@@ -1,0 +1,109 @@
+{
+  "scope": "Controlled-only HTML-linked dependency freshness; no accepted complete root or live model.",
+  "base_commit": "ef08b09708a295d5765d4c207141aa8a11d85f72",
+  "baseline": {
+    "tests": 9,
+    "passed": 3,
+    "failed": 6,
+    "errors": 0,
+    "skipped": 0
+  },
+  "additional_negative_baseline": {
+    "tests": 14,
+    "passed": 13,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0
+  },
+  "final_offline": {
+    "tests": 202,
+    "passed": 202,
+    "failed": 0,
+    "errors": 0,
+    "skipped": [],
+    "modules": [
+      "test_browser_dependency_freshness",
+      "test_verified_manifest_provenance",
+      "test_adaptive_architecture",
+      "test_verified_child_integration",
+      "test_verification_outcome_integrity",
+      "test_run4_scope_regression",
+      "test_repair_cycle_001",
+      "test_browser_requirement_authority"
+    ],
+    "source_sha256": {
+      "mini.py": "8a1c493039a7778f90b7619d884041c0ce3be7d80123bb6fe9fd9209d6a6d3b3",
+      "hivo/integration_gate.py": "f6cc8b9f43e4417d01dd56cd67eb97cf486d957923050661e500048410bb12e6",
+      "tests/test_browser_dependency_freshness.py": "889a524cbc1b609a5a167b34611435d5160862091965093d8d00f9fc484dd440",
+      "scripts/resume_engineering_checks.py": "ea33bdfc5781efa9f0e5cbe2143a6e6f90d0707057c7f03aa26ed9451c447ffa"
+    }
+  },
+  "browser_checks": {
+    "native_before_pass": true,
+    "behavior_before_pass": true,
+    "ready_before": true,
+    "broken_behavior_rejected": true,
+    "clean_load_alone_still_insufficient": true,
+    "baseline_stale_false_fresh_reproduced": true,
+    "new_receipt_stale": true,
+    "parent_not_ready_after_change": true,
+    "restored_behavior": true,
+    "fresh_restored_ready": true
+  },
+  "browser_source_sha256": {
+    "mini.py": "8a1c493039a7778f90b7619d884041c0ce3be7d80123bb6fe9fd9209d6a6d3b3",
+    "hivo/integration_gate.py": "f6cc8b9f43e4417d01dd56cd67eb97cf486d957923050661e500048410bb12e6",
+    "scripts/browser_freshness_functional.py": "5138ff5609265ced497e1059b4a9f5e87532452107897ceb24357d915f7017c4"
+  },
+  "browser_behavior": {
+    "before_behavior": {
+      "increment": true,
+      "reload_persistence": true,
+      "no_runtime_errors": true,
+      "page_errors": [],
+      "passed": true
+    },
+    "broken_behavior": {
+      "increment": false,
+      "reload_persistence": false,
+      "no_runtime_errors": true,
+      "page_errors": [],
+      "passed": false
+    },
+    "restored_behavior": {
+      "increment": true,
+      "reload_persistence": true,
+      "no_runtime_errors": true,
+      "page_errors": [],
+      "passed": true
+    }
+  },
+  "controlled_chain_checks": {
+    "children_accepted": true,
+    "independent_behavior": true,
+    "foundation_attribution_unchanged": true,
+    "no_false_duplicate_owner": true,
+    "parent_scope_remains_blocking": true,
+    "retained_successor_bytes": true
+  },
+  "actual_parent_status": "failed",
+  "actual_parent_failure": "IMPACT_CONTRACT_INCOMPLETE: pre-mutation impact contract was not accepted; named greenfield artifact has no safe authorized path",
+  "notes": [
+    "First browser diagnostic failed the native CommonJS syntax precheck on a valid ES-module fixture; it is not successful browser/receipt evidence.",
+    "Initial 100-method cohort had three manifest failures; Windows case-sensitive snapshot key mismatch confirmed separately.",
+    "197 and 198 method cohorts overlap the final cohort and are not added to it.",
+    "Existing Stage 5B receipt route only; ordinary legacy evidence_gate freshness remains unresolved."
+  ],
+  "raw_sha256": {
+    "output/resume-engineering/20261121-001/freshness-baseline.json": "13a358ee966bea5b5790fc9e27219953de534e54d28abaf5e9995101cded00ca",
+    "output/resume-engineering/20261121-001/freshness-treatment.json": "16c1012645bf8250a557ab500f4d2d4fc2640020e6de21ad892a4a47740a5736",
+    "output/resume-engineering/20261121-001/additional-negative-baseline.json": "338e03a32a00597c2c6aeb90014587484c6d05180d0758f98394cd73ce5ddc9c",
+    "output/resume-engineering/20261121-checks-002/results.json": "d1cacdd4ca7b5bd27edcc6e53f5c8fdd2f1aa15c3990dd914029b613a1260693",
+    "output/resume-engineering/20261121-checks-003/results.json": "cc09813c1e8fa2f90b59c42e831438a23e1fc91662a542fad6943403e207a375",
+    "output/resume-engineering/20261121-checks-004/results.json": "5e7831872e57e5e27d9fa63736199287d343b3141245625462b0e313659540b3",
+    "output/resume-engineering/20261121-browser-001/results.json": "575eea2f8f5189d5880ae8c793d7676c4315b73df6eec5f9ce9d56d552ee472d",
+    "output/resume-engineering/20261121-browser-002/results.json": "3cc3a74f32e247ff33ac163dc7961b40c1361dc352e04a8d51ad7ced7391ae2a",
+    "output/resume-engineering/20261121-browser-003/results.json": "164440eb6e24b4a31e54fe071ee70eb37f7d5b0cc4b016002c712c952d70842a",
+    "output/resume-engineering/20261121-chain-001/results.json": "c9c6cd8c05706da17b9017d5781a78e51158e578f4e79fccf85807e061abba85"
+  }
+}
