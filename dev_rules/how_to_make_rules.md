@@ -1,8 +1,8 @@
 # How to Make Rules (`dev_rules/how_to_make_rules.md`)
 
-> - **Status:** Living meta-specification (`v0.5`)
+> - **Status:** Living meta-specification (`v0.6`)
 > - **Scope:** Governs how all development rules in `dev_rules/` are authored, auto-invoked by coding agents (`Antigravity`, `Codex`, `Claude Code`), proposed for update, and retired across Mini Hivo.
-> - **Related Specs:** [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Claude Code Entrypoint (`../CLAUDE.md`)](../CLAUDE.md), [Documentation & Worklog Rules (`documentation_rules.md`)](documentation_rules.md), [Tool Architecture & Design Rules (`tool_rules.md`)](tool_rules.md), [Orchestration Guardrails (`orchestration_rules.md`)](orchestration_rules.md)
+> - **Related Specs:** [Repository Workflow (`../AGENTS.md`)](../AGENTS.md), [Claude Code Entrypoint (`../CLAUDE.md`)](../CLAUDE.md), [Documentation & Worklog Rules (`documentation_rules.md`)](documentation_rules.md), [Tool Architecture & Design Rules (`tool_rules.md`)](tool_rules.md), [Orchestration Guardrails (`orchestration_rules.md`)](orchestration_rules.md), [Benchmarking & Evaluation Rules (`benchmarking_rules.md`)](benchmarking_rules.md)
 > - **Runtime Boundary:** Files in `dev_rules/` are **development-time guardrails for engineers and AI assistants only**. Mini Hivo's runtime code (`hivo/`, `mini.py`) must never import, parse, or depend on `dev_rules/`.
 > - **Hard Rule Lock:** `AGENTS.md`, `CLAUDE.md`, `**/AGENTS.md`, and `dev_rules/*.md` are **STRICTLY READ-ONLY** during normal development. Coding agents must **PROPOSE** rule updates in worklogs and responses — **never auto-apply edits** to rule files without explicit maintainer authorization.
 
@@ -16,7 +16,7 @@ Rules become restrictive and stale when concrete changelogs, hardware recipes, v
 | :--- | :--- | :--- | :--- | :--- |
 | **1. Rules** *(Global)* | Root `AGENTS.md` + `dev_rules/*_rules.md` | **Prescriptive** (*"How we MUST do things"*) | Timeless invariants, subsystem contracts, capability floors, failure-class preventions, and **non-binding `(e.g., ...)` examples** | At completed architectural milestones |
 | **2. Living System Docs** *(Global, by Subsystem)* | `docs/` *(and optional package READMEs)* | **Descriptive — Current State** (*"Where we are / how it works today"*) | Subsystem implementation maps, API/config references, provider/hardware guides, research papers | Whenever code, providers, or architecture change |
-| **3. Worklogs & Evidence Locker** *(By Person & Task)* | `docs/worklogs/` *(plus frozen legacy `reports/`, `updates/`)* | **Descriptive — Forensic History** (*"What I ran, changed, and found"*) | Per-person, small-scoped forensic records (`REPORT.md`, `PROTOCOL.md`, `results.json`, `provenance.json`, `patches/`) with exact commits, devices, models, commands, and denominators | Append-only per completed work dossier |
+| **3. Worklogs & Evidence Locker** *(By Person & Task)* | `docs/worklogs/` *(historical reference archives in `reports/`, `updates/`, `mini.py`)* | **Descriptive — Forensic History** (*"What I ran, changed, and found"*) | Per-person, small-scoped forensic records (`REPORT.md`, `PROTOCOL.md`, `results.json`, `provenance.json`, `patches/`) with exact commits, devices, models, commands, and denominators | Append-only per completed work dossier |
 
 > **Core Workflow — Record Concrete → Promote Invariant With a Back-Link:**
 > Never dump concrete bug-fix changelogs, GPU specs, or experiment numbers into `dev_rules/`. Record concrete details in `docs/worklogs/` (and update living `docs/` as needed), then **promote only the generalized invariant** into `dev_rules/<subsystem>_rules.md` with a concise back-link in its Revision Log.
@@ -152,3 +152,4 @@ Isolate approved rule edits on a dedicated rule-update branch and verify all 6 p
 | `v0.3` | 2026-11-26 | Added explicit Rule-Amendment Proposal workflow for multi-contributor rule updates backed by `docs/worklogs/` evidence. |
 | `v0.4` | 2026-11-26 | Hardened into strict Propose-Only Rule Lock (zero auto-edits by coding agents), added full 5-stage lifecycle including Rule Retirement, explicit 5 Update Triggers vs. Do-Not-Update table, exact Proposal Format block, and multi-agent auto-invocation (`AGENTS.md`, `CLAUDE.md`, `hivo/*/AGENTS.md`). |
 | `v0.5` | 2026-11-26 | Added explicit Default-is-Silence anti-noise guard (excluding 1-off single-task failures until systemic proof or `>= 2` tasks) and `[APPLIED]`/`[REJECTED]`/`[DEFERRED]` proposal resolution prefixes. |
+| `v0.6` | 2026-11-26 | Linked `benchmarking_rules.md` in `Related Specs` and aligned positive historical-archive wording. |

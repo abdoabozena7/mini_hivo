@@ -100,9 +100,19 @@
 
 ## Experiment Results & Intermediate Defects Caught
 
-| Case / Instance | Baseline Oracle | Candidate Oracle | Outcome | Key Metrics (Tokens / Latency / Turns) | Key Finding |
-| :--- | :--- | :--- | :---: | :--- | :--- |
-| `<case_id>` | `<e.g., F2P=0/1, P2P=6/6>` | `<e.g., F2P=1/1, P2P=6/6>` | `PASS` / `FAIL` / `BLOCKED` | `<metrics>` | `<factual cause>` |
+- **8-Point Anti-False-Result Truth Check (`dev_rules/benchmarking_rules.md §4`):** `<PASS (8/8) | INVALID_HARNESS (list failed checks)>`
+- **Human Audit Tier *(Optional)*:** `<None (Automated) | Spot-Checked (X pass, Y fail) | Blind PR Reviewed>`
+- **Headline Summary *(computed from `results.json`)*:** Raw `resolved/total`, Valid Non-Blocked `resolved/valid`, Cheating-Adjusted `%`, `pass^k`, `$/resolved`, Cache Hit `%`.
+
+| Case / Instance | Baseline Oracle | Candidate Oracle | Outcome | Bucket (`1–6`) | Key Metrics (Tokens / Cache / `$` / Latency) | Earliest Failure Turn & Factual Cause |
+| :--- | :--- | :--- | :---: | :---: | :--- | :--- |
+| `<case_id>` | `<e.g., F2P=0/1, P2P=6/6>` | `<e.g., F2P=1/1, P2P=6/6>` | `PASS` / `FAIL` / `BLOCKED` / `INVALID_BASELINE` | `<1–6 or —>` | `<metrics>` | `<turn # + factual cause>` |
+
+### Failure Triage: Proven Fix Proposals vs. Open Hypotheses
+- **Proven Fix Proposals (`PROVEN CAUSE` — directly observed in trace/diff/code):**
+  1. `<Target file::symbol | exact trace/diff proof | expected funnel effect | Stage 0 offline regression test>` *(or `None`)*
+- **Open Hypotheses (`HYPOTHESIS — UNPROVEN` — do not blindly patch):**
+  1. `<Hypothesis | missing evidence | cheapest 1-variable diagnostic probe>` *(or `None`)*
 
 ### Intermediate Harness / Environment Defects Caught During Runs
 1. <Document every aborted attempt or harness bug discovered and fixed transparently — never drop denominators.>

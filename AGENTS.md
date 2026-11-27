@@ -9,10 +9,12 @@ Before planning, diagnosing deeply, or editing files in any area below, you **MU
 | If your task touches... | MUST read first | Current-state architecture doc |
 | :--- | :--- | :--- |
 | `hivo/tools/`, `tests/test_tools_*` | [dev_rules/tool_rules.md](dev_rules/tool_rules.md) | [docs/TOOLS_ARCHITECTURE.md](docs/TOOLS_ARCHITECTURE.md) |
-| `hivo/providers/`, `hivo/hybrid/`, `scripts/*hybrid*`, `scripts/*swebench*` | [dev_rules/orchestration_rules.md](dev_rules/orchestration_rules.md) | [docs/ORCHESTRATION_ARCHITECTURE.md](docs/ORCHESTRATION_ARCHITECTURE.md), [docs/HYBRID_MODEL_STRATEGY.md](docs/HYBRID_MODEL_STRATEGY.md) |
-| `docs/`, `docs/worklogs/`, PRs, findings, experiments | [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) | [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) *(newest-first team radar)* |
-| `mini.py` or v1 single-model baseline | `AGENTS.md` (this file) | [docs/PROJECT_GOAL.md](docs/PROJECT_GOAL.md), [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md) |
+| `hivo/providers/`, `hivo/hybrid/`, `scripts/*hybrid*` | [dev_rules/orchestration_rules.md](dev_rules/orchestration_rules.md) | [docs/ORCHESTRATION_ARCHITECTURE.md](docs/ORCHESTRATION_ARCHITECTURE.md), [docs/HYBRID_MODEL_STRATEGY.md](docs/HYBRID_MODEL_STRATEGY.md) |
+| `scripts/*swebench*`, `scripts/*bench*`, `scripts/*eval*`, `hivo/benchmarks/`, `tests/test_benchmark_*`, `docs/BENCHMARK*`, `Type: experiment` worklogs | [dev_rules/benchmarking_rules.md](dev_rules/benchmarking_rules.md) | [docs/BENCHMARKING_ARCHITECTURE.md](docs/BENCHMARKING_ARCHITECTURE.md), [docs/BENCHMARK_SCORECARD.md](docs/BENCHMARK_SCORECARD.md) |
+| `docs/`, `docs/worklogs/`, PRs, findings | [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) | [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) *(newest-first team radar)* |
 | `dev_rules/`, `AGENTS.md`, `CLAUDE.md`, `**/AGENTS.md` | **LOCKED (READ-ONLY)** — see Hard Rule Lock below + [dev_rules/how_to_make_rules.md](dev_rules/how_to_make_rules.md) | — |
+
+> **Historical archives:** `mini.py` (v1 single-model baseline, documented in [docs/PROJECT_GOAL.md](docs/PROJECT_GOAL.md) and [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md)), `reports/`, and `updates/` are preserved read-only archives kept for chronological context and historical baseline findings.
 
 ## Hard Rule Lock — PROPOSE ONLY, NEVER AUTO-EDIT RULES
 
@@ -63,11 +65,10 @@ Follow **Observe → Investigate → Fix → Verify → Document → Review → 
 - Historical experiment reports in [the results index](reports/INDEX.md) and curated `evidence/` snapshots are baselines, not current success guarantees; inspect applicability and rerun focused checks when warranted, preserving explicit oracles, denominators, and evidence boundaries as the standard of rigor.
 - If functional verification fails or remains unavailable, label the work incomplete/failed/unverified, retain the evidence, explain what is needed, and avoid a successful-fix claim. A controlled-only completion must state its limited scope and any unverified live behavior explicitly.
 
-## Worklog & legacy update documentation
+## Worklog documentation & historical archives
 
-- Active team documentation uses per-contributor chronological dossiers under `docs/worklogs/<person>/YYYY-MM-DD_<slug>/` governed by [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) and indexed newest-first in [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) via `python scripts/update_worklog_index.py`. Do not allocate new colliding global `R_UPDATE_NNN.md` or `experimentNN` IDs for parallel team work.
-- Legacy `updates/R_UPDATE_*.md` records and `reports/experiment*/` directories are frozen historical archives; treat completed historical records as immutable unless the user explicitly requests an addendum/correction.
-- `R_UPDATE_001` remains permanently reserved for the existing immutable private historical audit (retained locally and gitignored); never reuse `001` or publish the private file.
+- Record all active team work in per-contributor chronological dossiers under `docs/worklogs/<person>/YYYY-MM-DD_<slug>/` (Tier 2) or `docs/worklogs/<person>/LOG.md` (Tier 1), governed by [dev_rules/documentation_rules.md](dev_rules/documentation_rules.md) and indexed newest-first in [docs/worklogs/INDEX.md](docs/worklogs/INDEX.md) via `python scripts/update_worklog_index.py`.
+- `mini.py`, `reports/`, and `updates/` are read-only historical archives preserved for chronological context and earlier baseline data — read and cite them as reference artifacts and keep them immutable (`R_UPDATE_001` remains permanently private/gitignored).
 - Use commit hashes only when available. A document cannot know its own future commit hash; identify the tested source revision and mark a containing commit pending when necessary. Never fabricate commands, before-code excerpts, results, counts or provenance.
 
 ## Evidence preservation and publication

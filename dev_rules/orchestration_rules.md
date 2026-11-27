@@ -1,9 +1,9 @@
 # Orchestration Architecture & Guardrails (`dev_rules/orchestration_rules.md`)
 
-> - **Status:** Living architectural guardrails (`v0.3` — aligned with asymmetric orchestration design & Decomposition-Capability Scaling findings)
+> - **Status:** Living architectural guardrails (`v0.4` — aligned with asymmetric orchestration design, Decomposition-Capability Scaling & `benchmarking_rules.md`)
 > - **Scope:** Orchestration layer — how Mini Hivo coordinates an **Orchestrator tier** and **Worker tier(s)** across capability floors, contract-complete decomposition, delegation, context budgets, rollback safety, verification handoffs, and provider-agnostic endpoints.
-> - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Tool Architecture & Design Rules (`tool_rules.md`)](tool_rules.md), [Orchestration Implementation Architecture (`../docs/ORCHESTRATION_ARCHITECTURE.md`)](../docs/ORCHESTRATION_ARCHITECTURE.md), [Hybrid Model & Provider Reference (`../docs/HYBRID_MODEL_STRATEGY.md`)](../docs/HYBRID_MODEL_STRATEGY.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md)
-> - **Rule Standard:** Guardrails below are **model-, vendor-, and hardware-agnostic invariants**. Any named models or providers are **illustrative examples / reference targets**, never mandatory locks. Live provider pricing, quotas, and hardware tuning live in `docs/`; dated empirical runs live in `reports/` and `updates/`.
+> - **Related Specs:** [Rule-Authoring Methodology (`how_to_make_rules.md`)](how_to_make_rules.md), [Tool Architecture & Design Rules (`tool_rules.md`)](tool_rules.md), [Benchmarking & Evaluation Rules (`benchmarking_rules.md`)](benchmarking_rules.md), [Orchestration Implementation Architecture (`../docs/ORCHESTRATION_ARCHITECTURE.md`)](../docs/ORCHESTRATION_ARCHITECTURE.md), [Hybrid Model & Provider Reference (`../docs/HYBRID_MODEL_STRATEGY.md`)](../docs/HYBRID_MODEL_STRATEGY.md), [Repository Workflow (`../AGENTS.md`)](../AGENTS.md)
+> - **Rule Standard:** Guardrails below are **model-, vendor-, and hardware-agnostic invariants**. Any named models or providers are **illustrative examples / reference targets**, never mandatory locks. Live provider pricing, quotas, and hardware tuning live in `docs/`; dated empirical runs live in `docs/worklogs/` (with historical baseline records preserved in `reports/` and `updates/`).
 > - **Tag Legend:** `[ENFORCED]` = verified in current orchestration code; `[TARGET]` = empirically validated invariant to enforce in upcoming orchestration work; `[PROCESS]` = operational or verification gate.
 
 ---
@@ -115,9 +115,7 @@ Empirical scaling studies show that **more splitting without complete interface 
    - **Never trust prose self-certification `[ENFORCED]`:** Do not treat worker completion text — or a weak LLM's self-authored test pass — as proof of success. Lightweight workers routinely omit post-write verification, and weak LLM reviewers hallucinate assertions.
    - **Inline + external verification `[ENFORCED]`:** Pair inline syntax checks with deterministic harness verification (unit tests or independent container test suites).
    - **Declarative component verification oracles (DCVG) `[TARGET]`:** Attach declarative per-leaf verification oracles at planning time for contract-decomposed multi-file builds so every leaf is verified deterministically at zero extra LLM cost.
-4. **Zero-Leakage Benchmarks & Pre-Solve Environment Checks:**
-   - **Zero solve-time test leakage `[ENFORCED]`:** Never expose hidden grading tests/patches to the agent during solve time.
-   - **Pre-solve environment & baseline oracle checks `[PROCESS]`:** Verify the execution environment and unpatched baseline failure *before* spending orchestration tokens, and report quota/environment blocks separately from model solve rates.
+4. **Benchmarking & Independent Evaluation `[PROCESS]`:** All benchmark isolation, workspace decontamination, privilege-separated output verification, deterministic KPIs, and promotion gates are governed by [`benchmarking_rules.md`](benchmarking_rules.md).
 5. **Secrets, Privacy & Offline-First Testability `[ENFORCED]`:**
    - Load credentials strictly from process env or gitignored `.env`; never emit real vendor key prefixes, private host paths, or account IDs into prompts, logs, traces, tests, or tracked docs.
    - Keep core orchestration mechanics (turn routing, compaction, backoff parsing, rollback, diff handoff, error handling) deterministically testable offline with scripted mock clients before running live inference.
@@ -131,3 +129,4 @@ Empirical scaling studies show that **more splitting without complete interface 
 | `v0.1` | 2026-11-26 | Initial model-, vendor-, and hardware-agnostic orchestration guardrails. |
 | `v0.2` | 2026-11-26 | Added Orchestrator/Worker behavioral capability floors (informed by the Decomposition-Capability Scaling Law & live hybrid runs), non-binding dev-free → paid-target model/provider examples, 5-dimension contract-completeness & single-syntax guardrails, scope-matched greenfield vs. brownfield repair rules, and moved into `dev_rules/`. |
 | `v0.3` | 2026-11-26 | Updated `tool_rules.md` link after `dev_rules/` move and split mixed `[ENFORCED]` / `[TARGET]` / `[PROCESS]` status tags per sub-bullet for strict 1:1 accuracy against current code. |
+| `v0.4` | 2026-11-26 | Linked `benchmarking_rules.md`, deduplicated §6.4 benchmark guardrails into a single pointer, and updated empirical-run path to `docs/worklogs/`. |

@@ -39,6 +39,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from hivo.benchmarks import (
+    build_benchmark_results,
+    docker_network_args,
+    evaluate_baseline_oracle,
+    evaluate_candidate_verdict,
+    run_preflight,
+    scan_trace_for_cheats,
+    strip_git_and_reinit,
+)
 from hivo.hybrid import HybridAgentRunner, HybridRunConfig
 from hivo.providers import (
     EndpointConfig,
@@ -232,7 +241,10 @@ def _docker_eval_once(
     """Run an isolated official Docker evaluation container applying model_patch + test_patch."""
     cid = ""
     try:
-        create_proc = _run_cmd(["docker", "run", "-d", image, "sleep", "900"], timeout=60)
+        create_proc = _run_cmd(
+            ["docker", "run", "-d", *docker_network_args("none"), image, "sleep", "900"],
+            timeout=60,
+        )
         if create_proc.returncode != 0:
             return {
                 "infra_ok": False,
@@ -293,12 +305,13 @@ def _docker_eval_once(
             _run_cmd(["docker", "rm", "-f", cid], timeout=30)
 
 
-def _extract_testbed_to_host(image: str, dest_repo: Path) -> None:
-    """Copy /testbed from the official Docker image onto the host workspace cleanly.
+def _extract_testbed_to_host(image: str, dest_repo: Path) -> dict[str, Any]:
+    """Copy /testbed from the official Docker image onto the host workspace and decontaminate git.
 
     Uses ``docker cp <cid>:/testbed/. -`` + Python ``tarfile`` so Linux symlinks
     (e.g. in Django docs) become Git-compatible plain-text link stubs under
-    ``core.symlinks=false`` instead of failing on Windows without symlink privilege.
+    ``core.symlinks=false`` instead of failing on Windows without symlink privilege,
+    then strips ``.git`` history into 1 fresh orphan baseline commit.
     """
     dest_repo.mkdir(parents=True, exist_ok=True)
     create_proc = _run_cmd(["docker", "create", image], timeout=60)
@@ -345,12 +358,8 @@ def _extract_testbed_to_host(image: str, dest_repo: Path) -> None:
             )
     finally:
         _run_cmd(["docker", "rm", "-f", cid], timeout=30)
-    if not (dest_repo / ".git").exists():
-        raise RuntimeError(f"Extracted /testbed is missing .git directory at {dest_repo}")
-    # Prevent Windows NTFS filemode/symlink/autocrlf ghost diffs against Linux /testbed
-    _run_cmd(["git", "config", "core.filemode", "false"], cwd=dest_repo, timeout=30)
-    _run_cmd(["git", "config", "core.symlinks", "false"], cwd=dest_repo, timeout=30)
-    _run_cmd(["git", "config", "core.autocrlf", "false"], cwd=dest_repo, timeout=30)
+    # Stage 0 decontamination: strip original .git history/remotes/reflogs into 1 fresh orphan commit.
+    return strip_git_and_reinit(dest_repo, commit_message="swebench baseline")
 
 
 def _git_diff_workspace(repo_dir: Path) -> str:
@@ -380,7 +389,10 @@ def _make_container_test_tool(
     def _ensure_container() -> str:
         if state["cid"]:
             return state["cid"]
-        proc = _run_cmd(["docker", "run", "-d", image, "sleep", "1800"], timeout=60)
+        proc = _run_cmd(
+            ["docker", "run", "-d", *docker_network_args("none"), image, "sleep", "1800"],
+            timeout=60,
+        )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.decode("utf-8", errors="replace").strip())
         state["cid"] = proc.stdout.decode("utf-8", errors="replace").strip()
@@ -528,6 +540,29 @@ def _build_task_prompt(row: dict[str, Any]) -> str:
     )
 
 
+def _estimate_usd(
+    orch_in: int,
+    orch_cached_in: int,
+    orch_out: int,
+    *,
+    in_price_per_m: float = 0.0,
+    cached_in_price_per_m: float = 0.0,
+    out_price_per_m: float = 0.0,
+) -> float:
+    billable_in = max(0, orch_in - orch_cached_in)
+    cost = (
+        (billable_in / 1_000_000.0) * max(0.0, in_price_per_m)
+        + (orch_cached_in / 1_000_000.0) * max(0.0, cached_in_price_per_m)
+        + (orch_out / 1_000_000.0) * max(0.0, out_price_per_m)
+    )
+    return round(cost, 6)
+
+
+def _git_head_sha(repo_root: Path) -> str:
+    proc = _run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=15)
+    return proc.stdout.decode("utf-8", errors="replace").strip() if proc.returncode == 0 else "unknown"
+
+
 def run_single_instance(
     row: dict[str, Any],
     *,
@@ -538,6 +573,9 @@ def run_single_instance(
     max_orch_turns: int,
     max_worker_turns: int,
     max_elapsed_sec: float,
+    in_price_per_m: float = 0.0,
+    cached_in_price_per_m: float = 0.0,
+    out_price_per_m: float = 0.0,
 ) -> dict[str, Any]:
     iid = row["instance_id"]
     repo = row["repo"]
@@ -552,6 +590,7 @@ def run_single_instance(
     eval_cmd = _official_eval_command(repo, test_patch)
 
     task_dir = run_dir / iid
+    task_dir.mkdir(parents=True, exist_ok=True)
     repo_dir = task_dir / "repo"
     scratch_dir = task_dir / "scratch"
     patches_dir = run_dir / "patches"
@@ -567,19 +606,30 @@ def run_single_instance(
         err = pull_proc.stderr.decode("utf-8", errors="replace").strip()
         print(f"[PULL FAILED] {err[:300]}", flush=True)
         return {
+            "task_id": iid,
             "instance_id": iid,
             "repo": repo,
             "difficulty": row.get("difficulty"),
+            "agent_status": "docker_pull_failed",
             "status": "docker_pull_failed",
+            "agent_error": err[:500],
+            "baseline_oracle": {"valid": False, "f2p_passed": 0, "f2p_total": len(fail_to_pass), "p2p_passed": 0, "p2p_total": len(pass_to_pass), "missing_tests": 0, "skipped_tests": 0, "reasons": ["docker pull failed"]},
+            "candidate_oracle": {"resolved": False, "verdict_code": "INFRA_ERROR", "patch_applied": False, "test_patch_applied": False, "protected_touched": [], "f2p_passed": 0, "f2p_total": len(fail_to_pass), "p2p_passed": 0, "p2p_total": len(pass_to_pass), "missing_tests": 0, "skipped_tests": 0},
             "resolved": False,
+            "trial_outcomes": [False],
+            "cheat_flags": [],
+            "tokens": {"orch_in": 0, "orch_cached_in": 0, "orch_out": 0, "orch_reasoning": 0, "worker_in": 0, "worker_out": 0},
+            "usd": 0.0,
+            "latency_ms": round((time.perf_counter() - t_task) * 1000.0, 2),
+            "funnel": {"localized": None, "dispatches": 0, "rollbacks": 0, "tool_calls": 0, "tool_schema_errors": 0},
             "error": err[:500],
         }
 
     test_tool_cleanup = None
     try:
-        # Pre-solve container sanity check: verify conda testbed activates BEFORE spending LLM tokens
+        # 1. Pre-solve container sanity check (zero LLM tokens)
         env_check = _run_cmd(
-            ["docker", "run", "--rm", image, "bash", "-lc", f"{_CONDA_ACTIVATE} && which python && python --version"],
+            ["docker", "run", "--rm", *docker_network_args("none"), image, "bash", "-lc", f"{_CONDA_ACTIVATE} && which python && python --version"],
             timeout=60,
         )
         if env_check.returncode != 0:
@@ -590,8 +640,91 @@ def run_single_instance(
             flush=True,
         )
 
-        print(f"[WORKSPACE] Extracting /testbed -> {repo_dir}", flush=True)
-        _extract_testbed_to_host(image, repo_dir)
+        # 2. Pre-solve Baseline Oracle Validity Gate (BEFORE spending any LLM tokens)
+        print(f"[ORACLE 1/2 — PRE-SOLVE] Baseline check (test_patch only, no fix) ...", flush=True)
+        base_eval = _docker_eval_once(
+            image,
+            repo=repo,
+            eval_cmd=eval_cmd,
+            model_patch="",
+            test_patch=test_patch,
+        )
+        base_check = (
+            _check_test_targets(repo, base_eval.get("output", ""), fail_to_pass, pass_to_pass)
+            if base_eval.get("infra_ok")
+            else {
+                "f2p_passed": 0,
+                "f2p_total": len(fail_to_pass),
+                "p2p_passed": 0,
+                "p2p_total": len(pass_to_pass),
+                "f2p_details": {},
+                "p2p_failed": {},
+            }
+        )
+        baseline_oracle = evaluate_baseline_oracle(
+            infra_ok=bool(base_eval.get("infra_ok")),
+            f2p_passed=base_check["f2p_passed"],
+            f2p_total=base_check["f2p_total"],
+            p2p_passed=base_check.get("p2p_passed", 0),
+            p2p_total=base_check.get("p2p_total", len(pass_to_pass)),
+            f2p_details=base_check.get("f2p_details"),
+            p2p_failed=base_check.get("p2p_failed"),
+        )
+        (task_dir / "oracle_baseline.log").write_text(base_eval.get("output", ""), encoding="utf-8")
+        print(
+            f"  baseline valid={baseline_oracle['valid']} | "
+            f"F2P={baseline_oracle['f2p_passed']}/{baseline_oracle['f2p_total']} | "
+            f"P2P={baseline_oracle['p2p_passed']}/{baseline_oracle['p2p_total']}",
+            flush=True,
+        )
+
+        if not baseline_oracle["valid"]:
+            reasons_str = "; ".join(baseline_oracle["reasons"])
+            print(f"[QUARANTINE] {iid}: INVALID_BASELINE ({reasons_str}) — skipping live solve (0 tokens spent).", flush=True)
+            cand_quarantine = evaluate_candidate_verdict(
+                baseline_oracle=baseline_oracle,
+                model_patch="",
+                protected_paths=(),
+                infra_ok=bool(base_eval.get("infra_ok")),
+                patch_applied=False,
+                test_patch_applied=bool(base_eval.get("test_patch_applied")),
+                f2p_passed=0,
+                f2p_total=len(fail_to_pass),
+                p2p_passed=0,
+                p2p_total=len(pass_to_pass),
+            )
+            record = {
+                "task_id": iid,
+                "instance_id": iid,
+                "repo": repo,
+                "version": row.get("version"),
+                "difficulty": row.get("difficulty"),
+                "base_commit": row.get("base_commit"),
+                "image": image,
+                "eval_command": eval_cmd,
+                "agent_status": "invalid_baseline",
+                "status": "INVALID_BASELINE",
+                "agent_error": reasons_str,
+                "orchestrator_model": orch_cfg.model,
+                "worker_model": worker_cfg.model,
+                "baseline_oracle": baseline_oracle,
+                "candidate_oracle": cand_quarantine,
+                "resolved": False,
+                "trial_outcomes": [False],
+                "cheat_flags": [],
+                "tokens": {"orch_in": 0, "orch_cached_in": 0, "orch_out": 0, "orch_reasoning": 0, "worker_in": 0, "worker_out": 0},
+                "usd": 0.0,
+                "latency_ms": round((time.perf_counter() - t_task) * 1000.0, 2),
+                "funnel": {"localized": None, "dispatches": 0, "rollbacks": 0, "tool_calls": 0, "tool_schema_errors": 0},
+                "patch_bytes": 0,
+                "patch_file": None,
+            }
+            (task_dir / "result.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+            return record
+
+        # 3. Decontaminated Workspace Extraction (.git stripped -> 1 orphan commit)
+        print(f"[WORKSPACE] Extracting & decontaminating /testbed -> {repo_dir}", flush=True)
+        decontam_info = _extract_testbed_to_host(image, repo_dir)
 
         test_tool_spec, test_tool_cleanup = _make_container_test_tool(image, repo_dir, repo)
         protected = ("tests/**", "testing/**", "test_*.py", "*_test.py")
@@ -633,37 +766,17 @@ def run_single_instance(
             test_tool_cleanup()
             test_tool_cleanup = None
 
+        cheat_flags = scan_trace_for_cheats(agent_res.trace, protected_paths=protected)
         print(
             f"[AGENT DONE] status={agent_res.status} | patch_bytes={len(model_patch)} | "
             f"orch_turns={agent_res.orchestrator_turns} | worker_dispatches={len(agent_res.worker_runs)} | "
             f"orch_tokens={agent_res.orchestrator_usage.total_tokens} | worker_tokens={agent_res.worker_usage.total_tokens} | "
-            f"elapsed={agent_res.elapsed_ms / 1000:.1f}s",
+            f"cheat_hits={len(cheat_flags)} | elapsed={agent_res.elapsed_ms / 1000:.1f}s",
             flush=True,
         )
 
-        # Independent Official Docker Oracle Evaluation
-        print(f"[ORACLE 1/2] Baseline check (test_patch only, no fix) ...", flush=True)
-        base_eval = _docker_eval_once(
-            image,
-            repo=repo,
-            eval_cmd=eval_cmd,
-            model_patch="",
-            test_patch=test_patch,
-        )
-        base_check = (
-            _check_test_targets(repo, base_eval.get("output", ""), fail_to_pass, pass_to_pass)
-            if base_eval.get("infra_ok")
-            else {"f2p_passed": 0, "f2p_total": len(fail_to_pass), "f2p_all_passed": False}
-        )
-        print(
-            f"  baseline F2P={base_check['f2p_passed']}/{base_check['f2p_total']} | "
-            f"P2P={base_check.get('p2p_passed', 0)}/{base_check.get('p2p_total', len(pass_to_pass))} "
-            f"(expected F2P < {base_check['f2p_total']})",
-            flush=True,
-        )
-        (task_dir / "oracle_baseline.log").write_text(base_eval.get("output", ""), encoding="utf-8")
-
-        print(f"[ORACLE 2/2] Candidate eval (model_patch + official test_patch) ...", flush=True)
+        # 4. Independent Privilege-Separated Candidate Docker Oracle
+        print(f"[ORACLE 2/2] Candidate eval (model_patch + official test_patch, --network none) ...", flush=True)
         cand_eval = _docker_eval_once(
             image,
             repo=repo,
@@ -679,28 +792,59 @@ def run_single_instance(
                 "f2p_total": len(fail_to_pass),
                 "p2p_passed": 0,
                 "p2p_total": len(pass_to_pass),
-                "f2p_all_passed": False,
-                "p2p_all_passed": False,
+                "f2p_details": {},
+                "p2p_failed": {},
             }
         )
         (task_dir / "oracle_eval.log").write_text(cand_eval.get("output", ""), encoding="utf-8")
 
-        resolved = bool(
-            model_patch.strip()
-            and cand_eval.get("infra_ok")
-            and cand_eval.get("patch_applied")
-            and cand_eval.get("test_patch_applied")
-            and cand_check.get("f2p_all_passed")
-            and cand_check.get("p2p_all_passed")
+        candidate_oracle = evaluate_candidate_verdict(
+            baseline_oracle=baseline_oracle,
+            model_patch=model_patch,
+            protected_paths=protected,
+            infra_ok=bool(cand_eval.get("infra_ok")),
+            patch_applied=bool(cand_eval.get("patch_applied")),
+            test_patch_applied=bool(cand_eval.get("test_patch_applied")),
+            f2p_passed=cand_check["f2p_passed"],
+            f2p_total=cand_check["f2p_total"],
+            p2p_passed=cand_check["p2p_passed"],
+            p2p_total=cand_check["p2p_total"],
+            f2p_details=cand_check.get("f2p_details"),
+            p2p_failed=cand_check.get("p2p_failed"),
         )
+        resolved = bool(candidate_oracle["resolved"])
         print(
-            f"[VERDICT] {iid}: resolved={resolved} | "
-            f"F2P={cand_check['f2p_passed']}/{cand_check['f2p_total']} | "
-            f"P2P={cand_check['p2p_passed']}/{cand_check['p2p_total']}",
+            f"[VERDICT] {iid}: resolved={resolved} ({candidate_oracle['verdict_code']}) | "
+            f"F2P={candidate_oracle['f2p_passed']}/{candidate_oracle['f2p_total']} | "
+            f"P2P={candidate_oracle['p2p_passed']}/{candidate_oracle['p2p_total']} | "
+            f"tamper={candidate_oracle['protected_touched']} | cheats={len(cheat_flags)}",
             flush=True,
         )
 
+        orch_in = int(agent_res.orchestrator_usage.prompt_tokens or 0)
+        orch_cached = int(agent_res.orchestrator_usage.cached_tokens or 0)
+        orch_out = int(agent_res.orchestrator_usage.completion_tokens or 0)
+        orch_reas = int(agent_res.orchestrator_usage.reasoning_tokens or 0)
+        worker_in = int(agent_res.worker_usage.prompt_tokens or 0)
+        worker_out = int(agent_res.worker_usage.completion_tokens or 0)
+        usd = _estimate_usd(
+            orch_in,
+            orch_cached,
+            orch_out,
+            in_price_per_m=in_price_per_m,
+            cached_in_price_per_m=cached_in_price_per_m,
+            out_price_per_m=out_price_per_m,
+        )
+
+        tool_schema_errors = sum(
+            1
+            for ev in agent_res.trace
+            if isinstance(ev, dict) and str(ev.get("error_code") or "").upper() in {"INVALID_ARGS", "UNKNOWN_TOOL", "SCHEMA_ERROR"}
+        )
+        worker_rollbacks = sum(1 for w in agent_res.worker_runs if w.rolled_back)
+
         record = {
+            "task_id": iid,
             "instance_id": iid,
             "repo": repo,
             "version": row.get("version"),
@@ -708,6 +852,7 @@ def run_single_instance(
             "base_commit": row.get("base_commit"),
             "image": image,
             "eval_command": eval_cmd,
+            "decontamination": decontam_info,
             "agent_status": agent_res.status,
             "agent_error": agent_res.error,
             "orchestrator_model": agent_res.orchestrator_model,
@@ -715,25 +860,33 @@ def run_single_instance(
             "orchestrator_turns": agent_res.orchestrator_turns,
             "orchestrator_tool_calls": agent_res.orchestrator_tool_calls,
             "orchestrator_reasoning_chars": agent_res.orchestrator_reasoning_chars,
-            "orchestrator_usage": agent_res.orchestrator_usage.to_dict(),
-            "worker_dispatches": len(agent_res.worker_runs),
-            "worker_rollbacks": sum(1 for w in agent_res.worker_runs if w.rolled_back),
-            "worker_usage": agent_res.worker_usage.to_dict(),
-            "agent_elapsed_sec": round(agent_res.elapsed_ms / 1000.0, 2),
+            "baseline_oracle": baseline_oracle,
+            "candidate_oracle": candidate_oracle,
+            "resolved": resolved,
+            "trial_outcomes": [resolved],
+            "cheat_flags": cheat_flags,
+            "tokens": {
+                "orch_in": orch_in,
+                "orch_cached_in": orch_cached,
+                "orch_out": orch_out,
+                "orch_reasoning": orch_reas,
+                "worker_in": worker_in,
+                "worker_out": worker_out,
+            },
+            "usd": usd,
+            "latency_ms": round(agent_res.elapsed_ms, 2),
             "total_task_elapsed_sec": round(time.perf_counter() - t_task, 2),
+            "funnel": {
+                "localized": len(agent_res.worker_runs) > 0,
+                "dispatches": len(agent_res.worker_runs),
+                "rollbacks": worker_rollbacks,
+                "tool_calls": agent_res.orchestrator_tool_calls + sum(w.tool_calls for w in agent_res.worker_runs),
+                "tool_schema_errors": tool_schema_errors,
+            },
             "patch_bytes": len(model_patch),
             "patch_file": str(patch_file.relative_to(run_dir)),
-            "baseline_f2p_passed": base_check["f2p_passed"],
-            "baseline_f2p_total": base_check["f2p_total"],
-            "baseline_oracle_valid": base_check["f2p_passed"] < base_check["f2p_total"],
-            "patch_applied": bool(cand_eval.get("patch_applied")),
-            "f2p_passed": cand_check["f2p_passed"],
-            "f2p_total": cand_check["f2p_total"],
-            "p2p_passed": cand_check["p2p_passed"],
-            "p2p_total": cand_check["p2p_total"],
             "f2p_details": cand_check.get("f2p_details", {}),
             "p2p_failed": cand_check.get("p2p_failed", {}),
-            "resolved": resolved,
         }
         (task_dir / "result.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         return record
@@ -750,7 +903,7 @@ def run_single_instance(
 
 def main() -> int:
     load_dotenv(REPO_ROOT / ".env", override=False)
-    parser = argparse.ArgumentParser(description="Run SWE-bench Verified slice on Mini Hivo Hybrid Runner.")
+    parser = argparse.ArgumentParser(description="Run SWE-bench Verified slice on Mini Hivo Hybrid Runner (Stage 0 sealed).")
     parser.add_argument(
         "--provider",
         choices=("groq", "nvidia", "openrouter", "cerebras", "gemini"),
@@ -765,12 +918,41 @@ def main() -> int:
         default=list(DEFAULT_SLICE),
         help="Explicit SWE-bench Verified instance IDs (default: seed=42 3-task stratified slice).",
     )
+    parser.add_argument("--slice-role", choices=("dev", "held-out", "calibration"), default="calibration")
     parser.add_argument("--max-orch-turns", type=int, default=14)
     parser.add_argument("--max-worker-turns", type=int, default=5)
     parser.add_argument("--max-elapsed-sec", type=float, default=420.0)
+    parser.add_argument("--in-price-per-m", type=float, default=0.0, help="Orchestrator input USD per 1M tokens.")
+    parser.add_argument("--cached-in-price-per-m", type=float, default=0.0, help="Orchestrator cached-input USD per 1M tokens.")
+    parser.add_argument("--out-price-per-m", type=float, default=0.0, help="Orchestrator output USD per 1M tokens.")
     parser.add_argument("--keep-images", action="store_true", help="Do not docker rmi task images after eval.")
+    parser.add_argument("--preflight-only", action="store_true", help="Run zero-LLM host/sandbox preflight and exit.")
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip pre-run host/sandbox preflight check.")
     parser.add_argument("--output-dir", default=None, help="Optional explicit run output directory.")
     args = parser.parse_args()
+
+    gpu_residency_pct: float | None = None
+    if not args.skip_preflight:
+        pf = run_preflight(
+            repo_root=REPO_ROOT,
+            provider=args.provider,
+            worker_model=args.worker_model,
+            require_docker=True,
+            require_local_worker=True,
+            require_harbor=False,
+        )
+        gpu_residency_pct = pf.get("gpu_residency_pct")
+        print(f"[PREFLIGHT] ready={pf['ready']}", flush=True)
+        for chk in pf["checks"]:
+            tag = "PASS" if chk["ok"] else ("FAIL" if chk["required"] else "INFO")
+            print(f"  [{tag:4s}] {chk['name']}: {chk['detail']}", flush=True)
+            if not chk["ok"] and chk.get("hint"):
+                print(f"         hint: {chk['hint']}", flush=True)
+        if args.preflight_only:
+            return 0 if pf["ready"] else 1
+        if not pf["ready"]:
+            print("[ABORT] Host preflight failed. Fix required checks above before spending tokens.", file=sys.stderr)
+            return 2
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = (
@@ -782,6 +964,35 @@ def main() -> int:
 
     orch_cfg = _build_cloud_config(args.provider, args.model)
     worker_cfg = ollama_worker(model=args.worker_model, num_ctx=args.worker_ctx, think=False)
+
+    meta = {
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "stage": "stage-1",
+        "slice_role": args.slice_role,
+        "benchmark_name": "SWE-bench Verified",
+        "benchmark_version": "legacy-calibration",
+        "seed": DEFAULT_SEED,
+        "harness_sha": _git_head_sha(REPO_ROOT),
+        "orchestrator": {
+            "provider": args.provider,
+            "model": orch_cfg.model,
+            "effort": orch_cfg.reasoning_effort,
+            "think": orch_cfg.think,
+        },
+        "worker": {
+            "runtime": "ollama",
+            "model": worker_cfg.model,
+            "num_ctx": worker_cfg.num_ctx,
+            "gpu_residency_pct": gpu_residency_pct,
+        },
+        "decontamination": {
+            "git_stripped": True,
+            "network_mode": "none",
+            "tmp_clean": True,
+            "secrets_isolated": True,
+        },
+        "human_audit": "None (Automated)",
+    }
 
     print(f"[RUN DIR] {run_dir}", flush=True)
     print(f"[ORCHESTRATOR] {orch_cfg.base_url} | {orch_cfg.model} | think={orch_cfg.think} | effort={orch_cfg.reasoning_effort}", flush=True)
@@ -802,9 +1013,11 @@ def main() -> int:
             max_orch_turns=args.max_orch_turns,
             max_worker_turns=args.max_worker_turns,
             max_elapsed_sec=args.max_elapsed_sec,
+            in_price_per_m=args.in_price_per_m,
+            cached_in_price_per_m=args.cached_in_price_per_m,
+            out_price_per_m=args.out_price_per_m,
         )
         results.append(rec)
-        # Append prediction incrementally so progress is never lost
         patch_rel = rec.get("patch_file")
         patch_txt = (run_dir / patch_rel).read_text(encoding="utf-8") if patch_rel and (run_dir / patch_rel).is_file() else ""
         with predictions_path.open("a", encoding="utf-8") as fh:
@@ -813,35 +1026,30 @@ def main() -> int:
                 "model_name_or_path": f"{orch_cfg.model}+{worker_cfg.model}",
                 "model_patch": patch_txt,
             }) + "\n")
-        (run_dir / "results.json").write_text(
-            json.dumps(
-                {
-                    "seed": DEFAULT_SEED,
-                    "orchestrator": orch_cfg.to_dict(),
-                    "worker": worker_cfg.to_dict(),
-                    "n_tasks": len(results),
-                    "resolved_count": sum(1 for r in results if r.get("resolved")),
-                    "results": results,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        payload = build_benchmark_results(meta, results, pass_k=1)
+        (run_dir / "results.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    resolved_n = sum(1 for r in results if r.get("resolved"))
-    print(f"\n================ SUMMARY (N={len(results)}) ================", flush=True)
-    print(f"Resolved: {resolved_n}/{len(results)}", flush=True)
-    for r in results:
+    final_payload = build_benchmark_results(meta, results, pass_k=1)
+    s = final_payload["summary"]
+    tc = final_payload["meta"]["truth_check"]
+    print(f"\n================ SUMMARY (N={s['total_n']}, TruthCheck={tc['status']}) ================", flush=True)
+    print(
+        f"Resolved: raw={s['resolved_n']}/{s['total_n']} ({s['raw_resolve_rate']:.1%}) | "
+        f"valid={s['resolved_n']}/{s['valid_non_blocked_n']} ({s['valid_resolve_rate']:.1%}) | "
+        f"cheating_adj={s['cheating_adjusted_rate']:.1%} | usd=${s['total_usd']:.4f} | cache_hit={s['cache_hit_rate']}",
+        flush=True,
+    )
+    for r in final_payload["cases"]:
+        co = r.get("candidate_oracle") or {}
         print(
-            f"  {r['instance_id']:28s} | resolved={str(r.get('resolved')):5s} | "
-            f"F2P={r.get('f2p_passed', 0)}/{r.get('f2p_total', 0)} | "
-            f"P2P={r.get('p2p_passed', 0)}/{r.get('p2p_total', 0)} | "
-            f"status={r.get('agent_status')} | orch_tok={((r.get('orchestrator_usage') or {}).get('total_tokens'))} | "
-            f"worker_tok={((r.get('worker_usage') or {}).get('total_tokens'))}",
+            f"  {r['task_id']:28s} | resolved={str(r.get('resolved')):5s} ({co.get('verdict_code', '?')}) | "
+            f"F2P={co.get('f2p_passed', 0)}/{co.get('f2p_total', 0)} | "
+            f"P2P={co.get('p2p_passed', 0)}/{co.get('p2p_total', 0)} | "
+            f"bucket={r.get('failure_bucket') or '-'} | cheats={len(r.get('cheat_flags') or [])}",
             flush=True,
         )
-    print(f"Saved full results to: {run_dir / 'results.json'}", flush=True)
-    return 0
+    print(f"Saved canonical 3-key results to: {run_dir / 'results.json'}", flush=True)
+    return 0 if tc["harness_valid"] else 1
 
 
 if __name__ == "__main__":

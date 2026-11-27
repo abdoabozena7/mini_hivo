@@ -15,7 +15,9 @@ This is the team's chronological evidence locker for detailed, small-scoped engi
 
 | Date | Author | Type | Subsystem | Status | Headline & Open Next Issue | Report | Data / Chain |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `2026-11-27` | kareem | `change` | `hivo/benchmarks / scripts / tests` | `verified` | Implemented Mini Hivo's stdlib-only Stage 0 benchmarking core ([`hivo/benchmarks/`](../../../../hivo/benchmarks/__init__.py)), hardened [... **Next:** Add higher-quota cloud provider key (e.g., `NVIDIA_API_KEY` or OpenRouter) in local `.env`, install `harbor` CLI, and build Stage 1 `Terminal-Bench 4.1` Harbor adapter + sealed `SWE-bench` calibration run | [Stage 0 Benchmark Harness Hardening, Self-Test Suite & Host Preflight](kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md) | [prov](kareem/2026-11-27_stage0-benchmark-harness-and-preflight/provenance.json), from [SOTA Benchmarking Rules, 2026 Progressive Plan & Initial Scoreboard](../2026-11-26_benchmarking-rules-and-sota-plan/REPORT.md) |
 | `2026-11-26` | kareem | `change` | `dev_rules / docs / worklogs` | `verified` | Separated Mini Hivo's development governance into three layers — prescriptive subsystem rules (`dev_rules/`), shared living architecture... **Next:** Return computed `unified_diff` in `dispatch_worker` (`hivo/hybrid/runner.py`) to catch silent light-worker edit defects immediately | [Modular `dev_rules/`, Living Subsystem Docs & 10-Person Worklog Evidence Locker](kareem/2026-11-26_dev-rules-and-worklog-policy/REPORT.md) | [prov](kareem/2026-11-26_dev-rules-and-worklog-policy/provenance.json) |
+| `2026-11-26` | kareem | `change` | `dev_rules / docs / benchmarking` | `verified` | Added Mini Hivo's dedicated SOTA benchmarking guardrails ([`dev_rules/benchmarking_rules.md`](../../../../dev_rules/benchmarking_rules.md... **Next:** Implement Stage 0 benchmark runner hardening (`.git` strip, `--network none`, pre-solve baseline quarantine, trace cheat-scanner, 3-key KPI emitter, host/sandbox preflight CLI) + offline self-test suite `tests/test_benchmark_*.py` wired into `python scripts/check.py --benchmarks | [SOTA Benchmarking Rules, 2026 Progressive Plan & Initial Scoreboard](kareem/2026-11-26_benchmarking-rules-and-sota-plan/REPORT.md) | [prov](kareem/2026-11-26_benchmarking-rules-and-sota-plan/provenance.json), from [Modular `dev_rules/`, Living Subsystem Docs & 10-Person Worklog Evidence Locker](../2026-11-26_dev-rules-and-worklog-policy/REPORT.md) |
 
 ---
 
@@ -46,7 +48,7 @@ Coding agents and feature PRs must **never** auto-edit `dev_rules/*.md`, `AGENTS
 | Abozena | [`abozena/`](abozena/) | `0` | [`0`](abozena/LOG.md) | — |
 | Ahmed | [`ahmed/`](ahmed/) | `0` | [`0`](ahmed/LOG.md) | — |
 | Fatma | [`fatma/`](fatma/) | `0` | [`0`](fatma/LOG.md) | — |
-| Kareem | [`kareem/`](kareem/) | `1` | [`0`](kareem/LOG.md) | `2026-11-26` — [Modular `dev_rules/`, Living Subsystem Docs & 10-Person Worklog Evidence Locker](kareem/2026-11-26_dev-rules-and-worklog-policy/REPORT.md) |
+| Kareem | [`kareem/`](kareem/) | `3` | [`0`](kareem/LOG.md) | `2026-11-27` — [Stage 0 Benchmark Harness Hardening, Self-Test Suite & Host Preflight](kareem/2026-11-27_stage0-benchmark-harness-and-preflight/REPORT.md) |
 | Marihan | [`marihan/`](marihan/) | `0` | [`0`](marihan/LOG.md) | — |
 | Renad | [`renad/`](renad/) | `0` | [`0`](renad/LOG.md) | — |
 | Rodina | [`rodina/`](rodina/) | `0` | [`0`](rodina/LOG.md) | — |

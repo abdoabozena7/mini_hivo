@@ -69,6 +69,7 @@ class CheckRunnerTests(unittest.TestCase):
         self.assertIn("tests.test_tools_fs_read", all_mods)
         self.assertIn("tests.test_providers", all_mods)
         self.assertIn("tests.test_hybrid_runner", all_mods)
+        self.assertIn("tests.test_benchmark_stage0", all_mods)
         self.assertIn("tests.test_worklog_index", all_mods)
         self.assertIn("tests.test_check_runner", all_mods)
         self.assertNotIn("tests.test_requirement_clarification", all_mods)
@@ -76,6 +77,9 @@ class CheckRunnerTests(unittest.TestCase):
         tools_only = _MOD.discover_v2_test_modules(repo_root, tools=True)
         self.assertTrue(all(m.startswith("tests.test_tools_") for m in tools_only))
         self.assertGreaterEqual(len(tools_only), 8)
+
+        bench_only = _MOD.discover_v2_test_modules(repo_root, benchmarks=True)
+        self.assertEqual(bench_only, ["tests.test_benchmark_stage0"])
 
 
 if __name__ == "__main__":
