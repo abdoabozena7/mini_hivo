@@ -232,6 +232,12 @@ class TestHybridAgentRunnerControlledE2E(unittest.TestCase):
             self.assertEqual(len(result.worker_runs), 1)
             self.assertEqual(result.worker_runs[0].status, "done")
             self.assertFalse(result.worker_runs[0].rolled_back)
+            self.assertIn("-    return a - b", result.worker_runs[0].unified_diff)
+            self.assertIn("+    return a + b", result.worker_runs[0].unified_diff)
+            # Verify orchestrator received the real unified_diff in its turn-3 tool observation
+            turn3_tool_obs = orch_payloads[2]["messages"][-1]["content"]
+            self.assertIn("unified_diff", turn3_tool_obs)
+            self.assertIn("+    return a + b", turn3_tool_obs)
 
             # Verify non-interactive orchestrator omits ask_user and worker stays lean (3 tools)
             run_started = next(e for e in result.trace if e.get("event") == "run_started")
@@ -316,6 +322,7 @@ class TestHybridAgentRunnerControlledE2E(unittest.TestCase):
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.worker_runs[0].status, "failed")
             self.assertTrue(result.worker_runs[0].rolled_back)
+            self.assertEqual(result.worker_runs[0].unified_diff, "")
             self.assertEqual(result.modified_files, ())
             # Disk bytes restored identically
             self.assertEqual((ws / "src" / "calc.py").read_text(encoding="utf-8"), original_bytes)
@@ -475,6 +482,60 @@ class TestHybridAgentRunnerControlledE2E(unittest.TestCase):
                 self.assertEqual(res.status, "completed")
                 self.assertEqual(seen_urls, [f"{preset.base_url}/chat/completions"])
                 self.assertEqual(res.orchestrator_model, preset.model)
+
+    def test_worker_unified_diff_truncates_cleanly_and_prompt_enforces_one_by_one(self) -> None:
+        from hivo.hybrid.prompts import build_orchestrator_system_prompt
+
+        prompt = build_orchestrator_system_prompt(include_run_command=True)
+        self.assertIn("ONE small problem at a time", prompt)
+        self.assertIn("unified_diff", prompt)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "big.txt").write_text("line_0\n", encoding="utf-8")
+
+            orch_turn = {"n": 0}
+
+            def orch_transport(url: str, payload: dict, headers: dict, timeout: float) -> RawHttpResponse:
+                orch_turn["n"] += 1
+                if orch_turn["n"] == 1:
+                    return _openai_ok(tool_calls=[{
+                        "id": "o1",
+                        "name": "dispatch_worker",
+                        "arguments": {"task": "Expand big.txt", "target_files": ["big.txt"]},
+                    }])
+                return _openai_ok(content="Checked truncated diff.")
+
+            worker_turn = {"n": 0}
+
+            def worker_transport(url: str, payload: dict, headers: dict, timeout: float) -> RawHttpResponse:
+                worker_turn["n"] += 1
+                if worker_turn["n"] == 1:
+                    big_body = "".join(f"row_{i}_" + ("x" * 40) + "\n" for i in range(40))
+                    return _ollama_ok(tool_calls=[{
+                        "id": "w1",
+                        "name": "write_file",
+                        "arguments": {"path": "big.txt", "content": big_body, "overwrite": True},
+                    }])
+                return _ollama_ok(content="Updated big.txt.")
+
+            orch_cfg = groq_orchestrator()
+            worker_cfg = ollama_worker()
+            runner = HybridAgentRunner(
+                ws,
+                HybridRunConfig(
+                    orchestrator=orch_cfg,
+                    worker=worker_cfg,
+                    max_worker_diff_chars=300,
+                ),
+                orchestrator_client=create_client(orch_cfg, api_key="k", transport=orch_transport),
+                worker_client=create_client(worker_cfg, transport=worker_transport),
+            )
+            res = runner.run("Expand big.txt")
+            self.assertEqual(res.status, "completed")
+            diff = res.worker_runs[0].unified_diff
+            self.assertIn("truncated from", diff)
+            self.assertLessEqual(len(diff), 400)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-27",
+  "author": "kareem",
+  "type": "experiment",
+  "subsystem": "hivo/hybrid / hivo/tools / live-ablation",
+  "branch": "feat/benchmark-harness-stage0",
+  "base_commit": "dac866bfe35c3a94969c7ad84ed4ae7ee0af8538",
+  "tested_revision": "dac866bfe35c3a94969c7ad84ed4ae7ee0af8538+uncommitted",
+  "source_sha256": {
+    "hivo/hybrid/runner.py": "0e6d69ebcc60265cb6ac31e08432722b65cd7bc5add28f84126b3e8389cd4e7c",
+    "hivo/hybrid/prompts.py": "e6884fd0bc2d12717995f9d3a12233cb5fd779511579b1616842ddabaaf1f57d",
+    "hivo/tools/orchestration.py": "b4b02e7eb1d2ba2c9622de7668e8b6bac73e751b293d7957a031b8829e75fa2b",
+    "tests/test_hybrid_runner.py": "1162feee832f71ed26a8bf39ce72c3b61829c3392eff264ff2c660393d177fcc",
+    "tests/test_tools_exec_and_orch.py": "0f3828985cf8056bcc959b33cdbd9b120f7f6897ffd1cba8149f9d32dfecb137",
+    "docs/ORCHESTRATION_ARCHITECTURE.md": "b5000e09281db0d6ba805e6573957f17f772f5ae52606c9f0b3ba5090fcb4c5d"
+  },
+  "environment": {
+    "os": "Windows 11 (10.0.26300)",
+    "python": "3.14.6",
+    "node": "v24.21.0",
+    "gpu": "NVIDIA GeForce GTX 1650 (4096 MiB VRAM, 100% GPU resident at 1.60 GB)",
+    "runtime_tools": "Ollama 0.40.18, Docker 29.6.2"
+  },
+  "models": {
+    "orchestrator": "Groq qwen/qwen3.8-27b (reasoning_effort=medium) [Runs 1-3]; scripted Antigravity 6-step PoC [Run 4]",
+    "worker": "Ollama qwen3.5:2b-q4_K_M (Q4_K_M, num_ctx=4096, think=False)"
+  },
+  "reproduction_commands": [
+    "python scripts/check.py -v",
+    "python scripts/update_worklog_index.py --check",
+    "node output/live_tests/2026-11-27_breakout-visual-repair/oracle/verify_breakout.js output/live_tests/2026-11-27_breakout-visual-repair/before",
+    "python -u output/live_tests/2026-11-27_breakout-visual-repair-poc-2b/run_poc.py"
+  ]
+}

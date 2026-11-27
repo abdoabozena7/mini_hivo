@@ -1,0 +1,31 @@
+--- before/style.css
++++ after/style.css
+@@ -8,18 +8,18 @@
+   --pink: #f472b6;
+ }
+ 
+-* {
+-  box-sizing: border-box;
+-}
+-
+-body {
+-  margin: 0;
+-  min-height: 100vh;
++.hud {
++  position: relative;
+   display: flex;
+   align-items: center;
+-  justify-content: center;
+-  background: radial-gradient(circle at top, #131b3a 0%, var(--bg) 70%);
+-  color: var(--text);
++  justify-content: space-between;
++  padding: 10px 16px;
++  background: rgba(17, 24, 51, 0.85);
++  border: 1px solid var(--border);
++  border-radius: 10px;
++  box-shadow: 0 0 12px rgba(0, 229, 255, 0.15);
++  z-index: 10;
++}
+   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+ }
+ 

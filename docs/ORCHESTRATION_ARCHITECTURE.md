@@ -3,7 +3,7 @@
 > - **Status:** Living current-state implementation documentation (`hivo/providers/` + `hivo/hybrid/`)
 > - **Governing Rules:** [`../dev_rules/orchestration_rules.md`](../dev_rules/orchestration_rules.md) *(prescriptive guardrails & capability floors)*
 > - **Deployment & Provider Reference:** [`HYBRID_MODEL_STRATEGY.md`](HYBRID_MODEL_STRATEGY.md) *(4 GB VRAM tuning, free dev vs. paid target cloud providers, deferred research tracks)*
-> - **Historical Origin:** Introduced in PR #6 (`updates/R_UPDATE_011.md`) and benchmarked in PR #7 (`updates/R_UPDATE_012.md`, `reports/experiment23/`). Maintains zero imports from `mini.py` and leaves `SingleModelPolicy` untouched.
+> - **Active v2 Runtime:** `hivo/providers/` + `hivo/hybrid/` is Mini Hivo's sole active orchestration engine (v2-only), with zero dependencies on the retired v1 historical archive (`mini.py`, `SingleModelPolicy`, `updates/`, `reports/`). Historical creation provenance is preserved read-only in `updates/R_UPDATE_011.md` and `reports/experiment23/`.
 
 ---
 
@@ -22,8 +22,8 @@
 
 | Module | Responsibility | Key Exports / Symbols |
 | :--- | :--- | :--- |
-| [`prompts.py`](../hivo/hybrid/prompts.py) | Role-specific compact system prompts and worker packet formatter (orchestrator navigation/delegation rules; ultra-compact worker stop-on-success rules) | `build_orchestrator_system_prompt`, `build_worker_system_prompt`, `format_worker_task_prompt` |
-| [`runner.py`](../hivo/hybrid/runner.py) | End-to-end asymmetric loop over `hivo.tools.ToolBinding` and `hivo.providers`: orchestrator turn routing, two-pass anchor-pinned `_compact_history()`, `dispatch_worker` execution, `O(target_files)` atomic byte snapshot/rollback, circuit breakers, and event callbacks | `HybridAgentRunner`, `HybridRunConfig`, `WorkerRunReport`, `HybridRunResult` |
+| [`prompts.py`](../hivo/hybrid/prompts.py) | Role-specific compact system prompts and worker packet formatter (one-small-problem-at-a-time orchestrator planning/delegation/diff-audit rules; ultra-compact worker stop-on-success rules) | `build_orchestrator_system_prompt`, `build_worker_system_prompt`, `format_worker_task_prompt` |
+| [`runner.py`](../hivo/hybrid/runner.py) | End-to-end asymmetric loop over `hivo.tools.ToolBinding` and `hivo.providers`: orchestrator turn routing, two-pass anchor-pinned `_compact_history()`, `dispatch_worker` execution, `O(target_files)` atomic byte snapshot/rollback, computed pre/post `unified_diff` handoff (`_compute_snapshot_diff`), circuit breakers, and event callbacks | `HybridAgentRunner`, `HybridRunConfig`, `WorkerRunReport`, `HybridRunResult` |
 | [`__init__.py`](../hivo/hybrid/__init__.py) | Public package surface | Re-exports runner, config/result dataclasses, and prompt builders |
 
 ### 1.3 Live Smoke & Benchmark Harnesses (`scripts/`)
@@ -45,19 +45,20 @@ User Task
             a. Snapshot exact bytes of ONLY packet.target_files (O(target_files))
             b. Spawn fenced static coder worker ToolBinding (default 3 tools: read_file, edit_file, write_file)
             c. Run worker sub-loop (think=False, capped num_ctx, max_worker_turns, max_consecutive_worker_errors=2)
-            d. On failure/max-turns/error-abort: restore exact snapshotted bytes via atomic_write_bytes (delete newly created files)
-            e. Return WorkerRunReport summary to orchestrator
+            d. On failure/max-turns/error-abort: restore exact snapshotted bytes via atomic_write_bytes (delete newly created files) and emit empty unified_diff
+            e. On success: compute bounded pre/post unified_diff from target_snapshot vs. disk bytes (_compute_snapshot_diff) and return WorkerRunReport + unified_diff to orchestrator
      3. Return HybridRunResult (status, modified_files, per-tier TokenUsage, WorkerRunReports, trace)
 ```
 
 ### Key Configuration Defaults (`HybridRunConfig`)
 - `max_orchestrator_turns = 16`, `max_worker_turns = 6`, `max_worker_dispatches = 6`, `max_consecutive_worker_errors = 2`
 - `orchestrator_max_read_lines = 200`, `orchestrator_max_output_chars = 16_000`, `worker_max_read_lines = 180`
-- `max_history_chars = 20_000`, `worker_max_history_chars = 10_000`, `max_elapsed_sec = 300.0`, `auto_checkpoint_worker = True`
+- `max_history_chars = 20_000`, `worker_max_history_chars = 10_000`, `max_worker_diff_chars = 2_400`, `max_elapsed_sec = 300.0`, `auto_checkpoint_worker = True`
 - `protected_paths: tuple[str, ...] = ()`, `extra_orchestrator_tools: tuple[ToolSpec, ...] = ()`
 
-### Known Current Gaps (Tracked as `[TARGET]` in `dev_rules/orchestration_rules.md`)
-- `dispatch_worker` does not yet return a computed pre/post `unified_diff` directly inside its response payload.
+### Known Current Gaps (Tracked in `dev_rules/orchestration_rules.md` & Pending Rule Proposals)
+- `_compact_history()` currently counts only `message["content"]` length and does not yet include serialized `assistant.tool_calls` JSON payloads (exposed by Groq `7K` ITPM `HTTP 413` in [`2026-11-27_breakout-visual-repair-hybrid-ablation`](worklogs/kareem/2026-11-27_breakout-visual-repair-hybrid-ablation/REPORT.md)).
+- Inline post-edit syntax validation in `hivo/tools/base.py` covers `.py`, `.json`, and `.js`, but does not yet validate `.css` brace balance.
 - Contract-complete multi-file decomposition ($\kappa \ge 0.90$), declarative per-leaf verification oracles (DCVG), and `< ~60`-line greenfield whole-file atomic rewrite are not yet wired into `hivo/hybrid/runner.py`.
 
 ---

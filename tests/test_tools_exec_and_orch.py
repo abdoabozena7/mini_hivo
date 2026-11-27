@@ -176,6 +176,7 @@ class TestToolsExecAndOrch(unittest.TestCase):
                     "status": "done",
                     "modified_files": packet["target_files"],
                     "diff_summary": "Updated 1 function",
+                    "unified_diff": "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n",
                 }
 
             def fake_ask(question: str, options: list[str]) -> str:
@@ -251,6 +252,7 @@ class TestToolsExecAndOrch(unittest.TestCase):
             self.assertTrue(r_disp["ok"])
             self.assertEqual(dispatched[0]["target_files"], ["src/a.py"])
             self.assertEqual(r_disp["data"]["status"], "done")
+            self.assertIn("+x = 2", r_disp["data"]["unified_diff"])
 
             r_disp_esc = execute_tool(
                 "dispatch_worker",

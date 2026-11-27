@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import difflib
 from pathlib import Path
 import time
 from typing import Any, Callable, Mapping
@@ -65,6 +66,7 @@ class HybridRunConfig:
     worker_max_read_lines: int = 180
     max_history_chars: int = 20_000
     worker_max_history_chars: int = 10_000
+    max_worker_diff_chars: int = 2_400
     max_elapsed_sec: float = 300.0
     auto_checkpoint_worker: bool = True
     dotenv_path: str | None = None
@@ -87,6 +89,7 @@ class WorkerRunReport:
     usage: TokenUsage
     latency_ms: float
     model: str
+    unified_diff: str = ""
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,54 @@ def _compact_history(
             msg["content"] = short
 
     return compacted
+
+
+def _compute_snapshot_diff(
+    target_snapshot: Mapping[Path, bytes | None],
+    workspace_root: Path,
+    *,
+    max_chars: int = 2_400,
+) -> str:
+    """Compute a compact unified diff from pre-dispatch snapshot bytes vs. post-dispatch disk bytes."""
+    chunks: list[str] = []
+    for target_path in sorted(target_snapshot.keys(), key=lambda p: str(p)):
+        orig_bytes = target_snapshot[target_path]
+        curr_bytes = target_path.read_bytes() if target_path.is_file() else None
+        if orig_bytes == curr_bytes:
+            continue
+        try:
+            rel_posix = target_path.relative_to(workspace_root).as_posix()
+        except ValueError:
+            rel_posix = target_path.name
+        before_lines = (
+            orig_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+            if orig_bytes is not None
+            else []
+        )
+        after_lines = (
+            curr_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+            if curr_bytes is not None
+            else []
+        )
+        diff_lines = list(
+            difflib.unified_diff(
+                before_lines,
+                after_lines,
+                fromfile=f"a/{rel_posix}" if orig_bytes is not None else "/dev/null",
+                tofile=f"b/{rel_posix}" if curr_bytes is not None else "/dev/null",
+                n=2,
+            )
+        )
+        if diff_lines:
+            chunks.append("".join(diff_lines))
+
+    full_diff = "\n".join(chunks).strip()
+    if max_chars > 0 and len(full_diff) > max_chars:
+        return (
+            full_diff[:max_chars].rstrip()
+            + f"\n... [unified_diff truncated from {len(full_diff)} chars]"
+        )
+    return full_diff
 
 
 class HybridAgentRunner:
@@ -283,6 +334,7 @@ class HybridAgentRunner:
                 "status": report.status,
                 "modified_files": list(report.modified_files),
                 "diff_summary": report.diff_summary,
+                "unified_diff": report.unified_diff,
                 "error": report.error,
             }
 
@@ -461,22 +513,21 @@ class HybridAgentRunner:
         )
 
         # Snapshot only the fenced target_files (O(targets) instead of O(entire repo))
-        # so multi-thousand-file repositories like Django checkpoint in milliseconds.
+        # for fast atomic rollback and exact post-dispatch unified_diff computation.
         target_snapshot: dict[Path, bytes | None] = {}
-        if self.config.auto_checkpoint_worker:
-            for rel_target in worker_binding.context.allowed_paths or ():
-                resolved_target, _, path_err = resolve_workspace_path(
-                    rel_target,
-                    worker_binding.context,
-                    check_allowed=True,
-                    allow_root=False,
-                )
-                if path_err is not None or resolved_target is None:
-                    continue
-                if resolved_target.is_file():
-                    target_snapshot[resolved_target] = resolved_target.read_bytes()
-                elif not resolved_target.exists():
-                    target_snapshot[resolved_target] = None
+        for rel_target in worker_binding.context.allowed_paths or ():
+            resolved_target, _, path_err = resolve_workspace_path(
+                rel_target,
+                worker_binding.context,
+                check_allowed=True,
+                allow_root=False,
+            )
+            if path_err is not None or resolved_target is None:
+                continue
+            if resolved_target.is_file():
+                target_snapshot[resolved_target] = resolved_target.read_bytes()
+            elif not resolved_target.exists():
+                target_snapshot[resolved_target] = None
 
         rendered_worker = worker_binding.render_tools()
         worker_wire = self.config.worker.provider_type
@@ -672,6 +723,16 @@ class HybridAgentRunner:
                 rolled_back=rolled_back,
             )
 
+        unified_diff = (
+            _compute_snapshot_diff(
+                target_snapshot,
+                self.workspace_root,
+                max_chars=self.config.max_worker_diff_chars,
+            )
+            if worker_status == "done" and not rolled_back and target_snapshot
+            else ""
+        )
+
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self._emit(
             trace,
@@ -680,6 +741,7 @@ class HybridAgentRunner:
             status=worker_status,
             modified_files=modified,
             rolled_back=rolled_back,
+            diff_chars=len(unified_diff),
             turns=turns,
             latency_ms=round(latency_ms, 1),
         )
@@ -697,4 +759,5 @@ class HybridAgentRunner:
             usage=usage_total,
             latency_ms=latency_ms,
             model=self.config.worker.model,
+            unified_diff=unified_diff,
         )
